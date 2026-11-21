@@ -105,6 +105,10 @@ export interface OtherTaxResult {
   scheme: OtherTaxScheme;
   amount: Cents;
   inGstBase: boolean;
+  /** Set when the tax was given per unit. */
+  perUnit?: string;
+  /** Set when the tax was given as a percent of the line net. */
+  percent?: string;
 }
 
 export interface LineResult {
@@ -226,7 +230,12 @@ export function calculateLine(input: LineInput, lineNumber: number, config: TaxC
         ? roundToCents(mul(quantity, parseDecimal(t.perUnit, { field: `${field} perUnit` })))
         : roundToCents(percentOf(fromCents(netAmount), parseDecimal(t.percent!, { field: `${field} percent` })));
     if (amount < 0n) throw new CalcError(`${field}: amount cannot be negative`);
-    return { scheme: t.scheme, amount, inGstBase: t.inGstBase ?? true };
+    return {
+      scheme: t.scheme,
+      amount,
+      inGstBase: t.inGstBase ?? true,
+      ...(t.perUnit !== undefined ? { perUnit: t.perUnit } : { percent: t.percent! }),
+    };
   });
 
   const gstRatePercent = gstRateFor(input.gstCategory, config);
