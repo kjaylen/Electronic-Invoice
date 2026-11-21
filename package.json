@@ -11,7 +11,8 @@
     "test": "node --disable-warning=ExperimentalWarning --test \"test/**/*.test.ts\"",
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck && npm test",
-    "example": "node --disable-warning=ExperimentalWarning scripts/example.ts"
+    "example": "node --disable-warning=ExperimentalWarning scripts/example.ts",
+    "test-certs": "bash scripts/make-test-certs.sh"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",
