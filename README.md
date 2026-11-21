@@ -12,6 +12,7 @@ The reference is the **BTS Orientation Manual for Issuers of Electronic Tax Docu
 
 ```
 npm install
+npm start         # API server + background worker (see "HTTP API" for the environment variables)
 npm test          # unit tests
 npm run typecheck # tsc --noEmit
 npm run check     # both
@@ -92,6 +93,69 @@ Notes:
 
 Local database: `docker compose up -d db`, then `DATABASE_URL=postgres://einvoicing:einvoicing@localhost:5432/einvoicing`.
 
+## HTTP API (`src/api`, `src/server.ts`)
+
+`npm start` runs the API and the background worker. It applies database migrations on startup.
+
+| Variable | Purpose |
+|---|---|
+| `DATABASE_URL` | PostgreSQL connection string (required) |
+| `KEY_ENCRYPTION_KEY` | 32 random bytes, Base64; encrypts taxpayers' private keys (required) |
+| `ADMIN_TOKEN` | Enables `/v1/admin` onboarding routes; at least 32 characters. Leave unset to disable them |
+| `PORT`, `HOST` | Default `3000`, `0.0.0.0` |
+| `WORKER_INTERVAL_MS` | Default `60000`; `0` turns the worker off in this process (run it in exactly one instance) |
+| `BTS_BASE_URL`, `BTS_TIMEOUT_MS` | Override the BTS host (e.g. a proxy) and the request timeout |
+
+**Conventions:**
+- **Authentication:** `Authorization: Bearer <key>`. Tenant routes take an API key (`etd_<prefix>_<secret>`); admin routes take the admin token. The business is always taken from the key, never from the URL or the body.
+- **Money and quantities:** decimal strings (`"24.99"`); JSON numbers are refused.
+- **Errors:** always `{ "error": { "code", "message", "details"? } }`. A malformed request is 400. A document BTS would refuse is 422, with the rule and BTS code in the message. A wrong state is 409, a missing record is 404, and a bad or missing key is 401.
+- **Issuing:** `POST /v1/documents` answers **201 whenever a document was created**, whatever BTS decided. Check `status`: `authorized`, `authorized_with_alert`, `rejected` (with `conditions`), `contingency_pending` or `pending`.
+- **Idempotency:** send an `Idempotency-Key` header, unique per sale. A retry returns the original response (`Idempotent-Replayed: true`) and never issues twice. Reusing a key for a different request is refused (422), and a request that failed validation releases its key.
+
+| Method and path | What it does |
+|---|---|
+| `GET /health` | Liveness and database check |
+| `POST /v1/admin/tenants` | Create a business |
+| `POST /v1/admin/tenants/:id/certificate` | Upload its BTS certificate and key (PEM) |
+| `POST /v1/admin/tenants/:id/api-keys` | Create an API key; the secret is shown once |
+| `DELETE /v1/admin/tenants/:id/api-keys/:keyId` | Revoke a key |
+| `GET /v1/me` | The business, its certificate (days left) and contingency state |
+| `PUT /v1/certificate` | Renew the business's own certificate |
+| `POST/GET /v1/customers`, `GET /v1/customers/:id` | Saved customers; list supports `q`, `limit`, `cursor` |
+| `POST/GET /v1/items`, `GET /v1/items/:id` | Catalog items |
+| `POST /v1/documents` | Issue a document (see the body below) |
+| `GET /v1/documents` | List; filters `status` and `type`; cursor pagination |
+| `GET /v1/documents/:id` | Status, totals, conditions, protocol number, contingency links |
+| `GET /v1/documents/:id/xml` | The signed XML exactly as sent to BTS |
+| `GET /v1/documents/:id/pdf` | Printed copy. Query options: `format=sheet\|receipt`, `paper=A4\|LETTER`, `orientation`, `widthMm`, `draft=true` |
+| `POST /v1/documents/:id/cancel` | Cancel an authorized document (event 050). Returns 200 when registered or rejected, 202 when BTS couldn't be reached |
+
+Issuing body:
+
+```json
+{
+  "type": "01",
+  "series": 1,
+  "customerId": "…",
+  "lines": [
+    { "itemId": "…", "quantity": "2" },
+    { "description": "Gift wrap", "quantity": "1", "unitCode": "H87", "unitPrice": "5.00", "gstCategory": "S" }
+  ],
+  "payment": { "meansCode": "30", "dueDate": "2026-12-31", "terms": "Net 30" }
+}
+```
+
+- **Customer:** use `customerId` for a saved customer, or `customer` to give one inline.
+- **Lines:** a line references a catalog item with `itemId`, or gives its fields in full. Item fields can be overridden per line.
+- **Credit and debit notes:** add `"reference": { "documentId": "…", "reason": "…" }`.
+
+**Not built yet:**
+- People logging in with passwords; that comes with the web app.
+- Rate limiting per key.
+- OpenAPI docs.
+- `.pfx` certificate upload.
+
 ## Printed copy (`src/render`, manual 3.4 and 3.5)
 
 | Module | Job | Status |
@@ -155,10 +219,14 @@ These were placeholders in the spec and are now confirmed against the manual:
 
 ## Notes for the next modules
 
-- **API and invoicing app:**
-  - An HTTP API with accounts and login, and endpoints for customers, items, issuing, cancelling, and fetching statuses and PDFs.
-  - A web app on top, including onboarding with `.pfx`-to-PEM certificate conversion.
-- **Workers:** schedule `resumePending`, `catchUpContingency` and certificate-expiry warnings per business.
+- **Invoicing web app:**
+  - People's accounts and login (roles per business).
+  - Onboarding with `.pfx`-to-PEM certificate conversion.
+  - Customers, items, "create and send invoice", and a mobile layout.
+- **API hardening:**
+  - Rate limiting per key.
+  - OpenAPI docs for integrators.
+  - Certificate-expiry warnings from the worker.
 - **Hardening for scale:**
   - PostgreSQL row-level security on `tenant_id`, as defense in depth.
   - A job queue so `resumePending` runs as one worker per tenant.
