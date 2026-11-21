@@ -1,0 +1,19 @@
+{
+  "name": "belize-einvoicing",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Belize e-invoicing core engine: builds, signs and submits Electronic Tax Documents to the Belize Tax Service.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "test": "node --disable-warning=ExperimentalWarning --test \"test/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm test"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "typescript": "^7.0.2"
+  }
+}
