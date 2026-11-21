@@ -130,7 +130,17 @@ test('a different GST rate is a config change', () => {
   assert.equal(doc.lines[0]!.gstRatePercent, '15');
 });
 
-test('document totals always equal the sum of line totals', () => {
+test('document GST is rounded per category on the document total (manual 4.2)', () => {
+  // Three lines of 0.04 at 12.5%: each line's GST is 0.005 -> 0.01, but the document GST is 0.015 -> 0.02.
+  const line = { description: 'x', quantity: '1', unitCode: 'H87', unitPrice: '0.04', gstCategory: 'S' } as const;
+  const doc = calculateDocument({ lines: [line, line, line] });
+  assert.deepEqual(doc.lines.map((l) => money(l.gstAmount)), ['0.01', '0.01', '0.01']);
+  assert.equal(money(doc.gstAmount), '0.02');
+  assert.equal(money(doc.taxAmount), '0.02');
+  assert.equal(money(doc.taxInclusiveAmount), '0.14');
+});
+
+test('document totals stay consistent on large documents', () => {
   const lines: LineInput[] = Array.from({ length: 200 }, (_, i) => ({
     description: `Item ${i}`,
     quantity: `${(i % 7) + 1}.${String(i * 37).padStart(3, '0').slice(-3)}`,
@@ -139,10 +149,14 @@ test('document totals always equal the sum of line totals', () => {
     gstCategory: (['S', 'Z', 'S'] as const)[i % 3]!,
   }));
   const doc = calculateDocument({ lines });
-  const sumLines = doc.lines.reduce((acc, l) => acc + l.lineTotal, 0n);
-  assert.equal(doc.taxInclusiveAmount, sumLines);
-  const sumSubtotals = doc.taxSubtotals.reduce((acc, s) => acc + s.taxAmount, 0n);
-  assert.equal(doc.taxAmount, sumSubtotals);
+  assert.equal(doc.taxInclusiveAmount, doc.taxExclusiveAmount + doc.taxAmount);
+  assert.equal(doc.lineExtensionAmount, doc.lines.reduce((acc, l) => acc + l.netAmount, 0n));
+  const gstSubtotals = doc.taxSubtotals.filter((s) => s.scheme === 'GST').reduce((acc, s) => acc + s.taxAmount, 0n);
+  assert.equal(doc.gstAmount, gstSubtotals);
+  // Document-level rounding differs from the sum of rounded lines by at most half a cent per line.
+  const lineGst = doc.lines.reduce((acc, l) => acc + l.gstAmount, 0n);
+  const diff = lineGst > doc.gstAmount ? lineGst - doc.gstAmount : doc.gstAmount - lineGst;
+  assert.ok(diff <= BigInt(lines.length) / 2n, `difference ${diff} cents`);
 });
 
 test('rejects invalid input with a clear message', () => {

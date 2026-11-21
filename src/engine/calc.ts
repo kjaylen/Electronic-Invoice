@@ -8,8 +8,10 @@
  *   - Line net (LineExtensionAmount) = quantity x unit price + charges - allowances.
  *   - GST base = line net + any other taxes GST applies on top of
  *     (excise and environmental tax on fuel).
- *   - Document totals are sums of the rounded line amounts, so every number
- *     printed in the XML adds up exactly.
+ *   - Document-level GST is rounded per GST category on the document total, not
+ *     summed from rounded line amounts (manual 4.2). So the document GST can
+ *     differ from the sum of the line GST amounts by a cent or so; BTS does not
+ *     check that arithmetic.
  *
  * Pure and stateless: safe to call concurrently for any number of tenants.
  * Tax rates come from a TaxConfig argument so a rate change is a config
@@ -72,6 +74,10 @@ export interface OtherTaxInput {
 
 export interface LineInput {
   description: string;
+  /** Short item name (Item/Name), if different from the description. */
+  itemName?: string;
+  /** The seller's own item code (Item/SellersItemIdentification/ID). */
+  sellerItemCode?: string;
   quantity: string;
   /** UN/ECE Rec 20 unit code, e.g. "GLL" for gallon, "H87" for piece. */
   unitCode: string;
@@ -79,6 +85,8 @@ export interface LineInput {
   gstCategory: GstCategory;
   /** Required when gstCategory is "E". */
   exemptionReasonCode?: string;
+  /** Optional text for the exemption, e.g. "Exempt medical service". */
+  exemptionReason?: string;
   allowanceCharges?: AllowanceChargeInput[];
   otherTaxes?: OtherTaxInput[];
 }
@@ -114,6 +122,8 @@ export interface OtherTaxResult {
 export interface LineResult {
   lineNumber: number;
   description: string;
+  itemName?: string;
+  sellerItemCode?: string;
   quantity: string;
   unitCode: string;
   unitPrice: string;
@@ -126,7 +136,9 @@ export interface LineResult {
   gstCategory: GstCategory;
   gstRatePercent: string;
   exemptionReasonCode?: string;
+  exemptionReason?: string;
   gstBase: Cents;
+  /** GST on this line, rounded. */
   gstAmount: Cents;
   /** GST plus other taxes on this line. */
   taxAmount: Cents;
@@ -152,6 +164,7 @@ export interface DocumentTotals {
   taxExclusiveAmount: Cents;
   /** Total of all taxes (GST, ENV, EXC). */
   taxAmount: Cents;
+  /** Document GST: the sum of the per-category amounts, each rounded on the document total. */
   gstAmount: Cents;
   taxSubtotals: TaxSubtotal[];
   /** LegalMonetaryTotal/TaxInclusiveAmount. */
@@ -248,6 +261,8 @@ export function calculateLine(input: LineInput, lineNumber: number, config: TaxC
   return {
     lineNumber,
     description: input.description,
+    ...(input.itemName !== undefined && { itemName: input.itemName }),
+    ...(input.sellerItemCode !== undefined && { sellerItemCode: input.sellerItemCode }),
     quantity: input.quantity,
     unitCode: input.unitCode,
     unitPrice: input.unitPrice,
@@ -258,6 +273,7 @@ export function calculateLine(input: LineInput, lineNumber: number, config: TaxC
     gstCategory: input.gstCategory,
     gstRatePercent,
     ...(input.exemptionReasonCode !== undefined && { exemptionReasonCode: input.exemptionReasonCode }),
+    ...(input.exemptionReason !== undefined && { exemptionReason: input.exemptionReason }),
     gstBase,
     gstAmount,
     taxAmount,
@@ -274,10 +290,12 @@ export function calculateDocument(input: DocumentInput, config: TaxConfig = DEFA
   if (rate.units < 0n) throw new CalcError('GST rate cannot be negative');
 
   const lines = input.lines.map((line, i) => calculateLine(line, i + 1, config));
+  const taxSubtotals = buildTaxSubtotals(lines);
 
   const lineExtensionAmount = lines.reduce((acc, l) => acc + l.netAmount, 0n);
-  const gstAmount = lines.reduce((acc, l) => acc + l.gstAmount, 0n);
-  const taxAmount = lines.reduce((acc, l) => acc + l.taxAmount, 0n);
+  const gstAmount = taxSubtotals.filter((s) => s.scheme === 'GST').reduce((acc, s) => acc + s.taxAmount, 0n);
+  const otherTaxAmount = lines.reduce((acc, l) => acc + l.otherTaxes.reduce((a, t) => a + t.amount, 0n), 0n);
+  const taxAmount = gstAmount + otherTaxAmount;
   const taxExclusiveAmount = lineExtensionAmount;
   const taxInclusiveAmount = taxExclusiveAmount + taxAmount;
   const prepaidAmount = input.prepaidAmount !== undefined ? parseCents(input.prepaidAmount, 'prepaidAmount') : 0n;
@@ -292,7 +310,7 @@ export function calculateDocument(input: DocumentInput, config: TaxConfig = DEFA
     taxExclusiveAmount,
     taxAmount,
     gstAmount,
-    taxSubtotals: buildTaxSubtotals(lines),
+    taxSubtotals,
     taxInclusiveAmount,
     prepaidAmount,
     payableRoundingAmount,
@@ -309,14 +327,16 @@ function buildTaxSubtotals(lines: LineResult[]): TaxSubtotal[] {
     groups.set(key, g);
   };
   for (const line of lines) {
-    bump(
-      `GST:${line.gstCategory}`,
-      { scheme: 'GST', category: line.gstCategory, ratePercent: line.gstRatePercent },
-      line.gstBase,
-      line.gstAmount,
-    );
+    // GST tax amount is filled in below from the category's taxable total.
+    bump(`GST:${line.gstCategory}`, { scheme: 'GST', category: line.gstCategory, ratePercent: line.gstRatePercent }, line.gstBase, 0n);
     for (const t of line.otherTaxes) {
       bump(t.scheme, { scheme: t.scheme }, line.netAmount, t.amount);
+    }
+  }
+  // Manual 4.2: GST per category is rounded on the document level.
+  for (const g of groups.values()) {
+    if (g.scheme === 'GST') {
+      g.taxAmount = roundToCents(percentOf(fromCents(g.taxableAmount), parseDecimal(g.ratePercent!)));
     }
   }
   const order = ['GST:S', 'GST:Z', 'GST:E', 'EXC', 'ENV'];

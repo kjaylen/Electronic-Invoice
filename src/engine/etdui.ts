@@ -11,10 +11,13 @@
  *   19-21 series                 3 digits
  *   22-27 issue date             YYMMDD
  *   28-31 issue time             HHMM
- *   32    operating mode         1 normal, 2 contingency, 3 contingency (Tax Receipt)
+ *   32    operating mode         1 previous authorization, 2 subsequent (01/03/04), 3 subsequent (Tax Receipt)
  *   33-34 reception environment  01 production, 02 test
  *   35-43 security code          9 random digits
  *   44    check digit            modulus 11
+ *
+ * Source: BTS Orientation Manual v1.30, section 4.3. All 13 example IDs in the
+ * manual are covered by the tests.
  */
 
 import { randomInt } from 'node:crypto';
@@ -28,10 +31,18 @@ export const ETD_TYPES = {
 } as const;
 export type EtdType = (typeof ETD_TYPES)[keyof typeof ETD_TYPES];
 
+/**
+ * Operating modes (manual 3.3.3 to 3.3.7, table 4-22):
+ *   1  Previous authorization: BTS authorizes before the sale proceeds. Mandatory in
+ *      normal operation for invoices, debit notes, credit notes and events.
+ *   2  Subsequent authorization for 01/03/04: only in contingency; contingencyInfo mandatory.
+ *   3  Subsequent authorization for Tax Receipts: allowed in normal operation and in
+ *      contingency; contingencyInfo optional.
+ */
 export const OPER_MODES = {
-  NORMAL: 1,
-  CONTINGENCY: 2,
-  CONTINGENCY_TAX_RECEIPT: 3,
+  PREVIOUS_AUTHORIZATION: 1,
+  SUBSEQUENT_AUTHORIZATION: 2,
+  SUBSEQUENT_AUTHORIZATION_TAX_RECEIPT: 3,
 } as const;
 export type OperMode = (typeof OPER_MODES)[keyof typeof OPER_MODES];
 
@@ -47,7 +58,7 @@ export interface EtduiParts {
   tin: string;
   /** Serial number, 1 to 999,999,999. */
   serial: number;
-  /** Series, 0 to 999. */
+  /** Series, 1 to 999. A business that does not use series uses 1 ("001"). */
   series: number;
   /** Local Belize issue date, YYYY-MM-DD. */
   issueDate: string;
@@ -74,16 +85,13 @@ export class EtduiError extends Error {
 const WEIGHTS = [2, 3, 4, 5, 6, 7, 8, 9] as const;
 
 /**
- * What the check digit is when 11 - remainder is 10 or 11.
+ * Modulus 11 check digit over the first 43 digits, weights 2..9 from the right.
  *
- * The manual's examples show 1 for a remainder of 0 (result 11) and for a
- * remainder of 10 (result 1, which needs no mapping). No example shows a
- * remainder of 1 (result 10), and the manual states no rule. 1 is a
- * placeholder for both until BTS confirms (see "Open questions" in the spec).
+ * CD = 11 - remainder, keeping only the last digit: a result of 11 gives 1 and
+ * a result of 10 gives 0. The manual does not state this, but all 13 example
+ * IDs in it follow it, including one with remainder 1 (CD 0) and two with
+ * remainder 0 (CD 1).
  */
-export const CHECK_DIGIT_WHEN_10_OR_11 = 1;
-
-/** Modulus 11 check digit over the first 43 digits, weights 2..9 from the right. */
 export function computeCheckDigit(first43: string): number {
   if (!/^\d{43}$/.test(first43)) {
     throw new EtduiError(`Check digit input must be exactly 43 digits, got "${first43}"`);
@@ -93,8 +101,7 @@ export function computeCheckDigit(first43: string): number {
     const digit = first43.charCodeAt(42 - i) - 48;
     total += digit * WEIGHTS[i % WEIGHTS.length]!;
   }
-  const result = 11 - (total % 11);
-  return result >= 10 ? CHECK_DIGIT_WHEN_10_OR_11 : result;
+  return (11 - (total % 11)) % 10;
 }
 
 /** A 9-digit security code from a cryptographic random source. */
@@ -103,15 +110,15 @@ export function generateSecurityCode(): string {
 }
 
 function assertOperModeAllowed(etdType: EtdType, operMode: OperMode): void {
-  if (operMode === OPER_MODES.NORMAL) return;
+  if (operMode === OPER_MODES.PREVIOUS_AUTHORIZATION) return;
   if (etdType === ETD_TYPES.EVENT) {
-    throw new EtduiError('Events cannot be registered in contingency (operMode must be 1)');
+    throw new EtduiError('Events must use previous authorization (operMode 1)');
   }
-  if (etdType === ETD_TYPES.TAX_RECEIPT && operMode !== OPER_MODES.CONTINGENCY_TAX_RECEIPT) {
-    throw new EtduiError('A Tax Receipt in contingency must use operMode 3');
+  if (etdType === ETD_TYPES.TAX_RECEIPT && operMode !== OPER_MODES.SUBSEQUENT_AUTHORIZATION_TAX_RECEIPT) {
+    throw new EtduiError('A Tax Receipt under subsequent authorization must use operMode 3 (BTS code 258)');
   }
-  if (etdType !== ETD_TYPES.TAX_RECEIPT && operMode !== OPER_MODES.CONTINGENCY) {
-    throw new EtduiError(`Document type ${etdType} in contingency must use operMode 2`);
+  if (etdType !== ETD_TYPES.TAX_RECEIPT && operMode !== OPER_MODES.SUBSEQUENT_AUTHORIZATION) {
+    throw new EtduiError(`Document type ${etdType} under subsequent authorization must use operMode 2 (BTS code 258)`);
   }
 }
 
@@ -125,8 +132,8 @@ function assertParts(p: EtduiParts): void {
   if (!Number.isInteger(p.serial) || p.serial < 1 || p.serial > 999_999_999) {
     throw new EtduiError(`Serial must be an integer from 1 to 999999999, got ${p.serial}`);
   }
-  if (!Number.isInteger(p.series) || p.series < 0 || p.series > 999) {
-    throw new EtduiError(`Series must be an integer from 0 to 999, got ${p.series}`);
+  if (!Number.isInteger(p.series) || p.series < 1 || p.series > 999) {
+    throw new EtduiError(`Series must be an integer from 1 to 999, got ${p.series}`);
   }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(p.issueDate) || Number.isNaN(Date.parse(`${p.issueDate}T00:00:00Z`))) {
     throw new EtduiError(`Issue date must be YYYY-MM-DD, got "${p.issueDate}"`);

@@ -1,7 +1,6 @@
 /** Shared test data: a sample supplier and helpers that build complete, consistent documents. */
 import { calculateDocument, type DocumentInput } from '../src/engine/calc.ts';
 import { buildEtdui, type OperMode } from '../src/engine/etdui.ts';
-import { buildSequenceInfo } from '../src/engine/sequence.ts';
 import type { IssuedEtdType, Supplier, UblDocumentInput } from '../src/engine/ubl.ts';
 
 export const SUPPLIER: Supplier = {
@@ -16,6 +15,8 @@ export const LINES: DocumentInput = {
   lines: [
     {
       description: 'Diesel',
+      itemName: 'Diesel',
+      sellerItemCode: '30015',
       quantity: '3000',
       unitCode: 'GLL',
       unitPrice: '5.7354',
@@ -58,12 +59,6 @@ export function etduiFor(etdType: IssuedEtdType, serial: number, operMode: OperM
 export function makeDocument(etdType: IssuedEtdType, overrides: Partial<UblDocumentInput> = {}): UblDocumentInput {
   const etdui = overrides.etdui ?? etduiFor(etdType, 42);
   const totals = overrides.totals ?? calculateDocument(LINES);
-  const sequence =
-    overrides.sequence ??
-    buildSequenceInfo(
-      { uuid: etdui, lineCount: totals.lineCount, taxAmount: totals.taxAmount, lineExtensionAmount: totals.lineExtensionAmount },
-      null,
-    );
   const isNote = etdType === '03' || etdType === '04';
   return {
     etdType,
@@ -81,7 +76,7 @@ export function makeDocument(etdType: IssuedEtdType, overrides: Partial<UblDocum
             contact: { telephone: '+501 223 4455', email: 'ap@islandlogistics.example' },
           },
     totals,
-    sequence,
+    previousSequenceHash: null,
     ...(isNote && { reference: { etdui: etduiFor('01', 41), issueDate: '2026-11-20', reason: 'Price correction' } }),
     payment: { meansCode: '30', dueDate: '2026-12-21', terms: 'Net 30' },
     ...overrides,

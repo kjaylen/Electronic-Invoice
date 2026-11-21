@@ -36,11 +36,40 @@ test('check digit of the manual example is 4', () => {
   assert.equal(computeCheckDigit(MANUAL_EXAMPLE.slice(0, 43)), 4);
 });
 
-test('check digit edge cases: 11 - remainder of 10 or 11 maps to 1 (placeholder until BTS confirms)', () => {
+test('check digit: a result of 11 gives 1 and a result of 10 gives 0', () => {
   // Inputs chosen so the weighted sum leaves the given remainder.
-  assert.equal(computeCheckDigit('0101234560000012340212411011334101000000009'), 1); // remainder 0 -> 11
-  assert.equal(computeCheckDigit('0101234560000012340212411011334101000000004'), 1); // remainder 1 -> 10
+  assert.equal(computeCheckDigit('0101234560000012340212411011334101000000009'), 1); // remainder 0 -> 11 -> 1
+  assert.equal(computeCheckDigit('0101234560000012340212411011334101000000004'), 0); // remainder 1 -> 10 -> 0
   assert.equal(computeCheckDigit('0101234560000012340212411011334101000000003'), 1); // remainder 10 -> 1
+});
+
+// Every 44-digit ID printed in the BTS Orientation Manual v1.30 (sections 3.5, 4.3, 4.7 and Annex I).
+const MANUAL_IDS = [
+  '01012345600000123402124110113341014732985144', // 4.3.3 worked example, remainder 7
+  '01023456710000000100126042412211025841364450', // 4.3.4, remainder 1 -> check digit 0
+  '01023456710000000200126042412221025708090478', // 4.3.4
+  '01023456733742204000125060900011015999755402', // Annex I invoice
+  '01023456739025566700125043018451010045740691', // remainder 10 -> 1
+  '01023456777401919700126012823091021306598061', // 3.5 QR example, remainder 10 -> 1
+  '02023456752676043500125060900041016500860171', // Annex I tax receipt, remainder 0 -> 1
+  '03023456731483551100125060900061014645610444', // Annex I debit note
+  '04023456759172926100125060900051015497916659', // Annex I credit note
+  '05000000100000060300125060903091019472728439', // Annex I events
+  '05000000100000060400325060903101012539849371', // remainder 0 -> 1
+  '05000000100013326800126012820091024411146627',
+  '05023456772554302901125060900071012750830294',
+];
+
+test('every ETDUI printed in the manual has a valid check digit', () => {
+  for (const id of MANUAL_IDS) {
+    assert.equal(computeCheckDigit(id.slice(0, 43)), Number(id[43]), id);
+  }
+});
+
+test('every non-event ETDUI in the manual parses', () => {
+  for (const id of MANUAL_IDS.filter((i) => !i.startsWith('05'))) {
+    assert.ok(isValidEtdui(id), id);
+  }
 });
 
 test('parses the manual example into its parts', () => {
@@ -108,6 +137,7 @@ test('validates parts', () => {
     [{ serial: 1_000_000_000 }, /Serial/],
     [{ serial: 1.5 }, /Serial/],
     [{ series: 1000 }, /Series/],
+    [{ series: 0 }, /Series/],
     [{ issueDate: '2024-13-01' }, /Issue date/],
     [{ issueDate: '01/11/2024' }, /Issue date/],
     [{ issueTime: '24:00' }, /Issue time/],
@@ -120,12 +150,12 @@ test('validates parts', () => {
   }
 });
 
-test('enforces which operating modes each document type may use', () => {
+test('enforces which operating modes each document type may use (BTS code 258)', () => {
   assert.throws(() => buildEtdui({ ...MANUAL_PARTS, operMode: 3 }), /must use operMode 2/);
   assert.ok(buildEtdui({ ...MANUAL_PARTS, operMode: 2 }));
   assert.throws(() => buildEtdui({ ...MANUAL_PARTS, etdType: '02', operMode: 2 }), /must use operMode 3/);
   assert.ok(buildEtdui({ ...MANUAL_PARTS, etdType: '02', operMode: 3 }));
-  assert.throws(() => buildEtdui({ ...MANUAL_PARTS, etdType: '05', operMode: 2 }), /Events cannot/);
+  assert.throws(() => buildEtdui({ ...MANUAL_PARTS, etdType: '05', operMode: 2 }), /Events must use previous authorization/);
 });
 
 test('security codes are 9 digits and vary', () => {

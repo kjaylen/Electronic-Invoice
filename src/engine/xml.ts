@@ -70,14 +70,20 @@ export function el(name: string, attrs: Attrs | undefined, ...children: XmlChild
   };
 }
 
-/** An element holding text. */
+/**
+ * An element holding text. Leading and trailing whitespace is trimmed: BTS
+ * rejects whitespace between tags (code 221), and padding in a name or
+ * address is never meaningful. Empty text is an error.
+ */
 export function leaf(name: string, text: string, attrs?: Attrs): XmlElement {
-  return { name: checkName(name), attrs: toAttrList(attrs), text: checkText(text, `<${name}>`), children: [] };
+  const value = text.trim();
+  if (value === '') throw new XmlError(`<${name}> cannot be empty`);
+  return { name: checkName(name), attrs: toAttrList(attrs), text: checkText(value, `<${name}>`), children: [] };
 }
 
-/** A text element only when the value is present; otherwise nothing. */
+/** A text element only when the value is present and not blank; otherwise nothing. */
 export function optLeaf(name: string, text: string | undefined | null, attrs?: Attrs): XmlElement | undefined {
-  return text === undefined || text === null || text === '' ? undefined : leaf(name, text, attrs);
+  return text === undefined || text === null || text.trim() === '' ? undefined : leaf(name, text, attrs);
 }
 
 function escapeText(s: string): string {
