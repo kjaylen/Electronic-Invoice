@@ -38,6 +38,8 @@ export function toApiError(error: unknown): ApiError {
       return /^Unknown/.test(e.message) ? notFound('Document') : new ApiError(409, 'conflict', e.message);
     case 'PrintError':
       return new ApiError(409, 'not_printable', e.message);
+    case 'PfxError':
+      return new ApiError(422, 'certificate_problem', e.message);
     case 'KeystoreError':
       return new ApiError(500, 'internal_error', 'Internal error');
     default:

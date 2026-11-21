@@ -2,10 +2,13 @@
 
 import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
+import { createApiKey, revokeApiKey } from '../db/apikeys.ts';
+import { pfxToPem, PfxError } from '../db/pfx.ts';
 import { addCertificate } from '../db/tenants.ts';
 import type { PipelineDeps } from '../pipeline/issue.ts';
 import { BELIZE_DISTRICTS, type Customer, type DistrictCode } from '../engine/ubl.ts';
 import { certificateSummary } from './admin.ts';
+import { requireOwner } from './app.ts';
 import { ApiError, notFound } from './errors.ts';
 import { certificateSchema, customerSchema, itemSchema, listQuery, uuid } from './schemas.ts';
 
@@ -151,10 +154,56 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: PipelineDeps) 
     };
   });
 
-  // A business can renew its own certificate.
+  // A business can install or renew its own certificate (owners only).
   app.put<{ Body: { certificatePem: string; privateKeyPem: string; passphrase?: string } }>('/certificate', { schema: { body: certificateSchema } }, async (request) => {
+    requireOwner(request);
     const id = await addCertificate(db, deps.keys, request.tenantId, request.body);
     return certificateSummary(deps, request.tenantId, id);
+  });
+
+  // The same from a .pfx / .p12 file, the format certificate portals usually hand out.
+  app.post<{ Body: { pfxBase64: string; password: string } }>(
+    '/certificate/pfx',
+    { schema: { body: { type: 'object', required: ['pfxBase64', 'password'], additionalProperties: false, properties: { pfxBase64: { type: 'string', minLength: 100, maxLength: 200_000 }, password: { type: 'string', maxLength: 500 } } } } },
+    async (request) => {
+      requireOwner(request);
+      let pem;
+      try {
+        pem = pfxToPem(Buffer.from(request.body.pfxBase64, 'base64'), request.body.password);
+      } catch (e) {
+        if (e instanceof PfxError) throw new ApiError(422, 'certificate_problem', e.message);
+        throw e;
+      }
+      const id = await addCertificate(db, deps.keys, request.tenantId, pem);
+      return certificateSummary(deps, request.tenantId, id);
+    },
+  );
+
+  // API keys for the business's own software (POS, accounting connectors). Owners, signed in, only.
+  const requireOwnerSession = (request: import('fastify').FastifyRequest) => {
+    if (request.principal !== 'owner') throw new ApiError(403, 'forbidden', 'Only an owner, signed in to the web app, can manage API keys');
+  };
+  app.get('/api-keys', async (request) => {
+    requireOwnerSession(request);
+    const rows = (await db.query<{ id: string; name: string; prefix: string; created_at: string | Date; last_used_at: string | Date | null; revoked_at: string | Date | null }>(
+      'select id, name, prefix, created_at, last_used_at, revoked_at from api_keys where tenant_id = $1 order by created_at desc', [request.tenantId],
+    )).rows;
+    const iso = (v: string | Date | null) => (v ? new Date(v).toISOString() : null);
+    return { data: rows.map((r) => ({ id: r.id, name: r.name, prefix: r.prefix, createdAt: iso(r.created_at), lastUsedAt: iso(r.last_used_at), revokedAt: iso(r.revoked_at) })) };
+  });
+  app.post<{ Body: { name: string } }>(
+    '/api-keys',
+    { schema: { body: { type: 'object', required: ['name'], additionalProperties: false, properties: { name: { type: 'string', minLength: 1, maxLength: 100 } } } } },
+    async (request, reply) => {
+      requireOwnerSession(request);
+      const key = await createApiKey(db, request.tenantId, request.body.name);
+      return reply.code(201).send({ id: key.id, name: request.body.name, prefix: key.prefix, key: key.key });
+    },
+  );
+  app.delete<{ Params: { id: string } }>('/api-keys/:id', { schema: { params: { type: 'object', required: ['id'], properties: { id: uuid } } } }, async (request, reply) => {
+    requireOwnerSession(request);
+    if (!(await revokeApiKey(db, request.tenantId, request.params.id))) throw notFound('API key');
+    return reply.code(204).send();
   });
 
   app.post<{ Body: CustomerBody }>('/customers', { schema: { body: { ...customerSchema, required: ['name'] } } }, async (request, reply) => {

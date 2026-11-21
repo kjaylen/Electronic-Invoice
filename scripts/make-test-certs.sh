@@ -68,5 +68,8 @@ openssl req -x509 -newkey rsa:2048 -nodes -sha256 -days 5475 \
   -subj "/CN=Untrusted Test Root" \
   -keyout ".work/untrusted.key.pem" -out "untrusted-root-ca.cert.pem" 2>/dev/null
 
+# The signer as a .pfx, the format certificate portals usually hand out (password: test-pfx-password).
+openssl pkcs12 -export -inkey signer-123456.key.pem -in signer-123456.cert.pem -certfile test-root-ca.cert.pem   -name "CaribFuel BTS test" -passout pass:test-pfx-password -out signer-123456.pfx 2>/dev/null
+
 rm -f ./*.srl
 echo "Wrote test certificates to $OUT"

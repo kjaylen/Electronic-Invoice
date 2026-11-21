@@ -13,7 +13,7 @@
 import { createHash } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { formatCents } from '../engine/decimal.ts';
-import type { LineInput } from '../engine/calc.ts';
+import { calculateDocument, type LineInput } from '../engine/calc.ts';
 import { BELIZE_DISTRICTS, type Customer, type DocumentReference, ETD_TYPE_NAMES, type IssuedEtdType } from '../engine/ubl.ts';
 import { cancelDocument, issueDocument, type IssueRequest, type PipelineDeps } from '../pipeline/issue.ts';
 import { renderReceipt, renderSheet } from '../render/pdf.ts';
@@ -242,6 +242,29 @@ export function registerDocumentRoutes(app: FastifyInstance, deps: PipelineDeps)
       if (key && !documentId) await db.query(`delete from idempotency_keys where tenant_id = $1 and key = $2 and status = 'in_progress'`, [tenantId, key]).catch(() => {});
       throw e;
     }
+  });
+
+  // Totals for a draft, without issuing anything: the web app calls this as the user types.
+  app.post<{ Body: IssueBody }>('/documents/preview', { schema: { body: issueSchema } }, async (request) => {
+    const req = await toIssueRequest(deps, request.tenantId, request.body);
+    const t = calculateDocument(
+      {
+        lines: req.lines,
+        ...(req.prepaidAmount !== undefined && { prepaidAmount: req.prepaidAmount }),
+        ...(req.payableRoundingAmount !== undefined && { payableRoundingAmount: req.payableRoundingAmount }),
+      },
+      deps.tax,
+    );
+    return {
+      lines: t.lines.map((l) => ({ lineNumber: l.lineNumber, net: formatCents(l.netAmount), gst: formatCents(l.gstAmount), tax: formatCents(l.taxAmount), total: formatCents(l.lineTotal) })),
+      totals: {
+        lineExtension: formatCents(t.lineExtensionAmount),
+        gst: formatCents(t.gstAmount),
+        tax: formatCents(t.taxAmount),
+        taxInclusive: formatCents(t.taxInclusiveAmount),
+        payable: formatCents(t.payableAmount),
+      },
+    };
   });
 
   app.get<{ Querystring: { limit?: string; cursor?: string; status?: string; type?: string } }>(

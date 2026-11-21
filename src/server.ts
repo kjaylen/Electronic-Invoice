@@ -8,11 +8,17 @@
  *   HOST                 default 0.0.0.0
  *   WORKER_INTERVAL_MS   default 60000; 0 disables the worker in this process
  *   BTS_BASE_URL         override the BTS host (e.g. a proxy); default per tenant environment
+ *   BTS_CA_FILE          extra CA certificate (PEM) to trust for the BTS host (e.g. a test double)
  *   BTS_TIMEOUT_MS       default 30000
+ *   WEB_ROOT             built web app to serve; default web/dist when it exists
+ *   COOKIE_SECURE        "false" only for local plain-HTTP development; default true
+ *   ALLOW_SIGNUP         "false" to close self-service sign-up; default true
  *
  *   npm start
  */
 
+import { existsSync, readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { buildApp } from './api/app.ts';
 import { startWorker } from './api/worker.ts';
@@ -30,11 +36,21 @@ const db = pgDatabase(new pg.Pool({ connectionString: env.DATABASE_URL, max: Num
 const applied = await migrate(db);
 const clients = cachingClientProvider({
   ...(env.BTS_BASE_URL && { baseUrl: env.BTS_BASE_URL }),
+  ...(env.BTS_CA_FILE && { ca: readFileSync(env.BTS_CA_FILE, 'utf8') }),
   timeoutMs: Number(env.BTS_TIMEOUT_MS ?? 30_000),
 });
 const pipeline = { db, keys: localKeyProtector(keyEncryptionKeyFromEnv(env)), clients };
 
-const app = await buildApp({ pipeline, ...(env.ADMIN_TOKEN && { adminToken: env.ADMIN_TOKEN }), logger: true });
+const defaultWebRoot = fileURLToPath(new URL('../web/dist/', import.meta.url));
+const webRoot = env.WEB_ROOT ?? (existsSync(defaultWebRoot) ? defaultWebRoot : undefined);
+const app = await buildApp({
+  pipeline,
+  ...(env.ADMIN_TOKEN && { adminToken: env.ADMIN_TOKEN }),
+  ...(webRoot && { webRoot }),
+  cookieSecure: env.COOKIE_SECURE !== 'false',
+  allowSignup: env.ALLOW_SIGNUP !== 'false',
+  logger: true,
+});
 if (applied.length) app.log.info({ applied }, 'database migrations applied');
 
 const intervalMs = Number(env.WORKER_INTERVAL_MS ?? 60_000);

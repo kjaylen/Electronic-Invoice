@@ -39,7 +39,7 @@ export interface FakeBts {
   close(): Promise<void>;
 }
 
-export async function startFakeBts(options: { trustedCa?: string } = {}): Promise<FakeBts> {
+export async function startFakeBts(options: { trustedCa?: string; port?: number } = {}): Promise<FakeBts> {
   const scripts = new Map<string, ScriptedReply[]>();
   const handlers = new Map<string, (req: ReceivedRequest) => ScriptedReply>();
   const requests: ReceivedRequest[] = [];
@@ -81,7 +81,7 @@ export async function startFakeBts(options: { trustedCa?: string } = {}): Promis
       });
     },
   );
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  await new Promise<void>((resolve) => server.listen(options.port ?? 0, '127.0.0.1', resolve));
   const { port } = server.address() as AddressInfo;
   return {
     baseUrl: `https://localhost:${port}`,

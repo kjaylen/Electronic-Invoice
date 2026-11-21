@@ -12,7 +12,10 @@ The reference is the **BTS Orientation Manual for Issuers of Electronic Tax Docu
 
 ```
 npm install
-npm start         # API server + background worker (see "HTTP API" for the environment variables)
+npm start         # API server + background worker + web app (see "HTTP API" for the environment variables)
+npm run demo      # local demo: the whole app against a stand-in BTS (see "Web app")
+npm run web:dev   # web app with hot reload (proxies the API on :3000)
+npm run web:build # build the web app into web/dist
 npm test          # unit tests
 npm run typecheck # tsc --noEmit
 npm run check     # both
@@ -105,6 +108,10 @@ Local database: `docker compose up -d db`, then `DATABASE_URL=postgres://einvoic
 | `PORT`, `HOST` | Default `3000`, `0.0.0.0` |
 | `WORKER_INTERVAL_MS` | Default `60000`; `0` turns the worker off in this process (run it in exactly one instance) |
 | `BTS_BASE_URL`, `BTS_TIMEOUT_MS` | Override the BTS host (e.g. a proxy) and the request timeout |
+| `BTS_CA_FILE` | Extra CA certificate (PEM) to trust for the BTS host |
+| `WEB_ROOT` | Built web app to serve; default `web/dist` when it exists |
+| `COOKIE_SECURE` | `false` only for local plain-HTTP development; default `true` |
+| `ALLOW_SIGNUP` | `false` to close self-service sign-up |
 
 **Conventions:**
 - **Authentication:** `Authorization: Bearer <key>`. Tenant routes take an API key (`etd_<prefix>_<secret>`); admin routes take the admin token. The business is always taken from the key, never from the URL or the body.
@@ -150,11 +157,56 @@ Issuing body:
 - **Lines:** a line references a catalog item with `itemId`, or gives its fields in full. Item fields can be overridden per line.
 - **Credit and debit notes:** add `"reference": { "documentId": "…", "reason": "…" }`.
 
-**Not built yet:**
-- People logging in with passwords; that comes with the web app.
-- Rate limiting per key.
-- OpenAPI docs.
-- `.pfx` certificate upload.
+Authentication also accepts the web app's session cookie (see "Web app"). The routes for owners are `POST /v1/certificate/pfx`, which installs a `.pfx` certificate, and `GET/POST/DELETE /v1/api-keys`, which manage the business's own API keys. `POST /v1/documents/preview` returns totals without issuing anything.
+
+**Not built yet:** rate limiting per API key, and OpenAPI docs.
+
+## Web app (`web/`)
+
+A React + TypeScript app (Vite) served by the API server from `web/dist`. It's built for business owners and staff, not developers.
+
+- **Accounts:**
+  - Email and password. Passwords are hashed with scrypt; only a hash of each session token is stored.
+  - Sessions live in httpOnly, SameSite=Lax cookies. Every change sent with a cookie also needs `X-Requested-With: etd-web`, which blocks CSRF.
+  - Logins are rate-limited per email and IP, and unknown emails take as long as wrong passwords.
+  - Roles per business: **owner** (certificate, API keys) and **member** (issuing).
+- **Onboarding:**
+  1. Account.
+  2. Business. Self-service businesses start in the BTS **test** environment; moving to production is an admin step.
+  3. The BTS certificate, uploaded as a `.pfx`/`.p12` file with its password and converted to PEM on the server with node-forge.
+- **Screens:**
+  - Overview: outage and certificate warnings, today's totals, documents needing attention.
+  - New invoice or receipt:
+    - pick a saved customer or add one, or sell to a walk-in on receipts
+    - catalog search for lines
+    - live totals from the engine (`POST /v1/documents/preview`)
+    - an idempotency key per form
+  - Document detail: plain-language status, BTS rule codes on rejection, PDF and receipt printing, XML download, credit and debit notes, cancellation.
+  - Customers, items, and settings (certificate and API keys).
+- **Design:** "ledger and drafting table".
+  - Warm grid paper, cream sheets with hairline edges, aubergine ink.
+  - Purple brand, lime for authorized, coral for problems.
+  - Inter Tight and Geist Mono (OFL), self-hosted.
+  - Original SVG crystals on the sign-in, onboarding and overview screens.
+- **Motion:**
+  - native view transitions between pages, with the top bar held in place
+  - staggered page entrances and pill buttons with sliding arrow chips
+  - animated banners, modals and suggestions
+  - drifting crystals
+  - all disabled under `prefers-reduced-motion`
+- **Security headers:** a strict Content-Security-Policy (`'self'` only, no third-party fonts or scripts), `nosniff`, and `SAMEORIGIN` framing.
+
+### Local demo
+
+```
+docker compose up -d db
+npm run web:build
+npm run demo            # http://localhost:3000
+```
+
+- **Business and certificate:** register the business with TIN **123456** and upload `test/certs/signer-123456.pfx`, password `test-pfx-password`. This is a throwaway test certificate.
+- **BTS stand-in:** it authorizes every document.
+- **Outage simulation:** create the file `.demo/bts-down` and new documents go into contingency. Delete it, and the worker sends them within about 15 seconds.
 
 ## Printed copy (`src/render`, manual 3.4 and 3.5)
 
@@ -219,10 +271,12 @@ These were placeholders in the spec and are now confirmed against the manual:
 
 ## Notes for the next modules
 
-- **Invoicing web app:**
-  - People's accounts and login (roles per business).
-  - Onboarding with `.pfx`-to-PEM certificate conversion.
-  - Customers, items, "create and send invoice", and a mobile layout.
+- **Web app, next:**
+  - Inviting teammates.
+  - Password reset by email.
+  - Emailing documents to customers.
+  - Editing customers and items.
+  - An admin console for moving businesses to production.
 - **API hardening:**
   - Rate limiting per key.
   - OpenAPI docs for integrators.
