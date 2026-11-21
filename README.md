@@ -16,7 +16,9 @@ npm start         # API server + background worker + web app (see "HTTP API" for
 npm run demo      # local demo: the whole app against a stand-in BTS (see "Web app")
 npm run web:dev   # web app with hot reload (proxies the API on :3000)
 npm run web:build # build the web app into web/dist
-npm test          # unit tests
+npm run e2e       # browser tests (Playwright; needs the Docker database, see "Web app")
+npm run icons     # redraw the app icons in web/public
+npm test          # unit and API tests
 npm run typecheck # tsc --noEmit
 npm run check     # both
 npm run example   # print a sample Tax Invoice (or: npm run example -- 04)
@@ -112,6 +114,9 @@ Local database: `docker compose up -d db`, then `DATABASE_URL=postgres://einvoic
 | `WEB_ROOT` | Built web app to serve; default `web/dist` when it exists |
 | `COOKIE_SECURE` | `false` only for local plain-HTTP development; default `true` |
 | `ALLOW_SIGNUP` | `false` to close self-service sign-up |
+| `PUBLIC_URL` | Public address of the web app, e.g. `https://app.example.bz`. Links in emails and share links are built from it, never from the request's Host header. Without it, password reset, invitation links and share links are off |
+| `SMTP_URL`, `MAIL_FROM` | Outgoing mail (password resets, invitations, documents), e.g. `smtps://user:pass@smtp.example.com:465` |
+| `MAIL_OUTBOX_DIR` | Instead of SMTP, write each email as an `.eml` file here (development and the demo) |
 
 **Conventions:**
 - **Authentication:** `Authorization: Bearer <key>`. Tenant routes take an API key (`etd_<prefix>_<secret>`); admin routes take the admin token. The business is always taken from the key, never from the URL or the body.
@@ -129,14 +134,22 @@ Local database: `docker compose up -d db`, then `DATABASE_URL=postgres://einvoic
 | `DELETE /v1/admin/tenants/:id/api-keys/:keyId` | Revoke a key |
 | `GET /v1/me` | The business, its certificate (days left) and contingency state |
 | `PUT /v1/certificate` | Renew the business's own certificate |
-| `POST/GET /v1/customers`, `GET /v1/customers/:id` | Saved customers; list supports `q`, `limit`, `cursor` |
-| `POST/GET /v1/items`, `GET /v1/items/:id` | Catalog items |
+| `POST/GET /v1/customers`, `GET/PUT/DELETE /v1/customers/:id` | Saved customers; list supports `q` (name, TIN, phone, email), `limit`, `cursor`. `PUT` replaces every field; `DELETE` archives |
+| `POST/GET /v1/items`, `GET/PUT/DELETE /v1/items/:id` | Catalog items, with optional `barcode` and `favorite`. List supports `q`, `favorite=true`, and `code` (exact barcode or your own code). `DELETE` archives and frees the barcode |
 | `POST /v1/documents` | Issue a document (see the body below) |
-| `GET /v1/documents` | List; filters `status` and `type`; cursor pagination |
-| `GET /v1/documents/:id` | Status, totals, conditions, protocol number, contingency links |
+| `GET /v1/documents` | List; filters `status`, `type`, `from`/`to` (issue date), `customerId`, and `q` (number like `12` or `001-000000012`, ETDUI, or customer name or TIN); cursor pagination |
+| `GET /v1/documents/:id` | Status, totals, lines, conditions, protocol number, contingency links |
 | `GET /v1/documents/:id/xml` | The signed XML exactly as sent to BTS |
 | `GET /v1/documents/:id/pdf` | Printed copy. Query options: `format=sheet\|receipt`, `paper=A4\|LETTER`, `orientation`, `widthMm`, `draft=true` |
 | `POST /v1/documents/:id/cancel` | Cancel an authorized document (event 050). Returns 200 when registered or rejected, 202 when BTS couldn't be reached |
+| `POST /v1/documents/:id/email` | Email the printed copy (PDF) and the signed XML to one address, replies going to the business. Recorded; at most 200 emails per business per hour |
+| `GET /v1/documents/:id/messages` | Emails sent for a document |
+| `POST /v1/documents/:id/share` | A link (`/d/<token>`) that opens the PDF without logging in, valid 90 days. It stops working if the document is cancelled. For WhatsApp, SMS or anywhere else |
+| `GET /v1/reports/summary` | `from`, `to`: totals, GST by rate, by type and by day. Credit notes subtract; only documents with legal value count |
+| `GET /v1/reports/customers`, `/v1/reports/items` | Sales by customer and by item |
+| `GET /v1/reports/documents` | The document register as CSV, every status included |
+
+Every report also answers `?format=csv` (UTF-8 with BOM for Excel; cells that a spreadsheet would run as formulas are neutralised).
 
 Issuing body:
 
@@ -159,6 +172,8 @@ Issuing body:
 
 Authentication also accepts the web app's session cookie (see "Web app"). The routes for owners are `POST /v1/certificate/pfx`, which installs a `.pfx` certificate, and `GET/POST/DELETE /v1/api-keys`, which manage the business's own API keys. `POST /v1/documents/preview` returns totals without issuing anything.
 
+Web app only (session cookie): `GET /v1/team`, `POST/DELETE /v1/team/invitations`, `PATCH/DELETE /v1/team/members/:userId`, and under `/v1/auth`: `password/change`, `password/forgot` (always 204, so it cannot reveal who has an account), `password/reset`, `invitations/:token` and `invitations/accept`.
+
 **Not built yet:** rate limiting per API key, and OpenAPI docs.
 
 ## Web app (`web/`)
@@ -169,20 +184,40 @@ A React + TypeScript app (Vite) served by the API server from `web/dist`. It's b
   - Email and password. Passwords are hashed with scrypt; only a hash of each session token is stored.
   - Sessions live in httpOnly, SameSite=Lax cookies. Every change sent with a cookie also needs `X-Requested-With: etd-web`, which blocks CSRF.
   - Logins are rate-limited per email and IP, and unknown emails take as long as wrong passwords.
-  - Roles per business: **owner** (certificate, API keys) and **member** (issuing).
+  - Roles per business: **owner** (certificate, API keys, team) and **member** (issuing, sending, catalog). A business always keeps at least one owner.
+  - **Teammates:** owners invite by email. The link works once, for 7 days, and only for that email address; the owner also gets the link to share another way (WhatsApp, in person). New people create their account from the link, even when self-service sign-up is closed.
+  - **Passwords:** forgotten passwords are reset by an emailed one-time link (one hour). Changing or resetting a password signs out every other session.
 - **Onboarding:**
   1. Account.
   2. Business. Self-service businesses start in the BTS **test** environment; moving to production is an admin step.
   3. The BTS certificate, uploaded as a `.pfx`/`.p12` file with its password and converted to PEM on the server with node-forge.
 - **Screens:**
-  - Overview: outage and certificate warnings, today's totals, documents needing attention.
-  - New invoice or receipt:
+  - **Overview:** today's sales (credit notes subtracted), documents needing attention, certificate warnings. It refreshes while documents are still waiting for BTS.
+  - **Counter** (tax receipts at speed):
+    - scan a barcode or type a code and press Enter; `3*code` adds three
+    - star items in the catalog to make them quick buttons
+    - `+` / `−` change the last line, `Del` removes it, `F2` or `Ctrl+Enter` issues
+    - cash received and change, card or transfer, optional customer TIN
+    - "repeat last sale", free-text items
+    - optional automatic printing on an 80 mm receipt printer (the browser remembers the printer)
+    - the sale in progress survives a closed tab
+  - **New invoice or receipt:**
     - pick a saved customer or add one, or sell to a walk-in on receipts
-    - catalog search for lines
+    - keyboard-friendly search for items (arrow keys, Enter), barcode scanners work too
     - live totals from the engine (`POST /v1/documents/preview`)
-    - an idempotency key per form
-  - Document detail: plain-language status, BTS rule codes on rejection, PDF and receipt printing, XML download, credit and debit notes, cancellation.
-  - Customers, items, and settings (certificate and API keys).
+    - drafts saved on the device and restored after a reload or crash; `Ctrl+Enter` issues
+    - one idempotency key per form (kept in the draft), so a retry never issues twice
+  - **Document detail:** plain-language status that updates by itself while BTS answers, BTS rule codes on rejection, the lines, printing (A4 or receipt) without leaving the page, XML download, "issue again", credit and debit notes, cancellation.
+  - **Sending:** email with the PDF and XML attached, WhatsApp (to the customer's phone when saved), copy link, or the phone's share sheet; a log of what was sent.
+  - **Documents:** search by number, customer name or TIN; filters for dates, type, status and customer, kept in the address bar; CSV download.
+  - **Customers and items:** add, edit, archive; customers link to their documents.
+  - **Reports:** this month, last month, quarter, year or custom; sales and GST collected, sales per day, GST by rate for the GST return, top customers and items; CSV for each.
+  - **Settings:** business, language, password, certificate, team, API keys.
+- **Live status:** a bar under the top menu appears while BTS is unreachable (with the queue count), when it comes back, and when the device is offline.
+- **Spanish:** every screen is in English and Spanish (`web/src/es.ts`). The choice is per device, defaulting to the browser's language. Emails are in English for now.
+- **Installable:** a web app manifest, icons and a service worker that caches the app shell (never API data), so it installs on phones and desktops and opens fast.
+- **Accessibility:** a skip link; focus moves to each new page; dialogs trap focus and give it back; a keyboard-operable combobox; every control labelled; muted text at 5:1 contrast.
+- **Robustness:** each page loads on demand and crashes stay inside one page (with a reload button); an expired session returns to the login page; network errors say so plainly.
 - **Design:** "ledger and drafting table".
   - Warm grid paper, cream sheets with hairline edges, aubergine ink.
   - Purple brand, lime for authorized, coral for problems.
@@ -207,6 +242,16 @@ npm run demo            # http://localhost:3000
 - **Business and certificate:** register the business with TIN **123456** and upload `test/certs/signer-123456.pfx`, password `test-pfx-password`. This is a throwaway test certificate.
 - **BTS stand-in:** it authorizes every document.
 - **Outage simulation:** create the file `.demo/bts-down` and new documents go into contingency. Delete it, and the worker sends them within about 15 seconds.
+- **Emails** (password resets, invitations, documents) are written to `.demo/outbox` as `.eml` files; open them with any mail program.
+
+### Browser tests
+
+```
+docker compose up -d db
+npm run e2e
+```
+
+Builds the web app, starts the demo on port 3100 with a fresh `einvoicing_e2e` database, and drives a real browser through sign-up, onboarding, the catalog, a counter sale, an invoice with a restored draft, emailing, search, reports, inviting a teammate, password reset, Spanish, accessibility checks, installability and the phone layout. On Windows it uses the installed Microsoft Edge; elsewhere run `npx playwright install chromium` first (or set `PW_CHANNEL`).
 
 ## Printed copy (`src/render`, manual 3.4 and 3.5)
 
@@ -272,11 +317,9 @@ These were placeholders in the spec and are now confirmed against the manual:
 ## Notes for the next modules
 
 - **Web app, next:**
-  - Inviting teammates.
-  - Password reset by email.
-  - Emailing documents to customers.
-  - Editing customers and items.
   - An admin console for moving businesses to production.
+  - Emails in Spanish.
+  - Login rate limits and email limits shared across instances (they are per process today).
 - **API hardening:**
   - Rate limiting per key.
   - OpenAPI docs for integrators.

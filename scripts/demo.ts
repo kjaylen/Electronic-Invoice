@@ -13,6 +13,9 @@
  * file .demo/bts-down: BTS then "fails" until you delete it, and the worker
  * sends the queued documents within ~15 seconds of it coming back.
  *
+ * Emails (password resets, invitations, documents) are written to
+ * .demo/outbox as .eml files instead of being sent.
+ *
  * Demo data lives in the local Docker database. The key that encrypts stored
  * certificates is kept in .demo/kek so they stay readable between runs.
  */
@@ -23,7 +26,7 @@ import { fileURLToPath } from 'node:url';
 import { applicationResponse, startFakeBts } from '../test/fake-bts.ts';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-const demoDir = `${root}.demo`;
+const demoDir = process.env.DEMO_DIR ?? `${root}.demo`;
 mkdirSync(demoDir, { recursive: true });
 const kekFile = `${demoDir}/kek`;
 if (!existsSync(kekFile)) writeFileSync(kekFile, randomBytes(32).toString('base64'), { mode: 0o600 });
@@ -53,7 +56,9 @@ Object.assign(process.env, {
   COOKIE_SECURE: 'false',
   WORKER_INTERVAL_MS: '15000',
   PORT: process.env.PORT ?? '3000',
+  MAIL_OUTBOX_DIR: `${demoDir}/outbox`,
 });
+process.env.PUBLIC_URL ??= `http://localhost:${process.env.PORT}`;
 console.log(`Stand-in BTS on ${bts.baseUrl} (create .demo/bts-down to simulate an outage)`);
 await import('../src/server.ts');
 console.log(`\n  Open http://localhost:${process.env.PORT}\n`);

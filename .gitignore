@@ -13,3 +13,6 @@ out/
 !test/certs/*.pfx
 web/dist/
 .demo/
+.demo-e2e/
+test-results/
+playwright-report/

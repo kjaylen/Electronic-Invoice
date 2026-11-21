@@ -76,6 +76,8 @@ export const itemSchema = {
     unitPrice: decimal,
     gstCategory: { type: 'string', enum: ['S', 'Z', 'E'] },
     exemptionReasonCode: text(50),
+    barcode: { type: 'string', pattern: '^[0-9A-Za-z-]{1,64}$' },
+    favorite: { type: 'boolean' },
   },
 } as const;
 

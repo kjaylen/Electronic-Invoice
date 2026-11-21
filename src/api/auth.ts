@@ -1,6 +1,6 @@
 /**
  * Accounts for people (the web app): sign up, log in, log out, create a
- * business, switch business.
+ * business, switch business, change or reset a password, accept an invitation.
  *
  * Sessions live in an httpOnly, SameSite=Lax cookie. Every state-changing
  * request authenticated by cookie must also send "X-Requested-With: etd-web":
@@ -10,20 +10,27 @@
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { createTenant, type NewTenant } from '../db/tenants.ts';
+import { acceptInvitation, findInvitation } from '../db/team.ts';
 import {
-  AccountError,
   addMembership,
+  changePassword,
   checkCredentials,
+  consumePasswordReset,
+  createPasswordReset,
   createSession,
   createUser,
   deleteSession,
+  findUserByEmail,
   lookupSession,
   memberships,
   SESSION_MAX_MS,
   setSessionTenant,
   type Session,
+  type User,
 } from '../db/users.ts';
+import { simpleHtml } from '../mail/mailer.ts';
 import type { PipelineDeps } from '../pipeline/issue.ts';
+import { publicLink, requireMail, type ServerContext } from './context.ts';
 import { ApiError } from './errors.ts';
 import { tenantSchema, uuid } from './schemas.ts';
 
@@ -31,12 +38,7 @@ export const SESSION_COOKIE = 'etd_session';
 export const CSRF_HEADER = 'x-requested-with';
 export const CSRF_VALUE = 'etd-web';
 
-export interface AuthOptions {
-  /** Send the cookie with Secure (HTTPS only). Default true; turn off only for local HTTP development. */
-  cookieSecure: boolean;
-  /** Let anyone create an account. Default true. */
-  allowSignup: boolean;
-}
+export type AuthOptions = Pick<ServerContext, 'cookieSecure' | 'allowSignup'>;
 
 export function readCookie(request: FastifyRequest, name: string): string | undefined {
   const header = request.headers.cookie;
@@ -106,7 +108,7 @@ async function sessionBody(deps: PipelineDeps, user: Session['user'], currentTen
   };
 }
 
-export function registerAuthRoutes(app: FastifyInstance, deps: PipelineDeps, options: AuthOptions) {
+export function registerAuthRoutes(app: FastifyInstance, deps: PipelineDeps, options: ServerContext) {
   const { db } = deps;
   app.addHook('onRequest', async (request) => requireCsrfHeader(request));
 
@@ -122,13 +124,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: PipelineDeps, opt
     async (request, reply) => {
       if (!options.allowSignup) throw new ApiError(403, 'signup_closed', 'Sign-up is closed; ask for an invitation');
       if (tooManyAttempts(`signup|${request.ip}`, 20)) throw new ApiError(429, 'too_many_attempts', 'Too many attempts; try again later');
-      let user;
-      try {
-        user = await createUser(db, request.body);
-      } catch (e) {
-        if (e instanceof AccountError) throw new ApiError(422, 'invalid_account', e.message);
-        throw e;
-      }
+      const user = await createUser(db, request.body);
       const { token } = await createSession(db, user.id, null);
       setSessionCookie(reply, token, options);
       return reply.code(201).send(await sessionBody(deps, user, null));
@@ -185,6 +181,122 @@ export function registerAuthRoutes(app: FastifyInstance, deps: PipelineDeps, opt
       if (!member) throw new ApiError(404, 'not_found', 'Business not found');
       await setSessionTenant(db, session.id, request.body.businessId);
       return sessionBody(deps, session.user, request.body.businessId);
+    },
+  );
+
+  // ---------- passwords ----------
+
+  const passwordField = { type: 'string', minLength: 1, maxLength: 200 } as const;
+
+  async function startSession(reply: FastifyReply, user: User, tenantId?: string) {
+    const current = tenantId ?? (await memberships(db, user.id))[0]?.tenantId ?? null;
+    const { token } = await createSession(db, user.id, current);
+    setSessionCookie(reply, token, options);
+    return sessionBody(deps, user, current);
+  }
+
+  app.post<{ Body: { currentPassword: string; newPassword: string } }>(
+    '/password/change',
+    { schema: { body: { type: 'object', required: ['currentPassword', 'newPassword'], additionalProperties: false, properties: { currentPassword: passwordField, newPassword: passwordField } } } },
+    async (request, reply) => {
+      const session = await requireSession(request);
+      if (tooManyAttempts(`change|${session.user.id}`, 10)) throw new ApiError(429, 'too_many_attempts', 'Too many attempts; try again in 15 minutes');
+      if (!(await changePassword(db, session.user.id, request.body.currentPassword, request.body.newPassword, session.id))) {
+        throw new ApiError(422, 'wrong_password', 'Your current password is incorrect');
+      }
+      return reply.code(204).send();
+    },
+  );
+
+  // Always 204, whether or not the email has an account, so the form cannot be used to find out who is registered.
+  app.post<{ Body: { email: string } }>(
+    '/password/forgot',
+    { schema: { body: { type: 'object', required: ['email'], additionalProperties: false, properties: { email: { type: 'string', minLength: 3, maxLength: 254 } } } } },
+    async (request, reply) => {
+      requireMail(options);
+      publicLink(options, '/'); // fail now, not silently in the background, when links cannot be built
+      const email = request.body.email.trim().toLowerCase();
+      if (tooManyAttempts(`forgot|${request.ip}`, 20) || tooManyAttempts(`forgot|${email}`, 5)) {
+        throw new ApiError(429, 'too_many_attempts', 'Too many attempts; try again in 15 minutes');
+      }
+      // In the background, so the response time does not reveal whether the account exists.
+      void (async () => {
+        const reset = await createPasswordReset(db, email);
+        if (!reset) return;
+        const link = publicLink(options, `/reset-password?token=${reset.token}`);
+        await options.mailer.send({
+          to: reset.user.email,
+          subject: 'Reset your password',
+          text: `Hello ${reset.user.name},\n\nSomeone (hopefully you) asked to reset the password for your eInvoicing account.\n\nChoose a new password here (the link works for one hour):\n${link}\n\nIf you did not ask for this, ignore this email; your password stays the same.`,
+          html: simpleHtml({
+            heading: 'Reset your password',
+            paragraphs: [`Hello ${reset.user.name},`, 'Someone (hopefully you) asked to reset the password for your eInvoicing account. The link works for one hour.', 'If you did not ask for this, ignore this email; your password stays the same.'],
+            button: { label: 'Choose a new password', url: link },
+          }),
+        });
+      })().catch((e) => request.log.error({ err: e }, 'password reset email failed'));
+      return reply.code(204).send();
+    },
+  );
+
+  app.post<{ Body: { token: string; password: string } }>(
+    '/password/reset',
+    { schema: { body: { type: 'object', required: ['token', 'password'], additionalProperties: false, properties: { token: { type: 'string', maxLength: 100 }, password: passwordField } } } },
+    async (request, reply) => {
+      if (tooManyAttempts(`reset|${request.ip}`, 30)) throw new ApiError(429, 'too_many_attempts', 'Too many attempts; try again later');
+      const user = await consumePasswordReset(db, request.body.token, request.body.password);
+      if (!user) throw new ApiError(400, 'invalid_token', 'This reset link is invalid, already used or expired. Ask for a new one.');
+      return startSession(reply, user);
+    },
+  );
+
+  // ---------- invitations ----------
+
+  const invalidInvitation = () => new ApiError(404, 'invalid_token', 'This invitation is invalid, already used or expired. Ask for a new one.');
+
+  app.get<{ Params: { token: string } }>('/invitations/:token', async (request) => {
+    const inv = await findInvitation(db, request.params.token);
+    if (!inv) throw invalidInvitation();
+    return {
+      businessName: inv.businessName,
+      invitedByName: inv.invitedByName,
+      email: inv.email,
+      role: inv.role,
+      accountExists: Boolean(await findUserByEmail(db, inv.email)),
+      expiresAt: inv.expiresAt,
+    };
+  });
+
+  app.post<{ Body: { token: string; name?: string; password?: string } }>(
+    '/invitations/accept',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          required: ['token'],
+          additionalProperties: false,
+          properties: { token: { type: 'string', maxLength: 100 }, name: { type: 'string', minLength: 1, maxLength: 200 }, password: passwordField },
+        },
+      },
+    },
+    async (request, reply) => {
+      if (tooManyAttempts(`accept|${request.ip}`, 30)) throw new ApiError(429, 'too_many_attempts', 'Too many attempts; try again later');
+      const inv = await findInvitation(db, request.body.token);
+      if (!inv) throw invalidInvitation();
+      const session = await sessionFromRequest(deps, request);
+      if (session) {
+        if (session.user.email !== inv.email) {
+          throw new ApiError(403, 'wrong_account', `This invitation is for ${inv.email}. Log out, then open the link again.`);
+        }
+        if (!(await acceptInvitation(db, inv, session.user.id))) throw invalidInvitation();
+        await setSessionTenant(db, session.id, inv.tenantId);
+        return sessionBody(deps, session.user, inv.tenantId);
+      }
+      if (await findUserByEmail(db, inv.email)) throw new ApiError(409, 'login_required', `Log in as ${inv.email} to accept this invitation`);
+      if (!request.body.name || !request.body.password) throw new ApiError(422, 'invalid_account', 'Enter your name and choose a password');
+      const user = await createUser(db, { email: inv.email, name: request.body.name, password: request.body.password });
+      if (!(await acceptInvitation(db, inv, user.id))) throw invalidInvitation();
+      return reply.code(201).send(await startSession(reply, user, inv.tenantId));
     },
   );
 }

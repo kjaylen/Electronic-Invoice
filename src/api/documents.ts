@@ -1,5 +1,6 @@
 /**
- * Documents: issue, list, get, signed XML, printed copy (PDF), cancel.
+ * Documents: issue, list and search, get, signed XML, printed copy (PDF),
+ * cancel, email to the customer, share links.
  *
  * POST /v1/documents answers 201 whenever a document was created, whatever
  * BTS decided: check "status" (authorized, authorized_with_alert, rejected,
@@ -10,8 +11,8 @@
  * request returns the original response instead of issuing twice.
  */
 
-import { createHash } from 'node:crypto';
-import type { FastifyInstance } from 'fastify';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { formatCents } from '../engine/decimal.ts';
 import { calculateDocument, type LineInput } from '../engine/calc.ts';
 import { BELIZE_DISTRICTS, type Customer, type DocumentReference, ETD_TYPE_NAMES, type IssuedEtdType } from '../engine/ubl.ts';
@@ -19,9 +20,28 @@ import { cancelDocument, issueDocument, type IssueRequest, type PipelineDeps } f
 import { renderReceipt, renderSheet } from '../render/pdf.ts';
 import { readEtdForPrint } from '../render/view.ts';
 import { toBigInt } from '../db/database.ts';
-import { type CustomerBody, customerFromRow, loadCustomer, loadItems, nextCursor, parsePage } from './catalog.ts';
+import { simpleHtml } from '../mail/mailer.ts';
+import { type CustomerBody, customerFromRow, likePattern, loadCustomer, loadItems, nextCursor, parsePage } from './catalog.ts';
+import { publicLink, requireMail, type ServerContext } from './context.ts';
 import { ApiError, notFound } from './errors.ts';
-import { issueSchema, listQuery, uuid } from './schemas.ts';
+import { date as dateSchema, issueSchema, listQuery, uuid } from './schemas.ts';
+
+const PRINTABLE = ['authorized', 'authorized_with_alert', 'contingency_pending'];
+export const SHARE_TTL_MS = 90 * 24 * 3600 * 1000;
+const shareHash = (token: string) => createHash('sha256').update(token, 'utf8').digest('hex');
+
+// Per-process limit on emails per business, so a compromised account cannot be used to send spam at volume.
+const EMAIL_LIMIT_PER_HOUR = 200;
+const emailCounts = new Map<string, { count: number; resetAt: number }>();
+function emailAllowed(tenantId: string): boolean {
+  const now = Date.now();
+  const e = emailCounts.get(tenantId);
+  if (!e || e.resetAt <= now) {
+    emailCounts.set(tenantId, { count: 1, resetAt: now + 3600_000 });
+    return true;
+  }
+  return ++e.count <= EMAIL_LIMIT_PER_HOUR;
+}
 
 interface LineBody extends Partial<Omit<LineInput, 'quantity'>> {
   itemId?: string;
@@ -196,7 +216,79 @@ async function toIssueRequest(deps: PipelineDeps, tenantId: string, body: IssueB
 
 const idParams = { type: 'object', required: ['id'], properties: { id: uuid } } as const;
 
-export function registerDocumentRoutes(app: FastifyInstance, deps: PipelineDeps) {
+interface LineRow {
+  line_number: number;
+  description: string;
+  quantity: string;
+  unit_code: string;
+  unit_price: string;
+  net_cents: unknown;
+  gst_category: 'S' | 'Z' | 'E';
+  gst_cents: unknown;
+  tax_cents: unknown;
+  line_total_cents: unknown;
+}
+
+const trimDecimal = (v: string) => String(v).replace(/(\.\d{2}\d*?)0+$/, '$1').replace(/\.$/, '');
+const trimQuantity = (v: string) => String(v).replace(/\.?0+$/, '');
+
+async function documentLines(deps: PipelineDeps, tenantId: string, documentId: string) {
+  const rows = (await deps.db.query<LineRow>(
+    `select line_number, description, quantity::text as quantity, unit_code, unit_price::text as unit_price, net_cents, gst_category, gst_cents, tax_cents, line_total_cents
+     from document_lines where document_id = $1 and tenant_id = $2 order by line_number`,
+    [documentId, tenantId],
+  )).rows;
+  return rows.map((l) => ({
+    lineNumber: l.line_number,
+    description: l.description,
+    quantity: trimQuantity(l.quantity),
+    unitCode: l.unit_code,
+    unitPrice: trimDecimal(l.unit_price),
+    gstCategory: l.gst_category,
+    net: cents(l.net_cents),
+    gst: cents(l.gst_cents),
+    tax: cents(l.tax_cents),
+    total: cents(l.line_total_cents),
+  }));
+}
+
+/** The printed copy, for any route that serves or sends it. */
+async function printedCopy(deps: PipelineDeps, tenantId: string, documentId: string, format: 'sheet' | 'receipt' = 'sheet') {
+  const row = (await deps.db.query<{ signed_xml: string; status: string; protocol_number: string | null }>(
+    'select signed_xml, status, protocol_number from documents where id = $1 and tenant_id = $2', [documentId, tenantId],
+  )).rows[0];
+  if (!row) throw notFound('Document');
+  if (!PRINTABLE.includes(row.status)) throw new ApiError(409, 'not_printable', `A ${row.status.replace(/_/g, ' ')} document has no valid printed copy`);
+  const view = readEtdForPrint(row.signed_xml);
+  const common = row.protocol_number ? { protocolNumber: row.protocol_number } : {};
+  const pdf = format === 'receipt' ? await renderReceipt(view, common) : await renderSheet(view, common);
+  return { pdf, view, signedXml: row.signed_xml, filename: `${view.typeName.replace(/ /g, '-')}-${view.series}-${view.number}` };
+}
+
+/** GET /d/:token: the printed copy behind a share link. No login; the 256-bit token is the permission. */
+export function registerPublicDocumentRoutes(app: FastifyInstance, deps: PipelineDeps) {
+  app.get<{ Params: { token: string }; Querystring: { format?: string } }>('/d/:token', async (request, reply) => {
+    const gone = (text: string) => reply.code(404).type('text/html; charset=utf-8').header('Cache-Control', 'no-store')
+      .send(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Link not available</title><body style="font-family:system-ui,sans-serif;background:#efe7d6;color:#160923;display:grid;place-items:center;min-height:90vh"><div style="max-width:28rem;text-align:center"><h1 style="font-size:1.3rem">This link is not available</h1><p>${text}</p></div>`);
+    const token = request.params.token;
+    if (!/^[A-Za-z0-9_-]{43}$/.test(token)) return gone('Check that you copied the whole link.');
+    const link = (await deps.db.query<{ tenant_id: string; document_id: string; expires_at: string | Date }>(
+      'select tenant_id, document_id, expires_at from share_links where token_hash = $1', [shareHash(token)],
+    )).rows[0];
+    if (!link) return gone('Check that you copied the whole link.');
+    if (new Date(link.expires_at).getTime() <= Date.now()) return gone('It has expired. Ask the business to send it again.');
+    try {
+      const copy = await printedCopy(deps, link.tenant_id, link.document_id, request.query.format === 'receipt' ? 'receipt' : 'sheet');
+      return reply.type('application/pdf').header('Cache-Control', 'private, no-store').header('X-Robots-Tag', 'noindex')
+        .header('Content-Disposition', `inline; filename="${copy.filename}.pdf"`).send(copy.pdf);
+    } catch (e) {
+      if (e instanceof ApiError && e.code === 'not_printable') return gone('This document is no longer valid (it was cancelled or replaced). Contact the business.');
+      throw e;
+    }
+  });
+}
+
+export function registerDocumentRoutes(app: FastifyInstance, deps: PipelineDeps, ctx: ServerContext) {
   const { db } = deps;
 
   app.post<{ Body: IssueBody }>('/documents', { schema: { body: issueSchema } }, async (request, reply) => {
@@ -267,13 +359,17 @@ export function registerDocumentRoutes(app: FastifyInstance, deps: PipelineDeps)
     };
   });
 
-  app.get<{ Querystring: { limit?: string; cursor?: string; status?: string; type?: string } }>(
+  app.get<{ Querystring: { limit?: string; cursor?: string; status?: string; type?: string; q?: string; from?: string; to?: string; customerId?: string } }>(
     '/documents',
     {
       schema: {
         querystring: listQuery({
           status: { type: 'string', enum: ['pending', 'authorized', 'authorized_with_alert', 'rejected', 'contingency_pending', 'superseded', 'cancelled'] },
           type: { type: 'string', enum: ['01', '02', '03', '04'] },
+          q: { type: 'string', maxLength: 100 },
+          from: dateSchema,
+          to: dateSchema,
+          customerId: uuid,
         }),
       },
     },
@@ -289,6 +385,41 @@ export function registerDocumentRoutes(app: FastifyInstance, deps: PipelineDeps)
         params.push(request.query.type);
         where += ` and d.etd_type = $${params.length}`;
       }
+      if (request.query.from) {
+        params.push(request.query.from);
+        where += ` and d.issue_date >= $${params.length}::date`;
+      }
+      if (request.query.to) {
+        params.push(request.query.to);
+        where += ` and d.issue_date <= $${params.length}::date`;
+      }
+      if (request.query.customerId) {
+        params.push(request.query.customerId);
+        where += ` and d.customer_id = $${params.length}`;
+      }
+      const q = request.query.q?.trim();
+      if (q) {
+        // A document number ("12", "001-000000012"), an ETDUI, or part of the customer's name or TIN.
+        const numbered = /^(?:(\d{1,3})-)?(\d{1,9})$/.exec(q);
+        if (/^\d{44}$/.test(q)) {
+          params.push(q);
+          where += ` and d.etdui = $${params.length}`;
+        } else {
+          params.push(likePattern(q));
+          const like = `$${params.length}`;
+          let cond = `d.customer_snapshot->>'name' ilike ${like} or d.customer_snapshot->>'tin' like ${like}`;
+          if (numbered) {
+            params.push(Number(numbered[2]));
+            cond += ` or (d.serial = $${params.length}`;
+            if (numbered[1]) {
+              params.push(Number(numbered[1]));
+              cond += ` and d.series_number = $${params.length}`;
+            }
+            cond += ')';
+          }
+          where += ` and (${cond})`;
+        }
+      }
       if (page.after) {
         params.push(page.after.createdAt, page.after.id);
         where += ` and (d.created_at, d.id) < ($${params.length - 1}::timestamptz, $${params.length}::uuid)`;
@@ -300,9 +431,87 @@ export function registerDocumentRoutes(app: FastifyInstance, deps: PipelineDeps)
     },
   );
 
-  app.get<{ Params: { id: string } }>('/documents/:id', { schema: { params: idParams } }, async (request) =>
-    documentJson(await loadDocument(deps, request.tenantId, request.params.id)),
+  app.get<{ Params: { id: string } }>('/documents/:id', { schema: { params: idParams } }, async (request) => ({
+    ...documentJson(await loadDocument(deps, request.tenantId, request.params.id)),
+    lines: await documentLines(deps, request.tenantId, request.params.id),
+  }));
+
+  // ---------- sending to the customer ----------
+
+  const userId = (request: FastifyRequest) => request.userId || null;
+
+  app.post<{ Params: { id: string }; Body: { to: string; message?: string } }>(
+    '/documents/:id/email',
+    {
+      schema: {
+        params: idParams,
+        body: {
+          type: 'object',
+          required: ['to'],
+          additionalProperties: false,
+          properties: { to: { type: 'string', minLength: 3, maxLength: 254, pattern: '^[^\\s@,;<>]+@[^\\s@,;<>]+\\.[^\\s@,;<>]+$' }, message: { type: 'string', maxLength: 2000 } },
+        },
+      },
+    },
+    async (request) => {
+      requireMail(ctx);
+      const copy = await printedCopy(deps, request.tenantId, request.params.id);
+      if (!emailAllowed(request.tenantId)) throw new ApiError(429, 'too_many_emails', 'Too many emails sent in the last hour; try again later');
+      const biz = (await db.query<{ name: string; email: string }>('select coalesce(trade_name, legal_name) as name, email from tenants where id = $1', [request.tenantId])).rows[0]!;
+      const v = copy.view;
+      const title = `${v.typeName} ${v.series}-${v.number}`;
+      const lines = [
+        `Please find attached ${v.typeName.toLowerCase()} ${v.series}-${v.number} from ${biz.name}.`,
+        ...(request.body.message?.trim() ? [request.body.message.trim()] : []),
+        'The PDF is the printed copy. The XML file is the electronic tax document as authorized by the Belize Tax Service.',
+      ];
+      const id = randomUUID();
+      try {
+        await ctx.mailer.send({
+          to: request.body.to,
+          replyTo: biz.email,
+          subject: `${title} from ${biz.name}`,
+          text: lines.join('\n\n'),
+          html: simpleHtml({ heading: title, paragraphs: lines }),
+          attachments: [
+            { filename: `${copy.filename}.pdf`, content: copy.pdf, contentType: 'application/pdf' },
+            { filename: `${copy.filename}.xml`, content: copy.signedXml, contentType: 'application/xml' },
+          ],
+        });
+      } catch (e) {
+        request.log.error({ err: e }, 'document email failed');
+        await db.query(`insert into document_messages (id, tenant_id, document_id, channel, recipient, status, error, sent_by) values ($1, $2, $3, 'email', $4, 'failed', $5, $6)`,
+          [id, request.tenantId, request.params.id, request.body.to, String((e as Error).message ?? e).slice(0, 500), userId(request)]);
+        throw new ApiError(502, 'email_failed', 'The email could not be sent. Check the address and try again.');
+      }
+      await db.query(`insert into document_messages (id, tenant_id, document_id, channel, recipient, status, sent_by) values ($1, $2, $3, 'email', $4, 'sent', $5)`,
+        [id, request.tenantId, request.params.id, request.body.to, userId(request)]);
+      return { id, channel: 'email', recipient: request.body.to, status: 'sent', createdAt: new Date().toISOString() };
+    },
   );
+
+  app.get<{ Params: { id: string } }>('/documents/:id/messages', { schema: { params: idParams } }, async (request) => {
+    await loadDocument(deps, request.tenantId, request.params.id);
+    const rows = (await db.query<{ id: string; channel: string; recipient: string; status: string; created_at: string | Date; sent_by_name: string | null }>(
+      `select m.id, m.channel, m.recipient, m.status, m.created_at, u.name as sent_by_name from document_messages m left join users u on u.id = m.sent_by
+       where m.document_id = $1 and m.tenant_id = $2 order by m.created_at desc limit 50`,
+      [request.params.id, request.tenantId],
+    )).rows;
+    return { data: rows.map((r) => ({ id: r.id, channel: r.channel, recipient: r.recipient, status: r.status, sentBy: r.sent_by_name, createdAt: new Date(r.created_at).toISOString() })) };
+  });
+
+  // A link the customer can open to get the PDF (for WhatsApp, SMS, or anywhere else).
+  app.post<{ Params: { id: string } }>('/documents/:id/share', { schema: { params: idParams } }, async (request, reply) => {
+    const row = (await db.query<{ status: string }>('select status from documents where id = $1 and tenant_id = $2', [request.params.id, request.tenantId])).rows[0];
+    if (!row) throw notFound('Document');
+    if (!PRINTABLE.includes(row.status)) throw new ApiError(409, 'not_printable', 'Only a valid document can be shared');
+    publicLink(ctx, '/');
+    const token = randomBytes(32).toString('base64url');
+    const expiresAt = new Date(Date.now() + SHARE_TTL_MS);
+    await db.query('insert into share_links (id, tenant_id, document_id, token_hash, created_by, expires_at) values ($1, $2, $3, $4, $5, $6)',
+      [randomUUID(), request.tenantId, request.params.id, shareHash(token), userId(request), expiresAt.toISOString()]);
+    return reply.code(201).send({ url: publicLink(ctx, `/d/${token}`), expiresAt: expiresAt.toISOString() });
+  });
 
   app.get<{ Params: { id: string } }>('/documents/:id/xml', { schema: { params: idParams } }, async (request, reply) => {
     const row = (await db.query<{ signed_xml: string; etdui: string }>('select signed_xml, etdui from documents where id = $1 and tenant_id = $2', [request.params.id, request.tenantId])).rows[0];

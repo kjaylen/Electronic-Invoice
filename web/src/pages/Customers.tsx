@@ -1,95 +1,175 @@
 import { type FormEvent, useEffect, useState } from 'react';
+import { Link } from 'react-router';
 import { api, type Customer, type Page } from '../api';
-import { DISTRICTS, ErrorText, Field, useDebounced } from '../ui';
+import { useT } from '../i18n';
+import { useToast } from '../toast';
+import { DISTRICTS, ErrorText, Field, Modal, useDebounced, usePageTitle } from '../ui';
+
+type Form = { name: string; tin: string; street: string; city: string; districtCode: string; telephone: string; email: string };
+const EMPTY: Form = { name: '', tin: '', street: '', city: '', districtCode: '1', telephone: '', email: '' };
+
+const toForm = (c: Customer): Form => ({
+  name: c.name,
+  tin: c.tin ?? '',
+  street: c.address?.street ?? '',
+  city: c.address?.city ?? '',
+  districtCode: c.address?.districtCode ?? '1',
+  telephone: c.contact.telephone ?? '',
+  email: c.contact.email ?? '',
+});
+
+export const customerBody = (f: Form) => ({
+  name: f.name.trim(),
+  ...(f.tin && { tin: f.tin }),
+  ...(f.street && f.city && { address: { street: f.street, city: f.city, districtCode: f.districtCode } }),
+  ...((f.telephone || f.email) && { contact: { ...(f.telephone && { telephone: f.telephone }), ...(f.email && { email: f.email }) } }),
+});
+
+/** Add or edit a customer. */
+function CustomerForm(props: { initial?: Customer; onSaved: (c: Customer) => void; onCancel: () => void }) {
+  const t = useT();
+  const [form, setForm] = useState<Form>(props.initial ? toForm(props.initial) : EMPTY);
+  const [error, setError] = useState<unknown>(null);
+  const [busy, setBusy] = useState(false);
+  const set = (k: keyof Form) => (e: { target: { value: string } }) => setForm({ ...form, [k]: e.target.value });
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const saved = props.initial
+        ? await api<Customer>(`/v1/customers/${props.initial.id}`, { method: 'PUT', body: customerBody(form) })
+        : await api<Customer>('/v1/customers', { method: 'POST', body: customerBody(form) });
+      props.onSaved(saved);
+    } catch (err) {
+      setError(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <form className="stack" onSubmit={submit}>
+      <div className="form-grid">
+        <Field label={t('Name')}><input required autoFocus value={form.name} onChange={set('name')} /></Field>
+        <Field label="TIN" hint={t('If GST-registered.')}><input inputMode="numeric" pattern="\d{6}" maxLength={6} value={form.tin} onChange={set('tin')} /></Field>
+      </div>
+      <div className="form-grid">
+        <Field label={t('Street')}><input value={form.street} onChange={set('street')} /></Field>
+        <Field label={t('City or town')}><input value={form.city} onChange={set('city')} /></Field>
+        <Field label={t('District')}><select value={form.districtCode} onChange={set('districtCode')}>{DISTRICTS.map(([c, n]) => <option key={c} value={c}>{n}</option>)}</select></Field>
+      </div>
+      <div className="form-grid">
+        <Field label={t('Telephone')} hint={t('Used to send documents by WhatsApp.')}><input type="tel" value={form.telephone} onChange={set('telephone')} /></Field>
+        <Field label={t('Email')}><input type="email" value={form.email} onChange={set('email')} /></Field>
+      </div>
+      {props.initial && <p className="small muted">{t('Documents already issued keep the details they were issued with.')}</p>}
+      <ErrorText error={error} />
+      <div className="row">
+        <span className="spacer" />
+        <button type="button" className="secondary" onClick={props.onCancel}>{t('Cancel')}</button>
+        <button type="submit" disabled={busy}>{busy ? t('Saving…') : t('Save customer')}</button>
+      </div>
+    </form>
+  );
+}
 
 export function Customers() {
+  const t = useT();
+  usePageTitle(t('Customers'));
+  const toast = useToast();
   const [q, setQ] = useState('');
   const query = useDebounced(q, 250);
-  const [list, setList] = useState<Customer[]>([]);
+  const [list, setList] = useState<Customer[] | null>(null);
   const [cursor, setCursor] = useState<string | null>(null);
-  const [adding, setAdding] = useState(false);
-  const [form, setForm] = useState({ name: '', tin: '', street: '', city: '', districtCode: '1', telephone: '', email: '' });
+  const [editing, setEditing] = useState<Customer | 'new' | null>(null);
+  const [archiving, setArchiving] = useState<Customer | null>(null);
   const [error, setError] = useState<unknown>(null);
 
   const load = async (after?: string) => {
-    const r = await api<Page<Customer>>(`/v1/customers?limit=25${query ? `&q=${encodeURIComponent(query)}` : ''}${after ? `&cursor=${after}` : ''}`);
-    setList(after ? [...list, ...r.data] : r.data);
-    setCursor(r.nextCursor);
+    try {
+      const r = await api<Page<Customer>>(`/v1/customers?limit=25${query ? `&q=${encodeURIComponent(query)}` : ''}${after ? `&cursor=${after}` : ''}`);
+      setList(after ? [...(list ?? []), ...r.data] : r.data);
+      setCursor(r.nextCursor);
+    } catch (e) {
+      setError(e);
+      setList([]);
+    }
   };
   useEffect(() => {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query]);
 
-  const set = (k: keyof typeof form) => (e: { target: { value: string } }) => setForm({ ...form, [k]: e.target.value });
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
-    setError(null);
+  const archive = async () => {
+    if (!archiving) return;
     try {
-      await api('/v1/customers', {
-        method: 'POST',
-        body: {
-          name: form.name,
-          ...(form.tin && { tin: form.tin }),
-          ...(form.street && form.city && { address: { street: form.street, city: form.city, districtCode: form.districtCode } }),
-          ...((form.telephone || form.email) && { contact: { ...(form.telephone && { telephone: form.telephone }), ...(form.email && { email: form.email }) } }),
-        },
-      });
-      setForm({ name: '', tin: '', street: '', city: '', districtCode: '1', telephone: '', email: '' });
-      setAdding(false);
+      await api(`/v1/customers/${archiving.id}`, { method: 'DELETE' });
+      toast(t('{name} archived', { name: archiving.name }));
+      setArchiving(null);
       await load();
-    } catch (err) {
-      setError(err);
+    } catch (e) {
+      setError(e);
     }
   };
 
   return (
     <div className="stack">
       <div className="row">
-        <div><span className="kicker">Directory</span><h1>Customers</h1></div>
+        <div><span className="kicker">{t('Directory')}</span><h1>{t('Customers')}</h1></div>
         <span className="spacer" />
-        <button onClick={() => setAdding(!adding)}>{adding ? 'Close' : 'Add customer'}</button>
+        <button onClick={() => setEditing('new')}>{t('Add customer')}</button>
       </div>
-      {adding && (
-        <form className="card stack" onSubmit={submit}>
-          <div className="form-grid">
-            <Field label="Name"><input required value={form.name} onChange={set('name')} /></Field>
-            <Field label="TIN" hint="If GST-registered."><input inputMode="numeric" pattern="\d{6}" maxLength={6} value={form.tin} onChange={set('tin')} /></Field>
-          </div>
-          <div className="form-grid">
-            <Field label="Street"><input value={form.street} onChange={set('street')} /></Field>
-            <Field label="City or town"><input value={form.city} onChange={set('city')} /></Field>
-            <Field label="District"><select value={form.districtCode} onChange={set('districtCode')}>{DISTRICTS.map(([c, n]) => <option key={c} value={c}>{n}</option>)}</select></Field>
-          </div>
-          <div className="form-grid">
-            <Field label="Telephone"><input type="tel" value={form.telephone} onChange={set('telephone')} /></Field>
-            <Field label="Email"><input type="email" value={form.email} onChange={set('email')} /></Field>
-          </div>
-          <ErrorText error={error} />
-          <div className="row"><span className="spacer" /><button type="submit">Save customer</button></div>
-        </form>
-      )}
-      <input placeholder="Search by name or TIN" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search customers" />
+      <input type="search" placeholder={t('Search by name, TIN, phone or email')} value={q} onChange={(e) => setQ(e.target.value)} aria-label={t('Search customers')} />
+      <ErrorText error={error} />
       <section className="card">
-        {list.length === 0 ? <p className="muted">No customers{query ? ' match your search' : ' yet'}.</p> : (
+        {list === null ? <div className="stack"><div className="skeleton" /><div className="skeleton" /></div> : list.length === 0 ? <div className="empty">{query ? t('No customers match your search.') : t('No customers yet. Add the ones you invoice often.')}</div> : (
           <div className="table-wrap">
             <table className="responsive">
-              <thead><tr><th>Name</th><th>TIN</th><th>Address</th><th>Contact</th></tr></thead>
+              <thead><tr><th scope="col">{t('Name')}</th><th scope="col">TIN</th><th scope="col">{t('Address')}</th><th scope="col">{t('Contact')}</th><th scope="col"><span className="sr-only">{t('Actions')}</span></th></tr></thead>
               <tbody>
                 {list.map((c) => (
                   <tr key={c.id}>
-                    <td data-label="Name"><strong>{c.name}</strong></td>
+                    <td data-label={t('Name')}><strong>{c.name}</strong></td>
                     <td data-label="TIN">{c.tin ?? '—'}</td>
-                    <td data-label="Address">{c.address ? `${c.address.street}, ${c.address.city}` : '—'}</td>
-                    <td data-label="Contact">{[c.contact.telephone, c.contact.email].filter(Boolean).join(' · ') || '—'}</td>
+                    <td data-label={t('Address')}>{c.address ? `${c.address.street}, ${c.address.city}` : '—'}</td>
+                    <td data-label={t('Contact')}>{[c.contact.telephone, c.contact.email].filter(Boolean).join(' · ') || '—'}</td>
+                    <td className="right actions">
+                      <Link to={`/documents?customerId=${c.id}`} viewTransition>{t('Documents')}</Link>
+                      <button className="link" onClick={() => setEditing(c)}>{t('Edit')}</button>
+                      <button className="link" onClick={() => setArchiving(c)}>{t('Archive')}</button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
         )}
-        {cursor && <button className="secondary" onClick={() => void load(cursor)}>Load more</button>}
+        {cursor && <button className="secondary" onClick={() => void load(cursor)}>{t('Load more')}</button>}
       </section>
+
+      {editing && (
+        <Modal wide title={editing === 'new' ? t('Add customer') : t('Edit {name}', { name: editing.name })} onClose={() => setEditing(null)}>
+          <CustomerForm
+            {...(editing !== 'new' && { initial: editing })}
+            onCancel={() => setEditing(null)}
+            onSaved={(c) => {
+              toast(editing === 'new' ? t('{name} added', { name: c.name }) : t('{name} saved', { name: c.name }));
+              setEditing(null);
+              void load();
+            }}
+          />
+        </Modal>
+      )}
+      {archiving && (
+        <Modal title={t('Archive {name}?', { name: archiving.name })} onClose={() => setArchiving(null)}>
+          <p>{t('They disappear from your customer list and search. Documents already issued to them are not affected.')}</p>
+          <div className="row">
+            <span className="spacer" />
+            <button className="secondary" onClick={() => setArchiving(null)}>{t('Keep')}</button>
+            <button className="danger" onClick={() => void archive()}>{t('Archive')}</button>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

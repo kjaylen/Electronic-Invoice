@@ -151,3 +151,56 @@ export async function setSessionTenant(db: Database, sessionId: string, tenantId
 export async function deleteSession(db: Database, token: string): Promise<void> {
   await db.query('delete from sessions where token_hash = $1', [tokenHash(token)]);
 }
+
+// ---------- passwords: change and reset ----------
+
+export const RESET_TTL_MS = 60 * 60 * 1000;
+
+function checkNewPassword(password: string) {
+  if (password.length < MIN_PASSWORD_LENGTH) throw new AccountError(`Use a password of at least ${MIN_PASSWORD_LENGTH} characters`);
+}
+
+/** Replace the password and sign the person out everywhere (except the session kept, if any). */
+export async function setPassword(db: Database, userId: string, password: string, keepSessionId?: string): Promise<void> {
+  checkNewPassword(password);
+  await db.query('update users set password_hash = $2 where id = $1', [userId, await hashPassword(password)]);
+  await db.query('delete from sessions where user_id = $1 and id is distinct from $2', [userId, keepSessionId ?? null]);
+}
+
+export async function changePassword(db: Database, userId: string, current: string, next: string, keepSessionId: string): Promise<boolean> {
+  const row = (await db.query<{ password_hash: string }>('select password_hash from users where id = $1', [userId])).rows[0];
+  if (!row || !(await verifyPassword(current, row.password_hash))) return false;
+  await setPassword(db, userId, next, keepSessionId);
+  return true;
+}
+
+/** A one-time reset token for this email, or null when no account has it. Earlier unused tokens stop working. */
+export async function createPasswordReset(db: Database, email: string): Promise<{ token: string; user: User } | null> {
+  const user = (await db.query<User>('select id, email, name from users where lower(email) = $1', [normalizeEmail(email)])).rows[0];
+  if (!user) return null;
+  const token = randomBytes(32).toString('base64url');
+  await db.query('update password_resets set used_at = now() where user_id = $1 and used_at is null', [user.id]);
+  await db.query('insert into password_resets (id, user_id, token_hash, expires_at) values ($1, $2, $3, $4)', [
+    randomUUID(), user.id, tokenHash(token), new Date(Date.now() + RESET_TTL_MS).toISOString(),
+  ]);
+  return { token, user };
+}
+
+/** Use a reset token: sets the password, signs out all sessions. Null when the token is unknown, used or expired. */
+export async function consumePasswordReset(db: Database, token: string, password: string): Promise<User | null> {
+  checkNewPassword(password);
+  if (!/^[A-Za-z0-9_-]{43}$/.test(token)) return null;
+  const row = (await db.query<{ user_id: string }>(
+    `update password_resets set used_at = now() where token_hash = $1 and used_at is null and expires_at > now() returning user_id`,
+    [tokenHash(token)],
+  )).rows[0];
+  if (!row) return null;
+  await setPassword(db, row.user_id, password);
+  return (await db.query<User>('select id, email, name from users where id = $1', [row.user_id])).rows[0] ?? null;
+}
+
+export async function findUserByEmail(db: Database, email: string): Promise<User | null> {
+  return (await db.query<User>('select id, email, name from users where lower(email) = $1', [normalizeEmail(email)])).rows[0] ?? null;
+}
+
+export { normalizeEmail, tokenHash };

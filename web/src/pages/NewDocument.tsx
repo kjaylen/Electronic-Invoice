@@ -1,11 +1,12 @@
-import { type FormEvent, useEffect, useMemo, useState } from 'react';
+import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
-import { api, type Customer, type DocumentInfo, type Item, type Page } from '../api';
+import { api, type Customer, type DocumentDetailInfo, type DocumentInfo, type Item, type Page } from '../api';
+import { useT } from '../i18n';
 import { useSession } from '../session';
-import { DISTRICTS, ErrorText, Field, GST_CATEGORIES, money, PAYMENT_MEANS, UNITS, useDebounced } from '../ui';
+import { useToast } from '../toast';
+import { belizeDate, Combobox, DISTRICTS, ErrorText, Field, GST_CATEGORIES, money, PAYMENT_MEANS, Segmented, store, TYPE_NAMES, UNITS, useDebounced, usePageTitle } from '../ui';
 
 type DocType = '01' | '02' | '03' | '04';
-const TYPE_NAMES: Record<DocType, string> = { '01': 'Tax invoice', '02': 'Tax receipt', '03': 'Debit note', '04': 'Credit note' };
 
 interface Line {
   key: number;
@@ -19,82 +20,108 @@ interface Line {
   discountPercent: string;
 }
 
+type NewCustomer = { name: string; tin: string; street: string; city: string; districtCode: string; telephone: string; email: string; save: boolean };
+
+interface Draft {
+  savedAt: string;
+  customerMode: 'saved' | 'new' | 'walkin';
+  customer: Customer | null;
+  newCustomer: NewCustomer;
+  receiptTin: string;
+  lines: Line[];
+  meansCode: string;
+  dueDate: string;
+  terms: string;
+  note: string;
+  reason: string;
+  idempotencyKey: string;
+}
+
 let lineKey = 0;
 const emptyLine = (): Line => ({ key: ++lineKey, description: '', quantity: '1', unitCode: 'H87', unitPrice: '', gstCategory: 'S', exemptionReasonCode: '', discountPercent: '' });
 const DECIMAL = /^\d+(\.\d{1,6})?$/;
-const lineReady = (l: Line) => l.description.trim() && DECIMAL.test(l.quantity) && Number(l.quantity) > 0 && DECIMAL.test(l.unitPrice) && (l.gstCategory !== 'E' || l.exemptionReasonCode.trim());
+const lineReady = (l: Line) => Boolean(l.description.trim() && DECIMAL.test(l.quantity) && Number(l.quantity) > 0 && DECIMAL.test(l.unitPrice) && (l.gstCategory !== 'E' || l.exemptionReasonCode.trim()));
+const EMPTY_CUSTOMER: NewCustomer = { name: '', tin: '', street: '', city: '', districtCode: '1', telephone: '', email: '', save: true };
 
-function addDays(days: number): string {
-  const d = new Date(Date.now() + days * 86_400_000 - 6 * 3_600_000); // Belize time
-  return d.toISOString().slice(0, 10);
-}
-
-/** Type-ahead over saved customers or catalog items. */
-function Search<T extends { id: string }>(props: { placeholder: string; search: (q: string) => Promise<T[]>; label: (t: T) => string; onPick: (t: T) => void; value?: string; onText?: (v: string) => void }) {
-  const [text, setText] = useState(props.value ?? '');
-  const [results, setResults] = useState<T[]>([]);
-  const [open, setOpen] = useState(false);
-  const q = useDebounced(text, 250);
-  useEffect(() => setText(props.value ?? ''), [props.value]);
-  useEffect(() => {
-    if (!open || q.trim().length < 1) return setResults([]);
-    let live = true;
-    void props.search(q).then((r) => live && setResults(r));
-    return () => {
-      live = false;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, open]);
-  return (
-    <div className="relative">
-      <input
-        placeholder={props.placeholder}
-        value={text}
-        onChange={(e) => {
-          setText(e.target.value);
-          setOpen(true);
-          props.onText?.(e.target.value);
-        }}
-        onFocus={() => setOpen(true)}
-        onBlur={() => setTimeout(() => setOpen(false), 150)}
-      />
-      {open && results.length > 0 && (
-        <div className="suggestions">
-          {results.map((r) => (
-            <button type="button" key={r.id} onMouseDown={() => { props.onPick(r); setOpen(false); }}>{props.label(r)}</button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
+export const searchItems = (q: string, limit = 8) => api<Page<Item>>(`/v1/items?limit=${limit}&q=${encodeURIComponent(q)}`).then((r) => r.data);
 
 export function NewDocument() {
-  const { me } = useSession();
+  const t = useT();
+  const toast = useToast();
+  const { me, session } = useSession();
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const initialType = (['01', '02', '03', '04'].includes(params.get('type') ?? '') ? params.get('type') : '01') as DocType;
   const refId = params.get('ref');
+  const fromId = params.get('from');
 
   const [type, setType] = useState<DocType>(initialType);
+  usePageTitle(t('New {type}', { type: t(TYPE_NAMES[type]!).toLowerCase() }));
   const [reference, setReference] = useState<DocumentInfo | null>(null);
   const [reason, setReason] = useState('');
   const [customerMode, setCustomerMode] = useState<'saved' | 'new' | 'walkin'>(initialType === '02' ? 'walkin' : 'saved');
   const [customer, setCustomer] = useState<Customer | null>(null);
-  const [newCustomer, setNewCustomer] = useState({ name: '', tin: '', street: '', city: '', districtCode: '1', telephone: '', email: '', save: true });
+  const [newCustomer, setNewCustomer] = useState<NewCustomer>(EMPTY_CUSTOMER);
   const [receiptTin, setReceiptTin] = useState('');
-  const [lines, setLines] = useState<Line[]>([emptyLine()]);
+  const [lines, setLines] = useState<Line[]>(() => [emptyLine()]);
   const [meansCode, setMeansCode] = useState(initialType === '02' ? '10' : '30');
-  const [dueDate, setDueDate] = useState(addDays(30));
+  const [dueDate, setDueDate] = useState(belizeDate(30));
   const [terms, setTerms] = useState(initialType === '02' ? '' : 'Net 30');
   const [note, setNote] = useState('');
   const [preview, setPreview] = useState<{ totals: DocumentInfo['totals']; lines: Array<{ total: string }> } | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   // One key per form: a retry after a timeout or a double click never issues twice.
-  const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID());
+  const [idempotencyKey, setIdempotencyKey] = useState<string>(() => crypto.randomUUID());
+  const [restored, setRestored] = useState<string | null>(null);
+  const lineInputs = useRef(new Map<number, HTMLInputElement>());
+  const focusLine = useRef<number | null>(null);
+
+  const draftKey = `etd.draft.${session?.currentBusinessId}.${type}${refId ? `.ref.${refId}` : ''}`;
 
   useEffect(() => setType(initialType), [initialType]);
+
+  // Restore an unfinished draft for this business and document type (kept on this device).
+  useEffect(() => {
+    if (fromId) return;
+    const d = store.get<Draft>(draftKey);
+    if (!d || !d.lines?.length) return;
+    lineKey = Math.max(lineKey, ...d.lines.map((l) => l.key));
+    setCustomerMode(d.customerMode);
+    setCustomer(d.customer);
+    setNewCustomer(d.newCustomer);
+    setReceiptTin(d.receiptTin);
+    setLines(d.lines);
+    setMeansCode(d.meansCode);
+    setDueDate(d.dueDate);
+    setTerms(d.terms);
+    setNote(d.note);
+    setReason(d.reason);
+    setIdempotencyKey(d.idempotencyKey);
+    setRestored(d.savedAt);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftKey]);
+
+  const dirty = lines.some((l) => l.description.trim() || l.unitPrice) || Boolean(customer) || Boolean(newCustomer.name) || Boolean(note);
+  const draftState = JSON.stringify({ customerMode, customer, newCustomer, receiptTin, lines, meansCode, dueDate, terms, note, reason, idempotencyKey });
+  const debouncedDraft = useDebounced(draftState, 500);
+  useEffect(() => {
+    if (!session?.currentBusinessId || !dirty) return;
+    store.set(draftKey, { ...JSON.parse(debouncedDraft), savedAt: new Date().toISOString() });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedDraft]);
+
+  const discardDraft = () => {
+    store.remove(draftKey);
+    setRestored(null);
+    setCustomer(null);
+    setNewCustomer(EMPTY_CUSTOMER);
+    setReceiptTin('');
+    setLines([emptyLine()]);
+    setNote('');
+    setReason('');
+    setIdempotencyKey(crypto.randomUUID());
+  };
 
   // A credit or debit note starts from the original document.
   useEffect(() => {
@@ -111,11 +138,44 @@ export function NewDocument() {
     });
   }, [refId]);
 
+  // "Issue again": same customer and lines as an earlier document.
+  useEffect(() => {
+    if (!fromId) return;
+    void api<DocumentDetailInfo>(`/v1/documents/${fromId}`).then((d) => {
+      setLines(d.lines.map((l) => ({ key: ++lineKey, description: l.description, quantity: l.quantity, unitCode: l.unitCode, unitPrice: l.unitPrice, gstCategory: l.gstCategory, exemptionReasonCode: '', discountPercent: '' })));
+      if (d.customerId) {
+        void api<Customer>(`/v1/customers/${d.customerId}`).then((c) => {
+          setCustomer(c);
+          setCustomerMode('saved');
+        });
+      } else if (d.customer?.name) {
+        setCustomerMode('new');
+        setNewCustomer((c) => ({ ...c, name: d.customer?.name ?? '', tin: d.customer?.tin ?? '', save: false }));
+      } else if (d.customer?.tin) {
+        setReceiptTin(d.customer.tin);
+      }
+      if (d.lines.some((l) => l.gstCategory === 'E')) setError(new Error(t('Exempt items need their exemption reason code again.')));
+    }).catch(setError);
+  }, [fromId, t]);
+
+  useEffect(() => {
+    if (focusLine.current !== null) {
+      lineInputs.current.get(focusLine.current)?.focus();
+      focusLine.current = null;
+    }
+  }, [lines]);
+
   const isNote = type === '03' || type === '04';
   const needsCustomer = type !== '02';
   const updateLine = (key: number, patch: Partial<Line>) => setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
+  const addLine = () => {
+    const l = emptyLine();
+    focusLine.current = l.key;
+    setLines((ls) => [...ls, l]);
+  };
 
-  const linesBody = lines.filter(lineReady).map((l) => ({
+  const ready = lines.filter(lineReady);
+  const linesBody = ready.map((l) => ({
     ...(l.itemId && { itemId: l.itemId }),
     description: l.description.trim(),
     quantity: l.quantity,
@@ -139,19 +199,24 @@ export function NewDocument() {
       live = false;
     };
   }, [previewKey, type]);
+  const lineTotal = (l: Line) => {
+    const i = ready.indexOf(l);
+    const total = i >= 0 ? preview?.lines[i]?.total : undefined;
+    return total ? money(total) : '';
+  };
 
-  const readyCount = linesBody.length;
   const canIssue = useMemo(() => {
-    if (readyCount === 0 || readyCount !== lines.length) return false;
+    if (ready.length === 0 || ready.length !== lines.length) return false;
     if (needsCustomer && customerMode === 'saved' && !customer) return false;
     if (needsCustomer && customerMode === 'walkin') return false;
     if (customerMode === 'new' && (!newCustomer.name.trim() || (needsCustomer && (!newCustomer.street || !newCustomer.city)))) return false;
     if (isNote && (!reference || !reason.trim())) return false;
     return Boolean(me?.certificate);
-  }, [readyCount, lines.length, needsCustomer, customerMode, customer, newCustomer, isNote, reference, reason, me]);
+  }, [ready.length, lines.length, needsCustomer, customerMode, customer, newCustomer, isNote, reference, reason, me]);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
+    if (!canIssue || busy) return;
     setBusy(true);
     setError(null);
     try {
@@ -169,6 +234,9 @@ export function NewDocument() {
         if (c.save) {
           const saved = await api<Customer>('/v1/customers', { method: 'POST', body: inline });
           customerPart = { customerId: saved.id };
+          // If issuing fails, the retry uses the saved customer instead of creating a duplicate.
+          setCustomer(saved);
+          setCustomerMode('saved');
         } else {
           customerPart = { customer: inline };
         }
@@ -188,6 +256,7 @@ export function NewDocument() {
           ...(isNote && reference && { reference: { documentId: reference.id, reason: reason.trim() } }),
         },
       });
+      store.remove(draftKey);
       setIdempotencyKey(crypto.randomUUID());
       navigate(`/documents/${doc.id}`, { state: { justIssued: true }, viewTransition: true });
     } catch (err) {
@@ -197,150 +266,174 @@ export function NewDocument() {
     }
   };
 
+  const typeName = t(TYPE_NAMES[type]!);
   return (
-    <form className="stack" onSubmit={submit}>
+    <form className="stack" onSubmit={submit} onKeyDown={(e) => {
+      // Ctrl+Enter (Cmd+Enter on a Mac) issues from anywhere in the form.
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) void submit(e);
+    }}>
       <div className="row">
-        <div><span className="kicker">Issue</span><h1>New {TYPE_NAMES[type].toLowerCase()}</h1></div>
+        <div><span className="kicker">{t('Issue')}</span><h1>{t('New {type}', { type: typeName.toLowerCase() })}</h1></div>
         <span className="spacer" />
         {!isNote && (
-          <div className="tabs" role="tablist" aria-label="Document type">
-            {(['01', '02'] as const).map((t) => (
-              <button key={t} type="button" role="tab" aria-selected={type === t} className={type === t ? 'active' : ''} onClick={() => {
-                setType(t);
-                setCustomerMode(t === '02' ? 'walkin' : 'saved');
-                setMeansCode(t === '02' ? '10' : '30');
-                setTerms(t === '02' ? '' : 'Net 30');
-              }}>{TYPE_NAMES[t]}</button>
-            ))}
-          </div>
+          <Segmented
+            label={t('Document type')}
+            value={type}
+            options={[['01', t('Tax invoice')], ['02', t('Tax receipt')]]}
+            onChange={(v) => {
+              setType(v);
+              setCustomerMode(v === '02' ? 'walkin' : 'saved');
+              setMeansCode(v === '02' ? '10' : '30');
+              setTerms(v === '02' ? '' : 'Net 30');
+            }}
+          />
         )}
       </div>
 
-      {!me?.certificate && <div className="banner bad"><div><strong>Install your BTS certificate in Settings before issuing.</strong></div></div>}
-      {me?.contingency.active && <div className="banner warn"><div><strong>BTS is unreachable.</strong>This document will be issued as "Pending of BTS authorization" and sent automatically when BTS is back.</div></div>}
+      {restored && (
+        <div className="banner info" role="status">
+          <div className="row" style={{ width: '100%' }}>
+            <span><strong>{t('Draft restored')}</strong>{t('Saved on this device at {time}.', { time: new Date(restored).toLocaleTimeString() })}</span>
+            <span className="spacer" />
+            <button type="button" className="link" onClick={() => { discardDraft(); toast(t('Draft discarded'), 'info'); }}>{t('Discard draft')}</button>
+          </div>
+        </div>
+      )}
+      {!me?.certificate && <div className="banner bad"><div><strong>{t('Install your BTS certificate in Settings before issuing.')}</strong></div></div>}
+      {me?.contingency.active && <div className="banner warn"><div><strong>{t('BTS cannot be reached.')}</strong>{t('This document will be issued as "Pending of BTS authorization" and sent automatically when BTS is back.')}</div></div>}
 
       {isNote && (
         <fieldset className="stack">
-          <legend>{type === '04' ? 'Credit' : 'Debit'} note for</legend>
-          {reference ? <p><strong>{reference.typeName} {reference.series}-{reference.number}</strong> of {reference.issueDate}, {money(reference.totals.payable)}</p> : <p className="muted">Loading the original document…</p>}
-          <Field label="Reason" hint="Shown on the document, e.g. 'Returned 1 item' or 'Price correction'."><input required value={reason} onChange={(e) => setReason(e.target.value)} /></Field>
+          <legend>{type === '04' ? t('Credit note for') : t('Debit note for')}</legend>
+          {reference ? <p><strong>{t(TYPE_NAMES[reference.type] ?? reference.typeName)} {reference.series}-{reference.number}</strong> · {reference.issueDate} · {money(reference.totals.payable)}</p> : <p className="muted">{t('Loading the original document…')}</p>}
+          <Field label={t('Reason')} hint={t("Shown on the document, e.g. 'Returned 1 item' or 'Price correction'.")}><input required value={reason} onChange={(e) => setReason(e.target.value)} /></Field>
         </fieldset>
       )}
 
       <fieldset className="stack">
-        <legend>Customer</legend>
-        <div className="tabs" role="tablist">
-          <button type="button" className={customerMode === 'saved' ? 'active' : ''} onClick={() => setCustomerMode('saved')}>Saved customer</button>
-          <button type="button" className={customerMode === 'new' ? 'active' : ''} onClick={() => setCustomerMode('new')}>New customer</button>
-          {type === '02' && <button type="button" className={customerMode === 'walkin' ? 'active' : ''} onClick={() => setCustomerMode('walkin')}>Walk-in</button>}
-        </div>
+        <legend>{t('Customer')}</legend>
+        <Segmented
+          label={t('Customer')}
+          value={customerMode}
+          onChange={setCustomerMode}
+          options={[['saved', t('Saved customer')], ['new', t('New customer')], ...(type === '02' ? [['walkin', t('Walk-in')] as ['walkin', string]] : [])]}
+        />
         {customerMode === 'saved' && (
           <>
-            <Search<Customer>
-              placeholder="Search by name or TIN"
+            <Combobox<Customer>
+              label={t('Customer')}
+              placeholder={t('Search by name or TIN')}
               search={(q) => api<Page<Customer>>(`/v1/customers?limit=8&q=${encodeURIComponent(q)}`).then((r) => r.data)}
-              label={(c) => `${c.name}${c.tin ? ` · TIN ${c.tin}` : ''}`}
+              render={(c) => <><strong>{c.name}</strong>{c.tin && <span className="muted"> · TIN {c.tin}</span>}</>}
               onPick={setCustomer}
               value={customer?.name ?? ''}
             />
             {customer && <p className="small muted">{[customer.tin && `TIN ${customer.tin}`, customer.address && `${customer.address.street}, ${customer.address.city}`].filter(Boolean).join(' · ')}</p>}
-            {needsCustomer && !customer && <p className="small muted">A tax invoice must name the customer. No saved customer? Choose "New customer".</p>}
+            {needsCustomer && !customer && <p className="small muted">{t('A tax invoice must name the customer. No saved customer? Choose "New customer".')}</p>}
           </>
         )}
         {customerMode === 'new' && (
           <div className="stack">
             <div className="form-grid">
-              <Field label="Name"><input required value={newCustomer.name} onChange={(e) => setNewCustomer({ ...newCustomer, name: e.target.value })} /></Field>
-              <Field label="TIN" hint="If they are GST-registered."><input inputMode="numeric" pattern="\d{6}" maxLength={6} value={newCustomer.tin} onChange={(e) => setNewCustomer({ ...newCustomer, tin: e.target.value })} /></Field>
+              <Field label={t('Name')}><input required value={newCustomer.name} onChange={(e) => setNewCustomer({ ...newCustomer, name: e.target.value })} /></Field>
+              <Field label="TIN" hint={t('If they are GST-registered.')}><input inputMode="numeric" pattern="\d{6}" maxLength={6} value={newCustomer.tin} onChange={(e) => setNewCustomer({ ...newCustomer, tin: e.target.value })} /></Field>
             </div>
             <div className="form-grid">
-              <Field label="Street"><input required={needsCustomer} value={newCustomer.street} onChange={(e) => setNewCustomer({ ...newCustomer, street: e.target.value })} /></Field>
-              <Field label="City or town"><input required={needsCustomer} value={newCustomer.city} onChange={(e) => setNewCustomer({ ...newCustomer, city: e.target.value })} /></Field>
-              <Field label="District">
+              <Field label={t('Street')}><input required={needsCustomer} value={newCustomer.street} onChange={(e) => setNewCustomer({ ...newCustomer, street: e.target.value })} /></Field>
+              <Field label={t('City or town')}><input required={needsCustomer} value={newCustomer.city} onChange={(e) => setNewCustomer({ ...newCustomer, city: e.target.value })} /></Field>
+              <Field label={t('District')}>
                 <select value={newCustomer.districtCode} onChange={(e) => setNewCustomer({ ...newCustomer, districtCode: e.target.value })}>
                   {DISTRICTS.map(([code, name]) => <option key={code} value={code}>{name}</option>)}
                 </select>
               </Field>
             </div>
             <div className="form-grid">
-              <Field label="Telephone"><input type="tel" value={newCustomer.telephone} onChange={(e) => setNewCustomer({ ...newCustomer, telephone: e.target.value })} /></Field>
-              <Field label="Email"><input type="email" value={newCustomer.email} onChange={(e) => setNewCustomer({ ...newCustomer, email: e.target.value })} /></Field>
+              <Field label={t('Telephone')}><input type="tel" value={newCustomer.telephone} onChange={(e) => setNewCustomer({ ...newCustomer, telephone: e.target.value })} /></Field>
+              <Field label={t('Email')}><input type="email" value={newCustomer.email} onChange={(e) => setNewCustomer({ ...newCustomer, email: e.target.value })} /></Field>
             </div>
-            <label className="row small"><input type="checkbox" style={{ width: 'auto' }} checked={newCustomer.save} onChange={(e) => setNewCustomer({ ...newCustomer, save: e.target.checked })} /> Save to my customers</label>
+            <label className="row small"><input type="checkbox" checked={newCustomer.save} onChange={(e) => setNewCustomer({ ...newCustomer, save: e.target.checked })} /> {t('Save to my customers')}</label>
           </div>
         )}
         {customerMode === 'walkin' && (
-          <Field label="Customer TIN (optional)" hint="Only if the customer asks for their TIN on the receipt.">
+          <Field label={t('Customer TIN (optional)')} hint={t('Only if the customer asks for their TIN on the receipt.')}>
             <input inputMode="numeric" pattern="\d{6}" maxLength={6} value={receiptTin} onChange={(e) => setReceiptTin(e.target.value)} style={{ maxWidth: 200 }} />
           </Field>
         )}
       </fieldset>
 
       <fieldset>
-        <legend>Items</legend>
+        <legend>{t('Items')}</legend>
         {lines.map((l, i) => (
           <div className="line-editor" key={l.key}>
             <div className="desc">
-              <Field label={`Item ${i + 1}`}>
-                <Search<Item>
-                  placeholder="Type to search your items, or describe it"
-                  search={(q) => api<Page<Item>>('/v1/items?limit=50').then((r) => r.data.filter((it) => `${it.name} ${it.description} ${it.sellerCode ?? ''}`.toLowerCase().includes(q.toLowerCase())).slice(0, 8))}
-                  label={(it) => `${it.name} · ${money(it.unitPrice)}`}
+              <Field label={t('Item {n}', { n: i + 1 })}>
+                <Combobox<Item>
+                  inputRef={(el) => {
+                    if (el) lineInputs.current.set(l.key, el);
+                    else lineInputs.current.delete(l.key);
+                  }}
+                  placeholder={t('Search your items, scan a barcode, or describe it')}
+                  search={(q) => searchItems(q)}
+                  render={(it) => <><strong>{it.name}</strong> <span className="muted">· {money(it.unitPrice)}{it.sellerCode && ` · ${it.sellerCode}`}</span></>}
                   value={l.description}
                   onText={(v) => updateLine(l.key, { description: v, itemId: undefined })}
                   onPick={(it) => updateLine(l.key, { itemId: it.id, description: it.description, unitCode: it.unitCode, unitPrice: it.unitPrice, gstCategory: it.gstCategory, exemptionReasonCode: it.exemptionReasonCode ?? '' })}
+                  onEnter={async (code) => {
+                    const [hit] = (await api<Page<Item>>(`/v1/items?limit=1&code=${encodeURIComponent(code)}`)).data;
+                    if (hit) updateLine(l.key, { itemId: hit.id, description: hit.description, unitCode: hit.unitCode, unitPrice: hit.unitPrice, gstCategory: hit.gstCategory, exemptionReasonCode: hit.exemptionReasonCode ?? '' });
+                  }}
                 />
               </Field>
             </div>
-            <Field label="Qty"><input inputMode="decimal" value={l.quantity} aria-invalid={l.quantity !== '' && !DECIMAL.test(l.quantity)} onChange={(e) => updateLine(l.key, { quantity: e.target.value })} /></Field>
-            <Field label="Unit">
+            <Field label={t('Qty')}><input inputMode="decimal" value={l.quantity} aria-invalid={l.quantity !== '' && !DECIMAL.test(l.quantity)} onChange={(e) => updateLine(l.key, { quantity: e.target.value })} /></Field>
+            <Field label={t('Unit')}>
               <select value={l.unitCode} onChange={(e) => updateLine(l.key, { unitCode: e.target.value })}>
-                {UNITS.map(([code, name]) => <option key={code} value={code}>{name}</option>)}
+                {UNITS.map(([code, name]) => <option key={code} value={code}>{t(name)}</option>)}
                 {!UNITS.some(([c]) => c === l.unitCode) && <option value={l.unitCode}>{l.unitCode}</option>}
               </select>
             </Field>
-            <Field label="Price (BZ$)"><input inputMode="decimal" placeholder="0.00" value={l.unitPrice} aria-invalid={l.unitPrice !== '' && !DECIMAL.test(l.unitPrice)} onChange={(e) => updateLine(l.key, { unitPrice: e.target.value, itemId: undefined })} /></Field>
+            <Field label={t('Price (BZ$)')}><input inputMode="decimal" placeholder="0.00" value={l.unitPrice} aria-invalid={l.unitPrice !== '' && !DECIMAL.test(l.unitPrice)} onChange={(e) => updateLine(l.key, { unitPrice: e.target.value, itemId: undefined })} /></Field>
             <Field label="GST">
               <select value={l.gstCategory} onChange={(e) => updateLine(l.key, { gstCategory: e.target.value as Line['gstCategory'] })}>
-                {GST_CATEGORIES.map(([code, name]) => <option key={code} value={code}>{name}</option>)}
+                {GST_CATEGORIES.map(([code, name]) => <option key={code} value={code}>{t(name)}</option>)}
               </select>
             </Field>
-            <Field label="Disc. %"><input inputMode="decimal" placeholder="0" value={l.discountPercent} onChange={(e) => updateLine(l.key, { discountPercent: e.target.value })} /></Field>
+            <Field label={t('Disc. %')}><input inputMode="decimal" placeholder="0" value={l.discountPercent} onChange={(e) => updateLine(l.key, { discountPercent: e.target.value })} /></Field>
             <div className="row" style={{ alignSelf: 'end', paddingBottom: '0.3rem' }}>
-              <span className="line-total">{preview?.lines[linesBody.findIndex((b) => b.description === l.description.trim())]?.total ? money(preview.lines[linesBody.findIndex((b) => b.description === l.description.trim())]!.total) : ''}</span>
-              {lines.length > 1 && <button type="button" className="link" aria-label={`Remove item ${i + 1}`} onClick={() => setLines(lines.filter((x) => x.key !== l.key))}>Remove</button>}
+              <span className="line-total" aria-live="polite">{lineTotal(l)}</span>
+              {lines.length > 1 && <button type="button" className="link" aria-label={t('Remove item {n}', { n: i + 1 })} onClick={() => setLines(lines.filter((x) => x.key !== l.key))}>{t('Remove')}</button>}
             </div>
             {l.gstCategory === 'E' && (
-              <div className="desc"><Field label="Exemption reason code" hint="Required for exempt items."><input value={l.exemptionReasonCode} onChange={(e) => updateLine(l.key, { exemptionReasonCode: e.target.value })} /></Field></div>
+              <div className="desc"><Field label={t('Exemption reason code')} hint={t('Required for exempt items.')}><input value={l.exemptionReasonCode} onChange={(e) => updateLine(l.key, { exemptionReasonCode: e.target.value })} /></Field></div>
             )}
           </div>
         ))}
-        <button type="button" className="secondary" style={{ marginTop: '0.75rem' }} onClick={() => setLines([...lines, emptyLine()])}>+ Add item</button>
+        <button type="button" className="secondary" style={{ marginTop: '0.75rem' }} onClick={addLine}>+ {t('Add item')}</button>
       </fieldset>
 
       <div className="grid">
         <fieldset className="stack">
-          <legend>Payment</legend>
-          <Field label="Method">
+          <legend>{t('Payment')}</legend>
+          <Field label={t('Method')}>
             <select value={meansCode} onChange={(e) => setMeansCode(e.target.value)}>
-              {PAYMENT_MEANS.map(([code, name]) => <option key={code} value={code}>{name}</option>)}
+              {PAYMENT_MEANS.map(([code, name]) => <option key={code} value={code}>{t(name)}</option>)}
             </select>
           </Field>
-          {type !== '02' && <Field label="Due date"><input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} /></Field>}
-          <Field label="Terms" hint={type === '02' ? 'Optional.' : undefined}><input value={terms} onChange={(e) => setTerms(e.target.value)} /></Field>
-          <Field label="Note" hint="Optional; printed on the document."><textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} /></Field>
+          {type !== '02' && <Field label={t('Due date')}><input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} /></Field>}
+          <Field label={t('Terms')} hint={type === '02' ? t('Optional.') : undefined}><input value={terms} onChange={(e) => setTerms(e.target.value)} /></Field>
+          <Field label={t('Note')} hint={t('Optional; printed on the document.')}><textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} /></Field>
         </fieldset>
         <div className="card totals ticket stack">
-          <span className="kicker" style={{ color: 'var(--lime)' }}>{TYPE_NAMES[type]} · BZD</span>
-          <div><span>Subtotal</span><span>{money(preview?.totals.lineExtension ?? '0.00')}</span></div>
+          <span className="kicker" style={{ color: 'var(--lime)' }}>{typeName} · BZD</span>
+          <div><span>{t('Subtotal')}</span><span>{money(preview?.totals.lineExtension ?? '0.00')}</span></div>
           <div><span>GST</span><span>{money(preview?.totals.gst ?? '0.00')}</span></div>
           {preview && preview.totals.tax !== preview.totals.gst && (
-            <div><span>Other taxes</span><span>{money(String((Number(preview.totals.tax) - Number(preview.totals.gst)).toFixed(2)))}</span></div>
+            <div><span>{t('Other taxes')}</span><span>{money(String((Number(preview.totals.tax) - Number(preview.totals.gst)).toFixed(2)))}</span></div>
           )}
-          <div className="grand"><span>Total</span><span>{money(preview?.totals.taxInclusive ?? '0.00')}</span></div>
+          <div className="grand"><span>{t('Total')}</span><span aria-live="polite">{money(preview?.totals.taxInclusive ?? '0.00')}</span></div>
           <ErrorText error={error} />
-          <button type="submit" className="big lime" disabled={!canIssue || busy}>{busy ? 'Signing and sending…' : `Issue ${TYPE_NAMES[type].toLowerCase()}`}<span className="chip">→</span></button>
-          <p className="small muted">Issuing signs the document and sends it to BTS for authorization.</p>
+          <button type="submit" className="big lime" disabled={!canIssue || busy}>{busy ? t('Signing and sending…') : t('Issue {type}', { type: typeName.toLowerCase() })}<span className="chip" aria-hidden="true">→</span></button>
+          <p className="small muted">{t('Issuing signs the document and sends it to BTS for authorization.')} <kbd>Ctrl</kbd>+<kbd>Enter</kbd></p>
         </div>
       </div>
     </form>

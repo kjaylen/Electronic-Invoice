@@ -13,6 +13,10 @@
  *   WEB_ROOT             built web app to serve; default web/dist when it exists
  *   COOKIE_SECURE        "false" only for local plain-HTTP development; default true
  *   ALLOW_SIGNUP         "false" to close self-service sign-up; default true
+ *   PUBLIC_URL           public address of the web app (links in emails, share links), e.g. https://app.example.bz
+ *   SMTP_URL             outgoing mail server, e.g. smtps://user:pass@smtp.example.com:465
+ *   MAIL_FROM            sender address, e.g. "eInvoicing <no-reply@example.bz>"
+ *   MAIL_OUTBOX_DIR      instead of SMTP: write each email as an .eml file here (development)
  *
  *   npm start
  */
@@ -24,6 +28,7 @@ import { buildApp } from './api/app.ts';
 import { startWorker } from './api/worker.ts';
 import { migrate, pgDatabase } from './db/database.ts';
 import { keyEncryptionKeyFromEnv, localKeyProtector } from './db/keystore.ts';
+import { type Mailer, outboxMailer, smtpMailer } from './mail/mailer.ts';
 import { cachingClientProvider } from './pipeline/clients.ts';
 
 const env = process.env;
@@ -43,8 +48,12 @@ const pipeline = { db, keys: localKeyProtector(keyEncryptionKeyFromEnv(env)), cl
 
 const defaultWebRoot = fileURLToPath(new URL('../web/dist/', import.meta.url));
 const webRoot = env.WEB_ROOT ?? (existsSync(defaultWebRoot) ? defaultWebRoot : undefined);
+const mailFrom = env.MAIL_FROM ?? 'eInvoicing <no-reply@localhost>';
+const mailer: Mailer | undefined = env.SMTP_URL ? smtpMailer(env.SMTP_URL, mailFrom) : env.MAIL_OUTBOX_DIR ? outboxMailer(env.MAIL_OUTBOX_DIR, mailFrom) : undefined;
 const app = await buildApp({
   pipeline,
+  ...(mailer && { mailer }),
+  ...(env.PUBLIC_URL && { publicUrl: env.PUBLIC_URL }),
   ...(env.ADMIN_TOKEN && { adminToken: env.ADMIN_TOKEN }),
   ...(webRoot && { webRoot }),
   cookieSecure: env.COOKIE_SECURE !== 'false',
@@ -52,6 +61,8 @@ const app = await buildApp({
   logger: true,
 });
 if (applied.length) app.log.info({ applied }, 'database migrations applied');
+if (!mailer) app.log.warn('No SMTP_URL or MAIL_OUTBOX_DIR: password reset and emailing documents are off');
+if (!env.PUBLIC_URL) app.log.warn('No PUBLIC_URL: password reset, invitations and share links are off');
 
 const intervalMs = Number(env.WORKER_INTERVAL_MS ?? 60_000);
 const worker = intervalMs > 0

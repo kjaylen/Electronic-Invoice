@@ -190,8 +190,10 @@ test('issue an invoice from a saved customer and catalog item; read it back as J
     const receipt = await app.inject({ method: 'GET', url: `/v1/documents/${doc.id}/pdf?format=receipt&widthMm=58`, headers: as(keyA) });
     assert.equal(receipt.statusCode, 200);
 
-    const got = (await app.inject({ method: 'GET', url: `/v1/documents/${doc.id}`, headers: as(keyA) })).json();
+    const { lines, ...got } = (await app.inject({ method: 'GET', url: `/v1/documents/${doc.id}`, headers: as(keyA) })).json();
     assert.deepEqual(got, doc);
+    assert.deepEqual(lines.map((l: { description: string; quantity: string; total: string }) => [l.description, l.quantity]), [['USB-C phone charger', '2'], [lines[1].description, lines[1].quantity]]);
+    assert.equal(lines.length, 2, 'the detail view includes the lines');
     const listed = (await app.inject({ method: 'GET', url: '/v1/documents?status=authorized&type=01', headers: as(keyA) })).json();
     assert.deepEqual(listed.data.map((d: { id: string }) => d.id), [doc.id]);
   }));
