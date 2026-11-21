@@ -6,3 +6,6 @@ node_modules/
 *.pfx
 *.key
 coverage/
+
+# Throwaway test certificates for the signing tests (see scripts/make-test-certs.sh)
+!test/certs/*.pem

@@ -16,7 +16,12 @@ npm test          # unit tests
 npm run typecheck # tsc --noEmit
 npm run check     # both
 npm run example   # print a sample Tax Invoice (or: npm run example -- 04)
+npm run test-certs # regenerate the throwaway test certificates in test/certs
 ```
+
+`test/certs` holds **throwaway test keys** shaped like a BTS taxpayer certificate (TIN in the subject and in extension 1.2.84.2.1). They are public test data; BTS rejects anything signed with them. Real taxpayer keys never go in the repository.
+
+On Windows, the signing tests also verify each signature with .NET's `SignedXml` through `scripts/verify-signature.ps1`. That is an implementation independent of the one used to sign. On other platforms that test is skipped.
 
 ## Core engine (`src/engine`)
 
@@ -29,8 +34,10 @@ npm run example   # print a sample Tax Invoice (or: npm run example -- 04)
 | `sequence.ts` | Per-series SHA-1 hash chain (4.3.4) | Done; reproduces the manual's 2 worked examples and 4 annex samples |
 | `xml.ts` | Deterministic XML writer: escaping, invalid-character rejection, no whitespace between tags | Done |
 | `ubl.ts` | UBL 2.1 XML for Tax Invoice, Tax Receipt, Debit Note, Credit Note, incl. subsequent authorization | Done; validates against the official OASIS UBL 2.1 schemas |
-| `sign.ts` | XAdES-EPES signature (chapter 8) | Next |
-| `transport.ts` | Mutual-TLS submission to BTS (chapter 7) | Not started |
+| `certificate.ts` | Load taxpayer key and certificate, read TIN/issuer/serial, refuse expired or wrong-TIN certificates (codes 231, 243) | Done |
+| `sign.ts` | XAdES-EPES enveloped signature (chapter 8), laid out like BTS's own signature in 7.3.1 | Done; verified independently by .NET `SignedXml` and libxml2 C14N |
+| `verify.ts` | Verify a signed ETD before sending (and BTS replies later): XMLDSig core plus XAdES checks | Done |
+| `transport.ts` | Mutual-TLS submission to BTS (chapter 7) | Next |
 
 Engine modules are pure and stateless. Everything tenant-specific (TIN, environment, series, tax rates, certificate) is passed in, so any number of businesses can be processed in parallel.
 
@@ -68,14 +75,19 @@ These were placeholders in the spec and are now confirmed against the manual:
 - **Line allowance TaxTotal:** table 4-24 marks `AllowanceCharge/TaxTotal` as 1-1. It is left out to avoid reporting the GST twice, and the manual's own examples omit it.
 - **Prose vs examples:** the manual's prose says one line `TaxTotal` per tax, but its XML example uses one `TaxTotal` with a subtotal per tax. We follow the example.
 - **TIN length:** 6 digits everywhere in the syntax. One graphic-representation field mentions a 7-digit GST number.
+- **Signature policy hash:**
+  - BTS's own signature (7.3.1) uses policy `https://efdrshare.blob.core.windows.net/documentation/bz/sigPolicyv1.pdf` with hash `k2uAJ+0STF8ByHKCAvdesW6J6+OBhVxuc6xJLBIA8es=`. That is our default (`BTS_SIGNATURE_POLICY`).
+  - The PDF published at that URL today hashes to `ASZbXZ+3tPmWjkvBqnJ6kdahIFe4PI5rSQsG3HQyEn0=`.
+  - The Annex I sample uses a different URL with a placeholder hash, "demo policy digest value".
+  - Ask BTS which one they validate.
+- **Certificate format from the BTS portal:** probably PKCS#12 (.pfx/.p12), since BTS's tooling looks .NET-based. Node cannot read PKCS#12 natively, so onboarding will need a conversion step to PEM.
 - **Business questions** (from the spec): provider approval, holding taxpayers' keys in a hosted service, rollout dates, and time limits for contingency and cancellation.
 
 ## Notes for the next modules
 
-- **Signature (8.3):**
-  - XMLDSig enveloped, XAdES-EPES, RSA-SHA256, SHA-256 digests, C14N 1.0.
-  - The enveloped-signature transform comes first, then C14N.
-  - The signature goes in a second `UBLExtension`.
-  - The Annex I sample uses signature policy `https://www.ciat.org/ciatdat/sigpolicy/sigPolicyv1.pdf`.
+- **Transport (chapter 7):**
+  - Mutual TLS with the same taxpayer certificate.
+  - Endpoints: `https://test.bz.efdrciat.org` and `https://prod.bz.efdrciat.org`, paths `api/invoice/v1`, `api/taxreceipt/v1`, `api/debitnote/v1`, `api/creditnote/v1`, `api/event/v1`, `api/document/v1` and `api/status/v1`.
+  - Run `verifyDocumentSignature` on every document before sending it.
 - **QR code (3.5):** `https://portal.prod.bz.efdrciat.org/QRCode?UUID=<ETDUI>`, error correction level M, UTF-8, at least 25 mm × 25 mm including a 3 mm quiet zone.
 - **Annex I samples:** not valid against the UBL schema. They omit required elements such as `InvoicedQuantity` and `Price`, and use VAT at 10%. Use them for the signature layout and the hash rule only.
