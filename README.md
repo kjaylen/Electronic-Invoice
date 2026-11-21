@@ -37,7 +37,10 @@ On Windows, the signing tests also verify each signature with .NET's `SignedXml`
 | `certificate.ts` | Load taxpayer key and certificate, read TIN/issuer/serial, refuse expired or wrong-TIN certificates (codes 231, 243) | Done |
 | `sign.ts` | XAdES-EPES enveloped signature (chapter 8), laid out like BTS's own signature in 7.3.1 | Done; verified independently by .NET `SignedXml` and libxml2 C14N |
 | `verify.ts` | Verify a signed ETD before sending (and BTS replies later): XMLDSig core plus XAdES checks | Done |
-| `transport.ts` | Mutual-TLS submission to BTS (chapter 7) | Next |
+| `transport.ts` | Mutual-TLS client for the five reception services, Document Query and System Status; one connection pool per taxpayer | Done; tested against a local fake BTS server |
+| `response.ts` | Parse BTS replies: ApplicationResponse (001/002/003, rule codes, protocol number), Document Query (004–007), System Status (008/009) | Done; parses the manual's example reply |
+| `delivery.ts` | Send one document and settle its fate: pre-send checks, query-before-resend, 255 handling, backoff, 401 stop, "undetermined" handed back for contingency | Done |
+| Submit pipeline | PostgreSQL storage, per-series locking, store-before-send, legal record | Next |
 
 Engine modules are pure and stateless. Everything tenant-specific (TIN, environment, series, tax rates, certificate) is passed in, so any number of businesses can be processed in parallel.
 
@@ -80,14 +83,20 @@ These were placeholders in the spec and are now confirmed against the manual:
   - The PDF published at that URL today hashes to `ASZbXZ+3tPmWjkvBqnJ6kdahIFe4PI5rSQsG3HQyEn0=`.
   - The Annex I sample uses a different URL with a placeholder hash, "demo policy digest value".
   - Ask BTS which one they validate.
+- **Document Query and System Status JSON shapes:**
+  - The manual gives the field names (GetDocument: UUID, ResponseCode, Description, ResultETD; GetStatus: ResponseCode, StatusResponseTime) but not the exact JSON, nor the request field for the ETDUI. We send `{"ETDUI": "..."}`, which can be changed with `documentQueryField`.
+  - Replies are read field by field wherever they appear. The first test-server call will confirm the shapes.
+- **Verifying BTS's reply signatures:** this needs the BTS root CA certificate. BTS wraps its signature in `sig:UBLDocumentSignatures`, so `verify.ts` will need to accept that placement for replies.
 - **Certificate format from the BTS portal:** probably PKCS#12 (.pfx/.p12), since BTS's tooling looks .NET-based. Node cannot read PKCS#12 natively, so onboarding will need a conversion step to PEM.
 - **Business questions** (from the spec): provider approval, holding taxpayers' keys in a hosted service, rollout dates, and time limits for contingency and cancellation.
 
 ## Notes for the next modules
 
-- **Transport (chapter 7):**
-  - Mutual TLS with the same taxpayer certificate.
-  - Endpoints: `https://test.bz.efdrciat.org` and `https://prod.bz.efdrciat.org`, paths `api/invoice/v1`, `api/taxreceipt/v1`, `api/debitnote/v1`, `api/creditnote/v1`, `api/event/v1`, `api/document/v1` and `api/status/v1`.
-  - Run `verifyDocumentSignature` on every document before sending it.
+- **Submit pipeline:**
+  - Lock the series row, take the serial, build, sign, store as `pending` with the signed XML, release the lock.
+  - Then `deliver()`, and store every attempt and raw reply.
+  - On `undetermined`, reissue in a contingency series and keep checking the original ETDUI. Cancel it if it later turns out to be authorized (3.3.6.4).
+  - Keep one `BtsClient` per taxpayer certificate.
+- **First run against the BTS test server:** point `BtsClient` at `environment: 'test'` with a real BTS test certificate. Send one single-line and one two-line invoice to settle the open hash questions.
 - **QR code (3.5):** `https://portal.prod.bz.efdrciat.org/QRCode?UUID=<ETDUI>`, error correction level M, UTF-8, at least 25 mm × 25 mm including a 3 mm quiet zone.
 - **Annex I samples:** not valid against the UBL schema. They omit required elements such as `InvoicedQuantity` and `Price`, and use VAT at 10%. Use them for the signature layout and the hash rule only.

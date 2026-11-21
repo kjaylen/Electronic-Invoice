@@ -49,5 +49,24 @@ EOF
 
 issue "CaribFuel" 123456 signer-123456
 issue "Other Business" 654321 signer-654321
+
+# TLS server certificate for the fake BTS server in the transport tests.
+cat > "$WORK/server.ext" <<EOF
+basicConstraints=CA:FALSE
+keyUsage=critical,digitalSignature,keyEncipherment
+extendedKeyUsage=serverAuth
+subjectAltName=DNS:localhost,IP:127.0.0.1
+EOF
+openssl req -newkey rsa:2048 -nodes -sha256 -subj "/CN=localhost" \
+  -keyout "server-localhost.key.pem" -out "$WORK/server.csr" 2>/dev/null
+openssl x509 -req -sha256 -days 3650 -in "$WORK/server.csr" \
+  -CA "test-root-ca.cert.pem" -CAkey "test-root-ca.key.pem" -CAcreateserial \
+  -extfile "$WORK/server.ext" -out "server-localhost.cert.pem" 2>/dev/null
+
+# A second, unrelated CA, to test that a server rejects certificates it does not trust.
+openssl req -x509 -newkey rsa:2048 -nodes -sha256 -days 5475 \
+  -subj "/CN=Untrusted Test Root" \
+  -keyout ".work/untrusted.key.pem" -out "untrusted-root-ca.cert.pem" 2>/dev/null
+
 rm -f ./*.srl
 echo "Wrote test certificates to $OUT"
