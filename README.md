@@ -16,6 +16,7 @@ npm test          # unit tests
 npm run typecheck # tsc --noEmit
 npm run check     # both
 npm run example   # print a sample Tax Invoice (or: npm run example -- 04)
+npm run example:pdf # render sample printed copies (A4, multi-page, contingency, thermal) into out/
 npm run test-certs # regenerate the throwaway test certificates in test/certs
 ```
 
@@ -40,9 +41,68 @@ On Windows, the signing tests also verify each signature with .NET's `SignedXml`
 | `transport.ts` | Mutual-TLS client for the five reception services, Document Query and System Status; one connection pool per taxpayer | Done; tested against a local fake BTS server |
 | `response.ts` | Parse BTS replies: ApplicationResponse (001/002/003, rule codes, protocol number), Document Query (004–007), System Status (008/009) | Done; parses the manual's example reply |
 | `delivery.ts` | Send one document and settle its fate: pre-send checks, query-before-resend, 255 handling, backoff, 401 stop, "undetermined" handed back for contingency | Done |
-| Submit pipeline | PostgreSQL storage, per-series locking, store-before-send, legal record | Next |
+| `event.ts` | Cancellation event 050 (UBL ApplicationResponse), enforcing BTS event rules 227, 257, 258, 268, 285–287 | Done; validates against the official ApplicationResponse schema |
 
 Engine modules are pure and stateless. Everything tenant-specific (TIN, environment, series, tax rates, certificate) is passed in, so any number of businesses can be processed in parallel.
+
+## Storage and submit pipeline (`src/db`, `src/pipeline`, `migrations`)
+
+| Module | Job | Status |
+|---|---|---|
+| `migrations/001_init.sql` | Spec's eight tables, every row tenant-scoped; triggers make issued documents, lines and submissions permanent | Done |
+| `migrations/002_events_contingency.sql` | Permanent `events` table, contingency periods, `superseded` status, event attempts in `submissions` | Done |
+| `db/database.ts` | Small database interface; adapters for node-postgres and PGlite; migration runner | Done |
+| `db/keystore.ts` | Private keys encrypted at rest (AES-256-GCM), bound to the tenant id; pluggable for a cloud KMS | Done |
+| `db/tenants.ts` | Onboard a business and its BTS certificate (key must match, TIN must match, valid now); load what issuing needs | Done |
+| `pipeline/issue.ts` | `issueDocument`: lock series → number → build → sign → store pending → deliver → record → settle; contingency reissue when BTS can't be reached. `resumePending`, `catchUpContingency`, `reconcileSuperseded`, `cancelDocument` | Done |
+| `pipeline/clients.ts` | One pooled BTS client per tenant certificate | Done |
+
+### Contingency mode (manual 3.3.6)
+
+1. **Entering:** a normal-mode delivery that stays undetermined opens a contingency period for the business. In one transaction:
+   - The sale is reissued in the contingency series (900 by default), with operMode 2, or 3 for Tax Receipts.
+   - The reissue carries `contingencyInfo`; every document in the period shares its reason and start date and time.
+   - The original becomes `superseded` and is never sent again.
+2. **While the period is open:** new documents go straight to contingency without trying BTS. Their printed copy says "Pending of BTS authorization".
+3. **`catchUpContingency`:** sends the queue oldest first.
+   - The first success closes the period, because BTS is demonstrably back, and normal mode resumes.
+   - It stops at the first delivery that is still undetermined.
+4. **`reconcileSuperseded`:** checks each superseded original with Document Query.
+   - Not found: nothing to do.
+   - Authorized after all: the sale now has two authorized documents, so the original is cancelled with event 050.
+5. **`cancelDocument`:** registers event 050 for any authorized document.
+   - Refused while in contingency, because events are previous-authorization only.
+   - A cancellation that can't reach BTS stays pending; the next call resumes the same event instead of registering a second one.
+
+Run `resumePending` and `catchUpContingency` from a scheduled worker for each business, e.g. every minute while a contingency period is open.
+
+Notes:
+
+- **Locking:** only documents in the same series wait for each other, and only while one takes its number, which is a few milliseconds. Different series and different businesses run in parallel.
+- **Store before send:** a crash during sending leaves the document `pending` with its exact signed XML. `resumePending` asks BTS's Document Query first, so nothing is sent or authorized twice.
+- **Rejections:** a rejected serial stays used. If no later document has chained to it yet, the series hash pointer moves back so the next document skips it (manual 4.3.4). If a later document already chained to the rejected one, that link stays. BTS validates only each document's own hash (code 271), so this is a gap-analysis question for BTS, not a rejection.
+- **Database tests:** they run on PGlite, which is real PostgreSQL in WebAssembly and needs no server. `test/pipeline.postgres.test.ts` repeats the parallel-issuing check on a real server, with 10 connections, when `DATABASE_URL` is set.
+
+### Configuration
+
+| Variable | Purpose |
+|---|---|
+| `DATABASE_URL` | PostgreSQL connection string |
+| `KEY_ENCRYPTION_KEY` | 32 random bytes, Base64 (`openssl rand -base64 32`). Encrypts taxpayers' private keys. Keep it outside the database, ideally in a secrets manager, and never commit it |
+
+Local database: `docker compose up -d db`, then `DATABASE_URL=postgres://einvoicing:einvoicing@localhost:5432/einvoicing`.
+
+## Printed copy (`src/render`, manual 3.4 and 3.5)
+
+| Module | Job | Status |
+|---|---|---|
+| `view.ts` | Read the printed fields back from the signed XML (the manual allows nothing else), the table 3-3 regulatory messages, and the QR lookup URL | Done |
+| `pdf.ts` | `renderSheet` (A4/Letter, landscape by default, multi-sheet with "Sheet n of m") and `renderReceipt` (thermal, 56–80 mm, sized to content) | Done |
+
+- **Font sizes:** at least 11 pt for parties, items and numbers; at least 9 pt for everything else.
+- **QR code:** 22 mm of code inside a 3 mm quiet zone, error correction M. It encodes `https://portal.prod.bz.efdrciat.org/QRCode?UUID=<ETDUI>`. Tests decode the image back to that URL.
+- **Authorization:** a previous-authorization document can't be printed without BTS's authorization protocol, unless `draft: true`, which prints "DRAFT - NOT AUTHORIZED BY BTS".
+- **Fonts:** the built-in PDF fonts cover Latin-1, which is enough for English and Spanish names. Other scripts would need an embedded font.
 
 ## Settled by the manual
 
@@ -88,15 +148,21 @@ These were placeholders in the spec and are now confirmed against the manual:
   - Replies are read field by field wherever they appear. The first test-server call will confirm the shapes.
 - **Verifying BTS's reply signatures:** this needs the BTS root CA certificate. BTS wraps its signature in `sig:UBLDocumentSignatures`, so `verify.ts` will need to accept that placement for replies.
 - **Certificate format from the BTS portal:** probably PKCS#12 (.pfx/.p12), since BTS's tooling looks .NET-based. Node cannot read PKCS#12 natively, so onboarding will need a conversion step to PEM.
+- **QR lookup URL for the test environment:** the manual gives only the production URL. We assume `https://portal.test.bz.efdrciat.org/QRCode?UUID=`, which can be changed with `qrBaseUrl`.
+- **Superseded originals and the hash chain:** when a sale is reissued in contingency, the normal series' hash pointer moves back past the superseded original, on the expectation that BTS never received it. If BTS did authorize it, it gets cancelled, and the next normal document's chain skips a document that existed. That's a gap-analysis question, like the rejection case.
+- **Time limits:** for sending contingency documents and for cancellation (event 050), still unknown.
 - **Business questions** (from the spec): provider approval, holding taxpayers' keys in a hosted service, rollout dates, and time limits for contingency and cancellation.
 
 ## Notes for the next modules
 
-- **Submit pipeline:**
-  - Lock the series row, take the serial, build, sign, store as `pending` with the signed XML, release the lock.
-  - Then `deliver()`, and store every attempt and raw reply.
-  - On `undetermined`, reissue in a contingency series and keep checking the original ETDUI. Cancel it if it later turns out to be authorized (3.3.6.4).
-  - Keep one `BtsClient` per taxpayer certificate.
+- **API and invoicing app:**
+  - An HTTP API with accounts and login, and endpoints for customers, items, issuing, cancelling, and fetching statuses and PDFs.
+  - A web app on top, including onboarding with `.pfx`-to-PEM certificate conversion.
+- **Workers:** schedule `resumePending`, `catchUpContingency` and certificate-expiry warnings per business.
+- **Hardening for scale:**
+  - PostgreSQL row-level security on `tenant_id`, as defense in depth.
+  - A job queue so `resumePending` runs as one worker per tenant.
+  - The KEK in a cloud KMS.
 - **First run against the BTS test server:** point `BtsClient` at `environment: 'test'` with a real BTS test certificate. Send one single-line and one two-line invoice to settle the open hash questions.
 - **QR code (3.5):** `https://portal.prod.bz.efdrciat.org/QRCode?UUID=<ETDUI>`, error correction level M, UTF-8, at least 25 mm × 25 mm including a 3 mm quiet zone.
 - **Annex I samples:** not valid against the UBL schema. They omit required elements such as `InvoicedQuantity` and `Price`, and use VAT at 10%. Use them for the signature layout and the hash rule only.

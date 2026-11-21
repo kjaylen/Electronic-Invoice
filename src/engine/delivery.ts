@@ -35,6 +35,11 @@ export interface DeliveryOptions {
   backoffMs?: number[];
   /** Verify the signature before sending. Default true. */
   verifySignature?: boolean;
+  /**
+   * Ask Document Query before the first send. Use it when resending a document
+   * whose earlier attempt may have reached BTS (resuming after a crash).
+   */
+  queryFirst?: boolean;
   /** Injectable for tests. */
   sleep?: (ms: number) => Promise<void>;
 }
@@ -126,6 +131,10 @@ export async function deliver(client: BtsClient, signedXml: string, options: Del
   };
 
   let lastReason = 'no attempt made';
+  if (options.queryFirst) {
+    const settled = await checkWithQuery(1, 'query');
+    if (settled) return settled;
+  }
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     if (attempt > 1) {
       await sleep(backoff[Math.min(attempt - 2, backoff.length - 1)]!);

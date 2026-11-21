@@ -215,6 +215,15 @@ test('deliver: a resend rejected with 255 (already authorized) is resolved by Do
     assert.ok(out.status === 'authorized' && out.recoveredBy === 'duplicate');
   }));
 
+test('deliver: queryFirst settles from Document Query without sending', () =>
+  withBts(async (bts, client) => {
+    bts.script(DOCUMENT_QUERY_PATH, query('005'));
+    bts.script(INVOICE_PATH, authorized());
+    const out = await deliver(client, SIGNED, { sleep: noSleep, queryFirst: true });
+    assert.equal(out.status, 'authorized');
+    assert.deepEqual(bts.requests.map((r) => r.path), [DOCUMENT_QUERY_PATH]);
+  }));
+
 test('deliver: 401 stops at once (certificate or issuer problem)', () =>
   withBts(async (bts, client) => {
     bts.script(INVOICE_PATH, { status: 401, body: '' });

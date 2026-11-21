@@ -1,0 +1,16 @@
+# Local development database. Not for production.
+#   docker compose up -d db
+#   DATABASE_URL=postgres://einvoicing:einvoicing@localhost:5432/einvoicing
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: einvoicing
+      POSTGRES_PASSWORD: einvoicing
+      POSTGRES_DB: einvoicing
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - einvoicing-db:/var/lib/postgresql/data
+volumes:
+  einvoicing-db:

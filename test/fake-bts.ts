@@ -34,11 +34,14 @@ export interface FakeBts {
   baseUrl: string;
   requests: ReceivedRequest[];
   script(path: string, ...replies: ScriptedReply[]): void;
+  /** Answer a route with a function of the request, e.g. per ETDUI. */
+  handle(path: string, fn: (req: ReceivedRequest) => ScriptedReply): void;
   close(): Promise<void>;
 }
 
 export async function startFakeBts(options: { trustedCa?: string } = {}): Promise<FakeBts> {
   const scripts = new Map<string, ScriptedReply[]>();
+  const handlers = new Map<string, (req: ReceivedRequest) => ScriptedReply>();
   const requests: ReceivedRequest[] = [];
   const server: Server = createServer(
     {
@@ -54,15 +57,17 @@ export async function startFakeBts(options: { trustedCa?: string } = {}): Promis
       req.on('end', () => {
         const path = (req.url ?? '').split('?')[0]!;
         const peer = (req.socket as import('node:tls').TLSSocket).getPeerCertificate();
-        requests.push({
+        const received: ReceivedRequest = {
           method: req.method ?? '',
           path,
           contentType: String(req.headers['content-type'] ?? ''),
           body: Buffer.concat(chunks).toString('utf8'),
           clientCn: peer?.subject?.CN as string | undefined,
-        });
+        };
+        requests.push(received);
+        const handler = handlers.get(path);
         const queue = scripts.get(path) ?? [{ status: 404, body: 'no script' }];
-        const reply = queue.length > 1 ? queue.shift()! : queue[0]!;
+        const reply = handler ? handler(received) : queue.length > 1 ? queue.shift()! : queue[0]!;
         const send = () => {
           if (reply.hangUp) {
             req.socket.destroy();
@@ -82,7 +87,11 @@ export async function startFakeBts(options: { trustedCa?: string } = {}): Promis
     baseUrl: `https://localhost:${port}`,
     requests,
     script(path, ...replies) {
+      handlers.delete(path);
       scripts.set(path, replies);
+    },
+    handle(path, fn) {
+      handlers.set(path, fn);
     },
     close: () =>
       new Promise<void>((resolve) => {
