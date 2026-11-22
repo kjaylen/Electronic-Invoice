@@ -1090,3 +1090,18 @@ form.row > button { align-self: flex-end; }
 .pay-instructions h2 { font-size: 0.95rem; margin: 0 0 0.3rem; }
 .pay-instructions p { margin: 0; white-space: pre-wrap; }
 .pay-page .test-pay { width: 100%; }
+
+/* Paying with E-Kyash, and choosing how to pay. */
+.wallet-pay { border: 1.5px solid var(--brand); }
+.wallet-pay h2 { margin: 0; font-size: 1.05rem; }
+.wallet-body { display: flex; gap: 1.1rem; align-items: center; flex-wrap: wrap; }
+.wallet-qr { width: 220px; height: 220px; border-radius: var(--radius-lg); background: #fff; padding: 8px; border: 1px solid var(--hairline); image-rendering: pixelated; }
+.wallet-steps { margin: 0; padding-left: 1.2rem; display: grid; gap: 0.4rem; flex: 1; min-width: 12rem; }
+.wallet-wait { display: flex; align-items: center; gap: 0.5rem; margin: 0; }
+.pulse-dot { width: 8px; height: 8px; border-radius: 999px; background: var(--brand); animation: glow 1.6s ease-in-out infinite; }
+.pay-methods { display: grid; gap: 0.6rem; }
+.pay-methods button { display: grid; justify-items: start; gap: 0.15rem; text-align: left; width: 100%; }
+.pay-method-note { font-weight: 400; opacity: 0.8; }
+code.copyable { display: inline-block; max-width: 100%; overflow-wrap: anywhere; user-select: all; background: var(--sheet-2); border: 1px solid var(--hairline); border-radius: 4px; padding: 0.1rem 0.35rem; font-family: var(--mono); font-size: 0.8rem; }
+code.copyable.token { display: block; margin-top: 0.5rem; font-size: 0.85rem; padding: 0.4rem 0.55rem; color: var(--ink); }
+.pay-facts.urls { grid-template-columns: 1fr; }

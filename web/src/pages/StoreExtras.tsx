@@ -8,9 +8,153 @@ import { ErrorText, Field, Modal, money } from '../ui';
 
 // ---------- PayPal ----------
 
-interface Accounts {
+export interface Accounts {
   paypal: { connected: boolean; clientId: string | null; mode: 'sandbox' | 'live' };
+  belizebank: { connected: boolean; userName: string | null; mode: 'sandbox' | 'live' };
+  ekyash: { connected: boolean; sid: string | null; mode: 'sandbox' | 'live'; available: { sandbox: boolean; live: boolean }; callbackUrl: string | null };
   test: { available: boolean };
+}
+
+// ---------- Belize Bank: cards on the bank's page, and E-Kyash ----------
+
+export function BelizeBankConnect({ onChanged }: { onChanged: () => void }) {
+  const t = useT();
+  const toast = useToast();
+  const [accounts, setAccounts] = useState<Accounts | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState({ userName: '', password: '', mode: 'sandbox' as 'sandbox' | 'live' });
+  const [error, setError] = useState<unknown>(null);
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(() => api<Accounts>('/v1/payment-accounts').then((a) => {
+    setAccounts(a);
+    setForm((f) => ({ ...f, userName: a.belizebank.userName ?? '', mode: a.belizebank.mode }));
+  }).catch(setError), []);
+  useEffect(() => void load(), [load]);
+  const save = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await api('/v1/payment-accounts/belizebank', { method: 'PUT', body: { userName: form.userName, mode: form.mode, ...(form.password && { password: form.password }) } });
+      toast(t('Belize Bank connected'));
+      setEditing(false);
+      setForm((f) => ({ ...f, password: '' }));
+      await load();
+      onChanged();
+    } catch (err) {
+      setError(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (!accounts) return error ? <ErrorText error={error} /> : null;
+  const a = accounts.belizebank;
+  return (
+    <div className="stack paypal-box">
+      <div className="row">
+        <strong>{t('Belize Bank cards')}</strong>
+        <span className="spacer" />
+        {a.connected ? <span className="badge authorized">{a.mode === 'live' ? t('Connected') : t('Connected (sandbox)')}</span> : <span className="badge test">{t('Not connected')}</span>}
+      </div>
+      <p className="small muted">{t('Visa and Mastercard on Belize Bank’s secure payment page, charged in Belize dollars. Needs a merchant account with Belize Bank.')}</p>
+      {!editing ? (
+        <div className="row">
+          <button type="button" className="secondary" onClick={() => setEditing(true)}>{a.connected ? t('Change') : t('Connect Belize Bank')}</button>
+          {a.connected && <button type="button" className="link danger-link" onClick={() => void api('/v1/payment-accounts/belizebank', { method: 'DELETE' }).then(() => { toast(t('Belize Bank disconnected')); void load(); onChanged(); }).catch(setError)}>{t('Disconnect')}</button>}
+        </div>
+      ) : (
+        <div className="stack">
+          <p className="small">{t('Enter the payment gateway user name and password the bank gave you. Test in the sandbox first; the bank switches you to live after a successful test.')}</p>
+          <div className="form-grid">
+            <Field label={t('User name')}><input required value={form.userName} onChange={(e) => setForm({ ...form, userName: e.target.value.trim() })} autoComplete="off" /></Field>
+            <Field label={t('Password')} hint={a.connected ? t('Leave empty to keep the current one.') : undefined}><input type="password" autoComplete="new-password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></Field>
+          </div>
+          <Field label={t('Mode')}>
+            <select value={form.mode} onChange={(e) => setForm({ ...form, mode: e.target.value as 'sandbox' | 'live' })}>
+              <option value="sandbox">{t('Sandbox (test money)')}</option>
+              <option value="live">{t('Live (real money)')}</option>
+            </select>
+          </Field>
+          <ErrorText error={error} />
+          <div className="row"><span className="spacer" /><button type="button" className="secondary" onClick={() => setEditing(false)}>{t('Cancel')}</button><button type="button" disabled={busy || !form.userName} onClick={() => void save()}>{busy ? t('Checking with the bank…') : t('Save')}</button></div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function EKyashConnect({ onChanged }: { onChanged: () => void }) {
+  const t = useT();
+  const toast = useToast();
+  const [accounts, setAccounts] = useState<Accounts | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState({ sid: '', pinHash: '', apiKey: '', apiPassword: '', mode: 'sandbox' as 'sandbox' | 'live' });
+  const [error, setError] = useState<unknown>(null);
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(() => api<Accounts>('/v1/payment-accounts').then((a) => {
+    setAccounts(a);
+    setForm((f) => ({ ...f, sid: a.ekyash.sid ?? '', mode: a.ekyash.mode }));
+  }).catch(setError), []);
+  useEffect(() => void load(), [load]);
+  const save = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await api('/v1/payment-accounts/ekyash', {
+        method: 'PUT',
+        body: { sid: form.sid, mode: form.mode, ...(form.pinHash && { pinHash: form.pinHash }), ...(form.apiKey && { apiKey: form.apiKey }), ...(form.apiPassword && { apiPassword: form.apiPassword }) },
+      });
+      toast(t('E-Kyash connected'));
+      setEditing(false);
+      setForm((f) => ({ ...f, pinHash: '', apiKey: '', apiPassword: '' }));
+      await load();
+      onChanged();
+    } catch (err) {
+      setError(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (!accounts) return error ? <ErrorText error={error} /> : null;
+  const a = accounts.ekyash;
+  if (!a.available.sandbox && !a.available.live && !a.connected) return null;
+  const keep = a.connected ? t('Leave empty to keep the current one.') : undefined;
+  return (
+    <div className="stack paypal-box">
+      <div className="row">
+        <strong>E-Kyash</strong>
+        <span className="spacer" />
+        {a.connected ? <span className="badge authorized">{a.mode === 'live' ? t('Connected') : t('Connected (sandbox)')}</span> : <span className="badge test">{t('Not connected')}</span>}
+      </div>
+      <p className="small muted">{t('Customers pay from the E-Kyash app: they scan a QR code, or tap a button on their phone. In Belize dollars.')}</p>
+      {a.connected && a.callbackUrl && (
+        <p className="small">{t('Give Belize Bank this address for E-Kyash notifications:')} <code className="copyable">{a.callbackUrl}</code></p>
+      )}
+      {!editing ? (
+        <div className="row">
+          <button type="button" className="secondary" onClick={() => setEditing(true)}>{a.connected ? t('Change') : t('Connect E-Kyash')}</button>
+          {a.connected && <button type="button" className="link danger-link" onClick={() => void api('/v1/payment-accounts/ekyash', { method: 'DELETE' }).then(() => { toast(t('E-Kyash disconnected')); void load(); onChanged(); }).catch(setError)}>{t('Disconnect')}</button>}
+        </div>
+      ) : (
+        <div className="stack">
+          <p className="small">{t('Enter the merchant details Belize Bank gave you for E-Kyash.')}</p>
+          <div className="form-grid">
+            <Field label={t('Merchant ID (SID)')}><input required inputMode="numeric" value={form.sid} onChange={(e) => setForm({ ...form, sid: e.target.value.replace(/\D/g, '') })} autoComplete="off" /></Field>
+            <Field label={t('PIN hash')} hint={keep}><input autoComplete="off" spellCheck={false} value={form.pinHash} onChange={(e) => setForm({ ...form, pinHash: e.target.value.trim() })} /></Field>
+            <Field label={t('API key')} hint={keep}><input type="password" autoComplete="new-password" value={form.apiKey} onChange={(e) => setForm({ ...form, apiKey: e.target.value.trim() })} /></Field>
+            <Field label={t('API password')} hint={keep}><input type="password" autoComplete="new-password" value={form.apiPassword} onChange={(e) => setForm({ ...form, apiPassword: e.target.value.trim() })} /></Field>
+          </div>
+          <Field label={t('Mode')}>
+            <select value={form.mode} onChange={(e) => setForm({ ...form, mode: e.target.value as 'sandbox' | 'live' })}>
+              {a.available.sandbox && <option value="sandbox">{t('Sandbox (test money)')}</option>}
+              {a.available.live && <option value="live">{t('Live (real money)')}</option>}
+            </select>
+          </Field>
+          <ErrorText error={error} />
+          <div className="row"><span className="spacer" /><button type="button" className="secondary" onClick={() => setEditing(false)}>{t('Cancel')}</button><button type="button" disabled={busy || !form.sid} onClick={() => void save()}>{busy ? t('Checking with E-Kyash…') : t('Save')}</button></div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function PayPalConnect({ onChanged }: { onChanged: () => void }) {

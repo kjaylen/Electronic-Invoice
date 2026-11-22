@@ -157,6 +157,8 @@ export interface NewPayment {
   note?: string | null;
   /** Paid online from the invoice's link (recorded once per online payment). */
   onlinePaymentId?: string;
+  /** A bank's own reference for the payment (recorded once per business). */
+  externalId?: string;
 }
 
 /**
@@ -178,11 +180,11 @@ export async function recordPayment(db: Queryable, tenantId: string, documentId:
   if (paidOn < before.issueDate) throw new ReceivableError('A payment cannot be dated before the invoice');
   const id = randomUUID();
   const inserted = await db.query(
-    `insert into invoice_payments (id, tenant_id, document_id, amount_cents, method, reference, paid_on, note, created_by, online_payment_id)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) on conflict (online_payment_id) do nothing returning id`,
-    [id, tenantId, documentId, String(p.amountCents), p.method, p.reference?.trim() || null, paidOn, p.note?.trim() || null, userId, p.onlinePaymentId ?? null],
+    `insert into invoice_payments (id, tenant_id, document_id, amount_cents, method, reference, paid_on, note, created_by, online_payment_id, external_id)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) on conflict do nothing returning id`,
+    [id, tenantId, documentId, String(p.amountCents), p.method, p.reference?.trim() || null, paidOn, p.note?.trim() || null, userId, p.onlinePaymentId ?? null, p.externalId ?? null],
   );
-  if (!inserted.rows.length) throw new ReceivableError('This online payment is already recorded');
+  if (!inserted.rows.length) throw new ReceivableError('This payment is already recorded');
   const after = (await receivable(db, tenantId, documentId))!;
   if (before.balanceCents > 0n && after.balanceCents <= 0n) {
     await db.query("insert into event_outbox (tenant_id, type, subject_id) values ($1, 'invoice.paid', $2)", [tenantId, documentId]);

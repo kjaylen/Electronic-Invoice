@@ -26,7 +26,7 @@ import { decimal, money, uuid } from './schemas.ts';
 import { photoKey } from '../storage/objects.ts';
 import type { ServerContext } from './context.ts';
 import { assertFeature } from '../billing/billing.ts';
-import { getPaymentAccount } from '../commerce/payments.ts';
+import { getPaymentAccount, PROVIDER_NAMES } from '../commerce/payments.ts';
 import { addDomain, checkDomain, DomainError, domainJson, type DomainRow, normalizeDomain, verifyDomain } from '../commerce/domains.ts';
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
@@ -245,7 +245,7 @@ const settingsSchema = {
         bankTransfer: { type: 'object', additionalProperties: false, properties: { enabled: { type: 'boolean' }, instructions: text(2000) } },
         cashOnDelivery: { type: 'object', additionalProperties: false, properties: { enabled: { type: 'boolean' } } },
         payAtPickup: { type: 'object', additionalProperties: false, properties: { enabled: { type: 'boolean' } } },
-        online: { type: 'object', additionalProperties: false, properties: { enabled: { type: 'boolean' }, provider: { type: 'string', enum: ['paypal', 'test'] } } },
+        online: { type: 'object', additionalProperties: false, properties: { enabled: { type: 'boolean' }, provider: { type: 'string', enum: ['paypal', 'test', 'belizebank', 'ekyash'] } } },
       },
     },
   },
@@ -495,8 +495,9 @@ export function registerProductRoutes(app: FastifyInstance, deps: PipelineDeps, 
     if (merged.enabled && !merged.delivery.enabled && !merged.pickup.enabled) throw new ApiError(422, 'invalid_settings', 'Offer delivery, pickup, or both');
     if (merged.payments.online.enabled) {
       const env = (await db.query<{ environment: string }>('select environment from tenants where id = $1', [request.tenantId])).rows[0]!.environment;
-      if (merged.payments.online.provider === 'test' && env !== 'test') throw new ApiError(422, 'invalid_settings', 'Test payments are only for the BTS test environment; connect PayPal to take real payments');
-      if (merged.payments.online.provider === 'paypal' && !(await getPaymentAccount(db, request.tenantId, 'paypal'))?.configured) throw new ApiError(422, 'invalid_settings', 'Connect your PayPal account first');
+      const provider = merged.payments.online.provider;
+      if (provider === 'test' && env !== 'test') throw new ApiError(422, 'invalid_settings', 'Test payments are only for the BTS test environment; connect a payment provider to take real payments');
+      if (provider !== 'test' && !(await getPaymentAccount(db, request.tenantId, provider))?.configured) throw new ApiError(422, 'invalid_settings', `Connect your ${PROVIDER_NAMES[provider]} account first`);
     }
     if (merged.enabled && !merged.payments.bankTransfer.enabled && !merged.payments.cashOnDelivery.enabled && !merged.payments.payAtPickup.enabled && !merged.payments.online.enabled) {
       throw new ApiError(422, 'invalid_settings', 'Turn on at least one way to pay');

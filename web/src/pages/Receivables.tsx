@@ -127,7 +127,7 @@ export function Receivables() {
       )}
 
       {tab === 'invoices' && <OpenInvoices />}
-      {tab === 'settings' && can('business.manage') && <ReceivableSettingsForm onSaved={() => void load()} />}
+      {tab === 'settings' && can('business.manage') && <><ReceivableSettingsForm onSaved={() => void load()} /><BillPayments /></>}
 
       {statementFor && <StatementModal customerKey={statementFor} onClose={() => setStatementFor(null)} />}
     </div>
@@ -261,6 +261,8 @@ const OFFSET_CHOICES = [-7, -3, -1, 0, 1, 3, 7, 14, 30, 60, 90];
 
 function offsetLabel(t: ReturnType<typeof useT>, o: number): string {
   if (o === 0) return t('On the due date');
+  if (o === -1) return t('The day before');
+  if (o === 1) return t('The day after');
   return o < 0 ? t('{n} days before', { n: -o }) : t('{n} days after', { n: o });
 }
 
@@ -293,7 +295,9 @@ function ReceivableSettingsForm({ onSaved }: { onSaved: () => void }) {
       setBusy(false);
     }
   };
-  const provider = s.onlineProvider === 'paypal' ? 'PayPal' : s.onlineProvider === 'test' ? t('test payments (BTS test environment)') : null;
+  const names: Record<string, string> = { belizebank: t('Belize Bank cards'), ekyash: 'E-Kyash', paypal: 'PayPal', test: t('test payments (BTS test environment)') };
+  const list = (s.onlineProviders ?? (s.onlineProvider ? [s.onlineProvider] : [])).map((p) => names[p] ?? p);
+  const provider = list.length ? list.join(', ') : null;
   return (
     <form className="stack" onSubmit={(e) => void save(e)}>
       <section className="card stack">
@@ -314,7 +318,7 @@ function ReceivableSettingsForm({ onSaved }: { onSaved: () => void }) {
       <section className="card stack">
         <div>
           <h2>{t('Paying online')}</h2>
-          <p className="small muted">{provider ? t('Invoices you email include a “Pay online” link. Payments go through {provider} and are recorded on the invoice by themselves.', { provider }) : t('Connect PayPal in Settings → Online store to let customers pay invoices online.')}</p>
+          <p className="small muted">{provider ? t('Invoices you email include a “Pay online” link. Payments go through {provider} and are recorded on the invoice by themselves.', { provider }) : t('Connect Belize Bank, E-Kyash or PayPal in Settings → Online store to let customers pay invoices online.')}</p>
         </div>
         <label className="row"><input type="checkbox" checked={s.payOnline} onChange={(e) => setS({ ...s, payOnline: e.target.checked })} disabled={!provider} /> {t('Let customers pay invoices online')}</label>
       </section>
@@ -495,5 +499,112 @@ function RemindModal({ documentId, email, onClose, onDone }: { documentId: strin
         <div className="row"><button type="button" className="secondary" onClick={onClose}>{t('Cancel')}</button><span className="spacer" /><button disabled={busy}>{busy ? t('Sending…') : t('Send reminder')}</button></div>
       </form>
     </Modal>
+  );
+}
+
+// ---------- bill payments through Belize Bank's online banking ----------
+
+interface BillPaySetup {
+  enabled: boolean;
+  configured: boolean;
+  referenceField: string;
+  lastSeenAt: string | null;
+  urls: { validate: string; post: string; reconcile: string } | null;
+  last30Days: { payments: number; amount: string };
+  problems: Array<{ id: string; kind: string; bankReference: string | null; reference: string | null; amount: string | null; outcome: string; createdAt: string }>;
+  token?: string;
+}
+
+function BillPayments() {
+  const t = useT();
+  const toast = useToast();
+  const [s, setS] = useState<BillPaySetup | null>(null);
+  const [token, setToken] = useState<string | null>(null);
+  const [field, setField] = useState('referenceNumber');
+  const [error, setError] = useState<unknown>(null);
+  const [busy, setBusy] = useState(false);
+  const show = (r: BillPaySetup) => {
+    setS(r);
+    setField(r.referenceField);
+  };
+  useEffect(() => void api<BillPaySetup>('/v1/bill-payments').then(show).catch(setError), []);
+  const issue = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await api<BillPaySetup>('/v1/bill-payments', { method: 'POST', body: { referenceField: field } });
+      show(r);
+      setToken(r.token ?? null);
+    } catch (err) {
+      setError(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const update = async (enabled: boolean) => {
+    setBusy(true);
+    setError(null);
+    try {
+      show(await api<BillPaySetup>('/v1/bill-payments', { method: 'PUT', body: { referenceField: field, enabled } }));
+      toast(enabled ? t('Saved') : t('Bill payments turned off'));
+    } catch (err) {
+      setError(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (!s) return <section className="card"><ErrorText error={error} /></section>;
+  return (
+    <section className="card stack">
+      <div className="row">
+        <div>
+          <h2>{t('Bill payments in Belize Bank online banking')}</h2>
+          <p className="small muted">{t('Customers pay an invoice as a bill in Belize Bank’s online or mobile banking, typing the invoice number. The bank checks the number and the balance with us first, and the payment is recorded on the invoice by itself.')}</p>
+        </div>
+        <span className="spacer" />
+        {s.enabled ? <span className="badge authorized">{t('On')}</span> : <span className="badge test">{t('Off')}</span>}
+      </div>
+      {s.configured && (
+        <p className="small">{s.lastSeenAt ? t('Last message from the bank: {when}.', { when: new Date(s.lastSeenAt).toLocaleString() }) : t('No message from the bank yet.')} {t('Last 30 days: {n} payments, {amount}.', { n: s.last30Days.payments, amount: money(s.last30Days.amount) })}</p>
+      )}
+      <Field label={t('Name of the invoice number field')} hint={t('As agreed with the bank. Common names such as referenceNumber and invoiceNumber are understood too.')}>
+        <input value={field} maxLength={40} pattern="^[A-Za-z][A-Za-z0-9_]{0,39}$" onChange={(e) => setField(e.target.value.trim())} />
+      </Field>
+      {token && (
+        <div className="banner warn">
+          <div>
+            <strong>{t('Give this token to Belize Bank now')}</strong>
+            {t('It is shown only once. The bank sends it with every request; anyone with it can ask about your invoices.')}
+            <code className="copyable token">{token}</code>
+          </div>
+        </div>
+      )}
+      {s.configured && s.urls && (
+        <dl className="pay-facts urls">
+          <div><dt>{t('Validation')}</dt><dd><code className="copyable">{s.urls.validate}</code></dd></div>
+          <div><dt>{t('Payment posted')}</dt><dd><code className="copyable">{s.urls.post}</code></dd></div>
+          <div><dt>{t('Daily reconciliation')}</dt><dd><code className="copyable">{s.urls.reconcile}</code></dd></div>
+        </dl>
+      )}
+      <ErrorText error={error} />
+      <div className="row">
+        {!s.configured ? <button disabled={busy} onClick={() => void issue()}>{t('Turn on bill payments')}</button> : (
+          <>
+            {s.enabled ? <button className="secondary" disabled={busy} onClick={() => void update(true)}>{t('Save')}</button> : <button disabled={busy} onClick={() => void update(true)}>{t('Turn back on')}</button>}
+            <button className="secondary" disabled={busy} onClick={() => void issue()}>{t('New token')}</button>
+            {s.enabled && <button className="link danger-link" disabled={busy} onClick={() => void update(false)}>{t('Turn off')}</button>}
+          </>
+        )}
+      </div>
+      {s.problems.length > 0 && (
+        <div className="stack-tight">
+          <h3>{t('Payments to apply by hand')}</h3>
+          <p className="small muted">{t('The bank took these payments but the reference matched no single open invoice. Find the invoice and record the payment on it.')}</p>
+          <ul className="plain small">
+            {s.problems.map((p) => <li key={p.id}>{new Date(p.createdAt).toLocaleDateString()} · {p.amount ? money(p.amount) : '—'} · {t('reference')} “{p.reference ?? '—'}” · {t('bank ref.')} <span className="mono">{p.bankReference ?? '—'}</span></li>)}
+          </ul>
+        </div>
+      )}
+    </section>
   );
 }

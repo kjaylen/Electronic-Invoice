@@ -29,7 +29,7 @@ import { overLimit } from '../db/ratelimit.ts';
 import { formatCents, parseCents } from '../engine/decimal.ts';
 import { BELIZE_DISTRICTS } from '../engine/ubl.ts';
 import { simpleHtml } from '../mail/mailer.ts';
-import { confirmPayment, type GatewayOptions, gatewayFor, getPaymentAccount, PaymentError, type Provider, startPayment } from '../commerce/payments.ts';
+import { confirmPayment, type GatewayOptions, gatewayFor, getPaymentAccount, PaymentError, type Provider, startPayment, walletDisplay } from '../commerce/payments.ts';
 import type { PipelineDeps } from '../pipeline/issue.ts';
 import {
   AGE_BUCKETS, ageing, openReceivables, PAYMENT_METHODS, type PaymentMethod, paymentJson, paymentsFor, type Receivable, receivable,
@@ -65,14 +65,29 @@ export async function receivableSettings(db: Queryable, tenantId: string): Promi
   };
 }
 
-/** Which provider takes invoice payments for this business, if any: PayPal when connected, test payments in the BTS test environment. */
-export async function invoiceProvider(db: Queryable, tenantId: string, settings?: ReceivableSettings): Promise<Provider | null> {
+/**
+ * The ways a customer can pay this business's invoices online, best first:
+ * Belize Bank cards and E-Kyash (both in BZ$), then PayPal; test payments
+ * when nothing is connected and the business is in the BTS test environment.
+ */
+export async function invoiceProviders(db: Queryable, tenantId: string, settings?: ReceivableSettings, extras: { ekyash?: { sandboxUrl?: string; liveUrl?: string } } = {}): Promise<Provider[]> {
   const s = settings ?? (await receivableSettings(db, tenantId));
-  if (!s.payOnline) return null;
-  const paypal = await getPaymentAccount(db, tenantId, 'paypal');
-  if (paypal?.configured) return 'paypal';
+  if (!s.payOnline) return [];
+  const out: Provider[] = [];
+  for (const p of ['belizebank', 'ekyash', 'paypal'] as const) {
+    const account = await getPaymentAccount(db, tenantId, p);
+    if (!account?.configured) continue;
+    if (p === 'ekyash' && !(account.mode === 'live' ? extras.ekyash?.liveUrl : extras.ekyash?.sandboxUrl)) continue;
+    out.push(p);
+  }
+  if (out.length) return out;
   const env = (await db.query<{ environment: string }>('select environment from tenants where id = $1', [tenantId])).rows[0]?.environment;
-  return env === 'test' ? 'test' : null;
+  return env === 'test' ? ['test'] : [];
+}
+
+/** The first way to pay online, if any (whether to put a pay link in an email). */
+export async function invoiceProvider(db: Queryable, tenantId: string, settings?: ReceivableSettings, extras: { ekyash?: { sandboxUrl?: string; liveUrl?: string } } = {}): Promise<Provider | null> {
+  return (await invoiceProviders(db, tenantId, settings, extras))[0] ?? null;
 }
 
 // ---------- shared ----------
@@ -121,10 +136,10 @@ export function reminderWording(r: Receivable, businessName: string, days: numbe
 }
 
 /** Email one payment reminder for an invoice. Returns the message id. */
-async function sendReminder(deps: PipelineDeps, ctx: ServerContext, tenantId: string, r: Receivable, to: string, userId: string | null, settings: ReceivableSettings): Promise<string> {
+async function sendReminder(deps: PipelineDeps, ctx: ServerContext, tenantId: string, r: Receivable, to: string, userId: string | null, settings: ReceivableSettings, extras: { ekyash?: { sandboxUrl?: string; liveUrl?: string } } = {}): Promise<string> {
   const biz = await business(deps.db, tenantId);
   const { subject, intro } = reminderWording(r, biz.name, daysPastDue(r.dueDate));
-  const provider = ctx.publicUrl ? await invoiceProvider(deps.db, tenantId, settings) : null;
+  const provider = ctx.publicUrl ? await invoiceProvider(deps.db, tenantId, settings, extras) : null;
   const payUrl = provider ? (await createShareLink(deps.db, ctx, tenantId, r.documentId, userId)).payUrl : undefined;
   return sendDocumentEmail(deps, ctx, tenantId, r.documentId, {
     to, userId, subject, intro, ...(settings.instructions.trim() && { message: settings.instructions.trim() }), ...(payUrl && { payUrl }),
@@ -140,7 +155,7 @@ async function sendReminder(deps: PipelineDeps, ctx: ServerContext, tenantId: st
  * invoice, not every step it missed. A step that falls on or before the day
  * the invoice was issued is skipped (no "due in 3 days" right after issuing it).
  */
-export async function runReminders(deps: PipelineDeps, ctx: ServerContext, options: { perBusiness?: number } = {}): Promise<{ sent: number; failed: number }> {
+export async function runReminders(deps: PipelineDeps, ctx: ServerContext, options: { perBusiness?: number; ekyash?: { sandboxUrl?: string; liveUrl?: string } } = {}): Promise<{ sent: number; failed: number }> {
   const result = { sent: 0, failed: 0 };
   if (!ctx.mailConfigured) return result;
   const tenants = (await deps.db.query<{ id: string }>("select id from tenants where receivable_settings #>> '{reminders,enabled}' = 'true'")).rows;
@@ -157,7 +172,7 @@ export async function runReminders(deps: PipelineDeps, ctx: ServerContext, optio
       if (!claimed.rows.length) continue;
       budget--;
       try {
-        await sendReminder(deps, ctx, t.id, r, r.customer.email, null, settings);
+        await sendReminder(deps, ctx, t.id, r, r.customer.email, null, settings, { ...(options.ekyash && { ekyash: options.ekyash }) });
         result.sent++;
       } catch {
         // Try again next run.
@@ -200,7 +215,7 @@ const fileSafe = (s: string) => s.replace(/[^A-Za-z0-9-]+/g, '-').replace(/^-|-$
 
 // ---------- routes ----------
 
-export function registerReceivableRoutes(app: FastifyInstance, deps: PipelineDeps, ctx: ServerContext) {
+export function registerReceivableRoutes(app: FastifyInstance, deps: PipelineDeps, ctx: ServerContext, extras: { ekyash?: { sandboxUrl?: string; liveUrl?: string } } = {}) {
   const { db } = deps;
   const idParams = { type: 'object', required: ['id'], properties: { id: uuid } } as const;
   const canRead = (request: FastifyRequest) => {
@@ -280,7 +295,7 @@ export function registerReceivableRoutes(app: FastifyInstance, deps: PipelineDep
       const to = request.body?.to ?? r.customer.email;
       if (!to) throw new ApiError(422, 'no_email', 'This customer has no email address; enter one');
       if (await overLimit(db, `remind|${request.params.id}`, 10, 24 * 3600_000)) throw new ApiError(429, 'too_many_reminders', 'Enough reminders for this invoice today');
-      await sendReminder(deps, ctx, request.tenantId, r, to, request.userId || null, await receivableSettings(db, request.tenantId));
+      await sendReminder(deps, ctx, request.tenantId, r, to, request.userId || null, await receivableSettings(db, request.tenantId), extras);
       await audit(db, { tenantId: request.tenantId, userId: request.userId || null, action: 'invoice.reminded', target: r.number, details: { to }, ip: request.ip });
       return { sent: true, to };
     },
@@ -294,7 +309,7 @@ export function registerReceivableRoutes(app: FastifyInstance, deps: PipelineDep
       ageing: await ageing(db, request.tenantId),
       buckets: AGE_BUCKETS,
       reminders: settings.reminders,
-      onlinePayments: Boolean(await invoiceProvider(db, request.tenantId, settings)),
+      onlinePayments: Boolean(await invoiceProvider(db, request.tenantId, settings, extras)),
     };
   });
 
@@ -349,7 +364,7 @@ export function registerReceivableRoutes(app: FastifyInstance, deps: PipelineDep
       if (await overLimit(db, `statement|${request.tenantId}|${request.body.customer}`, 10, 24 * 3600_000)) throw new ApiError(429, 'too_many_statements', 'Enough statements for this customer today');
       const settings = await receivableSettings(db, request.tenantId);
       const biz = await business(db, request.tenantId);
-      const provider = ctx.publicUrl ? await invoiceProvider(db, request.tenantId, settings) : null;
+      const provider = ctx.publicUrl ? await invoiceProvider(db, request.tenantId, settings, extras) : null;
       const owed = s.open.filter((r) => r.balanceCents > 0n);
       const invoiceLines: string[] = [];
       for (const r of owed.slice(0, 30)) {
@@ -376,7 +391,8 @@ export function registerReceivableRoutes(app: FastifyInstance, deps: PipelineDep
   app.get('/receivable-settings', async (request) => {
     canRead(request);
     const settings = await receivableSettings(db, request.tenantId);
-    return { ...settings, onlineProvider: await invoiceProvider(db, request.tenantId, { ...settings, payOnline: true }) };
+    const providers = await invoiceProviders(db, request.tenantId, { ...settings, payOnline: true }, extras);
+    return { ...settings, onlineProvider: providers[0] ?? null, onlineProviders: providers };
   });
 
   app.put<{ Body: ReceivableSettings }>(
@@ -404,14 +420,16 @@ export function registerReceivableRoutes(app: FastifyInstance, deps: PipelineDep
       const value: ReceivableSettings = { reminders: { enabled: b.reminders.enabled, offsets: [...b.reminders.offsets].sort((x, y) => x - y) }, payOnline: b.payOnline, instructions: b.instructions.trim() };
       await db.query('update tenants set receivable_settings = $2 where id = $1', [request.tenantId, JSON.stringify(value)]);
       await audit(db, { tenantId: request.tenantId, userId: request.userId || null, action: 'receivables.settings_changed', details: { reminders: value.reminders.enabled, offsets: value.reminders.offsets, payOnline: value.payOnline }, ip: request.ip });
-      return { ...value, onlineProvider: await invoiceProvider(db, request.tenantId, { ...value, payOnline: true }) };
+      const providers = await invoiceProviders(db, request.tenantId, { ...value, payOnline: true }, extras);
+      return { ...value, onlineProvider: providers[0] ?? null, onlineProviders: providers };
     },
   );
 }
 
 // ---------- paying an invoice from its link (public) ----------
 
-export function registerPayRoutes(app: FastifyInstance, deps: PipelineDeps, ctx: ServerContext, options: { gatewayOptions: (tenantId: string) => Promise<GatewayOptions> }) {
+export function registerPayRoutes(app: FastifyInstance, deps: PipelineDeps, ctx: ServerContext, options: { gatewayOptions: (tenantId: string) => Promise<GatewayOptions>; ekyash?: { sandboxUrl?: string; liveUrl?: string } }) {
+  const extras = { ...(options.ekyash && { ekyash: options.ekyash }) };
   const { db } = deps;
   const tokenParams = { type: 'object', required: ['token'], properties: { token: { type: 'string', pattern: '^[A-Za-z0-9_-]{43}$' } } } as const;
   const paymentParams = { type: 'object', required: ['token', 'id'], properties: { token: tokenParams.properties.token, id: uuid } } as const;
@@ -435,7 +453,7 @@ export function registerPayRoutes(app: FastifyInstance, deps: PipelineDeps, ctx:
       'select etd_type, series_number, serial::text as serial, issue_date::text as issue_date, status, payable_cents from documents where id = $1', [link.documentId],
     )).rows[0]!;
     const settings = await receivableSettings(db, link.tenantId);
-    const provider = r && r.balanceCents > 0n ? await invoiceProvider(db, link.tenantId, settings) : null;
+    const providers = r && r.balanceCents > 0n ? await invoiceProviders(db, link.tenantId, settings, extras) : [];
     return {
       business: { name: biz.name, email: biz.email, telephone: biz.telephone },
       document: {
@@ -446,17 +464,21 @@ export function registerPayRoutes(app: FastifyInstance, deps: PipelineDeps, ctx:
       },
       invoice: r ? { customer: r.customer.name, dueDate: r.dueDate, total: r.total, paid: r.paid, credited: r.credited, balance: r.balance, status: r.status, daysOverdue: r.daysOverdue } : null,
       pdfUrl: `/d/${request.params.token}`,
-      online: provider ? { provider } : null,
+      online: providers.length ? { provider: providers[0], providers } : null,
       instructions: settings.instructions || null,
     };
   });
 
-  app.post<{ Params: { token: string } }>('/:token/start', { schema: { params: tokenParams } }, async (request) => {
+  app.post<{ Params: { token: string }; Body: { provider?: Provider } | undefined }>(
+    '/:token/start',
+    { schema: { params: tokenParams, body: { type: ['object', 'null'], additionalProperties: false, properties: { provider: { type: 'string', enum: ['belizebank', 'ekyash', 'paypal', 'test'] } } } } },
+    async (request) => {
     const link = await linked(request.params.token);
     const r = await receivable(db, link.tenantId, link.documentId);
     if (!r || r.balanceCents <= 0n) throw new ApiError(409, 'nothing_to_pay', 'There is nothing left to pay on this invoice');
-    const provider = await invoiceProvider(db, link.tenantId);
-    if (!provider) throw new ApiError(409, 'not_available', 'This business does not take online payments; see how to pay on the invoice');
+    const available = await invoiceProviders(db, link.tenantId, undefined, extras);
+    const provider = request.body?.provider ?? available[0];
+    if (!provider || !available.includes(provider)) throw new ApiError(409, 'not_available', 'This business does not take this way of paying online; see how to pay on the invoice');
     if (await overLimit(db, `invoice-pay|${link.documentId}`, 20, 3600_000)) throw new ApiError(429, 'too_many_attempts', 'Too many payment attempts for this invoice; try again later or contact the business');
     const base = ctx.publicUrl?.replace(/\/$/, '') ?? '';
     if (provider !== 'test' && !base) throw new ApiError(503, 'not_configured', 'Online payments are not available right now');
@@ -473,7 +495,8 @@ export function registerPayRoutes(app: FastifyInstance, deps: PipelineDeps, ctx:
       if (e instanceof PaymentError) throw new ApiError(409, 'payment_unavailable', e.message);
       throw e;
     }
-  });
+    },
+  );
 
   app.post<{ Params: { token: string; id: string } }>('/:token/payments/:id/confirm', { schema: { params: paymentParams } }, async (request) => {
     const link = await linked(request.params.token);
@@ -483,7 +506,10 @@ export function registerPayRoutes(app: FastifyInstance, deps: PipelineDeps, ctx:
     const now = await confirmPayment(db, gateway, p.id);
     if (now.status === 'paid') await settlePayment(deps, ctx, now);
     const r = await receivable(db, link.tenantId, link.documentId);
-    return { status: now.status, problem: (now.detail as { reason?: string } | null)?.reason ?? null, balance: r?.balance ?? null };
+    return {
+      status: now.status, problem: (now.detail as { reason?: string } | null)?.reason ?? null, balance: r?.balance ?? null,
+      ...(now.status === 'pending' && { wallet: await walletDisplay(now) }),
+    };
   });
 
   // The test gateway's pretend card page (BTS test environment only).

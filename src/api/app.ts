@@ -47,8 +47,9 @@ import { billingContextFactory, registerBillingRoutes } from './billing.ts';
 import { registerWebhookRoutes } from './webhooks.ts';
 import { countHit } from '../db/ratelimit.ts';
 import { buildOpenApi, routeCollector } from './openapi.ts';
-import { gatewayOptions, registerPaymentAccountRoutes } from './payments.ts';
+import { type GatewayExtras, gatewayOptions, registerPaymentAccountRoutes, registerPaymentCallbacks } from './payments.ts';
 import { registerPayRoutes, registerReceivableRoutes } from './receivables.ts';
+import { registerBillPayBankRoutes, registerBillPaySettingsRoutes } from './billpay.ts';
 import { registerDiscountRoutes } from './discounts.ts';
 import { domainCache } from '../commerce/domains.ts';
 import { registerIntegrationCallback, registerIntegrationRoutes } from './integrations.ts';
@@ -96,6 +97,8 @@ export interface AppOptions {
   webhooksAllowPrivate?: boolean;
   /** For tests: the fetch used to talk to payment providers. */
   paymentsFetch?: typeof fetch;
+  /** E-Kyash's API addresses (given by Belize Bank, the same for every merchant). */
+  ekyash?: { sandboxUrl?: string; liveUrl?: string };
   /** Where businesses point their store domains (CNAME), e.g. stores.example.bz. */
   storeDomainTarget?: string;
   /** For tests: DNS TXT lookups for domain verification. */
@@ -180,6 +183,12 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     ? { ...options.quickbooks, redirectUri: `${options.publicUrl.replace(/\/$/, '')}/v1/integrations/quickbooks/callback` }
     : undefined;
   const billingContext = billingContextFactory(deps, ctx);
+  // How every part of the app talks to payment providers.
+  const paymentExtras: GatewayExtras = {
+    ...(options.paymentsFetch && { fetch: options.paymentsFetch }),
+    ...(options.publicUrl && { publicUrl: options.publicUrl }),
+    ...(options.ekyash && { ekyash: options.ekyash }),
+  };
 
   app.addHook('onResponse', async (_request, reply) => {
     counters.requests++;
@@ -269,10 +278,11 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     registerReportRoutes(tenant, deps);
     registerBillingRoutes(tenant, deps, ctx, billingContext);
     registerWebhookRoutes(tenant, deps, { ...(options.webhooksAllowPrivate && { allowPrivate: true }) });
-    registerPaymentAccountRoutes(tenant, deps, { ...(options.paymentsFetch && { fetch: options.paymentsFetch }) });
+    registerPaymentAccountRoutes(tenant, deps, paymentExtras);
     registerDiscountRoutes(tenant, deps);
     registerIntegrationRoutes(tenant, deps, quickbooks);
-    registerReceivableRoutes(tenant, deps, ctx);
+    registerReceivableRoutes(tenant, deps, ctx, { ...(options.ekyash && { ekyash: options.ekyash }) });
+    registerBillPaySettingsRoutes(tenant, deps, ctx);
   }, { prefix: '/v1' });
 
   registerPublicDocumentRoutes(app, deps);
@@ -300,11 +310,16 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   // Paying an invoice from its link: no sign-in, the link's token is the permission.
   const slugOfTenant = async (tenantId: string) => (await db.query<{ slug: string }>('select slug from tenants where id = $1', [tenantId])).rows[0]!.slug;
   await app.register(async (pay) => registerPayRoutes(pay, deps, ctx, {
-    gatewayOptions: gatewayOptions(deps, slugOfTenant, { ...(options.paymentsFetch && { fetch: options.paymentsFetch }) }),
+    gatewayOptions: gatewayOptions(deps, slugOfTenant, paymentExtras),
+    ...(options.ekyash && { ekyash: options.ekyash }),
   }), { prefix: '/v1/pay' });
+  // Belize Bank asking about and posting bill payments (bearer token per business).
+  await app.register(async (bank) => registerBillPayBankRoutes(bank, deps), { prefix: '/v1/billpay' });
+  // What payment providers tell us (only ever a prompt to ask them).
+  await app.register(async (cb) => registerPaymentCallbacks(cb, deps, ctx, gatewayOptions(deps, slugOfTenant, paymentExtras)), { prefix: '/v1/payment-callbacks' });
 
   // The public storefront: no sign-in, scoped by the business's address.
-  await app.register(async (store) => registerStorefrontRoutes(store, deps, ctx, { ...(options.paymentsFetch && { fetch: options.paymentsFetch }) }), { prefix: '/v1/store' });
+  await app.register(async (store) => registerStorefrontRoutes(store, deps, ctx, paymentExtras), { prefix: '/v1/store' });
 
   // The web app: static files, and index.html for any other GET so client-side routes work.
   const webRoot = options.webRoot;

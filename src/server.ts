@@ -72,6 +72,10 @@ const webRoot = env.WEB_ROOT ?? (existsSync(defaultWebRoot) ? defaultWebRoot : u
 const mailFrom = env.MAIL_FROM ?? 'eInvoicing <no-reply@localhost>';
 const mailer: Mailer | undefined = env.SMTP_URL ? smtpMailer(env.SMTP_URL, mailFrom) : env.MAIL_OUTBOX_DIR ? outboxMailer(env.MAIL_OUTBOX_DIR, mailFrom) : undefined;
 const objectStore = objectStoreFromEnv(env);
+// E-Kyash's API addresses, given by Belize Bank (the same for every merchant).
+const ekyash = env.EKYASH_SANDBOX_URL || env.EKYASH_LIVE_URL
+  ? { ...(env.EKYASH_SANDBOX_URL && { sandboxUrl: env.EKYASH_SANDBOX_URL }), ...(env.EKYASH_LIVE_URL && { liveUrl: env.EKYASH_LIVE_URL }) }
+  : undefined;
 const quickbooksApp = env.QBO_CLIENT_ID && env.QBO_CLIENT_SECRET
   ? { clientId: env.QBO_CLIENT_ID, clientSecret: env.QBO_CLIENT_SECRET, environment: env.QBO_ENVIRONMENT === 'production' ? 'production' as const : 'sandbox' as const }
   : undefined;
@@ -79,6 +83,7 @@ const app = await buildApp({
   pipeline,
   ...(mailer && { mailer }),
   ...(env.PUBLIC_URL && { publicUrl: env.PUBLIC_URL }),
+  ...(ekyash && { ekyash }),
   ...(env.ADMIN_TOKEN && { adminToken: env.ADMIN_TOKEN }),
   ...(env.METRICS_TOKEN && { metricsToken: env.METRICS_TOKEN }),
   ...(objectStore && { objectStore }),
@@ -123,8 +128,8 @@ const housekeeping = housekeepingMs > 0
   ? startHousekeeping(db, {
       intervalMs: housekeepingMs,
       billing,
-      reconcilePayments: () => reconcilePayments(pipeline, backgroundCtx, gatewayOptions(pipeline, slugOf)),
-      reminders: () => runReminders(pipeline, backgroundCtx),
+      reconcilePayments: () => reconcilePayments(pipeline, backgroundCtx, gatewayOptions(pipeline, slugOf, { ...(env.PUBLIC_URL && { publicUrl: env.PUBLIC_URL }), ...(ekyash && { ekyash }) })),
+      reminders: () => runReminders(pipeline, backgroundCtx, { ...(ekyash && { ekyash }) }),
       ...(mailer && { mailer }),
       ...(env.PUBLIC_URL && { publicUrl: env.PUBLIC_URL }),
       ...(env.ALERT_WEBHOOK_URL && { alertWebhookUrl: env.ALERT_WEBHOOK_URL }),

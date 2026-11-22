@@ -9,6 +9,7 @@ import { Link, Outlet, useLocation, useNavigate, useOutletContext, useParams, us
 import { api, ApiError, type PaymentMethod } from '../api';
 import { BUSINESS } from '../business';
 import { LanguageToggle, useT } from '../i18n';
+import { PROVIDER_NOTE, WalletPay, type WalletInfo } from '../wallet';
 import { store } from '../storage';
 import { DISTRICTS, ErrorText, Field, money, usePageTitle, whatsappNumber } from '../ui';
 
@@ -25,7 +26,7 @@ interface StoreInfo {
   test: boolean;
   delivery: { enabled: boolean; zones: Array<{ name: string; fee: string }> };
   pickup: { enabled: boolean; address: string | null };
-  payments: { bankTransfer: boolean; cashOnDelivery: boolean; payAtPickup: boolean; online: 'paypal' | 'test' | null };
+  payments: { bankTransfer: boolean; cashOnDelivery: boolean; payAtPickup: boolean; online: 'paypal' | 'test' | 'belizebank' | 'ekyash' | null };
 }
 
 interface ProductCard {
@@ -456,7 +457,7 @@ export function ShopCheckout() {
             {(quote?.paymentMethods ?? []).map((m) => (
               <Radio key={m} name="payment" value={m} checked={payment === m} onChange={(v) => setPayment(v as PaymentMethod)}>
                 <strong>{t(PAYMENT_LABEL[m])}</strong>
-                <span className="small muted">{m === 'bank_transfer' ? t('The bank details appear after you order.') : m === 'cash_on_delivery' ? t('Pay the driver in cash.') : m === 'online' ? (info.payments.online === 'paypal' ? t('Card or PayPal, charged in US dollars at BZ$2 = US$1.') : t('Test payments: no money moves.')) : t('Pay when you collect.')}</span>
+                <span className="small muted">{m === 'bank_transfer' ? t('The bank details appear after you order.') : m === 'cash_on_delivery' ? t('Pay the driver in cash.') : m === 'online' ? t(PROVIDER_NOTE[info.payments.online ?? 'test'] ?? PROVIDER_NOTE.test!) : t('Pay when you collect.')}</span>
               </Radio>
             ))}
           </div>
@@ -539,20 +540,41 @@ export function ShopOrder() {
   const [confirming, setConfirming] = useState(Boolean(paymentId));
   const [payError, setPayError] = useState<unknown>(null);
   const [paying, setPaying] = useState(false);
+  // Paying from a wallet app (E-Kyash): the QR code stays up while we wait.
+  const [wallet, setWallet] = useState<(WalletInfo & { paymentId: string }) | null>(null);
+  const confirmUrl = useCallback((id: string) => shopApi(`/orders/${number}/payments/${id}/confirm?t=${encodeURIComponent(token)}`), [number, token]);
   useEffect(() => {
     // Back from the payment page: ask whether it went through, then load the order.
     if (!paymentId) {
       void load();
       return;
     }
-    void api<{ status: string; problem: string | null }>(shopApi(`/orders/${number}/payments/${paymentId}/confirm?t=${encodeURIComponent(token)}`), { method: 'POST' })
+    void api<{ status: string; problem: string | null; wallet?: WalletInfo | null }>(confirmUrl(paymentId), { method: 'POST' })
+      .then((r) => {
+        if (r.status === 'pending' && r.wallet) setWallet({ ...r.wallet, paymentId });
+      })
       .catch(() => null)
       .finally(() => {
         setConfirming(false);
         navigate(`/shop/orders/${number}?t=${encodeURIComponent(token)}`, { replace: true });
         void load();
       });
-  }, [load, paymentId, number, token, navigate]);
+  }, [load, paymentId, number, token, navigate, confirmUrl]);
+  useEffect(() => {
+    if (!wallet) return;
+    let tries = 0;
+    const timer = setInterval(() => {
+      if (document.visibilityState !== 'visible') return;
+      if (++tries > 200) return clearInterval(timer);
+      void api<{ status: string }>(confirmUrl(wallet.paymentId), { method: 'POST' }).then((r) => {
+        if (r.status !== 'pending') {
+          setWallet(null);
+          void load();
+        }
+      }).catch(() => {});
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [wallet, confirmUrl, load]);
   const payNow = async () => {
     setPaying(true);
     setPayError(null);
@@ -602,7 +624,8 @@ export function ShopOrder() {
           <p className="small">{t('Use order #{n} as the reference. The store confirms your payment and your receipt appears here.', { n: o.number })}</p>
         </section>
       )}
-      {o.online && o.paymentStatus === 'unpaid' && o.status === 'open' && (
+      {wallet && o.paymentStatus === 'unpaid' && o.status === 'open' && <WalletPay wallet={wallet} amount={o.totals.total} />}
+      {o.online && o.paymentStatus === 'unpaid' && o.status === 'open' && !wallet && (
         <section className="card stack pay-box">
           <h2>{t('Pay {amount} online', { amount: money(o.totals.total) })}</h2>
           {o.online.lastStatus === 'failed' && <div className="banner bad"><div><strong>{t('The payment did not go through')}</strong>{o.online.lastProblem ?? t('Nothing was charged. You can try again.')}</div></div>}

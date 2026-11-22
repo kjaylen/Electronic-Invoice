@@ -10,13 +10,14 @@ import { Brand } from '../art';
 import { LanguageToggle, useT } from '../i18n';
 import { ErrorText, money, PaymentBadge, TYPE_NAMES, usePageTitle } from '../ui';
 import type { InvoiceStatus } from '../api';
+import { PROVIDER_BUTTON, PROVIDER_NOTE, WalletPay, type WalletInfo } from '../wallet';
 
 interface PayInfo {
   business: { name: string; email: string; telephone: string };
   document: { type: string; number: string; issueDate: string; valid: boolean };
   invoice: { customer: string; dueDate: string; total: string; paid: string; credited: string; balance: string; status: InvoiceStatus; daysOverdue: number } | null;
   pdfUrl: string;
-  online: { provider: string } | null;
+  online: { provider: string; providers: string[] } | null;
   instructions: string | null;
 }
 
@@ -31,7 +32,7 @@ export function PayInvoice() {
   const [info, setInfo] = useState<PayInfo | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
-  const [outcome, setOutcome] = useState<{ status: string; problem: string | null } | null>(null);
+  const [outcome, setOutcome] = useState<{ status: string; problem: string | null; wallet?: WalletInfo | null } | null>(null);
   usePageTitle(info ? `${t(TYPE_NAMES[info.document.type] ?? 'Invoice')} ${info.document.number}` : t('Pay an invoice'));
 
   const load = useCallback(() => api<PayInfo>(`/v1/pay/${token}`).then(setInfo).catch(setError), [token]);
@@ -44,11 +45,12 @@ export function PayInvoice() {
     let stop = false;
     const check = async () => {
       try {
-        const r = await api<{ status: string; problem: string | null }>(`/v1/pay/${token}/payments/${paymentId}/confirm`, { method: 'POST' });
+        const r = await api<{ status: string; problem: string | null; wallet?: WalletInfo | null }>(`/v1/pay/${token}/payments/${paymentId}/confirm`, { method: 'POST' });
         if (stop) return;
         setOutcome(r);
         if (r.status === 'paid') void load();
-        if (r.status === 'pending' && tries.current++ < 10) setTimeout(() => void check(), 3000);
+        // A wallet payment waits for the customer to accept it in the app: keep asking for a while.
+        if (r.status === 'pending' && tries.current++ < (r.wallet ? 200 : 10)) setTimeout(() => void check(), 3000);
       } catch (e) {
         if (!stop) setError(e);
       }
@@ -59,11 +61,11 @@ export function PayInvoice() {
     };
   }, [paymentId, token, load]);
 
-  const pay = async () => {
+  const pay = async (provider: string) => {
     setBusy(true);
     setError(null);
     try {
-      const r = await api<{ redirectUrl: string }>(`/v1/pay/${token}/start`, { method: 'POST' });
+      const r = await api<{ redirectUrl: string }>(`/v1/pay/${token}/start`, { method: 'POST', body: { provider } });
       if (r.redirectUrl.startsWith('/')) navigate(r.redirectUrl);
       else window.location.assign(r.redirectUrl);
       setBusy(false);
@@ -94,7 +96,7 @@ export function PayInvoice() {
         </div>
 
         {outcome?.status === 'paid' && <div className="banner ok"><div><strong>{t('Thank you, your payment was received.')}</strong>{t('{business} has been notified. You can close this page.', { business: info.business.name })}</div></div>}
-        {outcome?.status === 'pending' && <div className="banner info"><div><strong>{t('Checking your payment…')}</strong>{t('This can take a moment.')}</div></div>}
+        {outcome?.status === 'pending' && !outcome.wallet && <div className="banner info"><div><strong>{t('Checking your payment…')}</strong>{t('This can take a moment.')}</div></div>}
         {outcome?.status === 'failed' && <div className="banner bad"><div><strong>{t('The payment did not go through.')}</strong>{outcome.problem ?? t('No money was taken. You can try again.')}</div></div>}
         {cancelled && !outcome && <div className="banner warn"><div><strong>{t('Payment cancelled')}</strong>{t('Nothing was charged. You can try again when you are ready.')}</div></div>}
 
@@ -118,14 +120,22 @@ export function PayInvoice() {
           <p className="muted">{t('Issued {date}.', { date: info.document.issueDate })}</p>
         )}
 
+        {outcome?.status === 'pending' && outcome.wallet && inv && <WalletPay wallet={outcome.wallet} amount={inv.balance} />}
+
         <ErrorText error={error} />
+        {owed && info.online && outcome?.status !== 'paid' && !(outcome?.status === 'pending' && outcome.wallet) && (
+          <div className="pay-methods">
+            {info.online.providers.map((p, i) => (
+              <button key={p} className={i === 0 ? 'lime big' : 'secondary big'} disabled={busy} onClick={() => void pay(p)}>
+                <span>{busy ? t('Opening…') : info.online!.providers.length === 1 ? t('Pay {amount} online', { amount: money(inv!.balance) }) : t(PROVIDER_BUTTON[p] ?? 'Pay online')}</span>
+                <span className="small pay-method-note">{t(PROVIDER_NOTE[p] ?? '')}</span>
+              </button>
+            ))}
+          </div>
+        )}
         <div className="action-grid">
-          {owed && info.online && outcome?.status !== 'paid' && (
-            <button className="lime big" disabled={busy} onClick={() => void pay()}>{busy ? t('Opening…') : t('Pay {amount} online', { amount: money(inv!.balance) })}</button>
-          )}
           <a className="button secondary" href={info.pdfUrl} target="_blank" rel="noreferrer">{t('View the invoice (PDF)')}</a>
         </div>
-        {owed && info.online?.provider === 'paypal' && <p className="small muted">{t('Pay by card or with your PayPal account. The amount is charged in US dollars at BZ$2 = US$1.')}</p>}
 
         {info.instructions && owed && (
           <div className="pay-instructions">

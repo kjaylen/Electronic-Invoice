@@ -32,8 +32,8 @@ import { overLimit } from '../db/ratelimit.ts';
 import { type PhotoRow, sendPhoto } from './products.ts';
 import { getSubscription } from '../billing/billing.ts';
 import { hasFeature } from '../billing/plans.ts';
-import { confirmPayment, gatewayFor, PaymentError, startPayment } from '../commerce/payments.ts';
-import { gatewayOptions, settlePaidOrder } from './payments.ts';
+import { confirmPayment, gatewayFor, PaymentError, type Provider, startPayment, walletDisplay } from '../commerce/payments.ts';
+import { type GatewayExtras, gatewayOptions, settlePaidOrder } from './payments.ts';
 import { toBigInt } from '../db/database.ts';
 import { formatCents } from '../engine/decimal.ts';
 
@@ -51,7 +51,7 @@ const cartSchema = {
 
 const PAYMENT_TEXT = { bank_transfer: 'Bank transfer', cash_on_delivery: 'Cash on delivery', pay_at_pickup: 'Pay at pickup', online: 'Paid online' } as const;
 
-export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDeps, ctx: ServerContext, payments: { fetch?: typeof fetch } = {}) {
+export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDeps, ctx: ServerContext, payments: GatewayExtras = {}) {
   const { db } = deps;
   const slugOf = async (tenantId: string) => (await db.query<{ slug: string }>('select slug from tenants where id = $1', [tenantId])).rows[0]!.slug;
   const gatewaySettings = gatewayOptions(deps, slugOf, payments);
@@ -378,12 +378,12 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
     { schema: { params: { ...orderParams, required: ['slug', 'number', 'paymentId'], properties: { ...orderParams.properties, paymentId: uuid } }, querystring: tokenQuery } },
     async (request) => {
       const { s, order } = await buyerOrder(request);
-      const p = (await db.query<{ id: string; provider: 'paypal' | 'test'; order_id: string }>('select id, provider, order_id from order_payments where id = $1 and order_id = $2', [request.params.paymentId, order.id])).rows[0];
+      const p = (await db.query<{ id: string; provider: Provider; order_id: string }>('select id, provider, order_id from order_payments where id = $1 and order_id = $2', [request.params.paymentId, order.id])).rows[0];
       if (!p) throw new StoreError('not_found', 'Payment not found');
       const gateway = await gatewayFor(db, s.tenantId, p.provider, await gatewaySettings(s.tenantId));
       const now = await confirmPayment(db, gateway, p.id);
       if (now.status === 'paid') await settlePaidOrder(deps, ctx, now);
-      return { status: now.status, problem: (now.detail as { reason?: string } | null)?.reason ?? null };
+      return { status: now.status, problem: (now.detail as { reason?: string } | null)?.reason ?? null, ...(now.status === 'pending' && { wallet: await walletDisplay(now) }) };
     },
   );
 

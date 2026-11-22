@@ -124,6 +124,9 @@ deployments). To move to object storage behind a CDN:
   ```
 
 - **PayPal.** Each business connects its own PayPal app (client id and secret, encrypted at rest). Nothing to set up on the platform. Pending payments are reconciled every housekeeping run.
+- **Belize Bank cards.** Each business connects its own merchant login for the bank's card payment page (sandbox or live); nothing to set up on the platform. The bank calls `<PUBLIC_URL>/v1/payment-callbacks/belizebank` when something happens to a payment; the callback only prompts a status check with the bank.
+- **E-Kyash.** Set `EKYASH_SANDBOX_URL` and `EKYASH_LIVE_URL` to the API addresses Belize Bank gives (the same for every merchant). Each business enters its merchant id, PIN hash, API key and API password, and gives the bank `<PUBLIC_URL>/v1/payment-callbacks/ekyash/<slug>` for notifications (signed with the API password).
+- **Belize Bank bill payments.** A business turns them on in Getting paid → Reminders and paying, and gives the bank the three addresses (`/v1/billpay/<slug>/validate`, `/post`, `/reconcile`) and the token shown once. The bank's requests must reach the app over HTTPS within 30 seconds; a firewall rule that only lets the bank's network reach `/v1/billpay/` is recommended.
 - **QuickBooks Online.** Create one app at developer.intuit.com, set `QBO_CLIENT_ID`, `QBO_CLIENT_SECRET`, `QBO_ENVIRONMENT=production` and register `<PUBLIC_URL>/v1/integrations/quickbooks/callback`. Syncs run every minute from the worker's process; failures retry with backoff and are listed in each business's Settings → Integrations.
 - **Payment reminders** are emailed by housekeeping for businesses that turned them on (at most 50 per business per run, each step once per invoice). They need SMTP and `PUBLIC_URL` (for the pay links).
 - **Webhooks** go out every 5 seconds from the worker's process. A failing endpoint is switched off after 20 failures in a row; the business switches it back on.

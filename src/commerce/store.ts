@@ -49,7 +49,7 @@ export interface StoreSettings {
     cashOnDelivery: { enabled: boolean };
     payAtPickup: { enabled: boolean };
     /** Card or PayPal at checkout, through the business's own payment account. */
-    online: { enabled: boolean; provider: 'paypal' | 'test' };
+    online: { enabled: boolean; provider: 'paypal' | 'test' | 'belizebank' | 'ekyash' };
   };
 }
 

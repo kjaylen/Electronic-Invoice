@@ -5,7 +5,7 @@ import { api, type StoreSettings } from '../api';
 import { useT } from '../i18n';
 import { useToast } from '../toast';
 import { ErrorText, Field, money } from '../ui';
-import { DiscountCodes, PayPalConnect, StoreDomains } from './StoreExtras';
+import { type Accounts, BelizeBankConnect, DiscountCodes, EKyashConnect, PayPalConnect, StoreDomains } from './StoreExtras';
 
 const feeWithGst = (fee: string) => (/^\d+(\.\d{1,2})?$/.test(fee) ? (Math.round(Number(fee) * 100 * 1.125) / 100).toFixed(2) : '');
 
@@ -17,11 +17,15 @@ export function StoreSettingsTab() {
   const [busy, setBusy] = useState(false);
   const [accountsVersion, setAccountsVersion] = useState(0);
   const [testAvailable, setTestAvailable] = useState(false);
+  const [connected, setConnected] = useState<{ paypal: boolean; belizebank: boolean; ekyash: boolean }>({ paypal: false, belizebank: false, ekyash: false });
   useEffect(() => {
     void api<StoreSettings>('/v1/store-settings').then(setS).catch(setError);
   }, [accountsVersion]);
   useEffect(() => {
-    void api<{ test: { available: boolean } }>('/v1/payment-accounts').then((a) => setTestAvailable(a.test.available)).catch(() => {});
+    void api<Accounts>('/v1/payment-accounts').then((a) => {
+      setTestAvailable(a.test.available);
+      setConnected({ paypal: a.paypal.connected, belizebank: a.belizebank.connected, ekyash: a.ekyash.connected });
+    }).catch(() => {});
   }, []);
   if (!s) return error ? <ErrorText error={error} /> : <div className="skeleton" style={{ height: '12rem' }} />;
   const url = `${window.location.origin}/${s.slug}/shop`;
@@ -110,12 +114,16 @@ export function StoreSettingsTab() {
           <label className="row toggle"><input type="checkbox" checked={s.payments.online.enabled} onChange={(e) => setS({ ...s, payments: { ...s.payments, online: { ...s.payments.online, enabled: e.target.checked } } })} /> <strong>{t('Pay online at checkout')}</strong></label>
           {s.payments.online.enabled && (
             <Field label={t('Through')}>
-              <select value={s.payments.online.provider} onChange={(e) => setS({ ...s, payments: { ...s.payments, online: { ...s.payments.online, provider: e.target.value as 'paypal' | 'test' } } })}>
+              <select value={s.payments.online.provider} onChange={(e) => setS({ ...s, payments: { ...s.payments, online: { ...s.payments.online, provider: e.target.value as StoreSettings['payments']['online']['provider'] } } })}>
+                {(connected.belizebank || s.payments.online.provider === 'belizebank') && <option value="belizebank">{t('Belize Bank cards (BZ$)')}</option>}
+                {(connected.ekyash || s.payments.online.provider === 'ekyash') && <option value="ekyash">E-Kyash</option>}
                 <option value="paypal">PayPal</option>
                 {testAvailable && <option value="test">{t('Test payments (BTS test environment, no money moves)')}</option>}
               </select>
             </Field>
           )}
+          <BelizeBankConnect onChanged={() => setAccountsVersion((v) => v + 1)} />
+          <EKyashConnect onChanged={() => setAccountsVersion((v) => v + 1)} />
           <PayPalConnect onChanged={() => setAccountsVersion((v) => v + 1)} />
         </div>
       </section>

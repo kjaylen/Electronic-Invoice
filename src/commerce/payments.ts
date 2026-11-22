@@ -6,18 +6,24 @@
  * from the reconciliation run) we ask the provider whether it was paid. Only
  * then is the order marked paid and its BTS receipt issued.
  *
- *   test    a built-in pretend card page, for the BTS test environment and demos; no money moves
- *   paypal  PayPal Checkout (Orders v2). PayPal does not take Belize dollars, so the charge is in
- *           US dollars at the fixed rate of BZ$2 to US$1; the receipt stays in BZ$.
+ *   test        a built-in pretend card page, for the BTS test environment and demos; no money moves
+ *   paypal      PayPal Checkout (Orders v2). PayPal does not take Belize dollars, so the charge is in
+ *               US dollars at the fixed rate of BZ$2 to US$1; the receipt stays in BZ$.
+ *   belizebank  Belize Bank's card payment page, in BZ$ (belizebank.ts)
+ *   ekyash      E-Kyash, Belize Bank's wallet: a QR code or a tap on the phone, in BZ$ (ekyash.ts)
  */
 
 import { randomUUID } from 'node:crypto';
+import QRCode from 'qrcode';
 import type { Queryable } from '../db/database.ts';
 import { toBigInt } from '../db/database.ts';
 import type { KeyProtector } from '../db/keystore.ts';
 import { formatCents } from '../engine/decimal.ts';
+import { belizeBankGateway } from './belizebank.ts';
+import { type EKyashCredentials, ekyashGateway } from './ekyash.ts';
 
-export type Provider = 'paypal' | 'test';
+export type Provider = 'paypal' | 'test' | 'belizebank' | 'ekyash';
+export const PROVIDER_NAMES: Record<Provider, string> = { paypal: 'PayPal', test: 'Test payment', belizebank: 'Belize Bank card', ekyash: 'E-Kyash' };
 
 export class PaymentError extends Error {
   override name = 'PaymentError';
@@ -166,21 +172,57 @@ export interface GatewayOptions {
   /** Allow the test gateway for businesses in production (never, outside tests). */
   allowTestInProduction?: boolean;
   fetch?: typeof fetch;
+  /** The platform's public address, for providers that call back (Belize Bank). */
+  publicUrl?: string;
+  /** E-Kyash's API addresses, given by the bank (the same for every merchant). */
+  ekyash?: { sandboxUrl?: string; liveUrl?: string };
 }
 
 /** The gateway a business uses for a provider; throws when it is not set up. */
 export async function gatewayFor(db: Queryable, tenantId: string, provider: Provider, options: GatewayOptions): Promise<Gateway> {
   if (provider === 'test') {
     const env = (await db.query<{ environment: string }>('select environment from tenants where id = $1', [tenantId])).rows[0]?.environment;
-    if (env === 'production' && !options.allowTestInProduction) throw new PaymentError('Test payments are only for the BTS test environment; connect PayPal to take real payments');
+    if (env === 'production' && !options.allowTestInProduction) throw new PaymentError('Test payments are only for the BTS test environment; connect a payment provider to take real payments');
     return testGateway(db, options.testPage);
   }
   const r = (await db.query<{ public_id: string | null; credentials_encrypted: string | null; mode: 'sandbox' | 'live' }>(
-    "select public_id, credentials_encrypted, mode from payment_accounts where tenant_id = $1 and provider = 'paypal'", [tenantId],
+    'select public_id, credentials_encrypted, mode from payment_accounts where tenant_id = $1 and provider = $2', [tenantId, provider],
   )).rows[0];
-  if (!r?.public_id || !r.credentials_encrypted) throw new PaymentError('PayPal is not connected yet');
-  const secret = (await options.keys.decrypt(r.credentials_encrypted, `payments:${tenantId}:paypal`)).toString('utf8');
-  return paypalGateway({ clientId: r.public_id, secret, mode: r.mode, ...(options.fetch && { fetch: options.fetch }) });
+  if (!r?.public_id || !r.credentials_encrypted) throw new PaymentError(`${PROVIDER_NAMES[provider]} is not connected yet`);
+  const secret = (await options.keys.decrypt(r.credentials_encrypted, `payments:${tenantId}:${provider}`)).toString('utf8');
+  const fetchOpt = options.fetch ? { fetch: options.fetch } : {};
+  if (provider === 'belizebank') {
+    const callbackUrl = options.publicUrl ? new URL('v1/payment-callbacks/belizebank', options.publicUrl.endsWith('/') ? options.publicUrl : `${options.publicUrl}/`).toString() : undefined;
+    return belizeBankGateway({ userName: r.public_id, password: secret, mode: r.mode, ...fetchOpt, ...(callbackUrl && { callbackUrl }) });
+  }
+  if (provider === 'ekyash') {
+    const baseUrl = r.mode === 'live' ? options.ekyash?.liveUrl : options.ekyash?.sandboxUrl;
+    if (!baseUrl) throw new PaymentError('E-Kyash is not available on this server yet');
+    const creds = JSON.parse(secret) as Omit<EKyashCredentials, 'sid'>;
+    // The QR code and the button are shown on our own page, from the payment's details.
+    return ekyashGateway({ ...creds, sid: r.public_id, baseUrl, ...fetchOpt }, async (paymentId, display) => {
+      await db.query("update order_payments set detail = coalesce(detail, '{}'::jsonb) || $2::jsonb where id = $1", [paymentId, JSON.stringify({ ekyash: display })]);
+    });
+  }
+  return paypalGateway({ clientId: r.public_id, secret, mode: r.mode, ...fetchOpt });
+}
+
+/** Save a provider account (the secret part encrypted, bound to the business and provider). An empty secret keeps the current one. */
+export async function savePaymentAccount(db: Queryable, keys: KeyProtector, tenantId: string, provider: Exclude<Provider, 'test'>, input: { publicId: string; secret?: string; mode: 'sandbox' | 'live' }): Promise<void> {
+  const existing = (await db.query<{ credentials_encrypted: string | null }>('select credentials_encrypted from payment_accounts where tenant_id = $1 and provider = $2', [tenantId, provider])).rows[0];
+  const encrypted = input.secret ? await keys.encrypt(Buffer.from(input.secret), `payments:${tenantId}:${provider}`) : existing?.credentials_encrypted ?? null;
+  if (!encrypted) throw new PaymentError('Enter the password or secret');
+  await db.query(
+    `insert into payment_accounts (tenant_id, provider, public_id, credentials_encrypted, mode) values ($1, $2, $3, $4, $5)
+     on conflict (tenant_id, provider) do update set public_id = excluded.public_id, credentials_encrypted = excluded.credentials_encrypted, mode = excluded.mode, updated_at = now()`,
+    [tenantId, provider, input.publicId.trim(), encrypted, input.mode],
+  );
+}
+
+/** The stored secret of a provider account (E-Kyash's callback check needs its API password). */
+export async function paymentAccountSecret(db: Queryable, keys: KeyProtector, tenantId: string, provider: Exclude<Provider, 'test'>): Promise<string | null> {
+  const r = (await db.query<{ credentials_encrypted: string | null }>('select credentials_encrypted from payment_accounts where tenant_id = $1 and provider = $2', [tenantId, provider])).rows[0];
+  return r?.credentials_encrypted ? (await keys.decrypt(r.credentials_encrypted, `payments:${tenantId}:${provider}`)).toString('utf8') : null;
 }
 
 // ---------- payments for orders ----------
@@ -229,6 +271,13 @@ export async function startPayment(db: Queryable, gateway: Gateway, target: Paym
     await db.query("update order_payments set status = 'failed', detail = $2, updated_at = now() where id = $1", [paymentId, JSON.stringify({ error: (e as Error).message })]);
     throw e;
   }
+}
+
+/** For a wallet payment still waiting (E-Kyash): the QR code to scan and the button for phones. */
+export async function walletDisplay(p: PaymentRow): Promise<{ provider: 'ekyash'; qr: string; deepLink: string | null } | null> {
+  const display = (p.detail as { ekyash?: { qrData: string; deepLink: string | null } } | null)?.ekyash;
+  if (p.provider !== 'ekyash' || !display) return null;
+  return { provider: 'ekyash', qr: await QRCode.toDataURL(display.qrData, { margin: 1, width: 360, errorCorrectionLevel: 'M' }), deepLink: display.deepLink };
 }
 
 /** Ask the provider about a pending payment and record the answer. Returns the payment as it now stands. */

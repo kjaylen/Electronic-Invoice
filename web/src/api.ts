@@ -212,6 +212,7 @@ export interface ReceivableSettingsInfo {
   payOnline: boolean;
   instructions: string;
   onlineProvider: string | null;
+  onlineProviders?: string[];
 }
 
 export interface DocumentLine {
@@ -323,7 +324,7 @@ export interface StoreSettings {
   whatsapp: string;
   delivery: { enabled: boolean; zones: Array<{ name: string; fee: string }> };
   pickup: { enabled: boolean; instructions: string };
-  payments: { bankTransfer: { enabled: boolean; instructions: string }; cashOnDelivery: { enabled: boolean }; payAtPickup: { enabled: boolean }; online: { enabled: boolean; provider: 'paypal' | 'test' } };
+  payments: { bankTransfer: { enabled: boolean; instructions: string }; cashOnDelivery: { enabled: boolean }; payAtPickup: { enabled: boolean }; online: { enabled: boolean; provider: 'paypal' | 'test' | 'belizebank' | 'ekyash' } };
   slug?: string;
 }
 
