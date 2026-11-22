@@ -1,0 +1,8 @@
+{
+  "appId": "bz.einvoicing.till",
+  "appName": "eInvoicing Till",
+  "webDir": "www",
+  "android": { "allowMixedContent": false },
+  "ios": { "contentInset": "never", "scheme": "eInvoicing Till" },
+  "plugins": { "SplashScreen": { "launchAutoHide": true } }
+}

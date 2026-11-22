@@ -406,6 +406,74 @@ test('online store: a product with sizes and a photo, open the store, a buyer or
   expect(pdf.headers()['content-type']).toBe('application/pdf');
 });
 
+test('till: set a PIN, add a till and pair it from the link, sign in, open a shift, scan and sell, lock', async ({ page, browser }) => {
+  await logIn(page);
+  await page.goto(p('/settings?tab=account'));
+  await page.getByRole('button', { name: 'Set a PIN' }).click();
+  await page.getByLabel('New PIN').fill('4826');
+  await page.getByLabel('PIN again').fill('4826');
+  await page.getByRole('button', { name: 'Set PIN' }).click();
+  await expect(page.getByText('Your PIN is set')).toBeVisible();
+
+  await page.goto(p('/settings?tab=tills'));
+  await page.getByRole('button', { name: 'Add a till' }).click();
+  await page.getByRole('dialog').getByRole('textbox', { name: 'Name', exact: true }).fill('Front counter');
+  await page.getByRole('button', { name: 'Add and get a pairing code' }).click();
+  const code = (await page.locator('.pairing-code').textContent())!.trim();
+  expect(code).toMatch(/^[2-9A-Z]{4}-[2-9A-Z]{4}$/);
+  await page.getByRole('button', { name: 'Done' }).click();
+
+  // The till is another device: its own browser, opened from the pairing link.
+  const device = await browser.newContext();
+  const till = await device.newPage();
+  await till.goto(`/pos?pair=${code}`);
+  // With one person who has a PIN, the till goes straight to their PIN pad; otherwise they pick their name.
+  await expect(till.getByRole('heading', { name: /Who is selling\?|Rosa Owner/ })).toBeVisible();
+  if (await till.getByRole('heading', { name: 'Who is selling?' }).isVisible()) await till.getByRole('button', { name: 'Rosa Owner' }).click();
+  await expect(till.getByText('Enter your PIN')).toBeVisible();
+  for (const d of '4826') await till.keyboard.press(d);
+  await till.keyboard.press('Enter');
+  await expect(till.getByRole('button', { name: /Issue receipt/ })).toBeVisible();
+
+  await till.getByRole('button', { name: 'Open shift' }).click();
+  await till.getByLabel('Cash in the drawer to start (float)').fill('50');
+  await till.getByRole('dialog').getByRole('button', { name: 'Open shift' }).click();
+  await expect(till.locator('.shift-bar.open')).toContainText('Cash expected BZ$50.00');
+
+  // Devices: no automatic printing in this browser; a barcode scanner typing anywhere is read as one code.
+  await till.getByRole('button', { name: 'Devices', exact: true }).click();
+  await till.getByLabel('Print each receipt automatically').uncheck();
+  await till.locator('h1').click();
+  await till.keyboard.type('7501000000017', { delay: 5 });
+  await till.keyboard.press('Enter');
+  await expect(till.locator('.scan-test')).toContainText('7501000000017');
+
+  // Selling: a scan with the focus anywhere adds the item.
+  await till.getByRole('button', { name: 'Sell', exact: true }).click();
+  await expect(till.getByRole('combobox', { name: 'Add an item' })).toBeFocused();
+  await till.locator('.till-where').click();
+  await till.keyboard.type('7501000000017', { delay: 5 });
+  await till.keyboard.press('Enter');
+  await expect(till.locator('.cart-lines li')).toHaveCount(1);
+  await expect(till.locator('.cart .grand')).toContainText('BZ$3.94');
+  await till.getByLabel('Cash received').fill('5');
+  await till.getByRole('button', { name: /Issue receipt/ }).click();
+  await expect(till.locator('.last-sale')).toContainText('Authorized');
+  await expect(till.locator('.shift-bar.open')).toContainText('Cash expected BZ$53.94');
+
+  await till.getByRole('button', { name: 'Sales', exact: true }).click();
+  await expect(till.locator('.sale-list li').first()).toContainText('BZ$3.94');
+
+  // The web app shows the till, its shift and who is on it.
+  await page.reload();
+  await expect(page.locator('.till-admin-list')).toContainText('Front counter');
+  await expect(page.locator('.till-admin-list')).toContainText('Signed in: Rosa Owner');
+
+  await till.getByRole('button', { name: 'Lock' }).click();
+  await expect(till.getByRole('heading', { name: /Who is selling\?|Rosa Owner/ })).toBeVisible();
+  await device.close();
+});
+
 test('platform console: staff move the business to BTS production', async ({ page, browser }) => {
   const staff = readFileSync(`${root}.demo-e2e/platform-admin.txt`, 'utf8');
   const email = /Email: (\S+)/.exec(staff)![1]!;

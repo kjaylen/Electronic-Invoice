@@ -27,6 +27,7 @@ const TAGS: Array<{ prefix: string; name: string; description: string }> = [
   { prefix: '/v1/certificate', name: 'Business', description: '' },
   { prefix: '/v1/business', name: 'Business', description: '' },
   { prefix: '/v1/store-settings', name: 'Products', description: '' },
+  { prefix: '/v1/pos', name: 'Tills', description: 'The till apps (iOS, Android, desktop): add a till and pair it with a one-time code, see what it runs and has plugged in, remove it.' },
 ];
 
 const SUMMARIES: Record<string, string> = {
@@ -104,6 +105,15 @@ const SUMMARIES: Record<string, string> = {
   'POST /v1/shifts/{id}/cash': 'Put cash into or take cash out of the drawer, with a reason',
   'POST /v1/shifts/{id}/close': 'Close a shift with the counted cash (optionally by notes and coins)',
   'GET /v1/shifts/{id}/report.pdf': 'The end-of-day (Z) report, for the receipt printer or A4',
+  'GET /v1/pos/devices': 'Tills: waiting to pair or paired, last seen, open shift, who is signed in, the hardware they report',
+  'POST /v1/pos/devices': 'Add a till (with its own cash drawer) and get a one-time pairing code',
+  'POST /v1/pos/devices/{id}/code': 'A new pairing code for a till (pairing again replaces its token)',
+  'PATCH /v1/pos/devices/{id}': 'Rename a till or move it to another cash drawer',
+  'DELETE /v1/pos/devices/{id}': 'Remove a till: its token and everyone signed in on it stop working',
+  'PUT /v1/users/{id}/pin': 'Set someone\'s PIN for signing in on tills',
+  'DELETE /v1/users/{id}/pin': 'Remove someone\'s till PIN',
+  'PUT /v1/me/pin': 'Set your own till PIN',
+  'DELETE /v1/me/pin': 'Remove your own till PIN',
   'GET /v1/bill-payments': 'Belize Bank bill payments: set up or not, the addresses for the bank, payments to apply by hand',
   'POST /v1/bill-payments': 'Turn on Belize Bank bill payments, or issue a new token (shown once)',
   'PUT /v1/bill-payments': 'Change the invoice number field, or turn bill payments off',

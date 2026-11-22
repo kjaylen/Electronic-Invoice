@@ -1,0 +1,24 @@
+{
+  "name": "einvoicing-till-mobile",
+  "version": "1.0.0",
+  "private": true,
+  "description": "The till for iPhone, iPad and Android: sell, print receipts on network and Bluetooth printers, scan barcodes with the camera.",
+  "scripts": {
+    "web": "node scripts/copy-web.mjs",
+    "sync": "npm run web && cap sync",
+    "android": "npm run sync && cap open android",
+    "ios": "npm run sync && cap open ios",
+    "apk": "npm run sync && cd android && gradlew assembleDebug"
+  },
+  "dependencies": {
+    "@capacitor-mlkit/barcode-scanning": "8.2.2",
+    "@capacitor/android": "8.6.2",
+    "@capacitor/app": "8.1.2",
+    "@capacitor/core": "8.6.2",
+    "@capacitor/ios": "8.6.2",
+    "@capacitor/preferences": "8.0.1"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.6.2"
+  }
+}

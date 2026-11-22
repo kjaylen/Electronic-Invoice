@@ -13,6 +13,8 @@
  * USB and Bluetooth barcode scanners type like a keyboard and work everywhere.
  */
 
+import { Capacitor, registerPlugin } from '@capacitor/core';
+
 export type PrinterConnection = 'network' | 'bluetooth' | 'system' | 'browser';
 export type RawTarget = { connection: 'network'; host: string; port: number } | { connection: 'bluetooth'; address: string };
 
@@ -63,11 +65,6 @@ interface DesktopBridge {
 
 // ---------- Capacitor (iOS and Android) ----------
 
-interface CapacitorGlobal {
-  isNativePlatform(): boolean;
-  getPlatform(): 'ios' | 'android' | 'web';
-  registerPlugin<T>(name: string): T;
-}
 interface PreferencesPlugin {
   get(o: { key: string }): Promise<{ value: string | null }>;
   set(o: { key: string; value: string }): Promise<void>;
@@ -90,7 +87,6 @@ interface BarcodeScannerPlugin {
 declare global {
   interface Window {
     tillDesktop?: DesktopBridge;
-    Capacitor?: CapacitorGlobal;
   }
 }
 
@@ -146,13 +142,13 @@ async function detectPlatform(): Promise<Platform> {
       customerDisplay: desktop.display,
     };
   }
-  const cap = window.Capacitor;
-  if (cap?.isNativePlatform()) {
-    const kind = cap.getPlatform() === 'ios' ? 'ios' as const : 'android' as const;
-    const prefs = cap.registerPlugin<PreferencesPlugin>('Preferences');
-    const hardware = cap.registerPlugin<TillHardwarePlugin>('TillHardware');
-    const scanner = cap.registerPlugin<BarcodeScannerPlugin>('BarcodeScanner');
-    const version = await cap.registerPlugin<AppPlugin>('App').getInfo().then((i) => i.version).catch(() => '');
+  // The native plugins by name: Preferences and App (Capacitor's), BarcodeScanner (ML Kit), TillHardware (ours).
+  if (Capacitor.isNativePlatform()) {
+    const kind = Capacitor.getPlatform() === 'ios' ? 'ios' as const : 'android' as const;
+    const prefs = registerPlugin<PreferencesPlugin>('Preferences');
+    const hardware = registerPlugin<TillHardwarePlugin>('TillHardware');
+    const scanner = registerPlugin<BarcodeScannerPlugin>('BarcodeScanner');
+    const version = await registerPlugin<AppPlugin>('App').getInfo().then((i) => i.version).catch(() => '');
     return {
       kind,
       appVersion: version,

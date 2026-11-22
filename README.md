@@ -386,6 +386,74 @@ Neither is a tax document: each keeps the `POST /v1/documents` body it will issu
 - **Closing**: the drawer is counted blind, by notes and coins (which must add up) or as a total. Expected cash = float + cash takings (cash receipts and invoice payments, less cash refunds) + paid in − paid out; the difference (short or over) is kept with the shift. The opener or anyone allowed to adjust documents can close a shift.
 - **The report**: sales by document type and GST, takings by payment (from the receipt's payment means), invoice payments, refunds (credit notes against receipts), cancelled documents, the cash drawer and every cash movement. While open it is an X report; once closed, the Z report, printable on the 80 mm receipt printer or as an A4 PDF. Cashiers see their own shifts; managers see everyone's.
 
+## Tills: the iOS, Android and desktop apps (`src/api/pos.ts`, `web/src/pos`, `apps/`)
+
+One till app runs everywhere:
+- the desktop app (`apps/desktop`, Electron: Windows, macOS, Linux);
+- the mobile app (`apps/mobile`, Capacitor: iPhone, iPad, Android);
+- any browser at `/pos`.
+
+All three are the same web code (`web/src/pos`). It reuses the counter and the shift screens.
+
+- **Pairing:**
+  - A manager adds a till in Settings → Tills. Each till gets its own cash drawer (register).
+  - The manager gets a one-time code (30 minutes) and its QR code, which holds `https://<server>/pos?pair=<code>`.
+  - The app scans or types the code and receives its own device token. Only a hash of the token is kept.
+  - Pairing again replaces the token. Removing the till stops its token and every session on it.
+- **PINs:**
+  - People sign in on a till by tapping their name and entering a PIN of 4 to 8 digits. Runs like 1234 and repeats like 1111 are refused.
+  - The PIN is set in My account, by a manager in Users, or on the till with the person's password.
+  - Five wrong PINs lock that person out of that till for 15 minutes.
+  - Changing a PIN signs the person out of every till.
+  - The till locks itself after a few idle minutes (set per till).
+- **Sessions:**
+  - A PIN sign-in opens a session bound to the till, sent as `Authorization: Bearer pos_…`. It lasts 12 hours idle and 24 hours at most.
+  - The session is never accepted as a cookie.
+  - It has the person's role, limited to what a till does (`TILL_ROUTES`): selling, refunds, the cash drawer, the catalog, online orders and invoice payments. Settings, people, keys and exports stay in the web app.
+  - The apps call the API cross-origin from `capacitor://localhost`, `https://localhost` and `app://pos`. No cookies are allowed cross-origin.
+- **The till's drawer:**
+  - Sales, counter orders and invoice payments made on a till attach to the open shift of the till's register, whoever opened it. Cashiers share the drawer.
+  - Anyone signed in on that till may record cash in and out and close the shift.
+  - In the web app, a person's own shift stays theirs.
+- **Receipts:**
+  - Printed from the document as signed (`GET /v1/documents/:id/view`, with the printed copy's authorization and regulatory texts), laid out like the PDF receipt.
+  - The QR code is 22 mm, error correction M.
+  - Encoded as ESC/POS for thermal printers, or as HTML for installed and browser printers (`web/src/pos/ticket.ts`).
+  - Options per printer:
+    - 58 or 80 mm paper;
+    - accented letters as plain letters, code page 850 or Windows-1252;
+    - the QR drawn by the printer or sent as a picture;
+    - cut;
+    - a cash drawer kicked through the printer.
+  - Per till:
+    - print automatically;
+    - two copies;
+    - open the drawer for cash;
+    - print the Z report at close;
+    - a message at the bottom.
+- **Devices** (managers, on the till):
+  - Receipt printers:
+    - network (port 9100, local addresses only): desktop, Android, iOS;
+    - Bluetooth (paired, serial profile): Android;
+    - installed (USB) printers, printed without a dialog: desktop;
+    - the browser's print dialog: the web till.
+  - Cash drawer: open and test.
+  - Barcode scanners:
+    - USB and Bluetooth scanners that type like a keyboard, read anywhere on the screen as a burst of keys;
+    - the camera: ML Kit in the apps, BarcodeDetector in browsers.
+  - Customer display: a second screen, desktop.
+  - The till reports what it has to the server (`POST /v1/pos/heartbeat`), and Settings → Tills shows it.
+- **Online only:**
+  - Every sale is signed and sent to BTS through the server.
+  - When BTS is out, the server's contingency mode issues and queues documents as usual.
+  - When the till has no connection, it says so.
+- **Building the apps:** see `apps/desktop/README.md` and `apps/mobile/README.md`. `VITE_TILL_SERVER` pre-fills the server address.
+- **Tests:**
+  - `test/pos.test.ts`: pairing, PINs, lockout, the shared drawer, the route limits, CORS, removal.
+  - `test/till-print.test.ts`: a real receipt as ESC/POS and HTML, the Z report.
+  - The e2e till test: pair from the link, PIN, shift, scan, sell, lock.
+  - `apps/desktop` `npm run smoke`.
+
 ## Platform console (`/admin`)
 
 For the team that runs this service, not for businesses. Staff move a business from the BTS **test** environment to **production** once BTS has approved it; before, that was a manual database step.
