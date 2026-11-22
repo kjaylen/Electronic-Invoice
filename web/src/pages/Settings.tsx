@@ -12,6 +12,7 @@ import { assignableRoles, ROLE_DESCRIPTION, ROLE_LABEL } from '../permissions';
 import { useSession } from '../session';
 import { useToast } from '../toast';
 import { DISTRICTS, ErrorText, Field, Modal, Segmented, usePageTitle } from '../ui';
+import { StoreSettingsTab } from './StoreSettings';
 
 function readAsBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -523,6 +524,14 @@ function describe(t: T, e: AuditEvent): string {
     'apikey.created': t('Created the API key "{target}"', { target }),
     'apikey.revoked': t('Revoked an API key'),
     'document.cancelled': t('Cancelled document {target}', { target }),
+    'business.went_live': t('Moved this business to BTS production'),
+    'business.back_to_test': t('Moved this business back to the BTS test environment'),
+    'store.opened': t('Opened the online store'),
+    'store.closed': t('Closed the online store'),
+    'order.placed': t('Order {target} was placed online', { target }),
+    'order.paid': t('Marked order {target} paid', { target }),
+    'order.fulfilled': t('Marked order {target} delivered', { target }),
+    'order.cancelled': t('Cancelled order {target}', { target }),
   };
   return texts[e.action] ?? e.action;
 }
@@ -572,7 +581,7 @@ function ActivityTab() {
             <li key={e.id} className={e.action === 'login.failed' ? 'warn' : ''}>
               <time dateTime={e.at} className="mono small muted">{new Date(e.at).toLocaleString()}</time>
               <div>
-                <strong>{e.user?.name ?? t('Someone')}</strong> {describe(t, e).charAt(0).toLowerCase() + describe(t, e).slice(1)}
+                <strong>{e.user?.name ?? (e.action.startsWith('business.') && e.action !== 'business.updated' && e.action !== 'business.created' ? t('Platform staff') : e.action === 'order.placed' ? t('A buyer') : t('Someone'))}</strong> {describe(t, e).charAt(0).toLowerCase() + describe(t, e).slice(1)}
                 {changes(t, e) && <div className="small muted">{changes(t, e)}</div>}
               </div>
               {e.ip && <span className="mono small muted ip">{e.ip}</span>}
@@ -662,7 +671,7 @@ function ApiKeysTab() {
 
 // ---------- the page ----------
 
-type Tab = 'account' | 'business' | 'users' | 'activity' | 'keys';
+type Tab = 'account' | 'business' | 'store' | 'users' | 'activity' | 'keys';
 
 export function Settings() {
   const t = useT();
@@ -672,6 +681,7 @@ export function Settings() {
   const tabs: Array<[Tab, string]> = [
     ['account', t('My account')],
     ['business', t('Business')],
+    ...(can('business.manage') ? [['store', t('Online store')] as [Tab, string]] : []),
     ...(can('users.manage') ? [['users', t('Users')] as [Tab, string]] : []),
     ...(can('audit.view') ? [['activity', t('Activity')] as [Tab, string]] : []),
     ...(can('apikeys.manage') ? [['keys', t('API keys')] as [Tab, string]] : []),
@@ -688,6 +698,7 @@ export function Settings() {
       </div>
       {tab === 'account' && <AccountTab />}
       {tab === 'business' && <BusinessTab />}
+      {tab === 'store' && <StoreSettingsTab />}
       {tab === 'users' && <UsersTab />}
       {tab === 'activity' && <ActivityTab />}
       {tab === 'keys' && <ApiKeysTab />}

@@ -79,7 +79,9 @@ export function NewDocument() {
 
   const draftKey = `etd.draft.${session?.business.id}.${session?.user.id}.${type}${refId ? `.ref.${refId}` : ''}`;
 
-  useEffect(() => setType(initialType), [initialType]);
+  useEffect(() => {
+    setType(initialType);
+  }, [initialType]);
 
   // Restore an unfinished draft for this business and document type (kept on this device).
   useEffect(() => {

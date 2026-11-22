@@ -213,7 +213,9 @@ export function Combobox<T extends { id: string }>(props: {
   const listId = useId();
   const textRef = useRef(text);
   textRef.current = text;
-  useEffect(() => setText(props.value ?? ''), [props.value]);
+  useEffect(() => {
+    setText(props.value ?? '');
+  }, [props.value]);
   useEffect(() => {
     if (!open || q.trim().length < (props.minLength ?? 1)) {
       setResults([]);

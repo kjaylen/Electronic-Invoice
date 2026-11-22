@@ -19,7 +19,8 @@
     "web:build": "vite build --config web/vite.config.ts",
     "demo": "node --disable-warning=ExperimentalWarning scripts/demo.ts",
     "icons": "node --disable-warning=ExperimentalWarning scripts/make-icons.ts",
-    "e2e": "npm run web:build && playwright test"
+    "e2e": "npm run web:build && playwright test",
+    "platform-admin": "node --disable-warning=ExperimentalWarning scripts/platform-admin.ts"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.17",

@@ -66,13 +66,17 @@ export function Counter() {
   const [error, setError] = useState<unknown>(null);
   const search = useRef<HTMLInputElement>(null);
 
-  useEffect(() => store.set(storageKey, sale), [sale, storageKey]);
+  useEffect(() => {
+    store.set(storageKey, sale);
+  }, [sale, storageKey]);
   // Ready to scan as soon as the page opens.
   useEffect(() => {
     const timer = setTimeout(() => search.current?.focus(), 120);
     return () => clearTimeout(timer);
   }, []);
-  useEffect(() => store.set('etd.counter.autoprint', autoPrint), [autoPrint]);
+  useEffect(() => {
+    store.set('etd.counter.autoprint', autoPrint);
+  }, [autoPrint]);
   useEffect(() => {
     void api<Page<Item>>('/v1/items?favorite=true&limit=24').then(async (r) => {
       setFavorites(r.data.length ? r.data : (await api<Page<Item>>('/v1/items?limit=12')).data);

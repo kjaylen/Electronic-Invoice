@@ -18,6 +18,7 @@ npm run web:dev   # web app with hot reload (proxies the API on :3000)
 npm run web:build # build the web app into web/dist
 npm run e2e       # browser tests (Playwright; needs the Docker database, see "Web app")
 npm run icons     # redraw the app icons in web/public
+npm run platform-admin -- add you@example.com "Your Name"   # a platform console account (see "Platform console")
 npm test          # unit and API tests
 npm run typecheck # tsc --noEmit
 npm run check     # both
@@ -246,7 +247,8 @@ A React + TypeScript app (Vite) served by the API server from `web/dist`. It's b
   - **Documents:** search by number, customer name or TIN; filters for dates, type, status and customer, kept in the address bar; CSV download.
   - **Customers and items:** add, edit, archive; customers link to their documents.
   - **Reports:** this month, last month, quarter, year or custom; sales and GST collected, sales per day, GST by rate for the GST return, top customers and items; CSV for each.
-  - **Settings:** my account (language, password, sign out everywhere); business (details, address, certificate); users; activity; API keys.
+  - **Settings:** my account (language, password, sign out everywhere); business (details, address, certificate); online store; users; activity; API keys.
+  - **Products and Orders:** see "Online store" below.
 - **Live status:** a bar under the top menu appears while BTS is unreachable (with the queue count), when it comes back, and when the device is offline.
 - **Spanish:** every screen is in English and Spanish (`web/src/es.ts`). The choice is per device, defaulting to the browser's language. Emails are in English for now.
 - **Installable:** a web app manifest, icons and a service worker that caches the app shell (never API data), so it installs on phones and desktops and opens fast.
@@ -276,7 +278,9 @@ npm run demo            # http://localhost:3000
 - **Business and certificate:** on the start page choose "Create a business", use TIN **123456**, and upload `test/certs/signer-123456.pfx`, password `test-pfx-password`. This is a throwaway test certificate. Then add users under Settings → Users.
 - **BTS stand-in:** it authorizes every document.
 - **Outage simulation:** create the file `.demo/bts-down` and new documents go into contingency. Delete it, and the worker sends them within about 15 seconds.
-- **Emails** (password resets, welcome links, documents) are written to `.demo/outbox` as `.eml` files; open them with any mail program.
+- **Emails** (password resets, welcome links, documents, order confirmations) are written to `.demo/outbox` as `.eml` files; open them with any mail program.
+- **Platform console:** `http://localhost:3000/admin`; the demo creates a staff account on first start and saves its sign-in in `.demo/platform-admin.txt`.
+- **Online store:** add a product under Products, then Settings → Online store → Open the store, and shop at `http://localhost:3000/<your-address>/shop`. Mark the order paid under Orders to issue its receipt.
 
 ### Browser tests
 
@@ -285,7 +289,62 @@ docker compose up -d db
 npm run e2e
 ```
 
-Builds the web app, starts the demo on port 3100 with a fresh `einvoicing_e2e` database, and drives a real browser through sign-up, onboarding, the catalog, a counter sale, an invoice with a restored draft, emailing, search, reports, adding users (welcome link and temporary password, first sign-in, deactivation, the activity log), password reset, Spanish, accessibility checks, installability and the phone layout. On Windows it uses the installed Microsoft Edge; elsewhere run `npx playwright install chromium` first (or set `PW_CHANNEL`).
+Builds the web app, starts the demo on port 3100 with a fresh `einvoicing_e2e` database, and drives a real browser through sign-up, onboarding, the catalog, a counter sale, an invoice with a restored draft, emailing, search, reports, adding users (welcome link and temporary password, first sign-in, deactivation, the activity log), password reset, Spanish, accessibility checks, installability, the online store (a product with sizes and a photo, opening the store, a buyer's order, paid becoming a BTS receipt), the platform console moving the business to production, and the phone layout, storefront included. On Windows it uses the installed Microsoft Edge; elsewhere run `npx playwright install chromium` first (or set `PW_CHANNEL`).
+
+## Online store (`src/commerce`, phase 1)
+
+Every business can open an online store at `app.example.bz/<slug>/shop`. Its defining feature: **a paid order becomes a BTS-authorized document**, a tax receipt, or a tax invoice when the buyer gives a TIN.
+
+- **Products** group items: each **variant** (size, colour) is an item with its own price (before GST), GST category, your code, barcode and optional stock count. Variants also sell at the counter and on invoices. Products have a description, up to 10 photos (JPEG, PNG or WebP; the type is checked from the file's bytes, not its name), a status (draft or on sale), and their own address (`/shop/products/<handle>`).
+- **Storefront:** product grid, search, product pages with option pickers and stock hints ("Only 3 left"), a cart kept on the buyer's device, and checkout. Prices are shown with GST included. Every total comes from the same engine calculation that produces the e-invoice, so the quote, the order and the receipt agree to the cent.
+- **Checkout:**
+  - delivery to the zones the business sets (each with a fee before GST, which becomes a standard-rated line on the receipt) or pickup
+  - payment by bank transfer (the bank details are shown after ordering, with the order number as reference), cash on delivery, or at pickup
+  - an optional TIN and business name, for a tax invoice
+  - stock is reserved in the same database transaction that creates the order, so the last item cannot be sold twice
+- **Orders:** numbered per business (#1001 and up). The buyer gets an emailed confirmation and a private order page (an unguessable link) that shows progress and, once paid, the receipt PDF. The business is emailed about each new order.
+- **Staff** see a to-do list (unpaid, to deliver), mark an order **paid** (this issues the BTS document and emails it to the buyer; doing it twice never issues twice, and a rejected document can be issued again), mark it delivered or picked up, or cancel an unpaid order (its stock goes back). Paid orders are refunded with a credit note (phase 2).
+- **Roles:** managers and cashiers handle orders; managers and above manage products; owners and admins configure the store. API keys can sync products and handle orders.
+
+| Method and path | What it does |
+|---|---|
+| `GET/POST /v1/products`, `GET/PUT/DELETE /v1/products/:id` | Products with their variants (missing variants are archived on `PUT`); `DELETE` archives |
+| `POST /v1/products/:id/images`, `POST .../images/:imageId/cover`, `DELETE .../images/:imageId` | Photos (Base64 in JSON, up to 5 MB) |
+| `GET/PUT /v1/store-settings` | Open or close the store, delivery zones, pickup, payment methods, notifications |
+| `GET /v1/orders`, `GET /v1/orders/:id` | Orders; `view=to_do` (default), `unpaid`, `unfulfilled`, `done`, `cancelled`, `all`; `q` for number, name, phone |
+| `POST /v1/orders/:id/paid`, `/fulfilled`, `/cancel` | Payment received (issues the document), delivered or picked up, cancel an unpaid order |
+| `GET /v1/store/:slug`, `/products`, `/products/:handle`, `/images/:id` | The public storefront (no sign-in; only while the store is open and for products on sale) |
+| `POST /v1/store/:slug/quote`, `POST /v1/store/:slug/orders` | Price a cart; place an order (rate-limited per IP) |
+| `GET /v1/store/:slug/orders/:number?t=`, `.../document?t=` | The buyer's order page and receipt PDF (the token from the order link) |
+
+**Phase 2 (next):** card payments through a Belizean gateway and PayPal, refunds as credit notes, discount codes, custom domains. **Phase 3:** theme editor, search-engine friendly pages, social catalogs, abandoned-cart reminders, customer accounts, one stock count for the counter and the store.
+
+## Platform console (`/admin`)
+
+For the team that runs this service, not for businesses. Staff move a business from the BTS **test** environment to **production** once BTS has approved it; before, that was a manual database step.
+
+- **Staff accounts** are created from the command line, never by sign-up: `npm run platform-admin -- add|reset|disable|enable|list` (uses `DATABASE_URL`; prints a generated password once, or set `PLATFORM_ADMIN_PASSWORD`). Staff sign in at `<PUBLIC_URL>/admin` with their own `etd_admin` cookie (`SameSite=Strict`), separate from business accounts. Failed sign-ins are throttled.
+- **Businesses:** every business with its TIN, address, environment, users, authorized test documents and certificate expiry; search and filter.
+- **Readiness for production**, checked again inside the switch itself:
+  - required: an active, valid certificate for the business's TIN
+  - required: nothing still on its way to BTS test (no pending or contingency documents, no pending cancellations, no open outage)
+  - recommended: at least one authorized document in the test environment
+- **Going live** needs the BTS approval reference and the business's TIN typed again. Optionally it retires the current certificate, for when BTS issues a separate production certificate. Then:
+  - documents go to BTS production; **numbering starts again at 000000001 with a fresh sequence-hash chain**, because test and production are separate BTS systems. Series and document numbers are now unique per environment, and the ETDUI already carries the environment.
+  - the business's document list and reports show only production documents (test ones stay available with `?environment=test`)
+  - its owners are emailed, and the change appears in the business's own activity log and in the staff log
+- **Going back to test** is allowed only while nothing has been issued in production.
+- **Staff log:** every staff sign-in and change, permanent.
+
+| Method and path | What it does |
+|---|---|
+| `POST /v1/platform/auth/login`, `/logout`, `GET /v1/platform/auth/session` | Staff sign-in |
+| `GET /v1/platform/tenants`, `GET /v1/platform/tenants/:id` | Businesses; one business with its readiness checks and staff history |
+| `POST /v1/platform/tenants/:id/go-live` | `{ confirmTin, approvalReference, retireCertificate? }` |
+| `POST /v1/platform/tenants/:id/back-to-test` | `{ confirmTin, reason }` |
+| `GET /v1/platform/audit` | The staff log |
+
+To confirm with BTS: whether production numbering should restart at 1 (what this does) and whether production needs a different certificate (the console lets staff choose).
 
 ## Printed copy (`src/render`, manual 3.4 and 3.5)
 
@@ -351,7 +410,6 @@ These were placeholders in the spec and are now confirmed against the manual:
 ## Notes for the next modules
 
 - **Web app, next:**
-  - An admin console for moving businesses to production.
   - Optional two-step sign-in for owners and admins.
   - Emails in Spanish.
   - Login rate limits and email limits shared across instances (they are per process today).

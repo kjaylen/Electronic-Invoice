@@ -4,8 +4,8 @@
  *
  *   owner       everything; the only role that can manage owners and admins
  *   admin       everything except managing owners and admins
- *   manager     issue all documents, cancel, send, catalog, reports
- *   cashier     issue invoices and receipts, send them; read the catalog
+ *   manager     issue all documents, cancel, send, catalog and products, online orders, reports
+ *   cashier     issue invoices and receipts, send them, handle online orders; read the catalog
  *   accountant  read documents and reports; download records
  *
  * API keys act for the business's software: they can issue, cancel, send,
@@ -23,7 +23,8 @@ export const PERMISSIONS = [
   'documents.adjust', // credit and debit notes
   'documents.cancel',
   'documents.send',
-  'catalog.manage', // add, edit, archive customers and items
+  'catalog.manage', // add, edit, archive customers, items and products
+  'orders.manage', // online orders: mark fulfilled, cancel unpaid ones
   'reports.view',
   'business.manage', // business details and the BTS certificate
   'users.manage',
@@ -36,10 +37,10 @@ const ALL = new Set<Permission>(PERMISSIONS);
 export const ROLE_PERMISSIONS: Record<Role | 'api', ReadonlySet<Permission>> = {
   owner: ALL,
   admin: ALL,
-  manager: new Set(['documents.issue', 'documents.adjust', 'documents.cancel', 'documents.send', 'catalog.manage', 'reports.view']),
-  cashier: new Set(['documents.issue', 'documents.send']),
+  manager: new Set(['documents.issue', 'documents.adjust', 'documents.cancel', 'documents.send', 'catalog.manage', 'orders.manage', 'reports.view']),
+  cashier: new Set(['documents.issue', 'documents.send', 'orders.manage']),
   accountant: new Set(['reports.view']),
-  api: new Set(['documents.issue', 'documents.adjust', 'documents.cancel', 'documents.send', 'catalog.manage', 'reports.view', 'business.manage']),
+  api: new Set(['documents.issue', 'documents.adjust', 'documents.cancel', 'documents.send', 'catalog.manage', 'orders.manage', 'reports.view', 'business.manage']),
 };
 
 /** Higher can manage lower. Owners manage everyone; admins manage managers, cashiers and accountants. */

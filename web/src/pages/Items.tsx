@@ -80,9 +80,9 @@ function ItemForm(props: { initial?: Item; onSaved: (i: Item) => void; onCancel:
   );
 }
 
+/** The plain item list (counter and invoices). Shown inside the Products page. */
 export function Items() {
   const t = useT();
-  usePageTitle(t('Items'));
   const toast = useToast();
   const { can } = useSession();
   const manage = can('catalog.manage');
@@ -132,11 +132,11 @@ export function Items() {
   return (
     <div className="stack">
       <div className="row">
-        <div><span className="kicker">{t('Catalog')}</span><h1>{t('Items')}</h1></div>
+        <div><h2>{t('All items')}</h2></div>
         <span className="spacer" />
         {manage && <button onClick={() => setEditing('new')}>{t('Add item')}</button>}
       </div>
-      <p className="muted">{t('Products and services you sell often. Star an item to make it a quick button at the counter.')}</p>
+      <p className="muted small">{t('Everything you sell at the counter and on invoices, including each variant of your products. Star an item to make it a quick button at the counter.')}</p>
       <input type="search" placeholder={t('Search by name, code or barcode')} value={q} onChange={(e) => setQ(e.target.value)} aria-label={t('Search items')} />
       <ErrorText error={error} />
       <section className="card">

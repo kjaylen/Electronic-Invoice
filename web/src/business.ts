@@ -8,7 +8,7 @@
 import { store } from './storage';
 
 /** First path segments that are the app's own pages, not businesses. */
-const APP_PAGES = new Set(['signup']);
+const APP_PAGES = new Set(['signup', 'admin']);
 const SLUG = /^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$/;
 
 function fromLocation(): string | null {

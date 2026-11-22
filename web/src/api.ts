@@ -69,7 +69,7 @@ export const isSignedOut = (e: unknown) => e instanceof ApiError && e.status ===
 
 export type Role = 'owner' | 'admin' | 'manager' | 'cashier' | 'accountant';
 export type Permission =
-  | 'documents.issue' | 'documents.adjust' | 'documents.cancel' | 'documents.send' | 'catalog.manage'
+  | 'documents.issue' | 'documents.adjust' | 'documents.cancel' | 'documents.send' | 'catalog.manage' | 'orders.manage'
   | 'reports.view' | 'business.manage' | 'users.manage' | 'apikeys.manage' | 'audit.view';
 
 export interface Account {
@@ -210,4 +210,84 @@ export interface Summary {
   byType: Array<{ type: string; typeName: string; documents: number; net: string; gst: string; tax: string; total: string }>;
   byRate: Array<{ category: 'S' | 'Z' | 'E'; name: string; net: string; gst: string }>;
   byDay: Array<{ date: string; documents: number; total: string }>;
+}
+
+// ---------- online store ----------
+
+export interface Variant {
+  id?: string;
+  title?: string | null;
+  option1: string | null;
+  option2: string | null;
+  price: string;
+  priceWithGst?: string;
+  gstCategory: 'S' | 'Z' | 'E';
+  exemptionReasonCode: string | null;
+  unitCode: string;
+  sellerCode: string | null;
+  barcode: string | null;
+  stock: number | null;
+}
+
+export interface Product {
+  id: string;
+  title: string;
+  handle: string;
+  description: string;
+  status: 'draft' | 'active' | 'archived';
+  option1Name: string | null;
+  option2Name: string | null;
+  variants: Variant[];
+  images: Array<{ id: string; contentType: string; bytes: number }>;
+}
+
+export interface ProductSummary {
+  id: string;
+  title: string;
+  handle: string;
+  status: 'draft' | 'active' | 'archived';
+  variants: number;
+  priceFrom: string | null;
+  priceTo: string | null;
+  stock: number | null;
+  imageId: string | null;
+}
+
+export interface StoreSettings {
+  enabled: boolean;
+  tagline: string;
+  about: string;
+  notifyEmail: string;
+  whatsapp: string;
+  delivery: { enabled: boolean; zones: Array<{ name: string; fee: string }> };
+  pickup: { enabled: boolean; instructions: string };
+  payments: { bankTransfer: { enabled: boolean; instructions: string }; cashOnDelivery: { enabled: boolean }; payAtPickup: { enabled: boolean } };
+  slug?: string;
+}
+
+export type PaymentMethod = 'bank_transfer' | 'cash_on_delivery' | 'pay_at_pickup';
+
+export interface Order {
+  id: string;
+  number: number;
+  status: 'open' | 'cancelled';
+  paymentStatus: 'unpaid' | 'paid';
+  fulfillmentStatus: 'unfulfilled' | 'fulfilled';
+  paymentMethod: PaymentMethod;
+  fulfillment: 'delivery' | 'pickup';
+  deliveryZone: string | null;
+  deliveryFee: string;
+  customer: { name: string; email: string | null; phone: string };
+  address: { street: string; city: string; districtCode: string; districtName: string | null } | null;
+  business: { tin: string; name: string } | null;
+  note: string | null;
+  totals: { lineExtension: string; gst: string; total: string };
+  documentId: string | null;
+  document?: { id: string; status: DocStatus; type: string; series: string; number: string } | null;
+  lines?: Array<{ lineNumber: number; variantId: string | null; productTitle: string; variantTitle: string | null; quantity: number; unitPrice: string; gstCategory: string; total: string }>;
+  createdAt: string;
+  paidAt: string | null;
+  fulfilledAt: string | null;
+  cancelledAt: string | null;
+  cancelReason: string | null;
 }

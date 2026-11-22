@@ -6,6 +6,8 @@
  *   /v1/auth/...                    signing in to a business (web app)
  *   /v1/...                         everything else: Bearer <tenant API key>, or a session cookie
  *                                   (the business named by X-Business or ?b=<slug>)
+ *   /v1/platform/...                the platform console, for our staff (own accounts and cookie)
+ *   /v1/store/:slug/...             a business's online store, no auth
  *   /d/:token                       a shared document's printed copy, no auth (the token is the permission)
  *   /*                              the web app (static files), when webRoot is set
  *
@@ -31,7 +33,11 @@ import type { ServerContext } from './context.ts';
 import { registerDocumentRoutes, registerPublicDocumentRoutes } from './documents.ts';
 import { ApiError, errorHandler } from './errors.ts';
 import type { Role } from './permissions.ts';
+import { registerOrderRoutes } from './orders.ts';
+import { registerPlatformRoutes } from './platform.ts';
+import { registerProductRoutes } from './products.ts';
 import { registerReportRoutes } from './reports.ts';
+import { registerStorefrontRoutes } from './storefront.ts';
 import { registerUserRoutes } from './users.ts';
 
 export type Principal = 'api' | Role;
@@ -166,10 +172,18 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     registerDocumentRoutes(tenant, deps, ctx);
     registerUserRoutes(tenant, deps, ctx);
     registerBusinessRoutes(tenant, deps, ctx);
+    registerProductRoutes(tenant, deps);
+    registerOrderRoutes(tenant, deps, ctx);
     registerReportRoutes(tenant, deps);
   }, { prefix: '/v1' });
 
   registerPublicDocumentRoutes(app, deps);
+
+  // The platform console, for our own staff.
+  await app.register(async (platform) => registerPlatformRoutes(platform, deps, ctx), { prefix: '/v1/platform' });
+
+  // The public storefront: no sign-in, scoped by the business's address.
+  await app.register(async (store) => registerStorefrontRoutes(store, deps, ctx), { prefix: '/v1/store' });
 
   // The web app: static files, and index.html for any other GET so client-side routes work.
   const webRoot = options.webRoot;

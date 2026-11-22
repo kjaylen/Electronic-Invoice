@@ -258,7 +258,7 @@ async function documentLines(deps: PipelineDeps, tenantId: string, documentId: s
 }
 
 /** The printed copy, for any route that serves or sends it. */
-async function printedCopy(deps: PipelineDeps, tenantId: string, documentId: string, format: 'sheet' | 'receipt' = 'sheet') {
+export async function printedCopy(deps: PipelineDeps, tenantId: string, documentId: string, format: 'sheet' | 'receipt' = 'sheet') {
   const row = (await deps.db.query<{ signed_xml: string; status: string; protocol_number: string | null }>(
     'select signed_xml, status, protocol_number from documents where id = $1 and tenant_id = $2', [documentId, tenantId],
   )).rows[0];
@@ -268,6 +268,49 @@ async function printedCopy(deps: PipelineDeps, tenantId: string, documentId: str
   const common = row.protocol_number ? { protocolNumber: row.protocol_number } : {};
   const pdf = format === 'receipt' ? await renderReceipt(view, common) : await renderSheet(view, common);
   return { pdf, view, signedXml: row.signed_xml, filename: `${view.typeName.replace(/ /g, '-')}-${view.series}-${view.number}` };
+}
+
+/**
+ * Email a document's printed copy (PDF) and signed XML, replies going to the
+ * business, and record it. Throws on failure (after recording the failure).
+ */
+export async function sendDocumentEmail(
+  deps: PipelineDeps,
+  ctx: ServerContext,
+  tenantId: string,
+  documentId: string,
+  opts: { to: string; message?: string; userId?: string | null },
+): Promise<string> {
+  const copy = await printedCopy(deps, tenantId, documentId);
+  const biz = (await deps.db.query<{ name: string; email: string }>('select coalesce(trade_name, legal_name) as name, email from tenants where id = $1', [tenantId])).rows[0]!;
+  const v = copy.view;
+  const title = `${v.typeName} ${v.series}-${v.number}`;
+  const lines = [
+    `Please find attached ${v.typeName.toLowerCase()} ${v.series}-${v.number} from ${biz.name}.`,
+    ...(opts.message?.trim() ? [opts.message.trim()] : []),
+    'The PDF is the printed copy. The XML file is the electronic tax document as authorized by the Belize Tax Service.',
+  ];
+  const id = randomUUID();
+  try {
+    await ctx.mailer.send({
+      to: opts.to,
+      replyTo: biz.email,
+      subject: `${title} from ${biz.name}`,
+      text: lines.join('\n\n'),
+      html: simpleHtml({ heading: title, paragraphs: lines }),
+      attachments: [
+        { filename: `${copy.filename}.pdf`, content: copy.pdf, contentType: 'application/pdf' },
+        { filename: `${copy.filename}.xml`, content: copy.signedXml, contentType: 'application/xml' },
+      ],
+    });
+  } catch (e) {
+    await deps.db.query(`insert into document_messages (id, tenant_id, document_id, channel, recipient, status, error, sent_by) values ($1, $2, $3, 'email', $4, 'failed', $5, $6)`,
+      [id, tenantId, documentId, opts.to, String((e as Error).message ?? e).slice(0, 500), opts.userId ?? null]);
+    throw e;
+  }
+  await deps.db.query(`insert into document_messages (id, tenant_id, document_id, channel, recipient, status, sent_by) values ($1, $2, $3, 'email', $4, 'sent', $5)`,
+    [id, tenantId, documentId, opts.to, opts.userId ?? null]);
+  return id;
 }
 
 /** GET /d/:token: the printed copy behind a share link. No login; the 256-bit token is the permission. */
@@ -371,7 +414,7 @@ export function registerDocumentRoutes(app: FastifyInstance, deps: PipelineDeps,
     };
   });
 
-  app.get<{ Querystring: { limit?: string; cursor?: string; status?: string; type?: string; q?: string; from?: string; to?: string; customerId?: string } }>(
+  app.get<{ Querystring: { limit?: string; cursor?: string; status?: string; type?: string; q?: string; from?: string; to?: string; customerId?: string; environment?: 'test' | 'production' | 'all' } }>(
     '/documents',
     {
       schema: {
@@ -382,6 +425,7 @@ export function registerDocumentRoutes(app: FastifyInstance, deps: PipelineDeps,
           from: dateSchema,
           to: dateSchema,
           customerId: uuid,
+          environment: { type: 'string', enum: ['test', 'production', 'all'] },
         }),
       },
     },
@@ -389,6 +433,10 @@ export function registerDocumentRoutes(app: FastifyInstance, deps: PipelineDeps,
       const page = parsePage(request.query);
       const params: unknown[] = [request.tenantId];
       let where = 'd.tenant_id = $1';
+      // After going live, the list shows production documents unless test ones are asked for.
+      const env = request.query.environment ?? 'current';
+      if (env === 'current') where += ` and d.reception_env = (select case environment when 'production' then '01' else '02' end from tenants where id = $1)`;
+      else if (env !== 'all') where += env === 'production' ? ` and d.reception_env = '01'` : ` and d.reception_env = '02'`;
       if (request.query.status) {
         params.push(request.query.status);
         where += ` and d.status = $${params.length}`;
@@ -468,37 +516,13 @@ export function registerDocumentRoutes(app: FastifyInstance, deps: PipelineDeps,
     async (request) => {
       requirePermission(request, 'documents.send');
       requireMail(ctx);
-      const copy = await printedCopy(deps, request.tenantId, request.params.id);
       if (!emailAllowed(request.tenantId)) throw new ApiError(429, 'too_many_emails', 'Too many emails sent in the last hour; try again later');
-      const biz = (await db.query<{ name: string; email: string }>('select coalesce(trade_name, legal_name) as name, email from tenants where id = $1', [request.tenantId])).rows[0]!;
-      const v = copy.view;
-      const title = `${v.typeName} ${v.series}-${v.number}`;
-      const lines = [
-        `Please find attached ${v.typeName.toLowerCase()} ${v.series}-${v.number} from ${biz.name}.`,
-        ...(request.body.message?.trim() ? [request.body.message.trim()] : []),
-        'The PDF is the printed copy. The XML file is the electronic tax document as authorized by the Belize Tax Service.',
-      ];
-      const id = randomUUID();
-      try {
-        await ctx.mailer.send({
-          to: request.body.to,
-          replyTo: biz.email,
-          subject: `${title} from ${biz.name}`,
-          text: lines.join('\n\n'),
-          html: simpleHtml({ heading: title, paragraphs: lines }),
-          attachments: [
-            { filename: `${copy.filename}.pdf`, content: copy.pdf, contentType: 'application/pdf' },
-            { filename: `${copy.filename}.xml`, content: copy.signedXml, contentType: 'application/xml' },
-          ],
+      const id = await sendDocumentEmail(deps, ctx, request.tenantId, request.params.id, { to: request.body.to, ...(request.body.message && { message: request.body.message }), userId: userId(request) })
+        .catch((e) => {
+          if (e instanceof ApiError) throw e;
+          request.log.error({ err: e }, 'document email failed');
+          throw new ApiError(502, 'email_failed', 'The email could not be sent. Check the address and try again.');
         });
-      } catch (e) {
-        request.log.error({ err: e }, 'document email failed');
-        await db.query(`insert into document_messages (id, tenant_id, document_id, channel, recipient, status, error, sent_by) values ($1, $2, $3, 'email', $4, 'failed', $5, $6)`,
-          [id, request.tenantId, request.params.id, request.body.to, String((e as Error).message ?? e).slice(0, 500), userId(request)]);
-        throw new ApiError(502, 'email_failed', 'The email could not be sent. Check the address and try again.');
-      }
-      await db.query(`insert into document_messages (id, tenant_id, document_id, channel, recipient, status, sent_by) values ($1, $2, $3, 'email', $4, 'sent', $5)`,
-        [id, request.tenantId, request.params.id, request.body.to, userId(request)]);
       return { id, channel: 'email', recipient: request.body.to, status: 'sent', createdAt: new Date().toISOString() };
     },
   );

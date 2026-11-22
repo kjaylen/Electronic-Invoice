@@ -77,7 +77,7 @@ test('create the business and its owner, then install the certificate', async ({
 
 test('catalog: add items, star them for the counter, edit one', async ({ page }) => {
   await logIn(page);
-  await page.getByRole('navigation').getByRole('link', { name: 'Items' }).click();
+  await page.goto(p('/products?tab=items'));
   for (const [name, code, barcode, price] of [['Coconut water', 'COCO', '7501000000017', '3.50'], ['Johnny cakes', 'JC', '', '1.25']] as const) {
     await page.getByRole('button', { name: 'Add item' }).click();
     const dialog = page.getByRole('dialog');
@@ -297,7 +297,7 @@ test('accessibility basics: skip link, one h1 per page, labelled controls, dialo
   await logIn(page);
   await page.keyboard.press('Tab');
   await expect(page.getByRole('link', { name: 'Skip to content' })).toBeFocused();
-  for (const path of ['/', '/counter', '/documents', '/documents/new?type=01', '/customers', '/items', '/reports', '/settings']) {
+  for (const path of ['/', '/counter', '/documents', '/documents/new?type=01', '/orders', '/products', '/customers', '/items', '/reports', '/settings']) {
     await page.goto(p(path));
     await expect(page.locator('h1')).toHaveCount(1);
     // Every visible form control has an accessible name.
@@ -324,4 +324,100 @@ test('installable: manifest, icons and service worker are served', async ({ page
   expect((await request.get('/sw.js')).headers()['content-type']).toMatch(/javascript/);
   await logIn(page);
   await expect.poll(() => page.evaluate(async () => Boolean(await navigator.serviceWorker.getRegistration())), { timeout: 10_000 }).toBe(true);
+});
+
+test('online store: a product with sizes and a photo, open the store, a buyer orders, paid becomes a BTS receipt', async ({ page, browser }) => {
+  await logIn(page);
+  // The product.
+  await page.getByRole('navigation').getByRole('link', { name: 'Products' }).click();
+  await page.getByRole('link', { name: 'Add product' }).click();
+  await page.getByLabel('Title').fill('Reef Hoodie');
+  await page.getByLabel(/^Description/).fill('Warm enough for a norther.');
+  await page.getByLabel(/^Option name/).fill('Size');
+  const rows = page.locator('.variant-row');
+  await rows.nth(0).getByLabel('Size').fill('S');
+  await rows.nth(0).getByLabel(/^Price/).fill('60');
+  await rows.nth(0).getByLabel(/^Stock/).fill('3');
+  await expect(rows.nth(0)).toContainText('Buyers pay BZ$67.50');
+  await page.getByRole('button', { name: '+ Add variant' }).click();
+  await rows.nth(1).getByLabel('Size').fill('M');
+  await page.getByRole('button', { name: 'On sale' }).click();
+  await page.getByRole('button', { name: 'Save product' }).click();
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Reef Hoodie');
+  await page.locator('.photo-add input[type=file]').setInputFiles(`${root}web/public/icon-192.png`);
+  await expect(page.locator('.photo-grid figure')).toHaveCount(1);
+
+  // Open the store.
+  await page.goto(p('/settings?tab=store'));
+  await page.getByLabel(/^Bank details for buyers/).fill('Test Bank, account Corner Store, 111-222');
+  await page.getByRole('button', { name: 'Open the store' }).click();
+  await expect(page.getByRole('heading', { name: 'Your store is open' })).toBeVisible();
+
+  // A buyer, on another device.
+  const buyer = await (await browser.newContext()).newPage();
+  await buyer.goto(p('/shop'));
+  await expect(buyer.getByRole('heading', { level: 1 })).toHaveText('Corner Store');
+  await buyer.getByRole('link', { name: /Reef Hoodie/ }).click();
+  await expect(buyer.getByText('Only 3 left')).toBeVisible();
+  await buyer.getByRole('button', { name: 'M', exact: true }).click();
+  await buyer.getByRole('button', { name: /Add to cart/ }).click();
+  await buyer.getByRole('button', { name: 'View cart' }).click();
+  await expect(buyer.locator('.shop-cart li')).toHaveCount(1);
+  await buyer.getByRole('button', { name: /Check out/ }).click();
+  await buyer.getByLabel('Name', { exact: true }).fill('Bea Buyer');
+  await buyer.getByLabel(/^Phone/).fill('+501 600 1234');
+  await buyer.getByLabel(/^Email/).fill('bea@buyer.test');
+  await buyer.getByRole('radio', { name: /Pickup/ }).check();
+  await expect(buyer.locator('.summary .grand')).toContainText('BZ$67.50');
+  await buyer.getByRole('button', { name: /Place order/ }).click();
+  await expect(buyer.getByRole('heading', { name: 'Thank you, Bea' })).toBeVisible();
+  await expect(buyer.locator('pre.instructions')).toContainText('Test Bank');
+  const orderUrl = buyer.url();
+
+  // The merchant confirms the transfer: that issues the receipt.
+  await page.getByRole('navigation').getByRole('link', { name: 'Orders' }).click();
+  await page.getByRole('row', { name: /Bea Buyer/ }).getByRole('link').click();
+  const sent = Date.now();
+  await page.getByRole('button', { name: /Mark paid and issue receipt/ }).click();
+  await expect(page.getByText('Paid. The receipt was issued and emailed to bea@buyer.test.')).toBeVisible();
+  await expect(page.locator('.banner.ok')).toContainText('Tax receipt');
+  await page.getByRole('button', { name: 'Mark picked up' }).click();
+  await expect(page.locator('.badges')).toContainText('Picked up');
+  const mail = await emailTo('bea@buyer.test', sent);
+  expect(mail).toMatch(/application\/pdf/);
+
+  // The buyer's page now has the receipt.
+  await buyer.goto(orderUrl);
+  await expect(buyer.getByText('Your receipt')).toBeVisible();
+  const pdf = await buyer.request.get(await buyer.getByRole('link', { name: /Download PDF/ }).getAttribute('href') as string);
+  expect(pdf.headers()['content-type']).toBe('application/pdf');
+});
+
+test('platform console: staff move the business to BTS production', async ({ page, browser }) => {
+  const staff = readFileSync(`${root}.demo-e2e/platform-admin.txt`, 'utf8');
+  const email = /Email: (\S+)/.exec(staff)![1]!;
+  const password = /Password: (\S+)/.exec(staff)![1]!;
+  const staffPage = await (await browser.newContext()).newPage();
+  await staffPage.goto('/admin');
+  await staffPage.getByLabel('Email').fill(email);
+  await staffPage.getByLabel('Password').fill(password);
+  await staffPage.getByRole('button', { name: /Sign in/ }).click();
+  await staffPage.getByRole('link', { name: 'Corner Store' }).click();
+  await expect(staffPage.locator('ul.checks li.ok')).toHaveCount(3);
+  await staffPage.getByRole('button', { name: /Move to production/ }).click();
+  const dialog = staffPage.getByRole('dialog');
+  await dialog.getByLabel(/^BTS approval reference/).fill('BTS-TEST-0042');
+  await dialog.getByLabel(/^Type the TIN to confirm/).fill('111111');
+  await dialog.getByRole('button', { name: 'Move to production' }).click();
+  await expect(dialog.getByText('The TIN does not match this business.')).toBeVisible();
+  await dialog.getByLabel(/^Type the TIN to confirm/).fill('123456');
+  await dialog.getByRole('button', { name: 'Move to production' }).click();
+  await expect(staffPage.getByRole('heading', { name: /In production since/ })).toBeVisible();
+  await expect(staffPage.locator('ol.activity')).toContainText('Moved to production');
+
+  // The business sees it: no more "Test" badge, and its activity log says so.
+  await logIn(page);
+  await expect(page.locator('.topbar .badge.test')).toHaveCount(0);
+  await page.goto(p('/settings?tab=activity'));
+  await expect(page.locator('ol.activity')).toContainText('moved this business to BTS production');
 });

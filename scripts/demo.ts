@@ -61,4 +61,20 @@ Object.assign(process.env, {
 process.env.PUBLIC_URL ??= `http://localhost:${process.env.PORT}`;
 console.log(`Stand-in BTS on ${bts.baseUrl} (create .demo/bts-down to simulate an outage)`);
 await import('../src/server.ts');
-console.log(`\n  Open http://localhost:${process.env.PORT}\n`);
+
+// A platform console account for the demo (staff accounts have no sign-up), saved in .demo.
+const staffFile = `${demoDir}/platform-admin.txt`;
+if (!existsSync(staffFile)) {
+  const { default: pg } = await import('pg');
+  const { pgDatabase } = await import('../src/db/database.ts');
+  const { createPlatformAdmin } = await import('../src/db/platform.ts');
+  const db = pgDatabase(new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 1 }));
+  const exists = (await db.query<{ n: number }>(`select count(*)::int as n from platform_admins where lower(email) = 'staff@demo.test'`)).rows[0]!.n > 0;
+  if (!exists) {
+    const password = randomBytes(12).toString('base64url');
+    await createPlatformAdmin(db, { email: 'staff@demo.test', name: 'Demo Staff', password });
+    writeFileSync(staffFile, `Platform console: http://localhost:${process.env.PORT}/admin\nEmail: staff@demo.test\nPassword: ${password}\n`, { mode: 0o600 });
+  }
+  await db.close();
+}
+console.log(`\n  Open http://localhost:${process.env.PORT}   (platform console: /admin, sign-in in ${staffFile})\n`);

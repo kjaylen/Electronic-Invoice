@@ -119,17 +119,18 @@ const DEFAULT_CONTINGENCY_SERIES = 900;
 
 const clock = (deps: PipelineDeps) => (deps.now ?? (() => new Date()))();
 
-async function lockSeries(tx: Queryable, tenantId: string, etdType: string, seriesNumber: number, purpose: 'normal' | 'contingency') {
+/** The series row for this environment: test and production number separately, each with its own hash chain. */
+async function lockSeries(tx: Queryable, tenantId: string, environment: string, etdType: string, seriesNumber: number, purpose: 'normal' | 'contingency') {
   await tx.query(
-    `insert into series (id, tenant_id, etd_type, series_number, purpose) values ($1, $2, $3, $4, $5)
-     on conflict (tenant_id, etd_type, series_number) do nothing`,
-    [randomUUID(), tenantId, etdType, seriesNumber, purpose],
+    `insert into series (id, tenant_id, environment, etd_type, series_number, purpose) values ($1, $2, $3, $4, $5, $6)
+     on conflict (tenant_id, environment, etd_type, series_number) do nothing`,
+    [randomUUID(), tenantId, environment, etdType, seriesNumber, purpose],
   );
   const row = (
     await tx.query<{ id: string; next_serial: unknown; last_sequence_hash: string | null; purpose: string }>(
       `select id, next_serial, last_sequence_hash, purpose from series
-       where tenant_id = $1 and etd_type = $2 and series_number = $3 for update`,
-      [tenantId, etdType, seriesNumber],
+       where tenant_id = $1 and environment = $2 and etd_type = $3 and series_number = $4 for update`,
+      [tenantId, environment, etdType, seriesNumber],
     )
   ).rows[0];
   if (!row) throw new PipelineError('Series could not be created');
@@ -230,7 +231,7 @@ async function prepare(
   }
 
   return deps.db.transaction(async (tx) => {
-    const series = await lockSeries(tx, ctx.tenantId, req.etdType, seriesNumber, contingency ? 'contingency' : 'normal');
+    const series = await lockSeries(tx, ctx.tenantId, ctx.environment, req.etdType, seriesNumber, contingency ? 'contingency' : 'normal');
     const serial = Number(series.next_serial);
     const issuedAt = clock(deps);
     const local = toBelizeDateTime(issuedAt);
@@ -636,7 +637,7 @@ export async function cancelDocument(deps: PipelineDeps, tenantId: string, docum
   const event =
     existing ??
     (await deps.db.transaction(async (tx) => {
-      const series = await lockSeries(tx, tenantId, ETD_TYPES.EVENT, CANCELLATION_SERIES, 'normal');
+      const series = await lockSeries(tx, tenantId, ctx.environment, ETD_TYPES.EVENT, CANCELLATION_SERIES, 'normal');
       const serial = Number(series.next_serial);
       const at = clock(deps);
       const local = toBelizeDateTime(at);

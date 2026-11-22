@@ -46,6 +46,11 @@ export function toApiError(error: unknown): ApiError {
       return new ApiError(422, 'invalid_account', e.message);
     case 'MailNotConfigured':
       return new ApiError(503, 'email_unavailable', 'Email is not set up on this server');
+    case 'StoreError': {
+      const code = (e as unknown as { code: string }).code;
+      const status = code === 'not_found' || code === 'store_closed' ? 404 : code === 'invalid_order' ? 422 : 409;
+      return new ApiError(status, code, e.message);
+    }
     case 'KeystoreError':
       return new ApiError(500, 'internal_error', 'Internal error');
     default:

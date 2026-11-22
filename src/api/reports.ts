@@ -3,7 +3,8 @@
  * sales by day, by customer and by item, and the document register.
  *
  * Only documents with legal value count: authorized (with or without notes)
- * and those issued in contingency. Credit notes subtract; debit notes add.
+ * and those issued in contingency, in the business's current BTS environment
+ * (after going live, test documents never mix into real figures). Credit notes subtract; debit notes add.
  * Every report is also available as CSV (?format=csv) for the accountant.
  */
 
@@ -56,7 +57,8 @@ const txt = (v: unknown) => ({ v });
 
 export function registerReportRoutes(app: FastifyInstance, deps: PipelineDeps) {
   const { db } = deps;
-  const base = `d.tenant_id = $1 and d.issue_date between $2::date and $3::date and d.status = any($4::text[])`;
+  const base = `d.tenant_id = $1 and d.issue_date between $2::date and $3::date and d.status = any($4::text[])
+    and d.reception_env = (select case environment when 'production' then '01' else '02' end from tenants where id = $1)`;
   const args = (tenantId: string, q: { from: string; to: string }) => [tenantId, q.from, q.to, COUNTED_STATUSES];
 
   app.get<PeriodQuery>('/reports/summary', { schema: { querystring: periodQuery } }, async (request, reply) => {
@@ -141,6 +143,7 @@ export function registerReportRoutes(app: FastifyInstance, deps: PipelineDeps) {
          d.customer_snapshot->>'name' as name, d.customer_snapshot->>'tin' as tin, d.line_extension_cents as net, d.gst_cents as gst, d.tax_cents as tax,
          d.tax_inclusive_cents as total, d.status, d.protocol_number, d.referenced_etdui
        from documents d where d.tenant_id = $1 and d.issue_date between $2::date and $3::date
+         and d.reception_env = (select case environment when 'production' then '01' else '02' end from tenants where id = $1)
        order by d.issue_date, d.issue_time, d.etd_type, d.serial limit 100000`, [request.tenantId, q.from, q.to],
     )).rows;
     const header = ['Date', 'Time', 'Type', 'Number', 'ETDUI', 'Customer', 'Customer TIN', 'Net (BZD)', 'GST (BZD)', 'All taxes (BZD)', 'Total (BZD)', 'Status', 'BTS authorization', 'References'];

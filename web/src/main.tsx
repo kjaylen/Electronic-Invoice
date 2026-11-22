@@ -16,6 +16,7 @@ import { ToastProvider } from './toast';
 // Each page is its own chunk, loaded when first visited.
 const page = <K extends string>(load: () => Promise<Record<K, React.ComponentType>>, name: K) => lazy(() => load().then((m) => ({ default: m[name] })));
 const Start = page(() => import('./pages/Start'), 'Start');
+const PlatformConsole = page(() => import('./pages/Platform'), 'PlatformConsole');
 const CreateBusiness = page(() => import('./pages/Start'), 'CreateBusiness');
 const Login = page(() => import('./pages/Auth'), 'Login');
 const ForgotPassword = page(() => import('./pages/Auth'), 'ForgotPassword');
@@ -28,7 +29,16 @@ const Documents = page(() => import('./pages/Documents'), 'Documents');
 const DocumentDetail = page(() => import('./pages/DocumentDetail'), 'DocumentDetail');
 const NewDocument = page(() => import('./pages/NewDocument'), 'NewDocument');
 const Customers = page(() => import('./pages/Customers'), 'Customers');
-const Items = page(() => import('./pages/Items'), 'Items');
+const Products = page(() => import('./pages/Products'), 'Products');
+const ProductEditor = page(() => import('./pages/Products'), 'ProductEditor');
+const Orders = page(() => import('./pages/Orders'), 'Orders');
+const OrderDetail = page(() => import('./pages/Orders'), 'OrderDetail');
+const ShopLayout = page(() => import('./pages/Shop'), 'ShopLayout');
+const ShopHome = page(() => import('./pages/Shop'), 'ShopHome');
+const ShopProduct = page(() => import('./pages/Shop'), 'ShopProduct');
+const ShopCart = page(() => import('./pages/Shop'), 'ShopCart');
+const ShopCheckout = page(() => import('./pages/Shop'), 'ShopCheckout');
+const ShopOrder = page(() => import('./pages/Shop'), 'ShopOrder');
 const Reports = page(() => import('./pages/Reports'), 'Reports');
 const Settings = page(() => import('./pages/Settings'), 'Settings');
 
@@ -87,9 +97,10 @@ function Layout() {
     ['/', t('Overview')],
     ['/counter', t('Counter'), 'documents.issue'],
     ['/documents/new?type=01', t('New invoice'), 'documents.issue'],
+    ['/orders', t('Orders')],
     ['/documents', t('Documents')],
+    ['/products', t('Products')],
     ['/customers', t('Customers')],
-    ['/items', t('Items')],
     ['/reports', t('Reports'), 'reports.view'],
     ['/settings', t('Settings')],
   ];
@@ -187,6 +198,14 @@ function BusinessApp() {
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/setup" element={<Onboarding />} />
+        {/* The public online store: no sign-in. */}
+        <Route path="/shop" element={<ShopLayout />}>
+          <Route index element={<ShopHome />} />
+          <Route path="products/:handle" element={<ShopProduct />} />
+          <Route path="cart" element={<ShopCart />} />
+          <Route path="checkout" element={<ShopCheckout />} />
+          <Route path="orders/:number" element={<ShopOrder />} />
+        </Route>
       </Route>
       <Route element={<RequireSession />}>
         <Route index element={<Dashboard />} />
@@ -195,7 +214,12 @@ function BusinessApp() {
         <Route path="/documents/new" element={<NewDocument />} />
         <Route path="/documents/:id" element={<DocumentDetail />} />
         <Route path="/customers" element={<Customers />} />
-        <Route path="/items" element={<Items />} />
+        <Route path="/orders" element={<Orders />} />
+        <Route path="/orders/:id" element={<OrderDetail />} />
+        <Route path="/products" element={<Products />} />
+        <Route path="/products/new" element={<ProductEditor />} />
+        <Route path="/products/:id" element={<ProductEditor />} />
+        <Route path="/items" element={<Navigate to="/products?tab=items" replace />} />
         <Route path="/reports" element={<Allowed permission="reports.view"><Reports /></Allowed>} />
         <Route path="/settings" element={<Settings />} />
       </Route>
@@ -211,6 +235,8 @@ function PublicApp() {
       <Route element={<Bare />}>
         <Route index element={<Start />} />
         <Route path="/signup" element={<CreateBusiness />} />
+        {/* Our own staff: move businesses to BTS production. */}
+        <Route path="/admin/*" element={<PlatformConsole />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
