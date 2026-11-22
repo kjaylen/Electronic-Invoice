@@ -97,27 +97,16 @@ export function CreateBusiness() {
   const t = useT();
   usePageTitle(t('Create a business'));
   const [form, setForm] = useState({ legalName: '', tradeName: '', tin: '', street: '', city: '', districtCode: '1', telephone: '', email: '', slug: '', name: '', ownerEmail: '', password: '' });
-  const [slugEdited, setSlugEdited] = useState(false);
-  const [slugState, setSlugState] = useState<{ slug: string; available: boolean; problem: string | null } | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   const set = (k: keyof typeof form) => (e: { target: { value: string } }) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
-  // Suggest an address from the name until the person types their own; check it as they go.
+  // The address the business will get, made from its name (the server makes the final one).
   const nameForSlug = useDebounced(form.tradeName || form.legalName, 400);
   useEffect(() => {
-    if (slugEdited || !nameForSlug.trim()) return;
+    if (!nameForSlug.trim()) return;
     void api<{ slug: string }>(`/v1/auth/slug?name=${encodeURIComponent(nameForSlug)}`).then((r) => setForm((f) => ({ ...f, slug: r.slug }))).catch(() => {});
-  }, [nameForSlug, slugEdited]);
-  const slug = useDebounced(form.slug, 300);
-  useEffect(() => {
-    if (!slug) return setSlugState(null);
-    let live = true;
-    void api<{ slug: string; available: boolean; problem: string | null }>(`/v1/auth/slug?slug=${encodeURIComponent(slug)}`).then((r) => live && setSlugState(r)).catch(() => {});
-    return () => {
-      live = false;
-    };
-  }, [slug]);
+  }, [nameForSlug]);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -133,7 +122,6 @@ export function CreateBusiness() {
             tin: form.tin,
             address: { street: form.street, city: form.city, districtCode: form.districtCode },
             contact: { telephone: form.telephone, email: form.email },
-            ...(form.slug && { slug: form.slug }),
           },
           owner: { name: form.name, email: form.ownerEmail || form.email, password: form.password },
         },
@@ -171,12 +159,11 @@ export function CreateBusiness() {
             <Field label={t('Telephone')}><input required type="tel" value={form.telephone} onChange={set('telephone')} /></Field>
             <Field label={t('Billing email')}><input required type="email" value={form.email} onChange={set('email')} /></Field>
           </div>
-          <Field label={t('Business address')} hint={slugState?.problem ? t(slugState.problem) : slugState?.available ? t('Available. Your team signs in at {url}.', { url: `${origin}/${form.slug}` }) : t('Where your team signs in: {url}', { url: `${origin}/${form.slug || '…'}` })}>
-            <div className="slug-input">
-              <span className="mono muted">{origin}/</span>
-              <input required pattern="[a-z0-9][a-z0-9\-]{1,38}[a-z0-9]" autoCapitalize="none" spellCheck={false} aria-invalid={slugState ? !slugState.available : undefined} value={form.slug} onChange={(e) => { setSlugEdited(true); setForm((f) => ({ ...f, slug: e.target.value.toLowerCase() })); }} />
-            </div>
-          </Field>
+          <div className="address-preview" aria-live="polite">
+            <span className="small muted">{t('Your team signs in at')}</span>
+            <span className="mono">{origin}/{form.slug || '…'}</span>
+            <span className="small muted">{t('Made from your business name.')}</span>
+          </div>
         </fieldset>
         <fieldset className="stack">
           <legend>{t('Owner account')}</legend>
@@ -188,7 +175,7 @@ export function CreateBusiness() {
         </fieldset>
         <p className="small muted">{t('New businesses start in the BTS test environment, so nothing counts until you are ready.')}</p>
         <ErrorText error={error} />
-        <button type="submit" className="big" disabled={busy || (slugState !== null && !slugState.available)}>{busy ? t('Creating…') : t('Create business')}<span className="chip" aria-hidden="true">→</span></button>
+        <button type="submit" className="big" disabled={busy}>{busy ? t('Creating…') : t('Create business')}<span className="chip" aria-hidden="true">→</span></button>
         <p className="small">{t('Already have one?')} <Link to="/?choose=1" viewTransition>{t('Find your business')}</Link></p>
       </form>
     </Layout>

@@ -985,4 +985,8 @@ export const ES: Record<string, string> = {
   "Set up two-step sign-in first": "Configure primero la verificación en dos pasos",
   "This credit note is more than what is left to credit on the original": "Esta nota de crédito es mayor que lo que falta por acreditar en el original",
   "Too many documents for one archive. Choose a shorter period.": "Demasiados documentos para un solo archivo. Elija un periodo más corto.",
+  // Business address made from the name.
+  "Your team signs in at": "Su equipo inicia sesión en",
+  "Made from your business name.": "Se crea a partir del nombre de su negocio.",
+  "Made from your business name when the business was created. It stays the same, so links and bookmarks keep working.": "Se creó a partir del nombre de su negocio al registrarlo. No cambia, así los enlaces y marcadores siguen funcionando.",
 };

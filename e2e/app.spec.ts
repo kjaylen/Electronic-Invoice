@@ -62,8 +62,7 @@ test('create the business and its owner, then install the certificate', async ({
   await page.getByRole('link', { name: 'Create a business' }).click();
   await page.getByLabel('Registered name').fill(BUSINESS);
   await page.getByLabel(/^Trade name/).fill('Corner Store');
-  await expect(page.getByLabel(/^Business address/)).toHaveValue(SLUG); // suggested from the name
-  await expect(page.getByText(`Available. Your team signs in at`)).toBeVisible();
+  await expect(page.locator('.address-preview')).toContainText(`/${SLUG}`); // made from the name, not editable
   await page.getByLabel(/^TIN/).fill('123456');
   await page.getByLabel('Street').fill('12 Albert Street');
   await page.getByLabel('City or town').fill('Belize City');

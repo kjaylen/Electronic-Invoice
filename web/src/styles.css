@@ -930,3 +930,7 @@ label.row > input[type='checkbox'] { flex: none; margin-top: 0.15rem; }
 .console-login { position: relative; overflow: hidden; isolation: isolate; }
 .console-login > .card { position: relative; z-index: 2; }
 .console-login .crystals { z-index: 0; }
+
+/* The business address, made from its name: shown, not edited. */
+.address-preview { display: grid; gap: 0.15rem; padding: 0.7rem 0.85rem; border: 1px dashed var(--hairline-strong); border-radius: var(--radius); background: var(--sheet-2); }
+.address-preview .mono { font-size: 0.95rem; color: var(--brand-ink); word-break: break-all; }

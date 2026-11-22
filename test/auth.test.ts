@@ -87,13 +87,16 @@ test('business addresses: suggestions, format, reserved words, taken', () =>
     assert.equal((await check('slug=Bad_Address')).available, false);
     assert.equal((await check('slug=signup')).available, false, 'reserved for the app');
     assert.equal((await check('slug=v1')).available, false);
-    await signUp(app, { ...BUSINESS, slug: 'corozal-hw' });
+    const first = await signUp(app, { ...BUSINESS, tradeName: 'Corozal HW' });
+    assert.equal(first.slug, 'corozal-hw', 'the address is made from the trade name');
     assert.deepEqual(await check('slug=corozal-hw'), { slug: 'corozal-hw', available: false, problem: 'Another business already uses this address' });
     assert.equal((await check('name=Corozal%20HW')).slug, 'corozal-hw-2', 'suggestions skip taken addresses');
-    const taken = await app.inject({ method: 'POST', url: '/v1/auth/signup', headers: CSRF, payload: { business: { ...BUSINESS, tin: '777777', slug: 'corozal-hw' }, owner: { name: 'X', email: 'x@y.example', password: PASSWORD } } });
-    assert.equal(taken.statusCode, 422);
-    const reserved = await app.inject({ method: 'POST', url: '/v1/auth/signup', headers: CSRF, payload: { business: { ...BUSINESS, tin: '777777', slug: 'admin' }, owner: { name: 'X', email: 'x@y.example', password: PASSWORD } } });
-    assert.equal(reserved.statusCode, 422);
+    const second = await app.inject({ method: 'POST', url: '/v1/auth/signup', headers: CSRF, payload: { business: { ...BUSINESS, tin: '777777', tradeName: 'Corozal HW' }, owner: { name: 'X', email: 'x@y.example', password: PASSWORD } } });
+    assert.equal(second.json().business.slug, 'corozal-hw-2', 'a taken address gets a number');
+    const chosen = await app.inject({ method: 'POST', url: '/v1/auth/signup', headers: CSRF, payload: { business: { ...BUSINESS, tin: '888888', slug: 'my-pick' }, owner: { name: 'Y', email: 'y@y.example', password: PASSWORD } } });
+    assert.equal(chosen.statusCode, 400, 'a business cannot choose its own address');
+    const reserved = await app.inject({ method: 'POST', url: '/v1/auth/signup', headers: CSRF, payload: { business: { ...BUSINESS, tin: '888888', legalName: 'Admin' }, owner: { name: 'Y', email: 'y@y.example', password: PASSWORD } } });
+    assert.notEqual(reserved.json().business.slug, 'admin', 'reserved words are never given out');
   }));
 
 test('sign-up rules: weak password, duplicate TIN, closed sign-up', async () => {
@@ -102,7 +105,7 @@ test('sign-up rules: weak password, duplicate TIN, closed sign-up', async () => 
     assert.equal(weak.statusCode, 422);
     assert.equal((await app.inject({ method: 'GET', url: '/v1/auth/slug?slug=corozal-hardware-ltd' })).json().available, true, 'a failed sign-up leaves nothing behind');
     await signUp(app);
-    const dup = await app.inject({ method: 'POST', url: '/v1/auth/signup', headers: CSRF, payload: { business: { ...BUSINESS, slug: 'other-name' }, owner: { name: 'B', email: 'b@b.example', password: PASSWORD } } });
+    const dup = await app.inject({ method: 'POST', url: '/v1/auth/signup', headers: CSRF, payload: { business: { ...BUSINESS, tradeName: 'Other Name' }, owner: { name: 'B', email: 'b@b.example', password: PASSWORD } } });
     assert.equal(dup.statusCode, 409, 'one business per TIN per environment');
   });
   await withApp(async (_f, app) => {

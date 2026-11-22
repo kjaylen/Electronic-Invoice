@@ -6,7 +6,6 @@
 import { type FormEvent, useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { api, type Account, type AuditEvent, type BusinessProfile, type ManagedAccount, type Role } from '../api';
-import { goToBusiness } from '../business';
 import { type T, useI18n, useT } from '../i18n';
 import { assignableRoles, ROLE_DESCRIPTION, ROLE_LABEL } from '../permissions';
 import { useSession } from '../session';
@@ -266,13 +265,13 @@ function SecurityRules({ profile, onSaved }: { profile: BusinessProfile; onSaved
 function BusinessTab() {
   const t = useT();
   const toast = useToast();
-  const { me, can, role, refresh, refreshMe } = useSession();
+  const { me, can, refresh, refreshMe } = useSession();
   const [profile, setProfile] = useState<BusinessProfile | null>(null);
-  const [form, setForm] = useState<{ legalName: string; tradeName: string; street: string; city: string; districtCode: string; telephone: string; email: string; slug: string } | null>(null);
+  const [form, setForm] = useState<{ legalName: string; tradeName: string; street: string; city: string; districtCode: string; telephone: string; email: string } | null>(null);
   const editable = can('business.manage');
   const load = useCallback(() => api<BusinessProfile>('/v1/business').then((b) => {
     setProfile(b);
-    setForm({ legalName: b.legalName, tradeName: b.tradeName ?? '', street: b.address.street, city: b.address.city, districtCode: b.address.districtCode, telephone: b.contact.telephone, email: b.contact.email, slug: b.slug });
+    setForm({ legalName: b.legalName, tradeName: b.tradeName ?? '', street: b.address.street, city: b.address.city, districtCode: b.address.districtCode, telephone: b.contact.telephone, email: b.contact.email });
   }), []);
   useEffect(() => {
     void load();
@@ -286,10 +285,8 @@ function BusinessTab() {
         tradeName: form.tradeName || null,
         address: { street: form.street, city: form.city, districtCode: form.districtCode },
         contact: { telephone: form.telephone, email: form.email },
-        ...(form.slug !== profile.slug && { slug: form.slug }),
       },
     });
-    if (saved.slug !== profile.slug) return goToBusiness(saved.slug, '/settings?tab=business');
     toast(t('Business details saved'));
     await Promise.all([load(), refresh(), refreshMe()]);
   });
@@ -318,12 +315,11 @@ function BusinessTab() {
             <Field label={t('Telephone')}><input required type="tel" value={form.telephone} onChange={set('telephone')} /></Field>
             <Field label={t('Billing email')}><input required type="email" value={form.email} onChange={set('email')} /></Field>
           </div>
-          <Field label={t('Business address')} hint={role === 'owner' ? t('Where your team signs in. Changing it changes the link for everyone; old links stop working.') : t('Where your team signs in. Only an owner can change it.')}>
-            <div className="slug-input">
-              <span className="mono muted">{window.location.host}/</span>
-              <input required disabled={role !== 'owner'} pattern="[a-z0-9][a-z0-9\-]{1,38}[a-z0-9]" value={form.slug} onChange={(e) => setForm({ ...form, slug: e.target.value.toLowerCase() })} />
-            </div>
-          </Field>
+          <div className="address-preview">
+            <span className="small muted">{t('Your team signs in at')}</span>
+            <span className="mono">{window.location.host}/{profile.slug}</span>
+            <span className="small muted">{t('Made from your business name when the business was created. It stays the same, so links and bookmarks keep working.')}</span>
+          </div>
         </fieldset>
         <p className="small muted">{t('Changes apply to new documents. Documents already issued keep the details they were signed with. The TIN cannot change.')}</p>
         <ErrorText error={save.error} />

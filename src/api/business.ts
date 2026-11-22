@@ -51,7 +51,6 @@ const businessJson = (r: BusinessRow) => ({
 type BusinessBody = {
   legalName: string;
   tradeName?: string | null;
-  slug?: string;
   address: { street: string; additionalStreet?: string; city: string; districtCode: DistrictCode };
   contact: { telephone: string; email: string };
 };
@@ -73,39 +72,23 @@ export function registerBusinessRoutes(app: FastifyInstance, deps: PipelineDeps,
           properties: {
             legalName: { type: 'string', minLength: 1, maxLength: 300 },
             tradeName: { type: ['string', 'null'], maxLength: 300 },
-            slug: { type: 'string', minLength: 3, maxLength: 40 },
             address: addressSchema,
             contact: { ...contactSchema, required: ['telephone', 'email'] },
           },
         },
       },
     },
-    async (request, reply) => {
+    async (request) => {
       requirePermission(request, 'business.manage');
       const before = await load(request.tenantId);
       const b = request.body;
-      const slug = b.slug?.toLowerCase() ?? before.slug;
-      if (slug !== before.slug) {
-        if (request.principal !== 'owner') throw new ApiError(403, 'forbidden', "Only an owner can change the business's address");
-        const problem = slugProblem(slug);
-        if (problem) throw new ApiError(422, 'invalid_business', `Address: ${problem}`);
-        if (await slugTaken(db, slug, request.tenantId)) throw new ApiError(409, 'conflict', 'Another business already uses this address');
-      }
       await db.query(
-        `update tenants set legal_name = $2, trade_name = $3, slug = $4, street = $5, additional_street = $6, city = $7, district_code = $8, telephone = $9, email = $10 where id = $1`,
-        [request.tenantId, b.legalName, b.tradeName || null, slug, b.address.street, b.address.additionalStreet ?? null, b.address.city, b.address.districtCode, b.contact.telephone, b.contact.email],
+        `update tenants set legal_name = $2, trade_name = $3, street = $4, additional_street = $5, city = $6, district_code = $7, telephone = $8, email = $9 where id = $1`,
+        [request.tenantId, b.legalName, b.tradeName || null, b.address.street, b.address.additionalStreet ?? null, b.address.city, b.address.districtCode, b.contact.telephone, b.contact.email],
       );
       const after = await load(request.tenantId);
       const changed = Object.fromEntries((Object.keys(after) as Array<keyof BusinessRow>).filter((k) => before[k] !== after[k]).map((k) => [k, { from: before[k], to: after[k] }]));
       if (Object.keys(changed).length) await audit(db, { tenantId: request.tenantId, userId: request.userId || null, action: 'business.updated', details: changed, ip: request.ip });
-      // The session cookie is named after the address: carry the caller's session over to the new name.
-      if (slug !== before.slug) {
-        const token = readCookie(request, sessionCookieName(before.slug));
-        if (token) {
-          const flags = `Path=/; HttpOnly; SameSite=Lax${ctx.cookieSecure ? '; Secure' : ''}`;
-          reply.header('set-cookie', [`${sessionCookieName(slug)}=${token}; Max-Age=${30 * 24 * 3600}; ${flags}`, `${sessionCookieName(before.slug)}=; Max-Age=0; ${flags}`]);
-        }
-      }
       return businessJson(after);
     },
   );

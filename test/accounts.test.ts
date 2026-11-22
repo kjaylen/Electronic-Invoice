@@ -278,25 +278,17 @@ test('the activity log records sign-ins, account changes, certificate and cancel
     await assert.rejects(f.db.query('delete from audit_events'), /permanent/, 'the log cannot be erased');
   }));
 
-test('business profile: edit details; only owners change the address, and their session follows it', () =>
+test('business profile: edit details; the address is fixed, made from the name at creation', () =>
   withApp(async ({ app, slug, as }) => {
     const admin = await as('admin');
-    const owner = await as('owner');
     const current = (await app.inject({ method: 'GET', url: '/v1/business', headers: admin.headers })).json();
     assert.equal(current.slug, slug);
     const body = { legalName: current.legalName, tradeName: 'Shiny New Name', address: current.address, contact: current.contact };
     const ok = await app.inject({ method: 'PUT', url: '/v1/business', headers: admin.headers, payload: body });
     assert.equal(ok.statusCode, 200, ok.body);
     assert.equal(ok.json().tradeName, 'Shiny New Name');
-    assert.equal((await app.inject({ method: 'PUT', url: '/v1/business', headers: admin.headers, payload: { ...body, slug: 'shiny-new' } })).statusCode, 403);
-    assert.equal((await app.inject({ method: 'PUT', url: '/v1/business', headers: owner.headers, payload: { ...body, slug: 'login' } })).statusCode, 422);
-
-    const moved = await app.inject({ method: 'PUT', url: '/v1/business', headers: owner.headers, payload: { ...body, slug: 'shiny-new' } });
-    assert.equal(moved.statusCode, 200);
-    const cookies = moved.headers['set-cookie'] as string[];
-    assert.ok(cookies.some((c) => c.startsWith('etd_s_shiny-new=')), 'the session moves to the new cookie name');
-    assert.ok(cookies.some((c) => c.startsWith(`etd_s_${slug}=;`)), 'and the old one is cleared');
-    const newCookie = cookies.find((c) => c.startsWith('etd_s_shiny-new='))!.split(';')[0]!;
-    assert.equal((await app.inject({ method: 'GET', url: '/v1/me', headers: { cookie: newCookie, 'x-business': 'shiny-new' } })).statusCode, 200);
-    assert.equal((await app.inject({ method: 'GET', url: '/v1/auth/business/shiny-new' })).json().name, 'Shiny New Name');
+    assert.equal(ok.json().slug, slug, 'renaming keeps the address, so links keep working');
+    const owner = await as('owner');
+    assert.equal((await app.inject({ method: 'PUT', url: '/v1/business', headers: owner.headers, payload: { ...body, slug: 'shiny-new' } })).statusCode, 400, 'nobody chooses the address');
+    assert.equal((await app.inject({ method: 'GET', url: `/v1/auth/business/${slug}` })).json().name, 'Shiny New Name');
   }));

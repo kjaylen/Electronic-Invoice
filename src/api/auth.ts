@@ -205,7 +205,8 @@ export function registerAuthRoutes(app: FastifyInstance, deps: PipelineDeps, opt
 
   // ---------- a new business and its first owner ----------
 
-  const { environment: _env, ...businessProperties } = tenantSchema.properties;
+  // A business never chooses its address (slug): it is made from its name.
+  const { environment: _env, slug: _slug, ...businessProperties } = tenantSchema.properties;
   app.post<{ Body: { business: Omit<NewTenant, 'environment'>; owner: { name: string; email: string; password: string } } }>(
     '/signup',
     {
@@ -215,7 +216,8 @@ export function registerAuthRoutes(app: FastifyInstance, deps: PipelineDeps, opt
           required: ['business', 'owner'],
           additionalProperties: false,
           properties: {
-            business: { ...tenantSchema, required: ['legalName', 'tin', 'address', 'contact'], properties: { ...businessProperties, slug: slugField } },
+            // No address field: it is made from the business's name.
+            business: { ...tenantSchema, required: ['legalName', 'tin', 'address', 'contact'], properties: businessProperties },
             owner: {
               type: 'object',
               required: ['name', 'email', 'password'],
@@ -234,7 +236,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: PipelineDeps, opt
       const dup = await db.query(`select 1 from tenants where tin = $1 and environment = 'test'`, [business.tin]);
       if (dup.rows.length) throw new ApiError(409, 'conflict', 'A business with this TIN is already registered. Ask its owner to create an account for you.');
       const { user, slug } = await db.transaction(async (tx) => {
-        const tenantId = await createTenant(tx, { ...business, ...(business.slug && { slug: business.slug.toLowerCase() }), environment: 'test' });
+        const tenantId = await createTenant(tx, { ...business, environment: 'test' });
         const created = await createUser(tx, { tenantId, name: owner.name, email: owner.email, password: owner.password, role: 'owner' });
         await audit(tx, { tenantId, userId: created.id, action: 'business.created', ip: request.ip });
         const s = (await tx.query<{ slug: string }>('select slug from tenants where id = $1', [tenantId])).rows[0]!.slug;
