@@ -143,6 +143,13 @@ export const issueSchema = {
     note: text(1000),
     prepaidAmount: money,
     payableRoundingAmount: money,
+    // Tax invoices and debit notes: already paid in full when issued (recorded as a payment).
+    paid: {
+      type: 'object',
+      required: ['method'],
+      additionalProperties: false,
+      properties: { method: { type: 'string', enum: ['cash', 'cheque', 'bank_transfer', 'card', 'online', 'other'] }, reference: text(100) },
+    },
   },
 } as const;
 

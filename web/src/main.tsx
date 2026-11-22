@@ -47,6 +47,8 @@ const ShopCheckout = page(() => import('./pages/Shop'), 'ShopCheckout');
 const ShopOrder = page(() => import('./pages/Shop'), 'ShopOrder');
 const ShopTestPayment = page(() => import('./pages/Shop'), 'ShopTestPayment');
 const Reports = page(() => import('./pages/Reports'), 'Reports');
+const Receivables = page(() => import('./pages/Receivables'), 'Receivables');
+const PayInvoice = page(() => import('./pages/Pay'), 'PayInvoice');
 const Settings = page(() => import('./pages/Settings'), 'Settings');
 
 function PageSkeleton() {
@@ -130,6 +132,7 @@ function Layout() {
     ]],
     [t('Records'), [
       { to: '/documents', label: t('Documents'), icon: Icons.documents },
+      { to: '/receivables', label: t('Getting paid'), icon: Icons.wallet, permission: 'payments.record' },
       { to: '/customers', label: t('Customers'), icon: Icons.customers },
       { to: '/products', label: t('Products'), icon: Icons.products },
       { to: '/reports', label: t('Reports'), icon: Icons.reports, permission: 'reports.view' },
@@ -312,6 +315,7 @@ function BusinessApp() {
         <Route path="/products/:id" element={<ProductEditor />} />
         <Route path="/items" element={<Navigate to="/products?tab=items" replace />} />
         <Route path="/reports" element={<Allowed permission="reports.view"><Reports /></Allowed>} />
+        <Route path="/receivables" element={<Allowed permission="payments.record"><Receivables /></Allowed>} />
         <Route path="/settings" element={<Settings />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
@@ -345,6 +349,8 @@ function PublicApp() {
       <Route element={<Bare />}>
         <Route index element={<Start />} />
         <Route path="/signup" element={<CreateBusiness />} />
+        {/* A customer paying an invoice from its email. */}
+        <Route path="/pay/:token" element={<PayInvoice />} />
         {/* Our own staff: move businesses to BTS production. */}
         <Route path="/admin/*" element={<PlatformConsole />} />
       </Route>

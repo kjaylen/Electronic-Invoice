@@ -52,7 +52,7 @@ interface TenantRow {
 export const RESERVED_SLUGS = new Set([
   'v1', 'd', 'api', 'app', 'admin', 'assets', 'static', 'health', 'signup', 'login', 'logout', 'register', 'new', 'www', 'mail',
   'help', 'support', 'docs', 'status', 'about', 'pricing', 'terms', 'privacy', 'security', 'settings', 'account', 'businesses',
-  'developers', 'legal', 'billing', 'plans', 'webhooks', 'shop', 'store', 'checkout',
+  'developers', 'legal', 'billing', 'plans', 'webhooks', 'shop', 'store', 'checkout', 'pay', 'receivables',
 ]);
 const SLUG = /^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$/;
 

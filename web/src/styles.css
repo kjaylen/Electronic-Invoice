@@ -1043,3 +1043,50 @@ label.row > input[type='checkbox'] { flex: none; margin-top: 0.15rem; }
 .legal h2 { font-size: 1.15rem; margin: 1.8rem 0 0.5rem; }
 .legal p, .legal li { line-height: 1.65; color: var(--ink-2); }
 .legal ul { padding-left: 1.2rem; display: grid; gap: 0.35rem; }
+
+/* ---------- getting paid ---------- */
+.badge.pay-paid { background: var(--lime-soft); color: var(--lime-ink); border-color: #b5ecb9; }
+.badge.pay-partial { background: var(--info-soft); color: var(--brand-ink); border-color: #d6c8ea; }
+.badge.pay-unpaid { background: rgba(22, 9, 35, 0.05); color: var(--ink-2); border-color: var(--hairline); }
+.badge.pay-overdue { background: var(--coral-soft); color: var(--coral-ink); border-color: #f4bcb2; }
+.badge.pay-credit { background: var(--ochre-soft); color: #6b4206; border-color: #ecd2a3; }
+td .badges { display: inline-flex; align-items: center; }
+.late { color: var(--coral-ink); }
+.strong { font-weight: 620; }
+.stack-tight { display: grid; gap: 0.4rem; }
+.stack-tight h3 { margin: 0; font-size: 0.95rem; }
+ul.plain { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.3rem; }
+form.row > .field.grow { flex: 1; min-width: 14rem; }
+form.row > button { align-self: flex-end; }
+.ageing td, .ageing th { font-variant-numeric: tabular-nums; }
+.ageing tfoot th, .ageing tfoot td { border-top: 1.5px solid var(--ink); font-weight: 620; padding-top: 0.6rem; }
+.chips { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.chip-toggle { border: 1px solid var(--hairline-strong); background: var(--sheet); color: var(--ink-2); border-radius: 999px; padding: 0.3rem 0.75rem; font-size: 0.85rem; box-shadow: none; }
+.chip-toggle:hover:not(:disabled) { transform: none; box-shadow: none; border-color: var(--brand); color: var(--brand-ink); background: var(--sheet); }
+.chip-toggle.on, .chip-toggle.on:hover:not(:disabled) { background: var(--ink); color: var(--sheet); border-color: var(--ink); }
+.statement-head { align-items: flex-end; }
+.statement-total { font-family: var(--mono); font-size: 1.9rem; font-weight: 600; letter-spacing: -0.03em; }
+
+.payments-card h2 { margin: 0; }
+.pay-progress { height: 6px; border-radius: 999px; background: var(--hairline); overflow: hidden; }
+.pay-progress span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--brand), #9a5bc2); transition: width 500ms var(--ease-out); }
+.pay-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 0.6rem 1rem; margin: 0; }
+.pay-facts dt { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); }
+.pay-facts dd { margin: 0.1rem 0 0; font-variant-numeric: tabular-nums; }
+.payment-list { list-style: none; margin: 0; padding: 0; display: grid; }
+.payment-list li { padding: 0.5rem 0; border-top: 1px solid var(--hairline); display: grid; gap: 0.1rem; }
+.payment-list li.voided > .row span:first-child { text-decoration: line-through; opacity: 0.6; }
+
+/* The page a customer opens to pay an invoice. */
+.pay-page { min-height: 100vh; padding: 1.25rem 16px 3rem; display: grid; align-content: start; justify-items: center; gap: 1.25rem;
+  background: radial-gradient(1200px 500px at 50% -10%, rgba(109, 45, 147, 0.12), transparent 70%), var(--paper); }
+.pay-top { width: 100%; max-width: 560px; }
+.pay-card { width: 100%; max-width: 560px; gap: 1.1rem; padding: 1.6rem; }
+.pay-card h1 { margin: 0.2rem 0 0; font-size: 1.35rem; }
+.pay-amount { display: grid; gap: 0.15rem; padding: 1.1rem 1.2rem; border-radius: var(--radius-lg); background: var(--brand-deep); color: var(--sheet); }
+.pay-amount strong { font-family: var(--mono); font-size: clamp(2rem, 1.6rem + 2vw, 2.7rem); letter-spacing: -0.04em; font-weight: 600; color: var(--lime); }
+.pay-amount .muted { color: rgba(251, 248, 241, 0.72); }
+.pay-instructions { border-top: 1px dashed var(--hairline-strong); padding-top: 0.9rem; }
+.pay-instructions h2 { font-size: 0.95rem; margin: 0 0 0.3rem; }
+.pay-instructions p { margin: 0; white-space: pre-wrap; }
+.pay-page .test-pay { width: 100%; }

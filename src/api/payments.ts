@@ -1,5 +1,6 @@
 /**
- * Online payments: the business's payment account, and settling paid orders.
+ * Online payments: the business's payment account, and settling what was paid
+ * (store orders, and invoices paid from their link).
  *
  *   GET    /v1/payment-accounts            which providers are connected
  *   PUT    /v1/payment-accounts/paypal     { clientId, secret?, mode }: checked with PayPal before saving
@@ -14,6 +15,8 @@ import type { FastifyInstance } from 'fastify';
 import { audit } from '../db/audit.ts';
 import { loadOrder, markOrderPaid } from '../commerce/store.ts';
 import { confirmPayment, type GatewayOptions, gatewayFor, getPaymentAccount, paypalGateway, PaymentError, type PaymentRow, savePayPalAccount } from '../commerce/payments.ts';
+import { toBigInt } from '../db/database.ts';
+import { recordPayment, ReceivableError } from '../receivables/receivables.ts';
 import type { PipelineDeps } from '../pipeline/issue.ts';
 import type { ServerContext } from './context.ts';
 import { sendDocumentEmail } from './documents.ts';
@@ -30,7 +33,7 @@ export function gatewayOptions(deps: PipelineDeps, slugOf: (tenantId: string) =>
 
 /** A payment the provider says is paid: mark the order paid (issues the BTS document) and email the buyer. Safe to repeat. */
 export async function settlePaidOrder(deps: PipelineDeps, ctx: ServerContext, payment: PaymentRow): Promise<void> {
-  if (payment.status !== 'paid') return;
+  if (payment.status !== 'paid' || !payment.order_id) return;
   const loaded = await loadOrder(deps.db, payment.tenant_id, { id: payment.order_id });
   if (!loaded || loaded.order.payment_status === 'paid' || loaded.order.status === 'cancelled') return;
   const { order, document } = await markOrderPaid(deps, payment.tenant_id, payment.order_id, null);
@@ -38,6 +41,34 @@ export async function settlePaidOrder(deps: PipelineDeps, ctx: ServerContext, pa
   if (document && order.customer_email && ctx.mailConfigured && ['authorized', 'authorized_with_alert', 'contingency_pending'].includes(document.status)) {
     await sendDocumentEmail(deps, ctx, payment.tenant_id, document.documentId, { to: order.customer_email, message: `Thank you for your order #${order.number}. Your payment was received.` }).catch(() => {});
   }
+}
+
+/** An invoice paid from its link: record the payment against it (once). */
+export async function settlePaidInvoice(deps: PipelineDeps, payment: PaymentRow): Promise<void> {
+  if (payment.status !== 'paid' || !payment.document_id) return;
+  const provider = payment.provider === 'paypal' ? 'PayPal' : 'Test payment';
+  try {
+    // The money was taken, so it is recorded even if the invoice was paid another way meanwhile (a credit to return).
+    await recordPayment(deps.db, payment.tenant_id, payment.document_id, {
+      amountCents: toBigInt(payment.amount_cents), method: 'online', reference: `${provider} ${payment.transaction_id ?? ''}`.trim(),
+      note: 'Paid online from the invoice link', onlinePaymentId: payment.id,
+    }, null, { allowOverpay: true });
+    await audit(deps.db, { tenantId: payment.tenant_id, action: 'invoice.paid_online', details: { documentId: payment.document_id, provider: payment.provider, transaction: payment.transaction_id } });
+  } catch (e) {
+    if (e instanceof ReceivableError && /already recorded/.test(e.message)) return;
+    if (e instanceof ReceivableError) {
+      // The invoice was cancelled after the link went out: keep a record so the business can refund.
+      await audit(deps.db, { tenantId: payment.tenant_id, action: 'invoice.paid_online_unmatched', details: { documentId: payment.document_id, paymentId: payment.id, reason: e.message } });
+      return;
+    }
+    throw e;
+  }
+}
+
+/** Whatever an online payment was for. Safe to repeat. */
+export async function settlePayment(deps: PipelineDeps, ctx: ServerContext, payment: PaymentRow): Promise<void> {
+  if (payment.order_id) return settlePaidOrder(deps, ctx, payment);
+  if (payment.document_id) return settlePaidInvoice(deps, payment);
 }
 
 /** Pending online payments a few minutes old: ask the provider, settle the paid ones. */
@@ -51,7 +82,7 @@ export async function reconcilePayments(deps: PipelineDeps, ctx: ServerContext, 
       const gateway = await gatewayFor(deps.db, p.tenant_id, p.provider, await options(p.tenant_id));
       const now = await confirmPayment(deps.db, gateway, p.id);
       if (now.status === 'paid') {
-        await settlePaidOrder(deps, ctx, now);
+        await settlePayment(deps, ctx, now);
         settled++;
       }
     } catch {

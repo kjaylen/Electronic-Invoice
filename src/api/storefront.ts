@@ -252,9 +252,11 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
     const gateway = await gatewayFor(db, s.tenantId, s.settings.payments.online.provider, await gatewaySettings(s.tenantId));
     const base = ctx.publicUrl?.replace(/\/$/, '') ?? '';
     if (gateway.provider !== 'test' && !base) throw new PaymentError('PUBLIC_URL is not set on this server, so the payment provider cannot send buyers back');
-    const order = (await db.query<{ id: string; tenant_id: string; number: number; total_cents: unknown }>('select id, tenant_id, number, total_cents from orders where id = $1', [orderId])).rows[0]!;
+    const order = (await db.query<{ total_cents: unknown }>('select total_cents from orders where id = $1', [orderId])).rows[0]!;
     const orderPage = `${base}/${s.slug}/shop/orders/${number}?t=${token}`;
-    const started = await startPayment(db, gateway, order, { store: s.name, returnUrl: (paymentId) => `${orderPage}&payment=${paymentId}`, cancelUrl: `${orderPage}&cancelled=1` });
+    const started = await startPayment(db, gateway, {
+      tenantId: s.tenantId, orderId, amountCents: toBigInt(order.total_cents), description: `${s.name} order #${number}`, invoiceRef: `${s.tenantId.slice(0, 8)}-${number}`,
+    }, { returnUrl: (paymentId) => `${orderPage}&payment=${paymentId}`, cancelUrl: `${orderPage}&cancelled=1` });
     return { redirectUrl: started.redirectUrl, paymentId: started.paymentId };
   }
 

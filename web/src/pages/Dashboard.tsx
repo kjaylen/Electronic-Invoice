@@ -5,7 +5,7 @@ import { Crystals } from '../art';
 import { type T, useI18n, useT } from '../i18n';
 import { Icons } from '../icons';
 import { useSession } from '../session';
-import { belizeDate, belizeToday, fromCents, money, StatusBadge, toCents, TYPE_NAMES, usePageTitle } from '../ui';
+import { belizeDate, belizeToday, fromCents, money, PaymentBadge, StatusBadge, toCents, TYPE_NAMES, usePageTitle } from '../ui';
 import { SalesChart } from './Reports';
 
 export function customerLabel(t: T, d: DocumentInfo): string {
@@ -29,7 +29,7 @@ export function DocumentTable({ docs, empty }: { docs: DocumentInfo[]; empty?: s
               <td data-label={t('Document')}><Link to={`/documents/${d.id}`} viewTransition onClick={(e) => e.stopPropagation()}>{t(TYPE_NAMES[d.type] ?? d.typeName)}</Link> <span className="mono muted">{d.series}-{d.number}</span></td>
               <td data-label={t('Customer')}>{customerLabel(t, d)}</td>
               <td data-label={t('Total')} className="right">{money(d.totals.payable)}</td>
-              <td data-label={t('Status')}><StatusBadge status={d.status} /></td>
+              <td data-label={t('Status')}><span className="badges"><StatusBadge status={d.status} />{d.payment && <PaymentBadge status={d.payment.status} />}</span></td>
             </tr>
           ))}
         </tbody>

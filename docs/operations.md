@@ -10,7 +10,7 @@ do when something goes wrong.
 |---|---|---|
 | App server | API, web app, storefronts, platform console | `Dockerfile`, `src/server.ts` |
 | Background worker | Retries documents waiting for BTS, sends the contingency queue | inside the app server (`WORKER_INTERVAL_MS`) |
-| Housekeeping | Notification emails, operations alerts, clean-up | inside the app server (`HOUSEKEEPING_INTERVAL_MS`) |
+| Housekeeping | Notification emails, payment reminders to businesses' customers, operations alerts, clean-up | inside the app server (`HOUSEKEEPING_INTERVAL_MS`) |
 | PostgreSQL 16 | Everything, including the signed XML (the legal record) | managed service recommended |
 | Object storage + CDN | Product photos (optional) | S3, R2, Spaces, MinIO |
 | SMTP | Password links, documents, notices | any provider |
@@ -125,6 +125,7 @@ deployments). To move to object storage behind a CDN:
 
 - **PayPal.** Each business connects its own PayPal app (client id and secret, encrypted at rest). Nothing to set up on the platform. Pending payments are reconciled every housekeeping run.
 - **QuickBooks Online.** Create one app at developer.intuit.com, set `QBO_CLIENT_ID`, `QBO_CLIENT_SECRET`, `QBO_ENVIRONMENT=production` and register `<PUBLIC_URL>/v1/integrations/quickbooks/callback`. Syncs run every minute from the worker's process; failures retry with backoff and are listed in each business's Settings → Integrations.
+- **Payment reminders** are emailed by housekeeping for businesses that turned them on (at most 50 per business per run, each step once per invoice). They need SMTP and `PUBLIC_URL` (for the pay links).
 - **Webhooks** go out every 5 seconds from the worker's process. A failing endpoint is switched off after 20 failures in a row; the business switches it back on.
 
 ## 7. Staff accounts

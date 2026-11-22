@@ -1,6 +1,7 @@
 /**
  * Housekeeping, every few minutes: the platform's billing (trials ending,
- * monthly invoices, overdue status), email notices to businesses (rejections,
+ * monthly invoices, overdue status), payment reminders to businesses'
+ * customers, email notices to businesses (rejections,
  * outages, certificates, plan reminders), alerts to the operations webhook,
  * and clean-up of expired rate-limit windows and sign-in challenges.
  *
@@ -13,6 +14,7 @@ import { sweepRateLimits } from '../db/ratelimit.ts';
 import type { Mailer } from '../mail/mailer.ts';
 import { runNotifications, type NotifyResult } from '../notify/notifications.ts';
 import { heartbeat, opsStatus, type OpsThresholds, sendAlerts } from '../ops/monitoring.ts';
+import { backfillDueDates } from '../receivables/receivables.ts';
 
 export interface HousekeepingOptions {
   mailer?: Mailer;
@@ -24,6 +26,8 @@ export interface HousekeepingOptions {
   billing?: () => Promise<BillingContext>;
   /** Checks online payments buyers never came back from. */
   reconcilePayments?: () => Promise<unknown>;
+  /** Emails customers about invoices coming due and overdue. */
+  reminders?: () => Promise<unknown>;
   intervalMs?: number;
   onError?: (step: string, error: unknown) => void;
 }
@@ -50,6 +54,9 @@ export async function runHousekeepingOnce(db: Queryable, options: HousekeepingOp
     result.billing = await step('billing', async () => runBilling(await billing()));
   }
   if (options.reconcilePayments) await step('payments', options.reconcilePayments);
+  // Due dates for invoices issued before they were kept (read from the signed XML).
+  await step('due dates', () => backfillDueDates(db));
+  if (options.reminders) await step('reminders', options.reminders);
   if (options.mailer) {
     const mailer = options.mailer;
     result.notifications = await step('notifications', () => runNotifications(db, { mailer, ...(options.publicUrl && { publicUrl: options.publicUrl }) }));

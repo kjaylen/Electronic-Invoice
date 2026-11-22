@@ -4,9 +4,9 @@
  *
  *   owner       everything; the only role that can manage owners and admins
  *   admin       everything except managing owners and admins
- *   manager     issue all documents, cancel, send, catalog and products, online orders, reports
- *   cashier     issue invoices and receipts, send them, handle online orders; read the catalog
- *   accountant  read documents and reports; download records
+ *   manager     issue all documents, cancel, send, catalog and products, online orders, payments, reports
+ *   cashier     issue invoices and receipts, send them, handle online orders, record payments; read the catalog
+ *   accountant  read documents and reports; record payments; download records
  *
  * API keys act for the business's software: they can issue, cancel, send,
  * manage the catalog and read reports, but never manage people or keys.
@@ -25,6 +25,7 @@ export const PERMISSIONS = [
   'documents.send',
   'catalog.manage', // add, edit, archive customers, items and products
   'orders.manage', // online orders: mark fulfilled, cancel unpaid ones
+  'payments.record', // money received against invoices; statements and reminders to customers
   'reports.view',
   'business.manage', // business details and the BTS certificate
   'users.manage',
@@ -37,10 +38,10 @@ const ALL = new Set<Permission>(PERMISSIONS);
 export const ROLE_PERMISSIONS: Record<Role | 'api', ReadonlySet<Permission>> = {
   owner: ALL,
   admin: ALL,
-  manager: new Set(['documents.issue', 'documents.adjust', 'documents.cancel', 'documents.send', 'catalog.manage', 'orders.manage', 'reports.view']),
-  cashier: new Set(['documents.issue', 'documents.send', 'orders.manage']),
-  accountant: new Set(['reports.view']),
-  api: new Set(['documents.issue', 'documents.adjust', 'documents.cancel', 'documents.send', 'catalog.manage', 'orders.manage', 'reports.view', 'business.manage']),
+  manager: new Set(['documents.issue', 'documents.adjust', 'documents.cancel', 'documents.send', 'catalog.manage', 'orders.manage', 'payments.record', 'reports.view']),
+  cashier: new Set(['documents.issue', 'documents.send', 'orders.manage', 'payments.record']),
+  accountant: new Set(['reports.view', 'payments.record']),
+  api: new Set(['documents.issue', 'documents.adjust', 'documents.cancel', 'documents.send', 'catalog.manage', 'orders.manage', 'payments.record', 'reports.view', 'business.manage']),
 };
 
 /** Higher can manage lower. Owners manage everyone; admins manage managers, cashiers and accountants. */

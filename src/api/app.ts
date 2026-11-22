@@ -47,7 +47,8 @@ import { billingContextFactory, registerBillingRoutes } from './billing.ts';
 import { registerWebhookRoutes } from './webhooks.ts';
 import { countHit } from '../db/ratelimit.ts';
 import { buildOpenApi, routeCollector } from './openapi.ts';
-import { registerPaymentAccountRoutes } from './payments.ts';
+import { gatewayOptions, registerPaymentAccountRoutes } from './payments.ts';
+import { registerPayRoutes, registerReceivableRoutes } from './receivables.ts';
 import { registerDiscountRoutes } from './discounts.ts';
 import { domainCache } from '../commerce/domains.ts';
 import { registerIntegrationCallback, registerIntegrationRoutes } from './integrations.ts';
@@ -271,6 +272,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     registerPaymentAccountRoutes(tenant, deps, { ...(options.paymentsFetch && { fetch: options.paymentsFetch }) });
     registerDiscountRoutes(tenant, deps);
     registerIntegrationRoutes(tenant, deps, quickbooks);
+    registerReceivableRoutes(tenant, deps, ctx);
   }, { prefix: '/v1' });
 
   registerPublicDocumentRoutes(app, deps);
@@ -294,6 +296,12 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
   // The platform console, for our own staff.
   await app.register(async (platform) => registerPlatformRoutes(platform, deps, ctx, billingContext), { prefix: '/v1/platform' });
+
+  // Paying an invoice from its link: no sign-in, the link's token is the permission.
+  const slugOfTenant = async (tenantId: string) => (await db.query<{ slug: string }>('select slug from tenants where id = $1', [tenantId])).rows[0]!.slug;
+  await app.register(async (pay) => registerPayRoutes(pay, deps, ctx, {
+    gatewayOptions: gatewayOptions(deps, slugOfTenant, { ...(options.paymentsFetch && { fetch: options.paymentsFetch }) }),
+  }), { prefix: '/v1/pay' });
 
   // The public storefront: no sign-in, scoped by the business's address.
   await app.register(async (store) => registerStorefrontRoutes(store, deps, ctx, { ...(options.paymentsFetch && { fetch: options.paymentsFetch }) }), { prefix: '/v1/store' });

@@ -70,7 +70,7 @@ export const isSignedOut = (e: unknown) => e instanceof ApiError && e.status ===
 export type Role = 'owner' | 'admin' | 'manager' | 'cashier' | 'accountant';
 export type Permission =
   | 'documents.issue' | 'documents.adjust' | 'documents.cancel' | 'documents.send' | 'catalog.manage' | 'orders.manage'
-  | 'reports.view' | 'business.manage' | 'users.manage' | 'apikeys.manage' | 'audit.view';
+  | 'payments.record' | 'reports.view' | 'business.manage' | 'users.manage' | 'apikeys.manage' | 'audit.view';
 
 export interface Account {
   id: string;
@@ -156,6 +156,62 @@ export interface DocumentInfo {
   supersededBy: string | null;
   issuedBy?: string | null;
   createdAt: string;
+  /** Tax invoices and debit notes: what is owed (null for other documents and store orders paid at checkout). */
+  payment?: { status: InvoiceStatus; balance: string; dueDate: string; total?: string; paid?: string; credited?: string; daysOverdue?: number } | null;
+}
+
+// ---------- getting paid ----------
+
+export type InvoiceStatus = 'paid' | 'partial' | 'unpaid' | 'overdue' | 'credit';
+export type InvoicePaymentMethod = 'cash' | 'cheque' | 'bank_transfer' | 'card' | 'online' | 'refund' | 'other';
+
+export interface Receivable {
+  documentId: string;
+  type: '01' | '03';
+  number: string;
+  issueDate: string;
+  dueDate: string;
+  daysOverdue: number;
+  customer: { id: string | null; key: string; name: string; tin: string | null; email: string | null };
+  total: string;
+  paid: string;
+  credited: string;
+  balance: string;
+  status: InvoiceStatus;
+}
+
+export interface InvoicePayment {
+  id: string;
+  documentId: string;
+  amount: string;
+  method: InvoicePaymentMethod;
+  reference: string | null;
+  paidOn: string;
+  note: string | null;
+  recordedBy: string | null;
+  createdAt: string;
+  voided: boolean;
+  voidReason: string | null;
+}
+
+export type AgeBucket = 'current' | '1-30' | '31-60' | '61-90' | '90+';
+
+export interface ReceivablesOverview {
+  summary: { outstanding: string; overdue: string; dueThisWeek: string; collectedThisMonth: string; openInvoices: number; overdueInvoices: number; customersOwing: number };
+  ageing: {
+    customers: Array<{ key: string; id: string | null; name: string; tin: string | null; email: string | null; invoices: number; oldestDue: string; buckets: Record<AgeBucket, string>; total: string }>;
+    totals: Record<AgeBucket | 'total', string>;
+  };
+  buckets: AgeBucket[];
+  reminders: { enabled: boolean; offsets: number[] };
+  onlinePayments: boolean;
+}
+
+export interface ReceivableSettingsInfo {
+  reminders: { enabled: boolean; offsets: number[] };
+  payOnline: boolean;
+  instructions: string;
+  onlineProvider: string | null;
 }
 
 export interface DocumentLine {

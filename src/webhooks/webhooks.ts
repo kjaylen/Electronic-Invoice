@@ -31,6 +31,7 @@ import type { Queryable } from '../db/database.ts';
 import { toBigInt } from '../db/database.ts';
 import type { KeyProtector } from '../db/keystore.ts';
 import { formatCents } from '../engine/decimal.ts';
+import { paymentJson, type PaymentRow, receivable } from '../receivables/receivables.ts';
 
 export const WEBHOOK_EVENTS = [
   'document.authorized',
@@ -42,6 +43,8 @@ export const WEBHOOK_EVENTS = [
   'order.fulfilled',
   'order.cancelled',
   'order.refunded',
+  'payment.recorded',
+  'invoice.paid',
 ] as const;
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number] | 'ping';
 
@@ -201,6 +204,21 @@ export async function eventData(db: Queryable, type: string, tenantId: string, s
   if (type.startsWith('order.')) {
     const order = await orderOf(subjectId);
     return order ? { order } : null;
+  }
+  const invoiceOf = async (documentId: string) => {
+    const r = await receivable(db, tenantId, documentId);
+    if (!r) return null;
+    const { balanceCents: _cents, ...rest } = r;
+    return rest;
+  };
+  if (type === 'invoice.paid') {
+    const invoice = await invoiceOf(subjectId);
+    return invoice ? { invoice } : null;
+  }
+  if (type === 'payment.recorded') {
+    const p = (await db.query<PaymentRow>('select *, paid_on::text as paid_on from invoice_payments where id = $1 and tenant_id = $2', [subjectId, tenantId])).rows[0];
+    if (!p) return null;
+    return { payment: paymentJson(p), invoice: await invoiceOf(p.document_id) };
   }
   return null;
 }

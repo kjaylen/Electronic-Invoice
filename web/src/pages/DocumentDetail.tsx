@@ -8,6 +8,7 @@ import { useToast } from '../toast';
 import { DocumentPaper, type PaperData } from '../paper';
 import { ErrorText, Field, Modal, money, Segmented, StatusBadge, TYPE_NAMES, usePageTitle, whatsappNumber } from '../ui';
 import { customerLabel } from './Dashboard';
+import { PaymentsCard } from './Receivables';
 
 const EXPLAIN: Partial<Record<DocumentInfo['status'], { tone: string; title: string; text: string }>> = {
   authorized: { tone: 'ok', title: 'Authorized by BTS', text: 'This document is valid. Print it or send it to your customer.' },
@@ -218,6 +219,8 @@ export function DocumentDetail() {
               <span className="small">{t('Credited so far: {credited}. Left to credit: {left}.', { credited: money(doc.credit.credited), left: money(doc.credit.remaining) })}</span>
             )}
           </section>
+
+          {(doc.type === '01' || doc.type === '03') && doc.payment && <PaymentsCard doc={doc} onChange={() => void load()} />}
 
           <section className="card stack actions-bar">
             <h2>{t('Print and download')}</h2>

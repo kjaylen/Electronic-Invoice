@@ -347,6 +347,16 @@ Every business can open an online store at `app.example.bz/<slug>/shop`. Its def
 
 **Next:** a Belizean card gateway alongside PayPal. **Later:** theme editor, search-engine friendly pages, social catalogs, abandoned-cart reminders, customer accounts, one stock count for the counter and the store.
 
+## Getting paid (`src/receivables`, `src/api/receivables.ts`)
+
+Accounts receivable on top of the BTS documents, without touching them:
+
+- **Balances.** An invoice's balance is its amount payable less payments received (`invoice_payments`: never deleted, a mistake is voided with a reason) less credit notes issued against it; below zero is a credit. Only documents with legal value count, in the business's current BTS environment. Tax receipts and online-store orders are paid at the time, so they are never owed. Due dates come from the invoice's payment terms (`documents.due_date`; older invoices are backfilled from the signed XML by housekeeping).
+- **Recording payments**: from the invoice page (cash, transfer, cheque, card, other), or `paid` when issuing (`POST /v1/documents` with `paid: { method }`). Permission `payments.record`: owners, admins, managers, cashiers, accountants, API keys. Events `payment.recorded` and `invoice.paid` (when the balance reaches zero) go to webhooks.
+- **Getting paid** page: outstanding, overdue, due this week, collected this month; the ageing by customer (current, 1-30, 31-60, 61-90, 90+, also as CSV); open invoices; each customer's statement (on screen, PDF, emailed with a pay link per invoice).
+- **Reminders** (housekeeping, opt-in): for each open invoice with a customer email, the latest step reached (days from the due date, e.g. -3, 3, 14, 30) is sent once, with the PDF and a pay link. A step on or before the day of issue is skipped; turning reminders on late sends one reminder per invoice, not a backlog. A reminder can also be sent by hand.
+- **Paying online from the link** (`/pay/<token>`, the same 90-day token as the PDF share link): the balance, the PDF, and paying through the business's provider (PayPal when connected; test payments in the BTS test environment). The payment is recorded on the invoice once (`invoice_payments.online_payment_id` is unique), whether the customer comes back or reconciliation finds it.
+
 ## Platform console (`/admin`)
 
 For the team that runs this service, not for businesses. Staff move a business from the BTS **test** environment to **production** once BTS has approved it; before, that was a manual database step.
@@ -392,7 +402,7 @@ A plan limit answers **402** with `plan_limit`, `plan_feature` or `billing_suspe
 ## Public API, webhooks and integrations
 
 - **Reference:** `/docs` renders the OpenAPI 3.1 description at `/v1/openapi.json`, built from the routes' own schemas, with guides and curl examples. API keys are limited to 600 requests a minute (`API_RATE_LIMIT_PER_MINUTE`), with `X-RateLimit-*` headers.
-- **Webhooks** (Pro): database triggers record every document and order change in an outbox; the dispatcher signs each delivery (`X-EInvoicing-Signature: t=…,v1=<HMAC-SHA256>`), retries for about a day, and switches off an endpoint after 20 failures in a row. Endpoints must be https and public (checked on the address actually used). Events: `document.authorized`, `document.rejected`, `document.cancelled`, `document.issued_offline`, `order.placed`, `order.paid`, `order.fulfilled`, `order.cancelled`, `order.refunded`. Manage them in Settings → Developers or with `GET/POST /v1/webhooks`, `PATCH/DELETE /v1/webhooks/:id`, `.../rotate-secret`, `.../test`, `.../deliveries`.
+- **Webhooks** (Pro): database triggers record every document and order change in an outbox; the dispatcher signs each delivery (`X-EInvoicing-Signature: t=…,v1=<HMAC-SHA256>`), retries for about a day, and switches off an endpoint after 20 failures in a row. Endpoints must be https and public (checked on the address actually used). Events: `document.authorized`, `document.rejected`, `document.cancelled`, `document.issued_offline`, `order.placed`, `order.paid`, `order.fulfilled`, `order.cancelled`, `order.refunded`, `payment.recorded`, `invoice.paid`. Manage them in Settings → Developers or with `GET/POST /v1/webhooks`, `PATCH/DELETE /v1/webhooks/:id`, `.../rotate-secret`, `.../test`, `.../deliveries`.
 - **QuickBooks Online** (Pro; `src/integrations/quickbooks.ts`): connect with Intuit OAuth in Settings → Integrations; authorized documents are sent within a minute as Invoices, SalesReceipts and CreditMemos (document number, ETDUI and authorization in the note), cancelled ones are voided, and GST is booked once the business maps its QuickBooks tax codes. Needs the platform's Intuit app: `QBO_CLIENT_ID`, `QBO_CLIENT_SECRET`, `QBO_ENVIRONMENT`, and the redirect URI `<PUBLIC_URL>/v1/integrations/quickbooks/callback` registered with Intuit.
 
 ## Operations (`docs/operations.md`, `docs/staging.md`)

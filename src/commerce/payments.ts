@@ -188,7 +188,8 @@ export async function gatewayFor(db: Queryable, tenantId: string, provider: Prov
 export interface PaymentRow {
   id: string;
   tenant_id: string;
-  order_id: string;
+  order_id: string | null;
+  document_id: string | null;
   provider: Provider;
   reference: string | null;
   status: 'pending' | 'paid' | 'failed' | 'cancelled';
@@ -200,16 +201,28 @@ export interface PaymentRow {
   created_at: Date | string;
 }
 
-/** Start paying for an order: records the payment and returns where to send the buyer. */
-export async function startPayment(db: Queryable, gateway: Gateway, order: { id: string; tenant_id: string; number: number; total_cents: unknown }, urls: { store: string; returnUrl: (paymentId: string) => string; cancelUrl: string }): Promise<{ paymentId: string; redirectUrl: string }> {
+export interface PaymentTarget {
+  tenantId: string;
+  /** An online order, or an invoice being paid from its link. */
+  orderId?: string;
+  documentId?: string;
+  amountCents: bigint;
+  /** What the buyer sees at the provider, e.g. "Corner Store order #1001". */
+  description: string;
+  /** Short and unique per attempt, for the provider's records. */
+  invoiceRef: string;
+}
+
+/** Start an online payment: records it and returns where to send the buyer. */
+export async function startPayment(db: Queryable, gateway: Gateway, target: PaymentTarget, urls: { returnUrl: (paymentId: string) => string; cancelUrl: string }): Promise<{ paymentId: string; redirectUrl: string }> {
   const paymentId = randomUUID();
-  const amount = toBigInt(order.total_cents);
+  const amount = target.amountCents;
   await db.query(
-    "insert into order_payments (id, tenant_id, order_id, provider, status, amount_cents, currency) values ($1, $2, $3, $4, 'pending', $5, 'BZD')",
-    [paymentId, order.tenant_id, order.id, gateway.provider, String(amount)],
+    "insert into order_payments (id, tenant_id, order_id, document_id, provider, status, amount_cents, currency) values ($1, $2, $3, $4, $5, 'pending', $6, 'BZD')",
+    [paymentId, target.tenantId, target.orderId ?? null, target.documentId ?? null, gateway.provider, String(amount)],
   );
   try {
-    const c = await gateway.createCheckout({ paymentId, amountCents: amount, description: `${urls.store} order #${order.number}`, invoiceId: `${order.tenant_id.slice(0, 8)}-${order.number}-${paymentId.slice(0, 6)}`, returnUrl: urls.returnUrl(paymentId), cancelUrl: urls.cancelUrl });
+    const c = await gateway.createCheckout({ paymentId, amountCents: amount, description: target.description, invoiceId: `${target.invoiceRef}-${paymentId.slice(0, 6)}`, returnUrl: urls.returnUrl(paymentId), cancelUrl: urls.cancelUrl });
     await db.query('update order_payments set reference = $2, currency = $3, charged_amount = $4, updated_at = now() where id = $1', [paymentId, c.reference, c.currency, c.chargedAmount]);
     return { paymentId, redirectUrl: c.redirectUrl };
   } catch (e) {

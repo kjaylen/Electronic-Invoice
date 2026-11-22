@@ -41,6 +41,8 @@ interface Draft {
 let lineKey = 0;
 const emptyLine = (): Line => ({ key: ++lineKey, description: '', quantity: '1', unitCode: 'H87', unitPrice: '', gstCategory: 'S', exemptionReasonCode: '', discountPercent: '' });
 const DECIMAL = /^\d+(\.\d{1,6})?$/;
+/** The payment means on the invoice → how the payment is recorded. */
+const PAID_METHOD: Record<string, 'cash' | 'card' | 'bank_transfer' | 'cheque'> = { '10': 'cash', '48': 'card', '30': 'bank_transfer', '20': 'cheque' };
 const lineReady = (l: Line) => Boolean(l.description.trim() && DECIMAL.test(l.quantity) && Number(l.quantity) > 0 && DECIMAL.test(l.unitPrice) && (l.gstCategory !== 'E' || l.exemptionReasonCode.trim()));
 const EMPTY_CUSTOMER: NewCustomer = { name: '', tin: '', street: '', city: '', districtCode: '1', telephone: '', email: '', save: true };
 
@@ -68,6 +70,8 @@ export function NewDocument() {
   const [meansCode, setMeansCode] = useState(initialType === '02' ? '10' : '30');
   const [dueDate, setDueDate] = useState(belizeDate(30));
   const [terms, setTerms] = useState(initialType === '02' ? '' : 'Net 30');
+  // Tax invoices and debit notes paid on the spot: recorded as paid when issued.
+  const [paidNow, setPaidNow] = useState(false);
   const [note, setNote] = useState('');
   const [preview, setPreview] = useState<{ totals: DocumentInfo['totals']; lines: Array<{ net: string; tax: string; total: string }> } | null>(null);
   const [showPaper, setShowPaper] = useState(false);
@@ -319,6 +323,7 @@ export function NewDocument() {
           ...customerPart,
           lines: linesBody,
           payment,
+          ...(paidNow && (type === '01' || type === '03') && { paid: { method: PAID_METHOD[meansCode] ?? 'other' } }),
           ...(note.trim() && { note: note.trim() }),
           ...(isNote && reference && { reference: { documentId: reference.id, reason: reason.trim() } }),
         },
@@ -499,6 +504,9 @@ export function NewDocument() {
             </select>
           </Field>
           {type !== '02' && <Field label={t('Due date')}><input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} /></Field>}
+          {(type === '01' || type === '03') && can('payments.record') && (
+            <label className="row small"><input type="checkbox" checked={paidNow} onChange={(e) => setPaidNow(e.target.checked)} /> {t('Already paid in full (record the payment now)')}</label>
+          )}
           <Field label={t('Terms')} hint={type === '02' ? t('Optional.') : undefined}><input value={terms} onChange={(e) => setTerms(e.target.value)} /></Field>
           <Field label={t('Note')} hint={t('Optional; printed on the document.')}><textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} /></Field>
         </fieldset>

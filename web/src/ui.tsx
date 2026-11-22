@@ -2,7 +2,7 @@
 
 import { type ReactNode, useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { DocStatus } from './api';
+import type { DocStatus, InvoicePaymentMethod, InvoiceStatus } from './api';
 import { errorMessage, type T, useT } from './i18n';
 
 export const DISTRICTS: Array<[string, string]> = [
@@ -62,6 +62,15 @@ export const TYPE_NAMES: Record<string, string> = { '01': 'Tax invoice', '02': '
 export function StatusBadge({ status }: { status: DocStatus }) {
   const t = useT();
   return <span className={`badge ${status}`}>{t(STATUS_TEXT[status])}</span>;
+}
+
+export const PAYMENT_STATUS_TEXT: Record<InvoiceStatus, string> = { paid: 'Paid', partial: 'Part paid', unpaid: 'Unpaid', overdue: 'Overdue', credit: 'In credit' };
+export const PAYMENT_METHOD_TEXT: Record<InvoicePaymentMethod, string> = { cash: 'Cash', cheque: 'Cheque', bank_transfer: 'Bank transfer', card: 'Card', online: 'Online', refund: 'Refund', other: 'Other' };
+
+/** Whether an invoice is paid, part paid, owed or late. */
+export function PaymentBadge({ status }: { status: InvoiceStatus }) {
+  const t = useT();
+  return <span className={`badge pay-${status}`}>{t(PAYMENT_STATUS_TEXT[status])}</span>;
 }
 
 /** "17206.2" -> "BZ$17,206.20" */

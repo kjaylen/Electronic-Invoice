@@ -20,7 +20,7 @@ import { cancelDocument, issueDocument, type IssueRequest, type PipelineDeps } f
 import { renderReceipt, renderSheet } from '../render/pdf.ts';
 import QRCode from 'qrcode';
 import { qrUrl, readEtdForPrint } from '../render/view.ts';
-import { toBigInt } from '../db/database.ts';
+import { type Queryable, toBigInt } from '../db/database.ts';
 import { simpleHtml } from '../mail/mailer.ts';
 import { type CustomerBody, customerFromRow, likePattern, loadCustomer, loadItems, nextCursor, parsePage } from './catalog.ts';
 import { audit } from '../db/audit.ts';
@@ -30,6 +30,7 @@ import { can, requirePermission } from './permissions.ts';
 import { ApiError, notFound } from './errors.ts';
 import { date as dateSchema, issueSchema, listQuery, uuid } from './schemas.ts';
 import { assertCanIssue } from '../billing/billing.ts';
+import { type PaymentMethod, receivable, recordPayment, statusesFor } from '../receivables/receivables.ts';
 
 const PRINTABLE = ['authorized', 'authorized_with_alert', 'contingency_pending'];
 // Emails per business per hour (shared by every server process), so a compromised account cannot send spam at volume.
@@ -54,6 +55,7 @@ export interface IssueBody {
   note?: string;
   prepaidAmount?: string;
   payableRoundingAmount?: string;
+  paid?: { method: PaymentMethod; reference?: string };
 }
 
 const DOC_COLUMNS = `d.id, d.etdui, d.etd_type, d.series_number, d.serial, d.issue_date::text as issue_date, d.issue_time::text as issue_time,
@@ -312,25 +314,35 @@ export async function sendDocumentEmail(
   ctx: ServerContext,
   tenantId: string,
   documentId: string,
-  opts: { to: string; message?: string; userId?: string | null },
+  opts: {
+    to: string;
+    message?: string;
+    userId?: string | null;
+    /** A reminder or a payment request: its own subject and opening lines instead of "Please find attached". */
+    subject?: string;
+    intro?: string[];
+    /** A button to pay the invoice online. */
+    payUrl?: string;
+  },
 ): Promise<string> {
   const copy = await printedCopy(deps, tenantId, documentId);
   const biz = (await deps.db.query<{ name: string; email: string }>('select coalesce(trade_name, legal_name) as name, email from tenants where id = $1', [tenantId])).rows[0]!;
   const v = copy.view;
   const title = `${v.typeName} ${v.series}-${v.number}`;
-  const lines = [
-    `Please find attached ${v.typeName.toLowerCase()} ${v.series}-${v.number} from ${biz.name}.`,
+  const body = [
+    ...(opts.intro?.length ? opts.intro : [`Please find attached ${v.typeName.toLowerCase()} ${v.series}-${v.number} from ${biz.name}.`]),
     ...(opts.message?.trim() ? [opts.message.trim()] : []),
-    'The PDF is the printed copy. The XML file is the electronic tax document as authorized by the Belize Tax Service.',
   ];
+  const legal = 'The PDF is the printed copy. The XML file is the electronic tax document as authorized by the Belize Tax Service.';
+  const lines = [...body, ...(opts.payUrl ? [`Pay online: ${opts.payUrl}`] : []), legal];
   const id = randomUUID();
   try {
     await ctx.mailer.send({
       to: opts.to,
       replyTo: biz.email,
-      subject: `${title} from ${biz.name}`,
+      subject: opts.subject ?? `${title} from ${biz.name}`,
       text: lines.join('\n\n'),
-      html: simpleHtml({ heading: title, paragraphs: lines }),
+      html: simpleHtml({ heading: title, paragraphs: [...body, legal], ...(opts.payUrl && { button: { label: 'Pay online', url: opts.payUrl } }) }),
       attachments: [
         { filename: `${copy.filename}.pdf`, content: copy.pdf, contentType: 'application/pdf' },
         { filename: `${copy.filename}.xml`, content: copy.signedXml, contentType: 'application/xml' },
@@ -344,6 +356,29 @@ export async function sendDocumentEmail(
   await deps.db.query(`insert into document_messages (id, tenant_id, document_id, channel, recipient, status, sent_by) values ($1, $2, $3, 'email', $4, 'sent', $5)`,
     [id, tenantId, documentId, opts.to, opts.userId ?? null]);
   return id;
+}
+
+/**
+ * A link the customer can open without signing in (90 days): /d/<token> is the
+ * PDF, /pay/<token> the page to pay it online. The token is stored hashed.
+ */
+export async function createShareLink(db: Queryable, ctx: ServerContext, tenantId: string, documentId: string, createdBy: string | null): Promise<{ token: string; url: string; payUrl: string; expiresAt: string }> {
+  publicLink(ctx, '/');
+  const token = randomBytes(32).toString('base64url');
+  const expiresAt = new Date(Date.now() + SHARE_TTL_MS);
+  await db.query('insert into share_links (id, tenant_id, document_id, token_hash, created_by, expires_at) values ($1, $2, $3, $4, $5, $6)',
+    [randomUUID(), tenantId, documentId, shareHash(token), createdBy, expiresAt.toISOString()]);
+  return { token, url: publicLink(ctx, `/d/${token}`), payUrl: publicLink(ctx, `/pay/${token}`), expiresAt: expiresAt.toISOString() };
+}
+
+/** The document behind a share token, while the link is valid. */
+export async function shareLinkFor(db: Queryable, token: string): Promise<{ tenantId: string; documentId: string } | null> {
+  if (!/^[A-Za-z0-9_-]{43}$/.test(token)) return null;
+  const link = (await db.query<{ tenant_id: string; document_id: string; expires_at: string | Date }>(
+    'select tenant_id, document_id, expires_at from share_links where token_hash = $1', [shareHash(token)],
+  )).rows[0];
+  if (!link || new Date(link.expires_at).getTime() <= Date.now()) return null;
+  return { tenantId: link.tenant_id, documentId: link.document_id };
 }
 
 /** GET /d/:token: the printed copy behind a share link. No login; the 256-bit token is the permission. */
@@ -371,6 +406,13 @@ export function registerPublicDocumentRoutes(app: FastifyInstance, deps: Pipelin
 
 export function registerDocumentRoutes(app: FastifyInstance, deps: PipelineDeps, ctx: ServerContext) {
   const { db } = deps;
+
+  /** What is owed on a tax invoice or debit note (null for other documents, and for store orders paid at checkout). */
+  const withPayment = async <T extends { id: string; type: string }>(tenantId: string, doc: T) => {
+    if (doc.type !== '01' && doc.type !== '03') return { ...doc, payment: null };
+    const r = await receivable(db, tenantId, doc.id);
+    return { ...doc, payment: r ? { status: r.status, dueDate: r.dueDate, total: r.total, paid: r.paid, credited: r.credited, balance: r.balance, daysOverdue: r.daysOverdue } : null };
+  };
 
   /** Invoices and receipts need documents.issue; credit and debit notes need documents.adjust. */
   const requireIssue = (request: FastifyRequest, type: string) => requirePermission(request, type === '03' || type === '04' ? 'documents.adjust' : 'documents.issue');
@@ -411,7 +453,15 @@ export function registerDocumentRoutes(app: FastifyInstance, deps: PipelineDeps,
       documentId = result.documentId;
       // Who issued it (not part of the signed record). Also on the contingency reissue, if there was one.
       if (request.userId) await db.query('update documents set issued_by = $3 where tenant_id = $1 and (id = $2 or supersedes_document_id = $2)', [tenantId, result.documentId, request.userId]);
-      const body = documentJson(await loadDocument(deps, tenantId, result.documentId));
+      // Paid on the spot: record it, once the invoice has legal value (a rejected one is never owed).
+      const paid = request.body.paid;
+      if (paid && (issueRequest.etdType === '01' || issueRequest.etdType === '03') && can(request.principal, 'payments.record')) {
+        const open = await receivable(db, tenantId, result.documentId);
+        if (open && open.balanceCents > 0n) {
+          await recordPayment(db, tenantId, result.documentId, { amountCents: open.balanceCents, method: paid.method, reference: paid.reference ?? null, paidOn: open.issueDate }, request.userId || null);
+        }
+      }
+      const body = await withPayment(tenantId, documentJson(await loadDocument(deps, tenantId, result.documentId)));
       if (key) {
         await db.query(
           `update idempotency_keys set status = 'completed', response_code = 201, response_body = $3, document_id = $4, completed_at = now()
@@ -524,7 +574,8 @@ export function registerDocumentRoutes(app: FastifyInstance, deps: PipelineDeps,
       params.push(page.limit + 1);
       const rows = (await db.query<DocRow>(`select ${DOC_COLUMNS} from documents d where ${where} order by d.created_at desc, d.id desc limit $${params.length}`, params)).rows;
       const { items, nextCursor: next } = nextCursor(rows, page.limit);
-      return { data: items.map(documentJson), nextCursor: next };
+      const payments = await statusesFor(db, request.tenantId, items.filter((r) => r.etd_type === '01' || r.etd_type === '03').map((r) => r.id));
+      return { data: items.map((r) => ({ ...documentJson(r), payment: payments.get(r.id) ?? null })), nextCursor: next };
     },
   );
 
@@ -533,7 +584,7 @@ export function registerDocumentRoutes(app: FastifyInstance, deps: PipelineDeps,
     // For invoices and receipts: how much is left to credit (for the credit-note form).
     const balance = row.etd_type === '01' || row.etd_type === '02' ? await creditBalance(db, request.tenantId, row.etdui) : null;
     return {
-      ...documentJson(row),
+      ...(await withPayment(request.tenantId, documentJson(row))),
       lines: await documentLines(deps, request.tenantId, request.params.id),
       ...(balance && { credit: { credited: formatCents(balance.credited), debited: formatCents(balance.debited), remaining: formatCents(balance.remaining < 0n ? 0n : balance.remaining) } }),
     };
@@ -586,12 +637,8 @@ export function registerDocumentRoutes(app: FastifyInstance, deps: PipelineDeps,
     const row = (await db.query<{ status: string }>('select status from documents where id = $1 and tenant_id = $2', [request.params.id, request.tenantId])).rows[0];
     if (!row) throw notFound('Document');
     if (!PRINTABLE.includes(row.status)) throw new ApiError(409, 'not_printable', 'Only a valid document can be shared');
-    publicLink(ctx, '/');
-    const token = randomBytes(32).toString('base64url');
-    const expiresAt = new Date(Date.now() + SHARE_TTL_MS);
-    await db.query('insert into share_links (id, tenant_id, document_id, token_hash, created_by, expires_at) values ($1, $2, $3, $4, $5, $6)',
-      [randomUUID(), request.tenantId, request.params.id, shareHash(token), userId(request), expiresAt.toISOString()]);
-    return reply.code(201).send({ url: publicLink(ctx, `/d/${token}`), expiresAt: expiresAt.toISOString() });
+    const link = await createShareLink(db, ctx, request.tenantId, request.params.id, userId(request));
+    return reply.code(201).send({ url: link.url, expiresAt: link.expiresAt });
   });
 
   app.get<{ Params: { id: string } }>('/documents/:id/xml', { schema: { params: idParams } }, async (request, reply) => {

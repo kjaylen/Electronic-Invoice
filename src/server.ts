@@ -42,6 +42,7 @@ import { buildApp } from './api/app.ts';
 import { billingContextFactory } from './api/billing.ts';
 import { gatewayOptions, reconcilePayments } from './api/payments.ts';
 import { startHousekeeping } from './api/housekeeping.ts';
+import { runReminders } from './api/receivables.ts';
 import { startWorker } from './api/worker.ts';
 import { startWebhookDispatcher } from './webhooks/webhooks.ts';
 import { objectStoreFromEnv } from './storage/objects.ts';
@@ -123,6 +124,7 @@ const housekeeping = housekeepingMs > 0
       intervalMs: housekeepingMs,
       billing,
       reconcilePayments: () => reconcilePayments(pipeline, backgroundCtx, gatewayOptions(pipeline, slugOf)),
+      reminders: () => runReminders(pipeline, backgroundCtx),
       ...(mailer && { mailer }),
       ...(env.PUBLIC_URL && { publicUrl: env.PUBLIC_URL }),
       ...(env.ALERT_WEBHOOK_URL && { alertWebhookUrl: env.ALERT_WEBHOOK_URL }),
