@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { api, link, type Summary } from '../api';
 import { useI18n, useT } from '../i18n';
 import { belizeToday, ErrorText, Field, fromCents, Modal, money, Segmented, toCents, usePageTitle } from '../ui';
+import { useSearchParams } from 'react-router';
+import { GstReturnView, ProfitView } from './Accounting';
 
 type Preset = 'month' | 'last-month' | 'quarter' | 'year' | 'custom';
 
@@ -95,6 +97,8 @@ export function SalesChart({ summary }: { summary: Summary }) {
 export function Reports() {
   const t = useT();
   usePageTitle(t('Reports'));
+  const [params, setParams] = useSearchParams();
+  const view = (params.get('view') as 'sales' | 'gst' | 'profit' | null) ?? 'sales';
   const [preset, setPreset] = useState<Preset>('month');
   const [range, setRange] = useState<[string, string]>(() => presetRange('month'));
   const [summary, setSummary] = useState<Summary | null>(null);
@@ -165,8 +169,11 @@ export function Reports() {
         <span className="small muted num">{from} → {to}</span>
       </div>
       <ErrorText error={error} />
+      <Segmented label={t('Report')} value={view} onChange={(v) => setParams(v === 'sales' ? {} : { view: v }, { replace: true })} options={[['sales', t('Sales')], ['gst', t('GST return')], ['profit', t('Profit and loss')]]} />
+      {view === 'gst' && <GstReturnView from={from} to={to} />}
+      {view === 'profit' && <ProfitView from={from} to={to} />}
 
-      {!summary ? <div className="grid">{[0, 1, 2, 3].map((i) => <div key={i} className="skeleton" style={{ height: '6rem' }} />)}</div> : (
+      {view !== 'sales' ? null : !summary ? <div className="grid">{[0, 1, 2, 3].map((i) => <div key={i} className="skeleton" style={{ height: '6rem' }} />)}</div> : (
         <>
           <div className="grid four">
             <div className="card stat"><div className="label">{t('Sales, GST included')}</div><div className="value num">{money(summary.totals.total)}</div></div>

@@ -48,6 +48,8 @@ const ShopOrder = page(() => import('./pages/Shop'), 'ShopOrder');
 const ShopTestPayment = page(() => import('./pages/Shop'), 'ShopTestPayment');
 const Reports = page(() => import('./pages/Reports'), 'Reports');
 const Receivables = page(() => import('./pages/Receivables'), 'Receivables');
+const Expenses = page(() => import('./pages/Expenses'), 'Expenses');
+const ExpenseEditor = page(() => import('./pages/Expenses'), 'ExpenseEditor');
 const PayInvoice = page(() => import('./pages/Pay'), 'PayInvoice');
 const Quotes = page(() => import('./pages/Quotes'), 'Quotes');
 const QuoteDetail = page(() => import('./pages/Quotes'), 'QuoteDetail');
@@ -142,6 +144,7 @@ function Layout() {
       { to: '/documents', label: t('Documents'), icon: Icons.documents },
       { to: '/recurring', label: t('Recurring'), icon: Icons.repeat, permission: 'documents.issue' },
       { to: '/receivables', label: t('Getting paid'), icon: Icons.wallet, permission: 'payments.record' },
+      { to: '/expenses', label: t('Expenses'), icon: Icons.expense, permission: 'expenses.manage' },
       { to: '/customers', label: t('Customers'), icon: Icons.customers },
       { to: '/products', label: t('Products'), icon: Icons.products },
       { to: '/reports', label: t('Reports'), icon: Icons.reports, permission: 'reports.view' },
@@ -325,6 +328,8 @@ function BusinessApp() {
         <Route path="/items" element={<Navigate to="/products?tab=items" replace />} />
         <Route path="/reports" element={<Allowed permission="reports.view"><Reports /></Allowed>} />
         <Route path="/receivables" element={<Allowed permission="payments.record"><Receivables /></Allowed>} />
+        <Route path="/expenses" element={<Allowed permission="expenses.manage"><Expenses /></Allowed>} />
+        <Route path="/expenses/:id" element={<Allowed permission="expenses.manage"><ExpenseEditor /></Allowed>} />
         <Route path="/quotes" element={<Allowed permission="documents.issue"><Quotes /></Allowed>} />
         <Route path="/quotes/new" element={<QuoteEditor />} />
         <Route path="/quotes/:id" element={<Allowed permission="documents.issue"><QuoteDetail /></Allowed>} />

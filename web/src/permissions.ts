@@ -15,9 +15,9 @@ export const ROLE_LABEL: Record<Role, string> = {
 export const ROLE_DESCRIPTION: Record<Role, string> = {
   owner: 'Everything, including managing owners and admins.',
   admin: 'Everything except managing owners and admins: users, business details, certificate, API keys, activity.',
-  manager: 'Issue all documents including credit and debit notes, cancel, send, manage customers and items, record payments, see reports.',
+  manager: 'Issue all documents including credit and debit notes, cancel, send, manage customers and items, record payments and expenses, see reports.',
   cashier: 'Issue and send tax invoices and receipts, and record payments. Can add a customer while selling.',
-  accountant: 'Documents, reports and downloads; records payments received.',
+  accountant: 'Documents, reports and downloads; records payments received and expenses.',
 };
 
 const RANK: Record<Role, number> = { owner: 4, admin: 3, manager: 2, cashier: 1, accountant: 1 };

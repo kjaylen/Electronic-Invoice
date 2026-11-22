@@ -1130,3 +1130,30 @@ code.copyable.token { display: block; margin-top: 0.5rem; font-size: 0.85rem; pa
 ul.timeline li { padding-left: 0.9rem; position: relative; }
 ul.timeline li::before { content: ''; position: absolute; left: 0; top: 0.5em; width: 6px; height: 6px; border-radius: 999px; background: var(--brand); }
 @media (max-width: 760px) { .quote-totals { min-width: 0; width: 100%; } .search-input { max-width: none; width: 100%; } }
+
+/* ---------- expenses, the GST return, profit and loss ---------- */
+.grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (max-width: 760px) { .grid.three { grid-template-columns: 1fr; } }
+.kpi .small-value { font-size: 1.05rem; font-family: var(--sans); letter-spacing: 0; }
+.receipt-mark { margin-left: 0.35rem; font-size: 0.85rem; }
+.receipt-preview { width: 100%; max-height: 22rem; object-fit: contain; border-radius: var(--radius); border: 1px solid var(--hairline); background: #fff; }
+.gst-result { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; border-left: 4px solid var(--brand); }
+.gst-result.credit { border-left-color: var(--lime-ink); }
+.gst-amount { font-family: var(--mono); font-size: clamp(1.8rem, 1.4rem + 1.5vw, 2.5rem); font-weight: 600; letter-spacing: -0.04em; }
+.gst-result.owe .gst-amount { color: var(--brand-ink); }
+.gst-result.credit .gst-amount { color: var(--lime-ink); }
+.gst-result p { margin: 0.2rem 0 0; }
+.stat.loss .value { color: var(--coral-ink); }
+.stat.gain .value { color: var(--lime-ink); }
+.pl-bars { display: flex; align-items: flex-end; gap: 0.6rem; height: 160px; padding: 0.5rem 0; overflow-x: auto; }
+.pl-month { display: grid; justify-items: center; gap: 0.3rem; min-width: 2.4rem; height: 100%; grid-template-rows: 1fr auto; }
+.pl-pair { display: flex; align-items: flex-end; gap: 3px; height: 100%; }
+.pl-bar { display: block; width: 12px; min-height: 2px; border-radius: 3px 3px 0 0; }
+.pl-bar.income, .legend.income { background: var(--brand); }
+.pl-bar.cost, .legend.cost { background: var(--ochre); }
+.legend { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin: 0 0.25rem 0 0.6rem; vertical-align: middle; }
+.cat-bars { list-style: none; margin: 0 0 0.8rem; padding: 0; display: grid; gap: 0.5rem; }
+.cat-bars li { display: grid; grid-template-columns: minmax(8rem, 12rem) 1fr auto; gap: 0.8rem; align-items: center; }
+.cat-track { height: 8px; border-radius: 999px; background: var(--hairline); overflow: hidden; }
+.cat-track span { display: block; height: 100%; background: var(--ochre); border-radius: inherit; }
+@media (max-width: 520px) { .cat-bars li { grid-template-columns: 1fr auto; } .cat-track { grid-column: 1 / -1; order: 3; } }

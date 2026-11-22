@@ -52,6 +52,8 @@ import { registerPayRoutes, registerReceivableRoutes } from './receivables.ts';
 import { registerBillPayBankRoutes, registerBillPaySettingsRoutes } from './billpay.ts';
 import { registerPublicQuoteRoutes, registerQuoteRoutes } from './quotes.ts';
 import { registerRecurringRoutes } from './recurring.ts';
+import { registerExpenseRoutes } from './expenses.ts';
+import { registerAccountingRoutes } from './accounting.ts';
 import { registerDiscountRoutes } from './discounts.ts';
 import { domainCache } from '../commerce/domains.ts';
 import { registerIntegrationCallback, registerIntegrationRoutes } from './integrations.ts';
@@ -287,6 +289,8 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     registerBillPaySettingsRoutes(tenant, deps, ctx);
     registerQuoteRoutes(tenant, deps, ctx, { ...(options.ekyash && { ekyash: options.ekyash }) });
     registerRecurringRoutes(tenant, deps, ctx, { ...(options.ekyash && { ekyash: options.ekyash }) });
+    registerExpenseRoutes(tenant, deps, ctx);
+    registerAccountingRoutes(tenant, deps);
   }, { prefix: '/v1' });
 
   registerPublicDocumentRoutes(app, deps);
