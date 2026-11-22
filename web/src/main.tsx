@@ -4,10 +4,11 @@ import { BrowserRouter, Navigate, NavLink, Outlet, Route, Routes, useLocation, u
 import '@fontsource-variable/inter-tight';
 import '@fontsource-variable/geist-mono';
 import './styles.css';
-import type { Permission } from './api';
+import { api, type Permission } from './api';
 import { Brand } from './art';
 import { BUSINESS } from './business';
 import { ErrorBoundary } from './ErrorBoundary';
+import { Icons } from './icons';
 import { I18nProvider, LanguageToggle, useI18n } from './i18n';
 import { ROLE_LABEL } from './permissions';
 import { SessionProvider, useSession } from './session';
@@ -67,6 +68,8 @@ function useOnline() {
   return online;
 }
 
+type NavItem = { to: string; label: string; icon: () => React.JSX.Element; permission?: Permission; badge?: number };
+
 function Layout() {
   const { session, me, logout, can } = useSession();
   const { t } = useI18n();
@@ -74,12 +77,15 @@ function Layout() {
   const location = useLocation();
   const online = useOnline();
   const [open, setOpen] = useState(false);
+  const [ordersToDo, setOrdersToDo] = useState(0);
   const mainRef = useRef<HTMLElement>(null);
+  const navRef = useRef<HTMLElement>(null);
   const first = useRef(true);
   const close = () => setOpen(false);
 
   // Move focus to the new page after navigating, so keyboard and screen-reader users start at the top of it.
   useEffect(() => {
+    setOpen(false);
     if (first.current) {
       first.current = false;
       return;
@@ -93,71 +99,138 @@ function Layout() {
     return () => clearTimeout(timer);
   }, [location.pathname]);
 
-  const links: Array<[string, string, Permission?]> = [
-    ['/', t('Overview')],
-    ['/counter', t('Counter'), 'documents.issue'],
-    ['/documents/new?type=01', t('New invoice'), 'documents.issue'],
-    ['/orders', t('Orders')],
-    ['/documents', t('Documents')],
-    ['/products', t('Products')],
-    ['/customers', t('Customers')],
-    ['/reports', t('Reports'), 'reports.view'],
-    ['/settings', t('Settings')],
+  // How many online orders need doing, for the badge in the menu; refreshed as people move around.
+  useEffect(() => {
+    void api<{ counts: { unpaid: number; unfulfilled: number } }>('/v1/orders?view=to_do&q=%23000000000')
+      .then((r) => setOrdersToDo(Math.max(r.counts.unpaid, r.counts.unfulfilled)))
+      .catch(() => {});
+  }, [location.pathname]);
+
+  // The phone drawer: Escape closes it; opening it moves focus into it.
+  useEffect(() => {
+    if (!open) return;
+    navRef.current?.querySelector<HTMLElement>('a')?.focus();
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [open]);
+
+  const groups: Array<[string, NavItem[]]> = [
+    [t('Sell'), [
+      { to: '/', label: t('Overview'), icon: Icons.overview },
+      { to: '/counter', label: t('Counter'), icon: Icons.counter, permission: 'documents.issue' },
+      { to: '/documents/new?type=01', label: t('New invoice'), icon: Icons.invoice, permission: 'documents.issue' },
+      { to: '/orders', label: t('Orders'), icon: Icons.orders, badge: ordersToDo },
+    ]],
+    [t('Records'), [
+      { to: '/documents', label: t('Documents'), icon: Icons.documents },
+      { to: '/customers', label: t('Customers'), icon: Icons.customers },
+      { to: '/products', label: t('Products'), icon: Icons.products },
+      { to: '/reports', label: t('Reports'), icon: Icons.reports, permission: 'reports.view' },
+    ]],
+    [t('Business'), [
+      { to: '/settings', label: t('Settings'), icon: Icons.settings },
+    ]],
   ];
   const user = session!.user;
+  const business = me?.tradeName ?? me?.legalName ?? session!.business.tradeName ?? session!.business.legalName;
+  const initials = user.name.split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase();
+  const isActive = (to: string) => {
+    const [path, query] = to.split('?');
+    if (path === '/') return location.pathname === '/';
+    if (query) return location.pathname === path && location.search.includes(query);
+    if (path === '/documents') return location.pathname === '/documents' || (location.pathname.startsWith('/documents/') && location.pathname !== '/documents/new');
+    return location.pathname === path || location.pathname.startsWith(`${path}/`);
+  };
+
   return (
-    <div className="shell">
+    <div className={`app ${open ? 'drawer-open' : ''}`}>
       <a className="skip-link" href="#main">{t('Skip to content')}</a>
-      <header className="topbar">
-        <NavLink to="/" className="brand" onClick={close} viewTransition aria-label="eInvoicing"><Brand /></NavLink>
-        <button className="menu-button secondary" aria-expanded={open} aria-controls="main-nav" onClick={() => setOpen(!open)}>{open ? t('Close') : t('Menu')}</button>
-        <nav id="main-nav" className={open ? 'open' : ''} aria-label={t('Main')}>
-          {links.filter(([, , p]) => !p || can(p)).map(([to, label]) => {
-            const [path] = to.split('?');
+      <aside className="sidebar" aria-label={t('Sidebar')}>
+        <div className="sidebar-head">
+          <NavLink to="/" className="brand" viewTransition aria-label="eInvoicing"><Brand /></NavLink>
+          <button className="icon-button sidebar-close" aria-label={t('Close menu')} onClick={close}><Icons.close /></button>
+        </div>
+        <div className="biz-card">
+          <span className="biz-name" title={business}>{business}</span>
+          <span className="biz-meta">
+            {session!.business.environment === 'test'
+              ? <span className="badge test" title={t('Documents sent to the BTS test environment have no fiscal value')}>{t('Test')}</span>
+              : <span className="badge authorized">{t('Production')}</span>}
+            <span className="mono small muted">TIN {me?.tin ?? ''}</span>
+          </span>
+        </div>
+        <nav id="main-nav" ref={navRef} aria-label={t('Main')}>
+          {groups.map(([group, items]) => {
+            const visible = items.filter((i) => !i.permission || can(i.permission));
+            if (!visible.length) return null;
             return (
-              <NavLink
-                key={to}
-                to={to}
-                end={to === '/' || to === '/documents'}
-                onClick={close}
-                viewTransition
-                className={({ isActive }) => ((isActive && !(path === '/documents' && location.pathname === '/documents/new')) ? 'active' : '')}
-              >
-                {label}
-              </NavLink>
+              <div className="nav-group" key={group}>
+                <span className="nav-label">{group}</span>
+                {visible.map((i) => (
+                  <NavLink key={i.to} to={i.to} viewTransition className={isActive(i.to) ? 'active' : ''} aria-current={isActive(i.to) ? 'page' : undefined}>
+                    <i.icon />
+                    <span className="nav-text">{i.label}</span>
+                    {i.badge ? <span className="nav-badge" aria-label={t('{n} to do', { n: i.badge })}>{i.badge}</span> : null}
+                  </NavLink>
+                ))}
+                {group === t('Business') && (
+                  <a href={`/${session!.business.slug}/shop`} target="_blank" rel="noreferrer">
+                    <Icons.store />
+                    <span className="nav-text">{t('View store')}</span>
+                    <span className="nav-ext"><Icons.external /></span>
+                  </a>
+                )}
+              </div>
             );
           })}
         </nav>
-        <span className="spacer" />
-        <div className={`row account ${open ? 'open' : ''}`}>
-          <span className="who" title={`${user.name} · ${t(ROLE_LABEL[user.role])}`}>{me?.tradeName ?? me?.legalName ?? session!.business.tradeName ?? session!.business.legalName}</span>
-          {session!.business.environment === 'test' && <span className="badge test" title={t('Documents sent to the BTS test environment have no fiscal value')}>{t('Test')}</span>}
-          <LanguageToggle />
-          <a className="button secondary switch" href="/?choose=1" title={t('Switch business')}>{t('Switch')}</a>
-          <button className="secondary" onClick={() => void logout().then(() => navigate('/login', { viewTransition: true }))}>{t('Log out')}</button>
+        <div className="sidebar-foot">
+          <div className="me">
+            <span className="avatar" aria-hidden="true">{initials}</span>
+            <span className="me-text">
+              <strong title={user.name}>{user.name}</strong>
+              <span className="small muted">{t(ROLE_LABEL[user.role])}</span>
+            </span>
+          </div>
+          <div className="foot-actions">
+            <LanguageToggle />
+            <a className="icon-button" href="/?choose=1" title={t('Switch business')} aria-label={t('Switch business')}><Icons.swap /></a>
+            <button className="icon-button" title={t('Log out')} aria-label={t('Log out')} onClick={() => void logout().then(() => navigate('/login', { viewTransition: true }))}><Icons.logout /></button>
+          </div>
         </div>
-      </header>
-      {(!online || me?.contingency.active || (me && me.contingency.queued > 0)) && (
-        <div className="statusbar" role="status">
-          {!online ? (
-            <span>{t('You are offline. Drafts are kept on this device; issuing needs a connection.')}</span>
-          ) : me?.contingency.active ? (
-            <span><strong>{t('BTS cannot be reached.')}</strong> {t('Keep issuing: documents are sent automatically when it is back.')} {me.contingency.queued > 0 && t('{n} waiting.', { n: me.contingency.queued })}</span>
-          ) : (
-            <span><span className="pulse" /> {t('BTS is back. Sending {n} queued documents…', { n: me!.contingency.queued })}</span>
-          )}
-        </div>
-      )}
-      <main id="main" ref={mainRef} tabIndex={-1}>
-        {/* Keyed by route, so every page plays its entrance and a crash stays inside one page. */}
-        <div className="page stack" key={location.pathname + location.search}>
-          <ErrorBoundary>
-            <Suspense fallback={<PageSkeleton />}>
-              <Outlet />
-            </Suspense>
-          </ErrorBoundary>
-        </div>
-      </main>
+      </aside>
+      <div className="scrim" onClick={close} aria-hidden="true" />
+
+      <div className="workspace">
+        <header className="mobilebar">
+          <button className="icon-button" aria-expanded={open} aria-controls="main-nav" aria-label={t('Open menu')} onClick={() => setOpen(true)}><Icons.menu /></button>
+          <NavLink to="/" className="brand" viewTransition aria-label="eInvoicing"><Brand /></NavLink>
+          <span className="spacer" />
+          {session!.business.environment === 'test' && <span className="badge test">{t('Test')}</span>}
+        </header>
+        {(!online || me?.contingency.active || (me && me.contingency.queued > 0)) && (
+          <div className="statusbar" role="status">
+            {!online ? (
+              <span>{t('You are offline. Drafts are kept on this device; issuing needs a connection.')}</span>
+            ) : me?.contingency.active ? (
+              <span><strong>{t('BTS cannot be reached.')}</strong> {t('Keep issuing: documents are sent automatically when it is back.')} {me.contingency.queued > 0 && t('{n} waiting.', { n: me.contingency.queued })}</span>
+            ) : (
+              <span><span className="pulse" /> {t('BTS is back. Sending {n} queued documents…', { n: me!.contingency.queued })}</span>
+            )}
+          </div>
+        )}
+        <main id="main" ref={mainRef} tabIndex={-1}>
+          {/* Keyed by route, so every page plays its entrance and a crash stays inside one page. */}
+          <div className="page stack" key={location.pathname + location.search}>
+            <ErrorBoundary>
+              <Suspense fallback={<PageSkeleton />}>
+                <Outlet />
+              </Suspense>
+            </ErrorBoundary>
+          </div>
+        </main>
+      </div>
     </div>
   );
 }

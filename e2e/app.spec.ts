@@ -40,7 +40,7 @@ async function logIn(page: Page, email = OWNER.email, password = OWNER.password)
   await page.getByLabel('Email or username').fill(email);
   await page.getByLabel(/^Password/).fill(password);
   await page.getByRole('button', { name: /^Log in/ }).click();
-  await expect(page.getByRole('heading', { level: 1 })).toContainText(/Corner Store/);
+  await expect(page.locator('.biz-card')).toContainText('Corner Store');
 }
 
 test('create the business and its owner, then install the certificate', async ({ page }) => {
@@ -67,7 +67,7 @@ test('create the business and its owner, then install the certificate', async ({
   await page.getByRole('button', { name: 'Install certificate' }).click();
 
   await expect(page).toHaveURL(new RegExp(`/${SLUG}$`));
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Corner Store');
+  await expect(page.locator('.biz-card')).toContainText('Corner Store');
   await expect(page.getByText('Test environment')).toBeVisible();
 
   // The start page now goes straight to this business on this device.
@@ -161,7 +161,7 @@ test('invoice: new customer, draft survives a reload, issue, email it', async ({
 
 test('documents: search, filter, and the overview totals', async ({ page }) => {
   await logIn(page);
-  await expect(page.locator('.stat').nth(0)).toContainText('2');
+  await expect(page.locator('.kpi').filter({ hasText: 'Issued today' }).locator('.kpi-value')).toHaveText('2');
   await page.getByRole('navigation').getByRole('link', { name: 'Documents' }).click();
   await page.getByLabel('Search').fill('placencia');
   await expect(page.locator('tbody tr')).toHaveCount(1);
@@ -207,7 +207,7 @@ test('users: the owner adds a cashier by email, who sets a password from the wel
   await cashier.getByLabel(/^New password/).fill('cashier password 1');
   await cashier.getByLabel('Repeat the new password').fill('cashier password 1');
   await cashier.getByRole('button', { name: /Save and log in/ }).click();
-  await expect(cashier.getByRole('heading', { level: 1 })).toHaveText('Corner Store');
+  await expect(cashier.locator('.biz-card')).toContainText('Corner Store');
   // A cashier sells but does not see reports, users or keys.
   await expect(cashier.getByRole('navigation').getByRole('link', { name: 'Counter' })).toBeVisible();
   await expect(cashier.getByRole('navigation').getByRole('link', { name: 'Reports' })).toHaveCount(0);
@@ -251,7 +251,7 @@ test('users: a till account with a username and a temporary password, replaced a
   await till.getByLabel(/^New password/).fill('till one password');
   await till.getByLabel('Repeat the new password').fill('till one password');
   await till.getByRole('button', { name: /Save and continue/ }).click();
-  await expect(till.getByRole('heading', { level: 1 })).toHaveText('Corner Store');
+  await expect(till.locator('.biz-card')).toContainText('Corner Store');
 
   // The activity log shows all of it.
   await page.goto(p('/settings?tab=activity'));
@@ -277,7 +277,7 @@ test('forgot password: email link, new password, signed in', async ({ browser })
   await page.getByLabel(/^New password/).fill('my brand new password');
   await page.getByLabel('Repeat the new password').fill('my brand new password');
   await page.getByRole('button', { name: /Save and log in/ }).click();
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Corner Store');
+  await expect(page.locator('.biz-card')).toContainText('Corner Store');
   OWNER.password = 'my brand new password';
 });
 
@@ -415,9 +415,10 @@ test('platform console: staff move the business to BTS production', async ({ pag
   await expect(staffPage.getByRole('heading', { name: /In production since/ })).toBeVisible();
   await expect(staffPage.locator('ol.activity')).toContainText('Moved to production');
 
-  // The business sees it: no more "Test" badge, and its activity log says so.
+  // The business sees it: its sidebar says Production, and its activity log says so.
   await logIn(page);
-  await expect(page.locator('.topbar .badge.test')).toHaveCount(0);
+  await expect(page.locator('.biz-card')).toContainText('Production');
+  await expect(page.locator('.biz-card .badge.test')).toHaveCount(0);
   await page.goto(p('/settings?tab=activity'));
   await expect(page.locator('ol.activity')).toContainText('moved this business to BTS production');
 });

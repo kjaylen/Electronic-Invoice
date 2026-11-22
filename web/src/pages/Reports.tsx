@@ -47,7 +47,7 @@ function buckets(summary: Summary, lang: string): Array<{ key: string; label: st
   return out;
 }
 
-function SalesChart({ summary }: { summary: Summary }) {
+export function SalesChart({ summary }: { summary: Summary }) {
   const { t, lang } = useI18n();
   const data = useMemo(() => buckets(summary, lang), [summary, lang]);
   const [hover, setHover] = useState<number | null>(null);

@@ -227,7 +227,8 @@ A React + TypeScript app (Vite) served by the API server from `web/dist`. It's b
   1. The business, its address, and the owner account, in one form. Self-service businesses start in the BTS **test** environment; moving to production is an admin step.
   2. The BTS certificate, uploaded as a `.pfx`/`.p12` file with its password and converted to PEM on the server with node-forge.
 - **Screens:**
-  - **Overview:** today's sales (credit notes subtracted), documents needing attention, certificate warnings. It refreshes while documents are still waiting for BTS.
+  - **Navigation:** a sidebar grouped into Sell, Records and Business, with icons, a badge for online orders to handle, the business and its BTS environment at the top, and the signed-in person, language, business switch and log-out at the bottom. On phones it becomes a drawer behind a menu button.
+  - **Overview:** a greeting with quick actions; today's sales (credit notes subtracted, with the last 7 days), documents issued today, online orders to handle and documents needing attention; sales for the last 14 days (for roles that see reports); a to-do list (unpaid and undelivered orders, rejected or waiting documents, certificate problems); recent documents. It refreshes while documents are still waiting for BTS.
   - **Counter** (tax receipts at speed):
     - scan a barcode or type a code and press Enter; `3*code` adds three
     - star items in the catalog to make them quick buttons
@@ -249,7 +250,7 @@ A React + TypeScript app (Vite) served by the API server from `web/dist`. It's b
   - **Reports:** this month, last month, quarter, year or custom; sales and GST collected, sales per day, GST by rate for the GST return, top customers and items; CSV for each.
   - **Settings:** my account (language, password, sign out everywhere); business (details, address, certificate); online store; users; activity; API keys.
   - **Products and Orders:** see "Online store" below.
-- **Live status:** a bar under the top menu appears while BTS is unreachable (with the queue count), when it comes back, and when the device is offline.
+- **Live status:** a bar at the top of the page appears while BTS is unreachable (with the queue count), when it comes back, and when the device is offline.
 - **Spanish:** every screen is in English and Spanish (`web/src/es.ts`). The choice is per device, defaulting to the browser's language. Emails are in English for now.
 - **Installable:** a web app manifest, icons and a service worker that caches the app shell (never API data), so it installs on phones and desktops and opens fast.
 - **Accessibility:** a skip link; focus moves to each new page; dialogs trap focus and give it back; a keyboard-operable combobox; every control labelled; muted text at 5:1 contrast.
@@ -260,7 +261,7 @@ A React + TypeScript app (Vite) served by the API server from `web/dist`. It's b
   - Inter Tight and Geist Mono (OFL), self-hosted.
   - Original SVG crystals on the sign-in, onboarding and overview screens.
 - **Motion:**
-  - native view transitions between pages, with the top bar held in place
+  - native view transitions between pages, with the sidebar held in place
   - staggered page entrances and pill buttons with sliding arrow chips
   - animated banners, modals and suggestions
   - drifting crystals
