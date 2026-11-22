@@ -50,6 +50,8 @@ import { buildOpenApi, routeCollector } from './openapi.ts';
 import { registerPaymentAccountRoutes } from './payments.ts';
 import { registerDiscountRoutes } from './discounts.ts';
 import { domainCache } from '../commerce/domains.ts';
+import { registerIntegrationCallback, registerIntegrationRoutes } from './integrations.ts';
+import type { QuickBooksConfig } from '../integrations/quickbooks.ts';
 
 export type Principal = 'api' | Role;
 
@@ -95,6 +97,8 @@ export interface AppOptions {
   storeDomainTarget?: string;
   /** For tests: DNS TXT lookups for domain verification. */
   resolveTxt?: (name: string) => Promise<string[][]>;
+  /** The platform's Intuit app, for the QuickBooks Online integration. */
+  quickbooks?: { clientId: string; clientSecret: string; environment: 'sandbox' | 'production'; fetch?: typeof fetch };
 }
 
 function bearer(request: FastifyRequest): string | undefined {
@@ -154,6 +158,9 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     ...(options.resolveTxt && { resolveTxt: options.resolveTxt }),
   };
   const storeDomains = domainCache(db);
+  const quickbooks: QuickBooksConfig | undefined = options.quickbooks && options.publicUrl
+    ? { ...options.quickbooks, redirectUri: `${options.publicUrl.replace(/\/$/, '')}/v1/integrations/quickbooks/callback` }
+    : undefined;
   const billingContext = billingContextFactory(deps, ctx);
 
   app.addHook('onResponse', async (_request, reply) => {
@@ -246,9 +253,11 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     registerWebhookRoutes(tenant, deps, { ...(options.webhooksAllowPrivate && { allowPrivate: true }) });
     registerPaymentAccountRoutes(tenant, deps, { ...(options.paymentsFetch && { fetch: options.paymentsFetch }) });
     registerDiscountRoutes(tenant, deps);
+    registerIntegrationRoutes(tenant, deps, quickbooks);
   }, { prefix: '/v1' });
 
   registerPublicDocumentRoutes(app, deps);
+  registerIntegrationCallback(app, deps, ctx, quickbooks);
 
   // The public API's description (OpenAPI 3.1), from the routes' own schemas.
   let openapi: unknown;

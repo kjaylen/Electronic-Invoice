@@ -14,6 +14,7 @@ import { CodeForm, RecoveryCodes, SetupSteps, type TwoFactorSetupInfo } from '..
 import { DISTRICTS, ErrorText, Field, Modal, Segmented, usePageTitle } from '../ui';
 import { PlanTab, UpgradeNotice } from './Billing';
 import { WebhooksPanel } from './Webhooks';
+import { IntegrationsTab } from './Integrations';
 import { StoreSettingsTab } from './StoreSettings';
 
 function readAsBase64(file: File): Promise<string> {
@@ -671,6 +672,17 @@ function describe(t: T, e: AuditEvent): string {
     'business.two_factor_optional': t('Made two-step sign-in optional'),
     'billing.plan_changed': t('Changed the plan'),
     'webhook.created': t('Added the webhook {target}', { target }),
+    'integration.connected': t('Connected {target}', { target }),
+    'discount.created': t('Created the discount code {target}', { target }),
+    'discount.updated': t('Changed the discount code {target}', { target }),
+    'discount.deactivated': t('Switched off the discount code {target}', { target }),
+    'payments.paypal_connected': t('Connected PayPal'),
+    'payments.paypal_disconnected': t('Disconnected PayPal'),
+    'store.domain_added': t('Added the store domain {target}', { target }),
+    'store.domain_verified': t('Verified the store domain {target}', { target }),
+    'store.domain_removed': t('Removed the store domain {target}', { target }),
+    'integration.disconnected': t('Disconnected {target}', { target }),
+    'integration.updated': t('Changed the {target} settings', { target }),
     'webhook.updated': t('Changed the webhook {target}', { target }),
     'webhook.deleted': t('Removed the webhook {target}', { target }),
     'webhook.secret_rotated': t('Made a new secret for the webhook {target}', { target }),
@@ -813,7 +825,7 @@ function ApiKeysTab() {
 
 // ---------- the page ----------
 
-type Tab = 'account' | 'business' | 'plan' | 'store' | 'users' | 'activity' | 'keys';
+type Tab = 'account' | 'business' | 'plan' | 'store' | 'users' | 'activity' | 'keys' | 'integrations';
 
 export function Settings() {
   const t = useT();
@@ -827,6 +839,7 @@ export function Settings() {
     ...(can('business.manage') ? [['store', t('Online store')] as [Tab, string]] : []),
     ...(can('users.manage') ? [['users', t('Users')] as [Tab, string]] : []),
     ...(can('audit.view') ? [['activity', t('Activity')] as [Tab, string]] : []),
+    ...(can('business.manage') ? [['integrations', t('Integrations')] as [Tab, string]] : []),
     ...(can('apikeys.manage') ? [['keys', t('Developers')] as [Tab, string]] : []),
   ];
   const requested = params.get('tab') as Tab | null;
@@ -842,6 +855,7 @@ export function Settings() {
       {tab === 'account' && <AccountTab />}
       {tab === 'business' && <BusinessTab />}
       {tab === 'plan' && <PlanTab />}
+      {tab === 'integrations' && <IntegrationsTab />}
       {tab === 'store' && (me?.billing && !me.billing.features.includes('store') ? <UpgradeNotice feature="store" /> : <StoreSettingsTab />)}
       {tab === 'users' && <UsersTab />}
       {tab === 'activity' && <ActivityTab />}

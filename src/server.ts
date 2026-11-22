@@ -14,6 +14,7 @@
  *   API_RATE_LIMIT_PER_MINUTE   requests per minute per API key (default 600)
  *   WEBHOOK_INTERVAL_MS         how often webhooks are sent, from the worker's process (default 5000)
  *   STORE_DOMAIN_TARGET         the host businesses point their store domains at (CNAME), e.g. stores.example.bz
+ *   QBO_CLIENT_ID, QBO_CLIENT_SECRET, QBO_ENVIRONMENT   the platform's Intuit app (QuickBooks Online integration); needs PUBLIC_URL
  *   WORKER_INTERVAL_MS   default 60000; 0 disables the worker in this process
  *   HOUSEKEEPING_INTERVAL_MS  default 300000 (notification emails, alerts, clean-up); 0 disables
  *   ALERT_WEBHOOK_URL    post operations alerts here (Slack/Teams/Discord-style JSON with "text")
@@ -43,6 +44,7 @@ import { startHousekeeping } from './api/housekeeping.ts';
 import { startWorker } from './api/worker.ts';
 import { startWebhookDispatcher } from './webhooks/webhooks.ts';
 import { objectStoreFromEnv } from './storage/objects.ts';
+import { runQuickBooksSync } from './integrations/quickbooks.ts';
 import { migrate, pgDatabase } from './db/database.ts';
 import { keyringFromEnv } from './db/keystore.ts';
 import { type Mailer, noMailer, outboxMailer, smtpMailer } from './mail/mailer.ts';
@@ -68,6 +70,9 @@ const webRoot = env.WEB_ROOT ?? (existsSync(defaultWebRoot) ? defaultWebRoot : u
 const mailFrom = env.MAIL_FROM ?? 'eInvoicing <no-reply@localhost>';
 const mailer: Mailer | undefined = env.SMTP_URL ? smtpMailer(env.SMTP_URL, mailFrom) : env.MAIL_OUTBOX_DIR ? outboxMailer(env.MAIL_OUTBOX_DIR, mailFrom) : undefined;
 const objectStore = objectStoreFromEnv(env);
+const quickbooksApp = env.QBO_CLIENT_ID && env.QBO_CLIENT_SECRET
+  ? { clientId: env.QBO_CLIENT_ID, clientSecret: env.QBO_CLIENT_SECRET, environment: env.QBO_ENVIRONMENT === 'production' ? 'production' as const : 'sandbox' as const }
+  : undefined;
 const app = await buildApp({
   pipeline,
   ...(mailer && { mailer }),
@@ -77,6 +82,7 @@ const app = await buildApp({
   ...(objectStore && { objectStore }),
   ...(env.API_RATE_LIMIT_PER_MINUTE && { apiRateLimitPerMinute: Number(env.API_RATE_LIMIT_PER_MINUTE) }),
   ...(env.STORE_DOMAIN_TARGET && { storeDomainTarget: env.STORE_DOMAIN_TARGET }),
+  ...(quickbooksApp && { quickbooks: quickbooksApp }),
   ...((env.PLATFORM_BILLING_TENANT || env.PLATFORM_PAYMENT_INSTRUCTIONS) && {
     billing: { ...(env.PLATFORM_BILLING_TENANT && { tenantSlug: env.PLATFORM_BILLING_TENANT }), ...(env.PLATFORM_PAYMENT_INSTRUCTIONS && { paymentInstructions: env.PLATFORM_PAYMENT_INSTRUCTIONS }) },
   }),
@@ -133,12 +139,28 @@ const webhooks = intervalMs > 0
     })
   : undefined;
 
+// Accounting integrations sync from the worker's process too.
+let syncing = false;
+const integrationTimer = intervalMs > 0 && quickbooksApp && env.PUBLIC_URL
+  ? setInterval(() => {
+      if (syncing) return;
+      syncing = true;
+      const config = { ...quickbooksApp, redirectUri: `${env.PUBLIC_URL!.replace(/\/$/, '')}/v1/integrations/quickbooks/callback` };
+      void runQuickBooksSync({ db, keys: pipeline.keys, config })
+        .then((r) => (r.synced || r.failed) && app.log.info(r, 'quickbooks sync'))
+        .catch((e) => app.log.error({ err: e }, 'quickbooks sync failure'))
+        .finally(() => (syncing = false));
+    }, Number(env.INTEGRATION_SYNC_INTERVAL_MS ?? 60_000))
+  : undefined;
+integrationTimer?.unref();
+
 await app.listen({ port: Number(env.PORT ?? 3000), host: env.HOST ?? '0.0.0.0' });
 
 const shutdown = async (signal: string) => {
   app.log.info({ signal }, 'shutting down');
   await worker?.stop();
   await webhooks?.stop();
+  if (integrationTimer) clearInterval(integrationTimer);
   await housekeeping?.stop();
   await app.close();
   clients.closeAll();
