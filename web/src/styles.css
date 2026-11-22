@@ -1171,3 +1171,15 @@ button.kpi-button:hover:not(:disabled) { transform: translateY(-2px); box-shadow
 .receive-line { display: grid; grid-template-columns: minmax(0, 2.4fr) minmax(6rem, 0.8fr) minmax(8rem, 1fr) auto auto; gap: 0.6rem; align-items: end; padding: 0.4rem 0; border-bottom: 1px dashed var(--hairline); }
 .receive-line .line-total { padding-bottom: 0.6rem; font-family: var(--mono); min-width: 6rem; text-align: right; }
 @media (max-width: 760px) { .receive-line { grid-template-columns: 1fr 1fr; } .receive-line > .grow { grid-column: 1 / -1; } }
+
+/* ---------- cash register shifts ---------- */
+.shift-bar { display: flex; align-items: center; gap: 0.7rem; flex-wrap: wrap; padding: 0.6rem 0.9rem; border-radius: var(--radius-lg); border: 1px dashed var(--hairline-strong); background: var(--sheet); font-size: 0.92rem; }
+.shift-bar.open { border-style: solid; border-color: #b5ecb9; background: var(--lime-soft); }
+.shift-dot { width: 9px; height: 9px; border-radius: 999px; background: #2fc23c; animation: glow 2.4s ease-in-out infinite; }
+.denominations { display: grid; grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr)); gap: 0.5rem; }
+.denomination { display: grid; grid-template-columns: 3.2rem 1fr; grid-template-rows: auto auto; gap: 0.1rem 0.5rem; align-items: center; padding: 0.4rem 0.55rem; border: 1px solid var(--hairline); border-radius: var(--radius); background: var(--sheet); }
+.denomination input { width: 100%; text-align: right; }
+.denomination .small { grid-column: 2; text-align: right; min-height: 1em; }
+.close-summary { display: flex; gap: 2rem; flex-wrap: wrap; align-items: flex-end; padding: 0.8rem 1rem; border-radius: var(--radius-lg); background: var(--sheet-2); }
+.shift-result { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; border-left: 4px solid var(--lime-ink); }
+.shift-result.off { border-left-color: var(--coral); }

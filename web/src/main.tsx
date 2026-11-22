@@ -50,6 +50,8 @@ const Reports = page(() => import('./pages/Reports'), 'Reports');
 const Receivables = page(() => import('./pages/Receivables'), 'Receivables');
 const Expenses = page(() => import('./pages/Expenses'), 'Expenses');
 const Inventory = page(() => import('./pages/Inventory'), 'Inventory');
+const Shifts = page(() => import('./pages/Shifts'), 'Shifts');
+const ShiftDetail = page(() => import('./pages/Shifts'), 'ShiftDetail');
 const ReceiveStock = page(() => import('./pages/Inventory'), 'ReceiveStock');
 const ExpenseEditor = page(() => import('./pages/Expenses'), 'ExpenseEditor');
 const PayInvoice = page(() => import('./pages/Pay'), 'PayInvoice');
@@ -138,6 +140,7 @@ function Layout() {
     [t('Sell'), [
       { to: '/', label: t('Overview'), icon: Icons.overview },
       { to: '/counter', label: t('Counter'), icon: Icons.counter, permission: 'documents.issue' },
+      { to: '/shifts', label: t('Cash register'), icon: Icons.register, permission: 'documents.issue' },
       { to: '/documents/new?type=01', label: t('New invoice'), icon: Icons.invoice, permission: 'documents.issue' },
       { to: '/quotes', label: t('Quotes'), icon: Icons.quote, permission: 'documents.issue' },
       { to: '/orders', label: t('Orders'), icon: Icons.orders, badge: ordersToDo },
@@ -333,6 +336,8 @@ function BusinessApp() {
         <Route path="/receivables" element={<Allowed permission="payments.record"><Receivables /></Allowed>} />
         <Route path="/expenses" element={<Allowed permission="expenses.manage"><Expenses /></Allowed>} />
         <Route path="/inventory" element={<Allowed permission="catalog.manage"><Inventory /></Allowed>} />
+        <Route path="/shifts" element={<Allowed permission="documents.issue"><Shifts /></Allowed>} />
+        <Route path="/shifts/:id" element={<Allowed permission="documents.issue"><ShiftDetail /></Allowed>} />
         <Route path="/inventory/receive" element={<Allowed permission="catalog.manage"><ReceiveStock /></Allowed>} />
         <Route path="/expenses/:id" element={<Allowed permission="expenses.manage"><ExpenseEditor /></Allowed>} />
         <Route path="/quotes" element={<Allowed permission="documents.issue"><Quotes /></Allowed>} />

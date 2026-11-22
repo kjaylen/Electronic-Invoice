@@ -379,6 +379,13 @@ Neither is a tax document: each keeps the `POST /v1/documents` body it will issu
 - **Receiving stock** from a supplier (Inventory → Receive stock): items, quantities and unit costs before GST; the moving average cost of each item is updated; the supplier's bill can be recorded as an expense in the same step (stock for resale, GST on top for standard-rated, paid or a bill to pay).
 - **Counts and adjustments**: a stock count sets the levels typed in (only differences are recorded); single adjustments add, take off or set with a reason. Low-stock levels per item; low and out-of-stock items show on the overview's to-do list. Stock value at average cost; CSV export. Changing a variant's stock in the product editor is recorded as a count.
 
+## Cash registers and shifts (`src/api/shifts.ts`, `src/render/zreport.ts`)
+
+- **Shifts**: a cashier opens a shift at the counter with the cash in the drawer (the float). Receipts and invoices they issue, counter orders they mark paid and invoice payments they record attach to their open shift. One open shift per register and per person (unique indexes); the first shift creates a "Main register", and a business with several drawers adds registers (Cash register → Registers) and picks one when opening.
+- **Cash in and out**: money put in (change from the bank) or taken out (petty cash, a bank drop) with a reason; permanent, a mistake is corrected with the opposite movement.
+- **Closing**: the drawer is counted blind, by notes and coins (which must add up) or as a total. Expected cash = float + cash takings (cash receipts and invoice payments, less cash refunds) + paid in − paid out; the difference (short or over) is kept with the shift. The opener or anyone allowed to adjust documents can close a shift.
+- **The report**: sales by document type and GST, takings by payment (from the receipt's payment means), invoice payments, refunds (credit notes against receipts), cancelled documents, the cash drawer and every cash movement. While open it is an X report; once closed, the Z report, printable on the 80 mm receipt printer or as an A4 PDF. Cashiers see their own shifts; managers see everyone's.
+
 ## Platform console (`/admin`)
 
 For the team that runs this service, not for businesses. Staff move a business from the BTS **test** environment to **production** once BTS has approved it; before, that was a manual database step.

@@ -475,7 +475,14 @@ export async function markOrderPaid(deps: PipelineDeps, tenantId: string, orderI
     `update orders set payment_status = 'paid', paid_at = coalesce(paid_at, now()), paid_by = coalesce(paid_by, $3), document_id = $2 where id = $1`,
     [order.id, result.documentId, userId],
   );
-  if (userId) await deps.db.query('update documents set issued_by = $3 where tenant_id = $1 and (id = $2 or supersedes_document_id = $2)', [tenantId, result.documentId, userId]);
+  // Marked paid at the counter (paid at pickup, cash on delivery): in that person's open shift.
+  if (userId) {
+    await deps.db.query(
+      `update documents set issued_by = $3, shift_id = (select s.id from register_shifts s where s.tenant_id = $1 and s.opened_by = $3 and s.closed_at is null)
+       where tenant_id = $1 and (id = $2 or supersedes_document_id = $2)`,
+      [tenantId, result.documentId, userId],
+    );
+  }
   return { order: (await loadOrder(deps.db, tenantId, { id: orderId }))!.order, document: result };
 }
 

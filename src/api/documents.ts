@@ -226,7 +226,13 @@ export async function issueFromBody(deps: PipelineDeps, tenantId: string, body: 
   await checkCreditLimit(deps, tenantId, issueRequest);
   const result = await issueDocument(deps, tenantId, issueRequest);
   // Who issued it (not part of the signed record). Also on the contingency reissue, if there was one.
-  if (userId) await deps.db.query('update documents set issued_by = $3 where tenant_id = $1 and (id = $2 or supersedes_document_id = $2)', [tenantId, result.documentId, userId]);
+  if (userId) {
+    await deps.db.query(
+      `update documents set issued_by = $3, shift_id = (select s.id from register_shifts s where s.tenant_id = $1 and s.opened_by = $3 and s.closed_at is null)
+       where tenant_id = $1 and (id = $2 or supersedes_document_id = $2)`,
+      [tenantId, result.documentId, userId],
+    );
+  }
   // A sale takes the items off the shelf (tracked ones), once it has legal value or is on its way to BTS.
   if ((issueRequest.etdType === '01' || issueRequest.etdType === '02') && ['authorized', 'authorized_with_alert', 'contingency_pending', 'pending'].includes(result.status)) {
     await recordSale(deps.db, tenantId, result.documentId, body.lines.map((l) => ({ itemId: l.itemId ?? null, quantity: l.quantity })), userId).catch(() => {});

@@ -55,6 +55,7 @@ import { registerRecurringRoutes } from './recurring.ts';
 import { registerExpenseRoutes } from './expenses.ts';
 import { registerAccountingRoutes } from './accounting.ts';
 import { registerInventoryRoutes } from './inventory.ts';
+import { registerShiftRoutes } from './shifts.ts';
 import { registerDiscountRoutes } from './discounts.ts';
 import { domainCache } from '../commerce/domains.ts';
 import { registerIntegrationCallback, registerIntegrationRoutes } from './integrations.ts';
@@ -293,6 +294,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     registerExpenseRoutes(tenant, deps, ctx);
     registerAccountingRoutes(tenant, deps);
     registerInventoryRoutes(tenant, deps);
+    registerShiftRoutes(tenant, deps);
   }, { prefix: '/v1' });
 
   registerPublicDocumentRoutes(app, deps);

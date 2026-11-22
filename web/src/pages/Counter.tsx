@@ -5,6 +5,7 @@
  * progress is kept on this device).
  */
 
+import { ShiftBar } from './Shifts';
 import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { api, type DocumentDetailInfo, type DocumentInfo, type Item, link, type Page } from '../api';
@@ -210,6 +211,7 @@ export function Counter() {
         <label className="row small"><input type="checkbox" checked={autoPrint} onChange={(e) => setAutoPrint(e.target.checked)} /> {t('Print each receipt automatically')}</label>
       </div>
       {!me?.certificate && <div className="banner bad"><div><strong>{t('Install your BTS certificate in Settings before issuing.')}</strong></div></div>}
+      <ShiftBar refreshKey={last?.doc.id ?? null} />
 
       <div className="counter">
         <div className="stack">

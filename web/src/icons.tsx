@@ -31,6 +31,7 @@ export const Icons = {
   repeat: () => <Svg><path d="M4 9V8a3 3 0 0 1 3-3h8l-2.5-2.5" /><path d="M16 11v1a3 3 0 0 1-3 3H5l2.5 2.5" /></Svg>,
   expense: () => <Svg><path d="M6 2.5h8a1 1 0 0 1 1 1v14l-2-1.3-2 1.3-2-1.3-2 1.3-2-1.3V3.5a1 1 0 0 1 1-1Z" /><path d="M10 6v6M12 7.2c-.4-.5-1.1-.8-2-.8-1.1 0-2 .6-2 1.4s.9 1.2 2 1.4 2 .6 2 1.4-.9 1.4-2 1.4c-.9 0-1.6-.3-2-.8" /></Svg>,
   inventory: () => <Svg><path d="M3 7.5 10 4l7 3.5v8.5H3V7.5Z" /><path d="M6 16v-5h8v5M6 13.5h8" /></Svg>,
+  register: () => <Svg><rect x="3" y="9" width="14" height="8" rx="1.5" /><path d="M5 9V4.5a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1V9" /><path d="M8 6.5h4M3 13h14" /></Svg>,
   wallet: () => <Svg><path d="M3.5 6.5a2 2 0 0 1 2-2h9a1 1 0 0 1 1 1V7" /><rect x="3.5" y="6.5" width="13" height="9.5" rx="1.8" /><path d="M16.5 10h-3a1.5 1.5 0 0 0 0 3h3" /><circle cx="13.6" cy="11.5" r=".4" /></Svg>,
   alert: () => <Svg><path d="M10 3 2.5 16.5h15L10 3Z" /><path d="M10 8.5v3.5M10 14.3v.2" /></Svg>,
   check: () => <Svg><circle cx="10" cy="10" r="7" /><path d="m7 10 2 2 4-4" /></Svg>,

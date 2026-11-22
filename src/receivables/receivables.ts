@@ -180,8 +180,10 @@ export async function recordPayment(db: Queryable, tenantId: string, documentId:
   if (paidOn < before.issueDate) throw new ReceivableError('A payment cannot be dated before the invoice');
   const id = randomUUID();
   const inserted = await db.query(
-    `insert into invoice_payments (id, tenant_id, document_id, amount_cents, method, reference, paid_on, note, created_by, online_payment_id, external_id)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) on conflict do nothing returning id`,
+    `insert into invoice_payments (id, tenant_id, document_id, amount_cents, method, reference, paid_on, note, created_by, online_payment_id, external_id, shift_id)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
+       (select s.id from register_shifts s where s.tenant_id = $2 and s.opened_by = $9 and s.closed_at is null))
+     on conflict do nothing returning id`,
     [id, tenantId, documentId, String(p.amountCents), p.method, p.reference?.trim() || null, paidOn, p.note?.trim() || null, userId, p.onlinePaymentId ?? null, p.externalId ?? null],
   );
   if (!inserted.rows.length) throw new ReceivableError('This payment is already recorded');

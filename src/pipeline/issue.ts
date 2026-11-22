@@ -272,8 +272,8 @@ async function prepare(
       `insert into documents (id, tenant_id, series_id, etd_type, series_number, serial, etdui, issue_date, issue_time,
          oper_mode, reception_env, customer_id, customer_snapshot, referenced_etdui, line_count, line_extension_cents,
          gst_cents, tax_cents, tax_inclusive_cents, payable_cents, sequence_hash, previous_sequence_hash, signed_xml, status,
-         contingency_period_id, supersedes_document_id, due_date)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)`,
+         contingency_period_id, supersedes_document_id, due_date, payment_means)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)`,
       [
         documentId, ctx.tenantId, series.id, req.etdType, seriesNumber, serial, etdui, local.date, local.time,
         operMode, RECEPTION_ENV[ctx.environment], req.customerId ?? null,
@@ -284,6 +284,7 @@ async function prepare(
         mode.kind === 'contingency' ? (mode.supersedes?.documentId ?? null) : null,
         // Invoices and debit notes are owed until paid: due on the payment terms' date, or at once.
         req.etdType === '01' || req.etdType === '03' ? (req.payment?.dueDate ?? local.date) : null,
+        req.payment?.meansCode ?? null,
       ],
     );
     for (const line of totals.lines) {
