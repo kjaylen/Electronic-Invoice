@@ -73,7 +73,7 @@ if (!existsSync(staffFile)) {
   if (!exists) {
     const password = randomBytes(12).toString('base64url');
     await createPlatformAdmin(db, { email: 'staff@demo.test', name: 'Demo Staff', password });
-    writeFileSync(staffFile, `Platform console: http://localhost:${process.env.PORT}/admin\nEmail: staff@demo.test\nPassword: ${password}\n`, { mode: 0o600 });
+    writeFileSync(staffFile, `Platform console: http://localhost:${process.env.PORT}/admin\nEmail: staff@demo.test\nPassword: ${password}\nThe first sign-in sets up two-step sign-in: scan the QR code with an authenticator app on your phone.\n`, { mode: 0o600 });
   }
   await db.close();
 }

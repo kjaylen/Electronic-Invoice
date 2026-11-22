@@ -88,6 +88,7 @@ export interface SessionInfo {
   user: Account;
   business: { id: string; slug: string; legalName: string; tradeName: string | null; environment: 'test' | 'production' };
   permissions: Permission[];
+  twoFactor: { enabled: boolean; required: boolean; setupRequired: boolean };
 }
 
 export interface Me {
@@ -171,6 +172,8 @@ export interface DocumentLine {
 
 export interface DocumentDetailInfo extends DocumentInfo {
   lines: DocumentLine[];
+  /** Invoices and receipts: what credit notes have taken off, and what is left to credit. */
+  credit?: { credited: string; debited: string; remaining: string };
 }
 
 export interface Page<T> {
@@ -181,6 +184,7 @@ export interface Page<T> {
 export interface ManagedAccount extends Account {
   activeSessions: number;
   manageable: boolean;
+  twoFactor: boolean;
 }
 
 export interface AuditEvent {
@@ -202,6 +206,7 @@ export interface BusinessProfile {
   address: { street: string; additionalStreet?: string; city: string; districtCode: string };
   contact: { telephone: string; email: string };
   environment: 'test' | 'production';
+  requireTwoFactor: boolean;
 }
 
 export interface Summary {
@@ -281,9 +286,14 @@ export interface Order {
   address: { street: string; city: string; districtCode: string; districtName: string | null } | null;
   business: { tin: string; name: string } | null;
   note: string | null;
-  totals: { lineExtension: string; gst: string; total: string };
+  totals: { lineExtension: string; gst: string; total: string; refunded: string };
   documentId: string | null;
   document?: { id: string; status: DocStatus; type: string; series: string; number: string } | null;
+  refunds?: Array<{
+    id: string; amount: string; lines: Array<{ lineNumber: number; quantity: number }>; delivery: boolean; reason: string; restocked: boolean; createdAt: string;
+    document: { id: string; status: DocStatus; type: string; series: string; number: string } | null;
+  }>;
+  refundable?: { lines: Array<{ lineNumber: number; quantity: number }>; delivery: boolean };
   lines?: Array<{ lineNumber: number; variantId: string | null; productTitle: string; variantTitle: string | null; quantity: number; unitPrice: string; gstCategory: string; total: string }>;
   createdAt: string;
   paidAt: string | null;

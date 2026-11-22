@@ -5,6 +5,7 @@
  * One business is set up in the first test and used by the rest, in order.
  */
 
+import { createHmac } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { expect, type Page, test } from '@playwright/test';
@@ -16,6 +17,19 @@ const OUTBOX = `${root}.demo-e2e/outbox`;
 const OWNER = { name: 'Rosa Owner', email: 'rosa@cornerstore.test', password: 'a long test password' };
 const BUSINESS = 'Corner Store Ltd.';
 const SLUG = 'corner-store';
+/** The current code for an authenticator secret (RFC 6238), as a phone app would show it. */
+function totp(secretB32: string, offset = 0): string {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  let bits = '';
+  for (const ch of secretB32.replace(/\s/g, '')) bits += alphabet.indexOf(ch).toString(2).padStart(5, '0');
+  const key = Buffer.from(bits.match(/.{8}/g)!.map((b) => parseInt(b, 2)));
+  const counter = Buffer.alloc(8);
+  counter.writeBigUInt64BE(BigInt(Math.floor(Date.now() / 30_000) + offset));
+  const mac = createHmac('sha1', key).update(counter).digest();
+  const o = mac[mac.length - 1]! & 15;
+  return String((mac.readUInt32BE(o) & 0x7fffffff) % 1_000_000).padStart(6, '0');
+}
+
 /** A page of the business's own instance. */
 const p = (path = '') => `/${SLUG}${path === '/' ? '' : path}`;
 
@@ -402,6 +416,16 @@ test('platform console: staff move the business to BTS production', async ({ pag
   await staffPage.getByLabel('Email').fill(email);
   await staffPage.getByLabel('Password').fill(password);
   await staffPage.getByRole('button', { name: /Sign in/ }).click();
+  // Staff always use two-step sign-in: the first sign-in sets up the authenticator app.
+  await expect(staffPage.getByRole('heading', { name: 'Set up two-step sign-in' })).toBeVisible();
+  const secret = (await staffPage.locator('.secret-key').textContent())!;
+  await staffPage.getByLabel(/Enter the 6-digit code/).fill(totp(secret));
+  await staffPage.getByRole('button', { name: 'Turn on two-step sign-in' }).click();
+  await expect(staffPage.locator('.recovery-codes li')).toHaveCount(10);
+  const download = staffPage.waitForEvent('download');
+  await staffPage.getByRole('button', { name: 'Download' }).click();
+  await download;
+  await staffPage.getByRole('button', { name: 'I saved them' }).click();
   await staffPage.getByRole('link', { name: 'Corner Store' }).click();
   await expect(staffPage.locator('ul.checks li.ok')).toHaveCount(3);
   await staffPage.getByRole('button', { name: /Move to production/ }).click();

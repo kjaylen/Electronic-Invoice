@@ -1,0 +1,62 @@
+# A single-machine deployment: the app, PostgreSQL, and nightly backups.
+#   cp deploy/env.example deploy/.env.production   (and fill it in)
+#   docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env.production up -d
+# Put a TLS-terminating proxy (Caddy, nginx, a cloud load balancer) in front of port 3000.
+# For more than one machine, use a managed PostgreSQL with point-in-time recovery instead
+# of the "db" service, and run several "app" containers behind the load balancer.
+
+services:
+  app:
+    image: einvoicing:latest
+    build: ..
+    restart: unless-stopped
+    env_file: .env.production
+    environment:
+      COOKIE_SECURE: "true"
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: einvoicing
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      POSTGRES_DB: einvoicing
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U einvoicing"]
+      interval: 10s
+      retries: 6
+
+  # Nightly at 03:00 Belize time (09:00 UTC); dumps kept 14 days, and copied to
+  # BACKUP_S3_URI when set. See docs/operations.md for restoring.
+  backup:
+    image: einvoicing:latest
+    restart: unless-stopped
+    # Root only to write the backups volume; the app container runs as "node".
+    user: root
+    env_file: .env.production
+    environment:
+      BACKUP_DIR: /backups
+    volumes:
+      - backups:/backups
+    depends_on:
+      - db
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        while true; do
+          now=$$(date -u +%s); next=$$(date -u -d 'tomorrow 09:00' +%s 2>/dev/null || echo $$((now + 86400)))
+          [ "$$(date -u +%H)" -lt 9 ] && next=$$(date -u -d 'today 09:00' +%s)
+          sleep $$((next - now))
+          bash scripts/backup.sh || echo "backup failed" >&2
+        done
+
+volumes:
+  db-data:
+  backups:

@@ -14,7 +14,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply } from 'fastify';
 import { audit } from '../db/audit.ts';
 import type { Queryable } from '../db/database.ts';
 import { slugify } from '../db/tenants.ts';
@@ -23,6 +23,8 @@ import type { PipelineDeps } from '../pipeline/issue.ts';
 import { ApiError, notFound } from './errors.ts';
 import { requirePermission } from './permissions.ts';
 import { decimal, money, uuid } from './schemas.ts';
+import { photoKey } from '../storage/objects.ts';
+import type { ServerContext } from './context.ts';
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const MAX_IMAGES = 10;
@@ -245,7 +247,26 @@ const settingsSchema = {
   },
 } as const;
 
-export function registerProductRoutes(app: FastifyInstance, deps: PipelineDeps) {
+export interface PhotoRow {
+  content_type: string;
+  data: Uint8Array | null;
+  storage_key: string | null;
+}
+
+/** A photo from the database, or from object storage: a redirect to the CDN when there is one, else streamed through. */
+export async function sendPhoto(reply: FastifyReply, ctx: ServerContext, img: PhotoRow, cacheControl: string) {
+  if (img.storage_key && ctx.objects) {
+    const url = ctx.objects.publicUrl(img.storage_key);
+    if (url) return reply.header('Cache-Control', cacheControl).redirect(url, 302);
+    const obj = await ctx.objects.get(img.storage_key);
+    if (!obj) throw notFound('Photo');
+    return reply.type(img.content_type).header('Cache-Control', cacheControl).send(obj.data);
+  }
+  if (!img.data) throw notFound('Photo');
+  return reply.type(img.content_type).header('Cache-Control', cacheControl).send(Buffer.from(img.data));
+}
+
+export function registerProductRoutes(app: FastifyInstance, deps: PipelineDeps, ctx: ServerContext) {
   const { db } = deps;
 
   app.get<{ Querystring: { status?: string; q?: string } }>(
@@ -362,8 +383,11 @@ export function registerProductRoutes(app: FastifyInstance, deps: PipelineDeps) 
       const count = (await db.query<{ n: number }>('select count(*)::int as n from product_images where product_id = $1', [request.params.id])).rows[0]!.n;
       if (count >= MAX_IMAGES) throw new ApiError(409, 'too_many_images', `A product can have up to ${MAX_IMAGES} photos`);
       const id = randomUUID();
-      await db.query('insert into product_images (id, tenant_id, product_id, position, content_type, bytes, data) values ($1, $2, $3, $4, $5, $6, $7)', [
-        id, request.tenantId, request.params.id, count, type, data.length, data,
+      // To object storage when configured (the database keeps only the key); otherwise in the row.
+      const key = ctx.objects ? photoKey(request.tenantId, id, type) : null;
+      if (ctx.objects && key) await ctx.objects.put(key, data, type);
+      await db.query('insert into product_images (id, tenant_id, product_id, position, content_type, bytes, data, storage_key) values ($1, $2, $3, $4, $5, $6, $7, $8)', [
+        id, request.tenantId, request.params.id, count, type, data.length, key ? null : data, key,
       ]);
       await db.query('update products set updated_at = now() where id = $1', [request.params.id]);
       return reply.code(201).send({ id, contentType: type, bytes: data.length });
@@ -389,8 +413,11 @@ export function registerProductRoutes(app: FastifyInstance, deps: PipelineDeps) 
     { schema: { params: { type: 'object', required: ['id', 'imageId'], properties: { id: uuid, imageId: uuid } } } },
     async (request, reply) => {
       requirePermission(request, 'catalog.manage');
-      const r = await db.query('delete from product_images where id = $1 and product_id = $2 and tenant_id = $3 returning id', [request.params.imageId, request.params.id, request.tenantId]);
+      const r = await db.query<{ storage_key: string | null }>('delete from product_images where id = $1 and product_id = $2 and tenant_id = $3 returning storage_key', [request.params.imageId, request.params.id, request.tenantId]);
       if (!r.rows.length) throw notFound('Photo');
+      const key = r.rows[0]!.storage_key;
+      // Best effort: an object left behind costs a few kilobytes, a failed delete must not block the merchant.
+      if (key && ctx.objects) await ctx.objects.delete(key).catch((e) => request.log.warn({ err: e, key }, 'photo object not deleted'));
       return reply.code(204).send();
     },
   );
@@ -400,9 +427,9 @@ export function registerProductRoutes(app: FastifyInstance, deps: PipelineDeps) 
     '/products/:id/images/:imageId',
     { schema: { params: { type: 'object', required: ['id', 'imageId'], properties: { id: uuid, imageId: uuid } } } },
     async (request, reply) => {
-      const img = (await db.query<{ content_type: string; data: Buffer }>('select content_type, data from product_images where id = $1 and product_id = $2 and tenant_id = $3', [request.params.imageId, request.params.id, request.tenantId])).rows[0];
+      const img = (await db.query<PhotoRow>('select content_type, data, storage_key from product_images where id = $1 and product_id = $2 and tenant_id = $3', [request.params.imageId, request.params.id, request.tenantId])).rows[0];
       if (!img) throw notFound('Photo');
-      return reply.type(img.content_type).header('Cache-Control', 'private, max-age=86400').send(Buffer.from(img.data));
+      return sendPhoto(reply, ctx, img, 'private, max-age=86400');
     },
   );
 

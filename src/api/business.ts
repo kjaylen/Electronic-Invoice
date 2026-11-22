@@ -18,6 +18,7 @@ import type { ServerContext } from './context.ts';
 import { ApiError } from './errors.ts';
 import { requirePermission } from './permissions.ts';
 import { addressSchema, contactSchema } from './schemas.ts';
+import { twoFactorStatus } from '../db/twofactor.ts';
 
 interface BusinessRow {
   id: string;
@@ -32,6 +33,7 @@ interface BusinessRow {
   telephone: string;
   email: string;
   environment: string;
+  require_two_factor: boolean;
 }
 
 const businessJson = (r: BusinessRow) => ({
@@ -43,6 +45,7 @@ const businessJson = (r: BusinessRow) => ({
   address: { street: r.street, ...(r.additional_street && { additionalStreet: r.additional_street }), city: r.city, districtCode: r.district_code },
   contact: { telephone: r.telephone, email: r.email },
   environment: r.environment,
+  requireTwoFactor: r.require_two_factor,
 });
 
 type BusinessBody = {
@@ -104,6 +107,25 @@ export function registerBusinessRoutes(app: FastifyInstance, deps: PipelineDeps,
         }
       }
       return businessJson(after);
+    },
+  );
+
+  app.put<{ Body: { requireTwoFactor: boolean } }>(
+    '/business/security',
+    { schema: { body: { type: 'object', required: ['requireTwoFactor'], additionalProperties: false, properties: { requireTwoFactor: { type: 'boolean' } } } } },
+    async (request) => {
+      requirePermission(request, 'business.manage');
+      if (request.principal !== 'owner') throw new ApiError(403, 'forbidden', 'Only an owner can change sign-in rules');
+      const before = await load(request.tenantId);
+      if (request.body.requireTwoFactor && !before.require_two_factor) {
+        const own = await twoFactorStatus(db, 'user', request.userId);
+        if (!own.enabled) throw new ApiError(409, 'two_factor_first', 'Turn on two-step sign-in for your own account first');
+      }
+      await db.query('update tenants set require_two_factor = $2 where id = $1', [request.tenantId, request.body.requireTwoFactor]);
+      if (before.require_two_factor !== request.body.requireTwoFactor) {
+        await audit(db, { tenantId: request.tenantId, userId: request.userId || null, action: request.body.requireTwoFactor ? 'business.two_factor_required' : 'business.two_factor_optional', ip: request.ip });
+      }
+      return businessJson(await load(request.tenantId));
     },
   );
 }

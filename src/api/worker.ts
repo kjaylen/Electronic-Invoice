@@ -12,6 +12,7 @@
  */
 
 import { catchUpContingency, resumePending, type PipelineDeps } from '../pipeline/issue.ts';
+import { heartbeat } from '../ops/monitoring.ts';
 
 export interface WorkerTickResult {
   tenants: number;
@@ -70,7 +71,10 @@ export function startWorker(deps: PipelineDeps, options: WorkerOptions & { inter
     if (running || stopped) return;
     running = true;
     try {
-      options.onTick?.(await runWorkerOnce(deps, options));
+      const result = await runWorkerOnce(deps, options);
+      // Monitoring: a stale heartbeat means the worker stopped (alerts, /metrics).
+      await heartbeat(deps.db, 'worker', { tenants: result.tenants, delivered: result.delivered, failures: result.failures.length }).catch((e) => options.onError?.('*', e));
+      options.onTick?.(result);
     } catch (e) {
       options.onError?.('*', e);
     } finally {
@@ -79,6 +83,8 @@ export function startWorker(deps: PipelineDeps, options: WorkerOptions & { inter
   };
   const timer = setInterval(tick, options.intervalMs ?? 60_000);
   timer.unref();
+  // Report in right away, so a fresh start is not seen as a stopped worker.
+  void heartbeat(deps.db, 'worker', { starting: true }).catch(() => {});
   return {
     tick,
     async stop() {

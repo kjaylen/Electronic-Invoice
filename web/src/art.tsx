@@ -1,6 +1,6 @@
-/** Original artwork for the app: the brand mark and the floating crystals. */
+/** Original artwork for the app: the brand mark, the floating crystals and the sign-in flow field. */
 
-import type { CSSProperties } from 'react';
+import { type CSSProperties, useEffect, useRef, useState } from 'react';
 
 /** A folded ledger sheet with a tick: "documents, authorized". */
 export function BrandMark() {
@@ -88,11 +88,43 @@ export function Crystals({ count = SET.length }: { count?: number }) {
   );
 }
 
+/**
+ * The interactive flow field (three.js, loaded only here and only when
+ * WebGL works). Until it is ready, or without WebGL, the crystals show.
+ */
+export function FlowField() {
+  const host = useRef<HTMLDivElement>(null);
+  const [state, setState] = useState<'loading' | 'ready' | 'failed'>('loading');
+  useEffect(() => {
+    let field: { dispose(): void } | null = null;
+    let cancelled = false;
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    void import('./flowfield')
+      .then(({ startFlowField }) => {
+        if (cancelled || !host.current) return;
+        field = startFlowField(host.current, { reducedMotion });
+        // Fade in on the next frame, after the first render has painted.
+        requestAnimationFrame(() => !cancelled && setState('ready'));
+      })
+      .catch(() => !cancelled && setState('failed'));
+    return () => {
+      cancelled = true;
+      field?.dispose();
+    };
+  }, []);
+  return (
+    <>
+      {state !== 'ready' && <Crystals />}
+      {state !== 'failed' && <div ref={host} className={`flow-field${state === 'ready' ? ' ready' : ''}`} aria-hidden="true" />}
+    </>
+  );
+}
+
 /** The left half of the sign-in and onboarding screens. */
 export function AuthArt({ kicker, title, text }: { kicker: string; title: string; text: string }) {
   return (
     <aside className="auth-art">
-      <Crystals />
+      <FlowField />
       <div className="brand"><Brand light /></div>
       <div className="headline">
         <span className="kicker">{kicker}</span>

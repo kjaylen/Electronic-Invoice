@@ -1,6 +1,7 @@
 /** Server-wide settings the routes need beyond the pipeline: email, public links, cookies. */
 
 import type { Mailer } from '../mail/mailer.ts';
+import type { ObjectStore } from '../storage/objects.ts';
 import { ApiError } from './errors.ts';
 
 export interface ServerContext {
@@ -11,6 +12,8 @@ export interface ServerContext {
   publicUrl?: string;
   cookieSecure: boolean;
   allowSignup: boolean;
+  /** Product photos go here when set; otherwise they stay in the database. */
+  objects?: ObjectStore;
 }
 
 /** An absolute link into the web app. */

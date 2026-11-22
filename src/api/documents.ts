@@ -18,32 +18,24 @@ import { calculateDocument, type LineInput } from '../engine/calc.ts';
 import { BELIZE_DISTRICTS, type Customer, type DocumentReference, ETD_TYPE_NAMES, type IssuedEtdType } from '../engine/ubl.ts';
 import { cancelDocument, issueDocument, type IssueRequest, type PipelineDeps } from '../pipeline/issue.ts';
 import { renderReceipt, renderSheet } from '../render/pdf.ts';
-import { readEtdForPrint } from '../render/view.ts';
+import QRCode from 'qrcode';
+import { qrUrl, readEtdForPrint } from '../render/view.ts';
 import { toBigInt } from '../db/database.ts';
 import { simpleHtml } from '../mail/mailer.ts';
 import { type CustomerBody, customerFromRow, likePattern, loadCustomer, loadItems, nextCursor, parsePage } from './catalog.ts';
 import { audit } from '../db/audit.ts';
+import { overLimit } from '../db/ratelimit.ts';
 import { publicLink, requireMail, type ServerContext } from './context.ts';
 import { can, requirePermission } from './permissions.ts';
 import { ApiError, notFound } from './errors.ts';
 import { date as dateSchema, issueSchema, listQuery, uuid } from './schemas.ts';
 
 const PRINTABLE = ['authorized', 'authorized_with_alert', 'contingency_pending'];
+// Emails per business per hour (shared by every server process), so a compromised account cannot send spam at volume.
+const EMAIL_LIMIT_PER_HOUR = 200;
 export const SHARE_TTL_MS = 90 * 24 * 3600 * 1000;
 const shareHash = (token: string) => createHash('sha256').update(token, 'utf8').digest('hex');
 
-// Per-process limit on emails per business, so a compromised account cannot be used to send spam at volume.
-const EMAIL_LIMIT_PER_HOUR = 200;
-const emailCounts = new Map<string, { count: number; resetAt: number }>();
-function emailAllowed(tenantId: string): boolean {
-  const now = Date.now();
-  const e = emailCounts.get(tenantId);
-  if (!e || e.resetAt <= now) {
-    emailCounts.set(tenantId, { count: 1, resetAt: now + 3600_000 });
-    return true;
-  }
-  return ++e.count <= EMAIL_LIMIT_PER_HOUR;
-}
 
 interface LineBody extends Partial<Omit<LineInput, 'quantity'>> {
   itemId?: string;
@@ -219,6 +211,46 @@ async function toIssueRequest(deps: PipelineDeps, tenantId: string, body: IssueB
   };
 }
 
+// ---------- what is left to credit ----------
+
+const COUNTED_STATUSES = ['authorized', 'authorized_with_alert', 'contingency_pending', 'pending'];
+
+/**
+ * How much of a document can still be credited: its total, plus debit notes
+ * issued against it, minus credit notes already issued against it (counting
+ * those still on their way to BTS, so two at once cannot both pass).
+ */
+export async function creditBalance(db: PipelineDeps['db'], tenantId: string, etdui: string): Promise<{ original: bigint; debited: bigint; credited: bigint; remaining: bigint } | null> {
+  const original = (await db.query<{ tax_inclusive_cents: unknown }>(
+    'select tax_inclusive_cents from documents where tenant_id = $1 and etdui = $2', [tenantId, etdui],
+  )).rows[0];
+  if (!original) return null;
+  const sums = (await db.query<{ debited: unknown; credited: unknown }>(
+    `select coalesce(sum(tax_inclusive_cents) filter (where etd_type = '03'), 0)::bigint as debited,
+            coalesce(sum(tax_inclusive_cents) filter (where etd_type = '04'), 0)::bigint as credited
+     from documents where tenant_id = $1 and referenced_etdui = $2 and status = any($3::text[])`,
+    [tenantId, etdui, COUNTED_STATUSES],
+  )).rows[0]!;
+  const o = toBigInt(original.tax_inclusive_cents);
+  const debited = toBigInt(sums.debited);
+  const credited = toBigInt(sums.credited);
+  return { original: o, debited, credited, remaining: o + debited - credited };
+}
+
+/** Refuse a credit note larger than what is left to credit on the original (when the original is ours). */
+export async function checkCreditLimit(deps: PipelineDeps, tenantId: string, req: IssueRequest): Promise<void> {
+  if (req.etdType !== '04' || !req.reference) return;
+  const balance = await creditBalance(deps.db, tenantId, req.reference.etdui);
+  if (!balance) return;
+  const total = calculateDocument({ lines: req.lines }, deps.tax).taxInclusiveAmount;
+  const left = balance.remaining < 0n ? 0n : balance.remaining;
+  if (total > left) {
+    throw new ApiError(422, 'credit_exceeds_original',
+      `This credit note (BZ$${formatCents(total)}) is more than what is left to credit on the original: BZ$${formatCents(left)}`,
+      { remaining: formatCents(left), requested: formatCents(total) });
+  }
+}
+
 const idParams = { type: 'object', required: ['id'], properties: { id: uuid } } as const;
 
 interface LineRow {
@@ -370,7 +402,9 @@ export function registerDocumentRoutes(app: FastifyInstance, deps: PipelineDeps,
 
     let documentId: string | undefined;
     try {
-      const result = await issueDocument(deps, tenantId, await toIssueRequest(deps, tenantId, request.body));
+      const issueRequest = await toIssueRequest(deps, tenantId, request.body);
+      await checkCreditLimit(deps, tenantId, issueRequest);
+      const result = await issueDocument(deps, tenantId, issueRequest);
       documentId = result.documentId;
       // Who issued it (not part of the signed record). Also on the contingency reissue, if there was one.
       if (request.userId) await db.query('update documents set issued_by = $3 where tenant_id = $1 and (id = $2 or supersedes_document_id = $2)', [tenantId, result.documentId, request.userId]);
@@ -491,10 +525,16 @@ export function registerDocumentRoutes(app: FastifyInstance, deps: PipelineDeps,
     },
   );
 
-  app.get<{ Params: { id: string } }>('/documents/:id', { schema: { params: idParams } }, async (request) => ({
-    ...documentJson(await loadDocument(deps, request.tenantId, request.params.id)),
-    lines: await documentLines(deps, request.tenantId, request.params.id),
-  }));
+  app.get<{ Params: { id: string } }>('/documents/:id', { schema: { params: idParams } }, async (request) => {
+    const row = await loadDocument(deps, request.tenantId, request.params.id);
+    // For invoices and receipts: how much is left to credit (for the credit-note form).
+    const balance = row.etd_type === '01' || row.etd_type === '02' ? await creditBalance(db, request.tenantId, row.etdui) : null;
+    return {
+      ...documentJson(row),
+      lines: await documentLines(deps, request.tenantId, request.params.id),
+      ...(balance && { credit: { credited: formatCents(balance.credited), debited: formatCents(balance.debited), remaining: formatCents(balance.remaining < 0n ? 0n : balance.remaining) } }),
+    };
+  });
 
   // ---------- sending to the customer ----------
 
@@ -516,7 +556,7 @@ export function registerDocumentRoutes(app: FastifyInstance, deps: PipelineDeps,
     async (request) => {
       requirePermission(request, 'documents.send');
       requireMail(ctx);
-      if (!emailAllowed(request.tenantId)) throw new ApiError(429, 'too_many_emails', 'Too many emails sent in the last hour; try again later');
+      if (await overLimit(db, `email|${request.tenantId}`, EMAIL_LIMIT_PER_HOUR, 3600_000)) throw new ApiError(429, 'too_many_emails', 'Too many emails sent in the last hour; try again later');
       const id = await sendDocumentEmail(deps, ctx, request.tenantId, request.params.id, { to: request.body.to, ...(request.body.message && { message: request.body.message }), userId: userId(request) })
         .catch((e) => {
           if (e instanceof ApiError) throw e;
@@ -555,6 +595,23 @@ export function registerDocumentRoutes(app: FastifyInstance, deps: PipelineDeps,
     const row = (await db.query<{ signed_xml: string; etdui: string }>('select signed_xml, etdui from documents where id = $1 and tenant_id = $2', [request.params.id, request.tenantId])).rows[0];
     if (!row) throw notFound('Document');
     return reply.type('application/xml; charset=utf-8').header('Content-Disposition', `attachment; filename="${row.etdui}.xml"`).send(row.signed_xml);
+  });
+
+  // The document as signed, for the on-screen copy: what the PDF shows, read from the signed XML (any status).
+  app.get<{ Params: { id: string } }>('/documents/:id/view', { schema: { params: idParams } }, async (request) => {
+    const row = (await db.query<{ signed_xml: string; status: string; protocol_number: string | null; etdui: string }>(
+      'select signed_xml, status, protocol_number, etdui from documents where id = $1 and tenant_id = $2', [request.params.id, request.tenantId],
+    )).rows[0];
+    if (!row) throw notFound('Document');
+    const view = readEtdForPrint(row.signed_xml);
+    const url = qrUrl(row.etdui);
+    const svg = await QRCode.toString(url, { type: 'svg', errorCorrectionLevel: 'M', margin: 0 });
+    return {
+      view,
+      status: row.status,
+      protocolNumber: row.protocol_number,
+      qr: { url, image: `data:image/svg+xml;base64,${Buffer.from(svg, 'utf8').toString('base64')}` },
+    };
   });
 
   app.get<{ Params: { id: string }; Querystring: { format?: 'sheet' | 'receipt'; paper?: 'A4' | 'LETTER'; orientation?: 'landscape' | 'portrait'; widthMm?: string; draft?: 'true' | 'false' } }>(

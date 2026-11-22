@@ -1,10 +1,11 @@
 import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { Navigate, useNavigate, useSearchParams } from 'react-router';
-import { api, type Customer, type DocumentDetailInfo, type DocumentInfo, type Item, type Page } from '../api';
+import { api, type BusinessProfile, type Customer, type DocumentDetailInfo, type DocumentInfo, type Item, type Page } from '../api';
+import { DocumentPaper, type PaperParty, type PaperView } from '../paper';
 import { useT } from '../i18n';
 import { useSession } from '../session';
 import { useToast } from '../toast';
-import { belizeDate, Combobox, DISTRICTS, ErrorText, Field, GST_CATEGORIES, money, PAYMENT_MEANS, Segmented, store, TYPE_NAMES, UNITS, useDebounced, usePageTitle } from '../ui';
+import { belizeDate, Combobox, DISTRICTS, ErrorText, Field, GST_CATEGORIES, Modal, money, PAYMENT_MEANS, Segmented, store, toCents, TYPE_NAMES, UNITS, useDebounced, usePageTitle } from '../ui';
 
 type DocType = '01' | '02' | '03' | '04';
 
@@ -57,7 +58,7 @@ export function NewDocument() {
 
   const [type, setType] = useState<DocType>(initialType);
   usePageTitle(t('New {type}', { type: t(TYPE_NAMES[type]!).toLowerCase() }));
-  const [reference, setReference] = useState<DocumentInfo | null>(null);
+  const [reference, setReference] = useState<DocumentDetailInfo | null>(null);
   const [reason, setReason] = useState('');
   const [customerMode, setCustomerMode] = useState<'saved' | 'new' | 'walkin'>(initialType === '02' ? 'walkin' : 'saved');
   const [customer, setCustomer] = useState<Customer | null>(null);
@@ -68,7 +69,9 @@ export function NewDocument() {
   const [dueDate, setDueDate] = useState(belizeDate(30));
   const [terms, setTerms] = useState(initialType === '02' ? '' : 'Net 30');
   const [note, setNote] = useState('');
-  const [preview, setPreview] = useState<{ totals: DocumentInfo['totals']; lines: Array<{ total: string }> } | null>(null);
+  const [preview, setPreview] = useState<{ totals: DocumentInfo['totals']; lines: Array<{ net: string; tax: string; total: string }> } | null>(null);
+  const [showPaper, setShowPaper] = useState(false);
+  const [business, setBusiness] = useState<BusinessProfile | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   // One key per form: a retry after a timeout or a double click never issues twice.
@@ -125,11 +128,22 @@ export function NewDocument() {
     setIdempotencyKey(crypto.randomUUID());
   };
 
-  // A credit or debit note starts from the original document.
+  // A credit or debit note starts from the original document; a credit note also starts with its lines
+  // (what was sold, at the price charged), for the merchant to trim to what is being credited.
   useEffect(() => {
     if (!refId) return;
-    void api<DocumentInfo>(`/v1/documents/${refId}`).then((d) => {
+    void api<DocumentDetailInfo>(`/v1/documents/${refId}`).then((d) => {
       setReference(d);
+      if (initialType === '04' && d.lines.length) {
+        const copied = d.lines.map((l) => {
+          const listed = Number(l.quantity) * Number(l.unitPrice);
+          // A discounted line: the price actually charged per unit, never more.
+          const unitPrice = Math.abs(listed - Number(l.net)) >= 0.005 ? String(Math.floor((Number(l.net) / Number(l.quantity)) * 1e6) / 1e6) : l.unitPrice;
+          return { key: ++lineKey, description: l.description, quantity: l.quantity, unitCode: l.unitCode, unitPrice, gstCategory: l.gstCategory, exemptionReasonCode: '', discountPercent: '' };
+        });
+        setLines((ls) => (ls.every((l) => !l.description.trim()) ? copied : ls));
+        if (d.lines.some((l) => l.gstCategory === 'E')) setError(new Error(t('Exempt items need their exemption reason code again.')));
+      }
       if (d.customerId) {
         void api<Customer>(`/v1/customers/${d.customerId}`).then(setCustomer);
         setCustomerMode('saved');
@@ -138,7 +152,7 @@ export function NewDocument() {
         setNewCustomer((c) => ({ ...c, name: d.customer?.name ?? '', tin: d.customer?.tin ?? '', save: false }));
       }
     });
-  }, [refId]);
+  }, [refId, initialType, t]);
 
   // "Issue again": same customer and lines as an earlier document.
   useEffect(() => {
@@ -207,14 +221,65 @@ export function NewDocument() {
     return total ? money(total) : '';
   };
 
+  // A credit note may not take off more than is left on the original (the server checks too).
+  const overCredit = type === '04' && Boolean(reference?.credit && preview) && toCents(preview!.totals.taxInclusive) > toCents(reference!.credit!.remaining);
+
+  // The paper preview of the draft: the business from its profile, the customer and lines from the form.
+  const openPaper = () => {
+    setShowPaper(true);
+    if (!business) void api<BusinessProfile>('/v1/business').then(setBusiness).catch(() => {});
+  };
+  const draftView = (): PaperView => {
+    const district = (code: string) => DISTRICTS.find(([c]) => c === code)?.[1] ?? '';
+    const issuer: PaperParty = business
+      ? { name: business.tradeName ?? business.legalName, tin: business.tin, addressLines: [business.address.street, [business.address.city, district(business.address.districtCode)].filter(Boolean).join(', ')], telephone: business.contact.telephone, email: business.contact.email }
+      : { name: session?.business.tradeName ?? session?.business.legalName ?? '', addressLines: [] };
+    let customerParty: PaperParty | undefined;
+    if (customerMode === 'saved' && customer) {
+      customerParty = { name: customer.name, ...(customer.tin && { tin: customer.tin }), addressLines: customer.address ? [customer.address.street, [customer.address.city, district(customer.address.districtCode)].join(', ')] : [], ...(customer.contact.telephone && { telephone: customer.contact.telephone }), ...(customer.contact.email && { email: customer.contact.email }) };
+    } else if (customerMode === 'new' && newCustomer.name.trim()) {
+      customerParty = { name: newCustomer.name, ...(newCustomer.tin && { tin: newCustomer.tin }), addressLines: [newCustomer.street, [newCustomer.city, district(newCustomer.districtCode)].filter(Boolean).join(', ')].filter(Boolean), ...(newCustomer.telephone && { telephone: newCustomer.telephone }), ...(newCustomer.email && { email: newCustomer.email }) };
+    } else if (receiptTin.trim()) {
+      customerParty = { tin: receiptTin.trim(), addressLines: [] };
+    }
+    const now = new Date(Date.now() - 6 * 3600_000).toISOString();
+    return {
+      etdType: type,
+      typeName: TYPE_NAMES[type] ?? '',
+      etdui: t('Assigned when issued'),
+      series: '001',
+      number: '·········',
+      issueDate: now.slice(0, 10),
+      issueTime: now.slice(11, 19),
+      pendingAuthorization: false,
+      testEnvironment: me?.environment === 'test',
+      issuer,
+      ...(customerParty && { customer: customerParty }),
+      lines: ready.map((l, i) => ({
+        number: String(i + 1), quantity: l.quantity, unitCode: l.unitCode, description: l.description.trim(), unitPrice: l.unitPrice,
+        adjustments: DECIMAL.test(l.discountPercent) && Number(l.discountPercent) > 0 ? [{ reason: t('Discount {n}%', { n: l.discountPercent }), amount: '', isCharge: false }] : [],
+        net: preview?.lines[i]?.net ?? '', tax: preview?.lines[i]?.tax ?? '', total: preview?.lines[i]?.total ?? '',
+      })),
+      totals: {
+        taxExclusive: preview?.totals.lineExtension ?? '0.00', gst: preview?.totals.gst ?? '0.00', otherTaxes: [],
+        taxInclusive: preview?.totals.taxInclusive ?? '0.00', payable: preview?.totals.payable ?? preview?.totals.taxInclusive ?? '0.00',
+      },
+      ...(isNote && reference && { reference: { etdui: reference.etdui, documentType: reference.type, reason: reason.trim() || '…' } }),
+      ...(note.trim() && { note: note.trim() }),
+      payment: { ...(type !== '02' && dueDate && { dueDate }), ...(terms.trim() && { terms: terms.trim() }) },
+      regulatory: me?.environment === 'test' ? ['Transmitted to tests environment, no fiscal value'] : [],
+    };
+  };
+
   const canIssue = useMemo(() => {
     if (ready.length === 0 || ready.length !== lines.length) return false;
     if (needsCustomer && customerMode === 'saved' && !customer) return false;
     if (needsCustomer && customerMode === 'walkin') return false;
     if (customerMode === 'new' && (!newCustomer.name.trim() || (needsCustomer && (!newCustomer.street || !newCustomer.city)))) return false;
     if (isNote && (!reference || !reason.trim())) return false;
+    if (overCredit) return false;
     return Boolean(me?.certificate);
-  }, [ready.length, lines.length, needsCustomer, customerMode, customer, newCustomer, isNote, reference, reason, me]);
+  }, [ready.length, lines.length, needsCustomer, customerMode, customer, newCustomer, isNote, reference, reason, me, overCredit]);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -309,6 +374,17 @@ export function NewDocument() {
         <fieldset className="stack">
           <legend>{type === '04' ? t('Credit note for') : t('Debit note for')}</legend>
           {reference ? <p><strong>{t(TYPE_NAMES[reference.type] ?? reference.typeName)} {reference.series}-{reference.number}</strong> · {reference.issueDate} · {money(reference.totals.payable)}</p> : <p className="muted">{t('Loading the original document…')}</p>}
+          {type === '04' && reference?.credit && (
+            <>
+              <p className="small">
+                {toCents(reference.credit.credited) > 0n
+                  ? t('Already credited: {credited}. Left to credit: {left}.', { credited: money(reference.credit.credited), left: money(reference.credit.remaining) })
+                  : t('Left to credit: {left}.', { left: money(reference.credit.remaining) })}
+                {' '}{t('The lines below are copied from the original. Remove or reduce what is not being credited.')}
+              </p>
+              {overCredit && <div className="banner bad" role="alert"><div><strong>{t('This credit note is more than what is left to credit ({left}).', { left: money(reference.credit.remaining) })}</strong></div></div>}
+            </>
+          )}
           <Field label={t('Reason')} hint={t("Shown on the document, e.g. 'Returned 1 item' or 'Price correction'.")}><input required value={reason} onChange={(e) => setReason(e.target.value)} /></Field>
         </fieldset>
       )}
@@ -435,10 +511,19 @@ export function NewDocument() {
           )}
           <div className="grand"><span>{t('Total')}</span><span aria-live="polite">{money(preview?.totals.taxInclusive ?? '0.00')}</span></div>
           <ErrorText error={error} />
+          <button type="button" className="secondary paper-preview-button" disabled={ready.length === 0} onClick={openPaper}>{t('Preview the document')}</button>
           <button type="submit" className="big lime" disabled={!canIssue || busy}>{busy ? t('Signing and sending…') : t('Issue {type}', { type: typeName.toLowerCase() })}<span className="chip" aria-hidden="true">→</span></button>
           <p className="small muted">{t('Issuing signs the document and sends it to BTS for authorization.')} <kbd>Ctrl</kbd>+<kbd>Enter</kbd></p>
         </div>
       </div>
+      {showPaper && (
+        <Modal title={t('Preview: {type}', { type: typeName })} onClose={() => setShowPaper(false)} wide>
+          <div className="paper-stage paper-stage-modal">
+            <DocumentPaper data={{ view: draftView(), status: 'draft', protocolNumber: null, qr: null }} />
+          </div>
+          <p className="small muted">{t('This is how the document will look. The number, the document ID and the BTS authorization are added when it is issued.')}</p>
+        </Modal>
+      )}
     </form>
   );
 }

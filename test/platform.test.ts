@@ -7,10 +7,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
 import { buildApp } from '../src/api/app.ts';
-import { resetLoginAttempts } from '../src/api/auth.ts';
-import { resetPlatformLimits } from '../src/api/platform.ts';
 import { createApiKey } from '../src/db/apikeys.ts';
 import { createPlatformAdmin, setPlatformAdminStatus } from '../src/db/platform.ts';
+import { base32Decode, stepAt, totpCode } from '../src/db/twofactor.ts';
 import { createUser } from '../src/db/users.ts';
 import { SUBMIT_PATHS } from '../src/engine/transport.ts';
 import { memoryMailer } from '../src/mail/mailer.ts';
@@ -26,6 +25,8 @@ interface Ctx {
   staff: Record<string, string>;
   /** An API key for tenant B (TIN 654321), which starts in the test environment like tenant A. */
   key: string;
+  /** The staff member's authenticator secret (base32). */
+  secret: string;
 }
 
 function cookieFrom(res: LightMyRequestResponse, name: string): string {
@@ -35,17 +36,22 @@ function cookieFrom(res: LightMyRequestResponse, name: string): string {
 }
 
 async function withConsole(fn: (c: Ctx) => Promise<void>) {
-  resetLoginAttempts();
-  resetPlatformLimits();
   const f = await setupPipeline();
   const mail = memoryMailer();
   const app = await buildApp({ pipeline: f.deps, cookieSecure: true, publicUrl: 'https://app.example.test', mailer: mail });
   await createPlatformAdmin(f.db, { email: 'ops@platform.example', name: 'Olga Ops', password: PASSWORD });
-  const login = await app.inject({ method: 'POST', url: '/v1/platform/auth/login', headers: CSRF, payload: { email: 'ops@platform.example', password: PASSWORD } });
+  // First sign-in: the password gives the authenticator secret, the first code turns two-step sign-in on.
+  const first = await app.inject({ method: 'POST', url: '/v1/platform/auth/login', headers: CSRF, payload: { email: 'ops@platform.example', password: PASSWORD } });
+  assert.equal(first.statusCode, 200, first.body);
+  assert.equal(first.headers['set-cookie'], undefined, 'no session from the password alone');
+  const { challenge, secret, setup } = first.json();
+  assert.equal(setup, true);
+  const login = await app.inject({ method: 'POST', url: '/v1/platform/auth/login/verify', headers: CSRF, payload: { challenge, code: totpCode(base32Decode(secret), stepAt(Date.now())) } });
   assert.equal(login.statusCode, 200, login.body);
+  assert.equal(login.json().recoveryCodes.length, 10);
   const key = (await createApiKey(f.db, f.tenantB, 'tests')).key;
   try {
-    await fn({ f, app, mail, staff: { ...CSRF, cookie: cookieFrom(login, 'etd_admin') }, key });
+    await fn({ f, app, mail, staff: { ...CSRF, cookie: cookieFrom(login, 'etd_admin') }, key, secret });
   } finally {
     await app.close();
     await f.close();
@@ -55,8 +61,19 @@ async function withConsole(fn: (c: Ctx) => Promise<void>) {
 const receipt = { type: '02', lines: [{ description: 'Soap', quantity: '1', unitCode: 'H87', unitPrice: '4', gstCategory: 'S' }], payment: { meansCode: '10', terms: 'Cash' } };
 
 test('staff sign-in: own cookie, CSRF, failures throttled, business accounts cannot get in', () =>
-  withConsole(async ({ f, app, staff }) => {
-    const set = String((await app.inject({ method: 'POST', url: '/v1/platform/auth/login', headers: CSRF, payload: { email: 'ops@platform.example', password: PASSWORD } })).headers['set-cookie']);
+  withConsole(async ({ f, app, staff, secret }) => {
+    // Later sign-ins: password, then a code (never the same code twice).
+    const again = (await app.inject({ method: 'POST', url: '/v1/platform/auth/login', headers: CSRF, payload: { email: 'ops@platform.example', password: PASSWORD } })).json();
+    assert.equal(again.twoFactorRequired, true);
+    assert.equal(again.secret, undefined, 'the secret is only shown at setup');
+    assert.equal((await app.inject({ method: 'POST', url: '/v1/platform/auth/login/verify', headers: CSRF, payload: { challenge: again.challenge, code: '000000' } })).statusCode, 401);
+    const code = totpCode(base32Decode(secret), stepAt(Date.now()) + 1);
+    const verified = await app.inject({ method: 'POST', url: '/v1/platform/auth/login/verify', headers: CSRF, payload: { challenge: again.challenge, code } });
+    assert.equal(verified.statusCode, 200, verified.body);
+    assert.equal((await app.inject({ method: 'POST', url: '/v1/platform/auth/login/verify', headers: CSRF, payload: { challenge: again.challenge, code } })).statusCode, 401, 'a challenge is used once');
+    const third = (await app.inject({ method: 'POST', url: '/v1/platform/auth/login', headers: CSRF, payload: { email: 'ops@platform.example', password: PASSWORD } })).json();
+    assert.equal((await app.inject({ method: 'POST', url: '/v1/platform/auth/login/verify', headers: CSRF, payload: { challenge: third.challenge, code } })).statusCode, 401, 'a code cannot be replayed');
+    const set = String(verified.headers['set-cookie']);
     for (const flag of ['HttpOnly', 'SameSite=Strict', 'Secure']) assert.ok(set.includes(flag), flag);
     assert.equal((await app.inject({ method: 'GET', url: '/v1/platform/auth/session', headers: staff })).json().admin.name, 'Olga Ops');
     assert.equal((await app.inject({ method: 'GET', url: '/v1/platform/tenants' })).statusCode, 401);

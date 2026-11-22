@@ -6,15 +6,16 @@
  *   POST /v1/orders/:id/paid        payment received: issues the BTS receipt (or tax invoice) and emails it
  *   POST /v1/orders/:id/fulfilled   delivered or picked up
  *   POST /v1/orders/:id/cancel      cancel an unpaid order; its stock goes back
+ *   POST /v1/orders/:id/refund      refund a paid order (all or some lines): a credit note against its document
  */
 
 import type { FastifyInstance } from 'fastify';
 import { audit } from '../db/audit.ts';
 import { BELIZE_DISTRICTS } from '../engine/ubl.ts';
-import { cancelOrder, centsString, fulfillOrder, loadOrder, markOrderPaid, type OrderLineRow, type OrderRow, trimDecimal } from '../commerce/store.ts';
+import { cancelOrder, centsString, fulfillOrder, loadOrder, loadRefunds, markOrderPaid, type OrderLineRow, type OrderRow, refundable, refundOrder, type RefundRow, trimDecimal } from '../commerce/store.ts';
 import type { PipelineDeps } from '../pipeline/issue.ts';
 import type { ServerContext } from './context.ts';
-import { sendDocumentEmail } from './documents.ts';
+import { checkCreditLimit, sendDocumentEmail } from './documents.ts';
 import { notFound } from './errors.ts';
 import { requirePermission } from './permissions.ts';
 import { uuid } from './schemas.ts';
@@ -36,7 +37,7 @@ export function orderJson(o: OrderRow, lines?: OrderLineRow[], document?: { id: 
     address: o.street ? { street: o.street, city: o.city, districtCode: o.district_code, districtName: o.district_code ? BELIZE_DISTRICTS[o.district_code] : null } : null,
     business: o.buyer_tin ? { tin: o.buyer_tin, name: o.buyer_name } : null,
     note: o.note,
-    totals: { lineExtension: centsString(o.line_extension_cents), gst: centsString(o.gst_cents), total: centsString(o.total_cents) },
+    totals: { lineExtension: centsString(o.line_extension_cents), gst: centsString(o.gst_cents), total: centsString(o.total_cents), refunded: centsString(o.refunded_cents ?? 0) },
     documentId: o.document_id,
     ...(document !== undefined && { document }),
     ...(lines && {
@@ -56,6 +57,28 @@ export function orderJson(o: OrderRow, lines?: OrderLineRow[], document?: { id: 
     fulfilledAt: iso(o.fulfilled_at),
     cancelledAt: iso(o.cancelled_at),
     cancelReason: o.cancel_reason,
+  };
+}
+
+/** Refunds made and what is left to refund, for the order page. */
+async function refundsJson(deps: PipelineDeps, tenantId: string, order: OrderRow, lines: OrderLineRow[]) {
+  const refunds = await loadRefunds(deps.db, tenantId, order.id);
+  const left = refundable(order, lines, refunds);
+  const docs = await Promise.all(refunds.map((r) => documentSummary(deps, tenantId, r.document_id)));
+  return {
+    refunds: refunds.map((r: RefundRow, i) => ({
+      id: r.id, amount: centsString(r.amount_cents), lines: r.lines, delivery: r.delivery, reason: r.reason, restocked: r.restocked, createdAt: iso(r.created_at), document: docs[i],
+    })),
+    refundable: { lines: [...left.lines].map(([lineNumber, quantity]) => ({ lineNumber, quantity: Math.max(0, quantity) })), delivery: left.delivery },
+  };
+}
+
+/** The full order for its page: lines, document, refunds. */
+async function fullOrder(deps: PipelineDeps, tenantId: string, orderId: string) {
+  const loaded = (await loadOrder(deps.db, tenantId, { id: orderId }))!;
+  return {
+    ...orderJson(loaded.order, loaded.lines, await documentSummary(deps, tenantId, loaded.order.document_id)),
+    ...(await refundsJson(deps, tenantId, loaded.order, loaded.lines)),
   };
 }
 
@@ -108,7 +131,7 @@ export function registerOrderRoutes(app: FastifyInstance, deps: PipelineDeps, ct
   app.get<{ Params: { id: string } }>('/orders/:id', { schema: { params: idParams } }, async (request) => {
     const loaded = await loadOrder(db, request.tenantId, { id: request.params.id });
     if (!loaded) throw notFound('Order');
-    return orderJson(loaded.order, loaded.lines, await documentSummary(deps, request.tenantId, loaded.order.document_id));
+    return fullOrder(deps, request.tenantId, loaded.order.id);
   });
 
   app.post<{ Params: { id: string } }>('/orders/:id/paid', { schema: { params: idParams } }, async (request) => {
@@ -125,16 +148,15 @@ export function registerOrderRoutes(app: FastifyInstance, deps: PipelineDeps, ct
         request.log.error({ err: e }, 'order receipt email failed');
       }
     }
-    const loaded = (await loadOrder(db, request.tenantId, { id: order.id }))!;
-    return { ...orderJson(loaded.order, loaded.lines, await documentSummary(deps, request.tenantId, loaded.order.document_id)), emailed };
+    return { ...(await fullOrder(deps, request.tenantId, order.id)), emailed };
   });
 
   app.post<{ Params: { id: string } }>('/orders/:id/fulfilled', { schema: { params: idParams } }, async (request) => {
     requirePermission(request, 'orders.manage');
     await fulfillOrder(db, request.tenantId, request.params.id);
-    const loaded = (await loadOrder(db, request.tenantId, { id: request.params.id }))!;
-    await audit(db, { tenantId: request.tenantId, userId: request.userId || null, action: 'order.fulfilled', target: `#${loaded.order.number}`, ip: request.ip });
-    return orderJson(loaded.order, loaded.lines, await documentSummary(deps, request.tenantId, loaded.order.document_id));
+    const full = await fullOrder(deps, request.tenantId, request.params.id);
+    await audit(db, { tenantId: request.tenantId, userId: request.userId || null, action: 'order.fulfilled', target: `#${full.number}`, ip: request.ip });
+    return full;
   });
 
   app.post<{ Params: { id: string }; Body: { reason: string } }>(
@@ -146,6 +168,45 @@ export function registerOrderRoutes(app: FastifyInstance, deps: PipelineDeps, ct
       const loaded = (await loadOrder(db, request.tenantId, { id: request.params.id }))!;
       await audit(db, { tenantId: request.tenantId, userId: request.userId || null, action: 'order.cancelled', target: `#${loaded.order.number}`, details: { reason: request.body.reason }, ip: request.ip });
       return orderJson(loaded.order, loaded.lines, null);
+    },
+  );
+
+  app.post<{ Params: { id: string }; Body: { reason: string; lines?: Array<{ lineNumber: number; quantity: number }>; delivery?: boolean; restock?: boolean } }>(
+    '/orders/:id/refund',
+    {
+      schema: {
+        params: idParams,
+        body: {
+          type: 'object', required: ['reason'], additionalProperties: false,
+          properties: {
+            reason: { type: 'string', minLength: 1, maxLength: 500 },
+            lines: {
+              type: 'array', minItems: 1, maxItems: 100,
+              items: { type: 'object', required: ['lineNumber', 'quantity'], additionalProperties: false, properties: { lineNumber: { type: 'integer', minimum: 1 }, quantity: { type: 'integer', minimum: 0, maximum: 9999 } } },
+            },
+            delivery: { type: 'boolean' },
+            restock: { type: 'boolean' },
+          },
+        },
+      },
+    },
+    async (request) => {
+      requirePermission(request, 'documents.adjust');
+      const { refundId, document, amount } = await refundOrder(deps, request.tenantId, request.params.id, request.body, request.userId || null,
+        (req) => checkCreditLimit(deps, request.tenantId, req));
+      const full = await fullOrder(deps, request.tenantId, request.params.id);
+      await audit(db, { tenantId: request.tenantId, userId: request.userId || null, action: 'order.refunded', target: `#${full.number}`, details: { amount, reason: request.body.reason, refundId }, ip: request.ip });
+      // Email the buyer their credit note (best effort).
+      let emailed = false;
+      if (full.customer.email && ctx.mailConfigured && ['authorized', 'authorized_with_alert', 'contingency_pending'].includes(document.status)) {
+        try {
+          await sendDocumentEmail(deps, ctx, request.tenantId, document.documentId, { to: full.customer.email, message: `Your refund for order #${full.number}.`, userId: request.userId || null });
+          emailed = true;
+        } catch (e) {
+          request.log.error({ err: e }, 'refund email failed');
+        }
+      }
+      return { ...full, refund: { id: refundId, amount, documentId: document.documentId, status: document.status }, emailed };
     },
   );
 }

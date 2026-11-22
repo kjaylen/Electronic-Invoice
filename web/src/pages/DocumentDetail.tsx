@@ -5,7 +5,8 @@ import { type T, useT } from '../i18n';
 import { printPdf } from '../print';
 import { useSession } from '../session';
 import { useToast } from '../toast';
-import { ErrorText, Field, Modal, money, StatusBadge, TYPE_NAMES, unitName, usePageTitle, whatsappNumber } from '../ui';
+import { DocumentPaper, type PaperData } from '../paper';
+import { ErrorText, Field, Modal, money, Segmented, StatusBadge, TYPE_NAMES, usePageTitle, whatsappNumber } from '../ui';
 import { customerLabel } from './Dashboard';
 
 const EXPLAIN: Partial<Record<DocumentInfo['status'], { tone: string; title: string; text: string }>> = {
@@ -45,6 +46,8 @@ export function DocumentDetail() {
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [paper, setPaper] = useState<PaperData | null>(null);
+  const [variant, setVariant] = useState<'sheet' | 'receipt'>(() => (localStorage.getItem('etd.paper') === 'receipt' ? 'receipt' : 'sheet'));
   const shareUrl = useRef<string | null>(null);
   usePageTitle(doc ? `${t(TYPE_NAMES[doc.type] ?? doc.typeName)} ${doc.series}-${doc.number}` : t('Document'));
 
@@ -54,6 +57,20 @@ export function DocumentDetail() {
     void load();
     void loadMessages();
   }, [load, loadMessages]);
+  // The on-screen copy, read again when the status changes (authorization number, stamps).
+  const status = doc?.status;
+  useEffect(() => {
+    if (!status) return;
+    void api<PaperData>(`/v1/documents/${id}/view`).then(setPaper).catch(() => setPaper(null));
+  }, [id, status]);
+  const chooseVariant = (v: 'sheet' | 'receipt') => {
+    setVariant(v);
+    try {
+      localStorage.setItem('etd.paper', v);
+    } catch {
+      /* private mode: the choice lasts for this page only */
+    }
+  };
 
   // While BTS has not settled the document, check again: soon at first, then less often.
   const waiting = doc?.status === 'pending' || doc?.status === 'contingency_pending';
@@ -175,88 +192,94 @@ export function DocumentDetail() {
       )}
       <ErrorText error={error} />
 
-      <div className="row actions-bar">
-        {printable && (
-          <>
-            <button onClick={() => printPdf(link(`/v1/documents/${doc.id}/pdf`))}>{t('Print')}<span className="chip" aria-hidden="true">⎙</span></button>
-            {(doc.type === '01' || doc.type === '02') && <button className="secondary" onClick={() => printPdf(link(`/v1/documents/${doc.id}/pdf?format=receipt&widthMm=80`))}>{t('Print receipt')}</button>}
-            <a className="button secondary" href={link(`/v1/documents/${doc.id}/pdf`)} target="_blank" rel="noreferrer">{t('Open PDF')}</a>
-          </>
-        )}
-        <a className="button secondary" href={link(`/v1/documents/${doc.id}/xml`)}>{t('Download XML')}</a>
-        <span className="spacer" />
-        {can('documents.issue') && (doc.type === '01' || doc.type === '02') && <button className="secondary" onClick={() => navigate(`/documents/new?type=${doc.type}&from=${doc.id}`, { viewTransition: true })}>{t('Issue again')}</button>}
-        {canNote && <button className="secondary" onClick={() => navigate(`/documents/new?type=04&ref=${doc.id}`, { viewTransition: true })}>{t('Credit note')}</button>}
-        {canNote && doc.type === '01' && <button className="secondary" onClick={() => navigate(`/documents/new?type=03&ref=${doc.id}`, { viewTransition: true })}>{t('Debit note')}</button>}
-        {can('documents.cancel') && (doc.status === 'authorized' || doc.status === 'authorized_with_alert') && <button className="danger" onClick={() => setCancelling(true)}>{t('Cancel document')}</button>}
-      </div>
-
-      {printable && can('documents.send') && (
-        <section className="card send">
-          <div>
-            <h2>{t('Send to the customer')}</h2>
-            <p className="small muted">{t('By email with the PDF and XML attached, or as a link that opens the PDF (valid 90 days).')}</p>
+      <div className="doc-layout">
+        <div className="doc-main">
+          <div className="paper-toolbar">
+            <Segmented label={t('View')} value={variant} onChange={chooseVariant} options={[['sheet', t('Sheet')], ['receipt', t('Receipt')]]} />
+            <span className="spacer" />
+            {printable && (
+              <>
+                <button className="secondary small-button" onClick={() => printPdf(link(variant === 'receipt' ? `/v1/documents/${doc.id}/pdf?format=receipt&widthMm=80` : `/v1/documents/${doc.id}/pdf`))}>{t('Print')}<span className="chip" aria-hidden="true">⎙</span></button>
+                <a className="button secondary small-button" href={link(`/v1/documents/${doc.id}/pdf${variant === 'receipt' ? '?format=receipt&widthMm=80' : ''}`)} target="_blank" rel="noreferrer">PDF</a>
+              </>
+            )}
           </div>
-          <div className="row">
-            <button onClick={() => setEmailing(true)}>{t('Email')}<span className="chip" aria-hidden="true">@</span></button>
-            <button className="secondary whatsapp" onClick={() => void whatsapp()}>WhatsApp</button>
-            <button className="secondary" onClick={() => void copyLink()}>{t('Copy link')}</button>
-            {'share' in navigator && <button className="secondary" onClick={() => void nativeShare()}>{t('Share…')}</button>}
+          <div className={`paper-stage ${variant}`}>
+            {paper ? <DocumentPaper data={paper} variant={variant} /> : <div className="paper paper-sheet paper-loading" aria-busy="true"><div className="skeleton" style={{ height: '3rem', width: '45%' }} /><div className="skeleton" style={{ height: '8rem' }} /><div className="skeleton" style={{ height: '4rem', width: '40%', marginLeft: 'auto' }} /></div>}
           </div>
-          {messages.length > 0 && (
-            <ul className="sent-log small">
-              {messages.map((m) => (
-                <li key={m.id} className={m.status}>
-                  {m.status === 'sent' ? t('Emailed to {to}', { to: m.recipient }) : t('Email to {to} failed', { to: m.recipient })}
-                  <span className="muted"> · {new Date(m.createdAt).toLocaleString()}{m.sentBy && ` · ${m.sentBy}`}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-      )}
-
-      <section className="card">
-        <h2>{t('Items')}</h2>
-        <div className="table-wrap">
-          <table className="responsive lines">
-            <thead><tr><th scope="col">#</th><th scope="col">{t('Description')}</th><th scope="col" className="right">{t('Qty')}</th><th scope="col" className="right">{t('Price')}</th><th scope="col" className="right">GST</th><th scope="col" className="right">{t('Total')}</th></tr></thead>
-            <tbody>
-              {doc.lines.map((l) => (
-                <tr key={l.lineNumber}>
-                  <td data-label="#">{l.lineNumber}</td>
-                  <td data-label={t('Description')}>{l.description}{l.gstCategory !== 'S' && <span className="small muted"> · {l.gstCategory === 'Z' ? t('Zero-rated') : t('Exempt')}</span>}</td>
-                  <td data-label={t('Qty')} className="right">{l.quantity} <span className="small muted">{unitName(t, l.unitCode)}</span></td>
-                  <td data-label={t('Price')} className="right">{money(l.unitPrice)}</td>
-                  <td data-label="GST" className="right">{money(l.gst)}</td>
-                  <td data-label={t('Total')} className="right">{money(l.total)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
         </div>
-      </section>
 
-      <div className="grid">
-        <section className="card totals ticket">
-          <span className="kicker" style={{ color: 'var(--lime)' }}>{t('Amounts')} · BZD</span>
-          <div><span>{t('Subtotal')}</span><span>{money(doc.totals.lineExtension)}</span></div>
-          <div><span>GST</span><span>{money(doc.totals.gst)}</span></div>
-          {doc.totals.tax !== doc.totals.gst && <div><span>{t('All taxes')}</span><span>{money(doc.totals.tax)}</span></div>}
-          <div className="grand"><span>{t('Total')}</span><span>{money(doc.totals.taxInclusive)}</span></div>
-          {doc.totals.payable !== doc.totals.taxInclusive && <div><span>{t('Amount due')}</span><span>{money(doc.totals.payable)}</span></div>}
-        </section>
-        <section className="card stack">
-          <h2>BTS</h2>
-          <div><div className="small muted">{t('Document ID (ETDUI)')}</div><div className="mono">{doc.etdui}</div></div>
-          <div><div className="small muted">{t('Authorization')}</div><div className="mono">{doc.protocolNumber ?? '—'}</div></div>
-          <div className="small muted">{t('Environment')}: {doc.environment === 'test' ? t('Test (no fiscal value)') : t('Production')}</div>
-          {doc.supersededBy && <p><Link to={`/documents/${doc.supersededBy}`}>{t('Replaced by the contingency document')}</Link></p>}
-          {doc.supersedes && <p><Link to={`/documents/${doc.supersedes}`}>{t('Replaces the original attempt')}</Link></p>}
-        </section>
+        <aside className="doc-aside">
+          <section className="card stack doc-total">
+            <span className="kicker">{doc.totals.payable !== doc.totals.taxInclusive ? t('Amount due') : t('Total')} · BZD</span>
+            <span className="doc-total-amount">{money(doc.totals.payable)}</span>
+            <span className="small muted">{t('Subtotal')} {money(doc.totals.lineExtension)} · GST {money(doc.totals.gst)}</span>
+            {doc.credit && (doc.credit.credited !== '0.00' || doc.credit.debited !== '0.00') && (
+              <span className="small">{t('Credited so far: {credited}. Left to credit: {left}.', { credited: money(doc.credit.credited), left: money(doc.credit.remaining) })}</span>
+            )}
+          </section>
+
+          <section className="card stack actions-bar">
+            <h2>{t('Print and download')}</h2>
+            <div className="action-grid">
+              {printable && (
+                <>
+                  <button onClick={() => printPdf(link(`/v1/documents/${doc.id}/pdf`))}>{t('Print')}<span className="chip" aria-hidden="true">⎙</span></button>
+                  {(doc.type === '01' || doc.type === '02') && <button className="secondary" onClick={() => printPdf(link(`/v1/documents/${doc.id}/pdf?format=receipt&widthMm=80`))}>{t('Print receipt')}</button>}
+                  <a className="button secondary" href={link(`/v1/documents/${doc.id}/pdf`)} target="_blank" rel="noreferrer">{t('Open PDF')}</a>
+                </>
+              )}
+              <a className="button secondary" href={link(`/v1/documents/${doc.id}/xml`)}>{t('Download XML')}</a>
+            </div>
+          </section>
+
+          {printable && can('documents.send') && (
+            <section className="card stack send">
+              <div>
+                <h2>{t('Send to the customer')}</h2>
+                <p className="small muted">{t('By email with the PDF and XML attached, or as a link that opens the PDF (valid 90 days).')}</p>
+              </div>
+              <div className="action-grid">
+                <button onClick={() => setEmailing(true)}>{t('Email')}<span className="chip" aria-hidden="true">@</span></button>
+                <button className="secondary whatsapp" onClick={() => void whatsapp()}>WhatsApp</button>
+                <button className="secondary" onClick={() => void copyLink()}>{t('Copy link')}</button>
+                {'share' in navigator && <button className="secondary" onClick={() => void nativeShare()}>{t('Share…')}</button>}
+              </div>
+              {messages.length > 0 && (
+                <ul className="sent-log small">
+                  {messages.map((m) => (
+                    <li key={m.id} className={m.status}>
+                      {m.status === 'sent' ? t('Emailed to {to}', { to: m.recipient }) : t('Email to {to} failed', { to: m.recipient })}
+                      <span className="muted"> · {new Date(m.createdAt).toLocaleString()}{m.sentBy && ` · ${m.sentBy}`}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          )}
+
+          {(can('documents.issue') || canNote || can('documents.cancel')) && (doc.type === '01' || doc.type === '02' || doc.status.startsWith('authorized')) && (
+            <section className="card stack">
+              <h2>{t('Correct or repeat')}</h2>
+              <div className="action-grid">
+                {can('documents.issue') && (doc.type === '01' || doc.type === '02') && <button className="secondary" onClick={() => navigate(`/documents/new?type=${doc.type}&from=${doc.id}`, { viewTransition: true })}>{t('Issue again')}</button>}
+                {canNote && <button className="secondary" disabled={doc.credit?.remaining === '0.00'} title={doc.credit?.remaining === '0.00' ? t('Fully credited') : undefined} onClick={() => navigate(`/documents/new?type=04&ref=${doc.id}`, { viewTransition: true })}>{t('Credit note')}</button>}
+                {canNote && doc.type === '01' && <button className="secondary" onClick={() => navigate(`/documents/new?type=03&ref=${doc.id}`, { viewTransition: true })}>{t('Debit note')}</button>}
+                {can('documents.cancel') && (doc.status === 'authorized' || doc.status === 'authorized_with_alert') && <button className="danger" onClick={() => setCancelling(true)}>{t('Cancel document')}</button>}
+              </div>
+            </section>
+          )}
+
+          <section className="card stack doc-facts">
+            <h2>BTS</h2>
+            <div><div className="small muted">{t('Document ID (ETDUI)')}</div><div className="mono">{doc.etdui}</div></div>
+            <div><div className="small muted">{t('Authorization')}</div><div className="mono">{doc.protocolNumber ?? '—'}</div></div>
+            <div className="small muted">{t('Environment')}: {doc.environment === 'test' ? t('Test (no fiscal value)') : t('Production')}</div>
+            {doc.supersededBy && <p><Link to={`/documents/${doc.supersededBy}`}>{t('Replaced by the contingency document')}</Link></p>}
+            {doc.supersedes && <p><Link to={`/documents/${doc.supersedes}`}>{t('Replaces the original attempt')}</Link></p>}
+          </section>
+        </aside>
       </div>
-
-      {printable && <iframe className="pdf-frame" title={t('Printed copy')} src={link(`/v1/documents/${doc.id}/pdf`)} loading="lazy" />}
 
       {emailing && <EmailModal doc={doc} onClose={() => setEmailing(false)} onSent={(to) => { setEmailing(false); toast(t('Sent to {to}', { to })); void loadMessages(); }} />}
 

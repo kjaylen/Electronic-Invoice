@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api, link, type Summary } from '../api';
 import { useI18n, useT } from '../i18n';
-import { belizeToday, ErrorText, Field, fromCents, money, Segmented, toCents, usePageTitle } from '../ui';
+import { belizeToday, ErrorText, Field, fromCents, Modal, money, Segmented, toCents, usePageTitle } from '../ui';
 
 type Preset = 'month' | 'last-month' | 'quarter' | 'year' | 'custom';
 
@@ -101,6 +101,8 @@ export function Reports() {
   const [customers, setCustomers] = useState<CustomerRow[]>([]);
   const [items, setItems] = useState<ItemRow[]>([]);
   const [error, setError] = useState<unknown>(null);
+  const [archiving, setArchiving] = useState(false);
+  const [withPdf, setWithPdf] = useState(true);
   const [from, to] = range;
   const qs = `from=${from}&to=${to}`;
 
@@ -131,7 +133,21 @@ export function Reports() {
         <div><span className="kicker">{t('Insights')}</span><h1>{t('Reports')}</h1></div>
         <span className="spacer" />
         <a className="button secondary" href={link(`/v1/reports/documents?${qs}`)} download>{t('All documents (CSV)')}</a>
+        <button className="secondary" onClick={() => setArchiving(true)}>{t('Download archive')}</button>
       </div>
+      {archiving && (
+        <Modal title={t('Download the archive')} onClose={() => setArchiving(false)}>
+          <div className="stack">
+            <p>{t('One ZIP file with every document from {from} to {to}: the signed XML exactly as sent to BTS, BTS’s replies, cancellations and the register. Keep it with your tax records.', { from, to })}</p>
+            <label className="row small"><input type="checkbox" checked={withPdf} onChange={(e) => setWithPdf(e.target.checked)} /> {t('Include the PDFs (slower for long periods)')}</label>
+            <div className="row">
+              <span className="spacer" />
+              <button type="button" className="secondary" onClick={() => setArchiving(false)}>{t('Close')}</button>
+              <a className="button" href={link(`/v1/reports/archive?${qs}${withPdf ? '&pdf=true' : ''}`)} download onClick={() => setArchiving(false)}>{t('Download ZIP')}</a>
+            </div>
+          </div>
+        </Modal>
+      )}
       <div className="card row filters">
         <Segmented
           label={t('Period')}

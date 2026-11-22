@@ -1,0 +1,81 @@
+/**
+ * Housekeeping, every few minutes: email notices to businesses (rejections,
+ * outages, certificates), alerts to the operations webhook, and clean-up of
+ * expired rate-limit windows and sign-in challenges.
+ *
+ * Every step is safe to run from several processes at once.
+ */
+
+import type { Queryable } from '../db/database.ts';
+import { sweepRateLimits } from '../db/ratelimit.ts';
+import type { Mailer } from '../mail/mailer.ts';
+import { runNotifications, type NotifyResult } from '../notify/notifications.ts';
+import { heartbeat, opsStatus, type OpsThresholds, sendAlerts } from '../ops/monitoring.ts';
+
+export interface HousekeepingOptions {
+  mailer?: Mailer;
+  publicUrl?: string;
+  alertWebhookUrl?: string;
+  environment?: string;
+  thresholds?: OpsThresholds;
+  intervalMs?: number;
+  onError?: (step: string, error: unknown) => void;
+}
+
+export interface HousekeepingResult {
+  notifications: NotifyResult | null;
+  alerts: { fired: string[]; resolved: string[] } | null;
+  sweptLimits: number;
+}
+
+export async function runHousekeepingOnce(db: Queryable, options: HousekeepingOptions = {}): Promise<HousekeepingResult> {
+  const result: HousekeepingResult = { notifications: null, alerts: null, sweptLimits: 0 };
+  const step = async <T>(name: string, fn: () => Promise<T>): Promise<T | null> => {
+    try {
+      return await fn();
+    } catch (e) {
+      options.onError?.(name, e);
+      return null;
+    }
+  };
+  if (options.mailer) {
+    const mailer = options.mailer;
+    result.notifications = await step('notifications', () => runNotifications(db, { mailer, ...(options.publicUrl && { publicUrl: options.publicUrl }) }));
+  }
+  if (options.alertWebhookUrl) {
+    const url = options.alertWebhookUrl;
+    result.alerts = await step('alerts', async () => sendAlerts(db, await opsStatus(db, options.thresholds), { webhookUrl: url, ...(options.environment && { environment: options.environment }) }));
+  }
+  result.sweptLimits = (await step('rate limits', () => sweepRateLimits(db))) ?? 0;
+  await step('challenges', () => db.query('delete from login_challenges where expires_at < now()'));
+  await step('heartbeat', () => heartbeat(db, 'housekeeping', { notifications: result.notifications, alerts: result.alerts }));
+  return result;
+}
+
+export function startHousekeeping(db: Queryable, options: HousekeepingOptions = {}) {
+  let running = false;
+  let stopped = false;
+  const tick = async () => {
+    if (running || stopped) return;
+    running = true;
+    try {
+      await runHousekeepingOnce(db, options);
+    } finally {
+      running = false;
+    }
+  };
+  const timer = setInterval(() => void tick(), options.intervalMs ?? 5 * 60_000);
+  timer.unref();
+  // First run soon after start, not a full interval later.
+  const first = setTimeout(() => void tick(), 15_000);
+  first.unref();
+  return {
+    tick,
+    async stop() {
+      stopped = true;
+      clearInterval(timer);
+      clearTimeout(first);
+      while (running) await new Promise((r) => setTimeout(r, 50));
+    },
+  };
+}

@@ -48,7 +48,7 @@ test('health check and JSON 404s', () =>
   withApi(async ({ app }) => {
     const health = await app.inject({ method: 'GET', url: '/health' });
     assert.equal(health.statusCode, 200);
-    assert.deepEqual(health.json(), { status: 'ok' });
+    assert.deepEqual(health.json(), { status: 'degraded', worker: 'stale' }, 'no worker has reported in this test');
     const missing = await app.inject({ method: 'GET', url: '/nope' });
     assert.equal(missing.statusCode, 404);
     assert.equal(missing.json().error.code, 'not_found');
@@ -190,8 +190,9 @@ test('issue an invoice from a saved customer and catalog item; read it back as J
     const receipt = await app.inject({ method: 'GET', url: `/v1/documents/${doc.id}/pdf?format=receipt&widthMm=58`, headers: as(keyA) });
     assert.equal(receipt.statusCode, 200);
 
-    const { lines, ...got } = (await app.inject({ method: 'GET', url: `/v1/documents/${doc.id}`, headers: as(keyA) })).json();
+    const { lines, credit, ...got } = (await app.inject({ method: 'GET', url: `/v1/documents/${doc.id}`, headers: as(keyA) })).json();
     assert.deepEqual(got, doc);
+    assert.deepEqual(credit, { credited: '0.00', debited: '0.00', remaining: '61.85' }, 'an invoice says how much is left to credit');
     assert.deepEqual(lines.map((l: { description: string; quantity: string; total: string }) => [l.description, l.quantity]), [['USB-C phone charger', '2'], [lines[1].description, lines[1].quantity]]);
     assert.equal(lines.length, 2, 'the detail view includes the lines');
     const listed = (await app.inject({ method: 'GET', url: '/v1/documents?status=authorized&type=01', headers: as(keyA) })).json();

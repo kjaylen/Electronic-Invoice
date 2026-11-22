@@ -6,7 +6,14 @@
  *   ADMIN_TOKEN          enables /v1/admin; at least 32 characters         (optional)
  *   PORT                 default 3000
  *   HOST                 default 0.0.0.0
+ *   KEY_ENCRYPTION_KEYS_PREVIOUS  older keys still accepted for reading, comma separated (key rotation)
+ *   S3_BUCKET, S3_ENDPOINT, S3_REGION, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY, S3_PUBLIC_URL, S3_FORCE_PATH_STYLE
+ *                        product photos in S3-compatible storage behind a CDN (see src/storage/objects.ts)
  *   WORKER_INTERVAL_MS   default 60000; 0 disables the worker in this process
+ *   HOUSEKEEPING_INTERVAL_MS  default 300000 (notification emails, alerts, clean-up); 0 disables
+ *   ALERT_WEBHOOK_URL    post operations alerts here (Slack/Teams/Discord-style JSON with "text")
+ *   METRICS_TOKEN        enables GET /metrics with this bearer token (32+ characters)
+ *   DEPLOY_ENVIRONMENT   shown in alerts, e.g. "production" or "staging"
  *   BTS_BASE_URL         override the BTS host (e.g. a proxy); default per tenant environment
  *   BTS_CA_FILE          extra CA certificate (PEM) to trust for the BTS host (e.g. a test double)
  *   BTS_TIMEOUT_MS       default 30000
@@ -25,9 +32,11 @@ import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { buildApp } from './api/app.ts';
+import { startHousekeeping } from './api/housekeeping.ts';
 import { startWorker } from './api/worker.ts';
+import { objectStoreFromEnv } from './storage/objects.ts';
 import { migrate, pgDatabase } from './db/database.ts';
-import { keyEncryptionKeyFromEnv, localKeyProtector } from './db/keystore.ts';
+import { keyringFromEnv } from './db/keystore.ts';
 import { type Mailer, outboxMailer, smtpMailer } from './mail/mailer.ts';
 import { cachingClientProvider } from './pipeline/clients.ts';
 
@@ -44,17 +53,20 @@ const clients = cachingClientProvider({
   ...(env.BTS_CA_FILE && { ca: readFileSync(env.BTS_CA_FILE, 'utf8') }),
   timeoutMs: Number(env.BTS_TIMEOUT_MS ?? 30_000),
 });
-const pipeline = { db, keys: localKeyProtector(keyEncryptionKeyFromEnv(env)), clients };
+const pipeline = { db, keys: keyringFromEnv(env), clients };
 
 const defaultWebRoot = fileURLToPath(new URL('../web/dist/', import.meta.url));
 const webRoot = env.WEB_ROOT ?? (existsSync(defaultWebRoot) ? defaultWebRoot : undefined);
 const mailFrom = env.MAIL_FROM ?? 'eInvoicing <no-reply@localhost>';
 const mailer: Mailer | undefined = env.SMTP_URL ? smtpMailer(env.SMTP_URL, mailFrom) : env.MAIL_OUTBOX_DIR ? outboxMailer(env.MAIL_OUTBOX_DIR, mailFrom) : undefined;
+const objectStore = objectStoreFromEnv(env);
 const app = await buildApp({
   pipeline,
   ...(mailer && { mailer }),
   ...(env.PUBLIC_URL && { publicUrl: env.PUBLIC_URL }),
   ...(env.ADMIN_TOKEN && { adminToken: env.ADMIN_TOKEN }),
+  ...(env.METRICS_TOKEN && { metricsToken: env.METRICS_TOKEN }),
+  ...(objectStore && { objectStore }),
   ...(webRoot && { webRoot }),
   cookieSecure: env.COOKIE_SECURE !== 'false',
   allowSignup: env.ALLOW_SIGNUP !== 'false',
@@ -73,11 +85,24 @@ const worker = intervalMs > 0
     })
   : undefined;
 
+const housekeepingMs = Number(env.HOUSEKEEPING_INTERVAL_MS ?? 300_000);
+const housekeeping = housekeepingMs > 0
+  ? startHousekeeping(db, {
+      intervalMs: housekeepingMs,
+      ...(mailer && { mailer }),
+      ...(env.PUBLIC_URL && { publicUrl: env.PUBLIC_URL }),
+      ...(env.ALERT_WEBHOOK_URL && { alertWebhookUrl: env.ALERT_WEBHOOK_URL }),
+      ...(env.DEPLOY_ENVIRONMENT && { environment: env.DEPLOY_ENVIRONMENT }),
+      onError: (step, e) => app.log.error({ step, err: e }, 'housekeeping failure'),
+    })
+  : undefined;
+
 await app.listen({ port: Number(env.PORT ?? 3000), host: env.HOST ?? '0.0.0.0' });
 
 const shutdown = async (signal: string) => {
   app.log.info({ signal }, 'shutting down');
   await worker?.stop();
+  await housekeeping?.stop();
   await app.close();
   clients.closeAll();
   await db.close();

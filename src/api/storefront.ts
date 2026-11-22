@@ -25,22 +25,12 @@ import { printedCopy } from './documents.ts';
 import { ApiError } from './errors.ts';
 import { documentSummary, orderJson } from './orders.ts';
 import { uuid } from './schemas.ts';
+import { overLimit } from '../db/ratelimit.ts';
+import { type PhotoRow, sendPhoto } from './products.ts';
 
-// Per-process limits on placing orders, so a script cannot flood a store.
-const WINDOW_MS = 60 * 60 * 1000;
-const hits = new Map<string, { count: number; resetAt: number }>();
-function limited(key: string, limit: number): boolean {
-  const now = Date.now();
-  const e = hits.get(key);
-  if (!e || e.resetAt <= now) {
-    hits.set(key, { count: 1, resetAt: now + WINDOW_MS });
-    return false;
-  }
-  return ++e.count > limit;
-}
-export function resetStoreLimits() {
-  hits.clear();
-}
+
+// Limits on placing orders (shared by every server process), so a script cannot flood a store.
+const HOUR_MS = 60 * 60 * 1000;
 
 const slugParams = { slug: { type: 'string', pattern: '^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$' } } as const;
 const cartSchema = {
@@ -148,14 +138,14 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
     '/:slug/images/:id',
     { schema: { params: { type: 'object', required: ['slug', 'id'], properties: { ...slugParams, id: uuid } } } },
     async (request, reply) => {
-      const img = (await db.query<{ content_type: string; data: Uint8Array }>(
-        `select g.content_type, g.data from product_images g join tenants t on t.id = g.tenant_id join products p on p.id = g.product_id
+      const img = (await db.query<PhotoRow>(
+        `select g.content_type, g.data, g.storage_key from product_images g join tenants t on t.id = g.tenant_id join products p on p.id = g.product_id
          where g.id = $1 and t.slug = $2 and p.status = 'active'`,
         [request.params.id, request.params.slug],
       )).rows[0];
       if (!img) throw new StoreError('not_found', 'Photo not found');
-      // Photo ids never change content: cache for a year.
-      return reply.type(img.content_type).header('Cache-Control', 'public, max-age=31536000, immutable').send(Buffer.from(img.data));
+      // Photo ids never change content: cache for a year (the CDN redirect too).
+      return sendPhoto(reply, ctx, img, 'public, max-age=31536000, immutable');
     },
   );
 
@@ -216,7 +206,7 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
     },
     async (request, reply) => {
       const s = await store(request);
-      if (limited(`order|${request.ip}|${s.slug}`, 20) || limited(`order|${request.ip}`, 60)) throw new ApiError(429, 'too_many_orders', 'Too many orders from here in the last hour; contact the store');
+      if (await overLimit(db, `order|${request.ip}|${s.slug}`, 20, HOUR_MS) || await overLimit(db, `order|${request.ip}`, 60, HOUR_MS)) throw new ApiError(429, 'too_many_orders', 'Too many orders from here in the last hour; contact the store');
       const placed = await placeOrder(db, deps, s, request.body);
       const path = `/${s.slug}/shop/orders/${placed.number}?t=${placed.token}`;
       await audit(db, { tenantId: s.tenantId, action: 'order.placed', target: `#${placed.number}`, details: { total: placed.quote.totals.total }, ip: request.ip });

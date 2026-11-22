@@ -19,6 +19,9 @@ npm run web:build # build the web app into web/dist
 npm run e2e       # browser tests (Playwright; needs the Docker database, see "Web app")
 npm run icons     # redraw the app icons in web/public
 npm run platform-admin -- add you@example.com "Your Name"   # a platform console account (see "Platform console")
+npm run rotate-keys # re-encrypt stored secrets under a new KEY_ENCRYPTION_KEY (see docs/operations.md)
+npm run move-photos # move product photos from the database to S3-compatible storage
+npm run backup      # pg_dump with checksum and pruning (BACKUP_DIR, BACKUP_S3_URI); npm run restore -- <file>
 npm test          # unit and API tests
 npm run typecheck # tsc --noEmit
 npm run check     # both
@@ -118,6 +121,11 @@ Local database: `docker compose up -d db`, then `DATABASE_URL=postgres://einvoic
 | `PUBLIC_URL` | Public address of the web app, e.g. `https://app.example.bz`. Links in emails and share links are built from it, never from the request's Host header. Without it, password reset, welcome links and share links are off |
 | `SMTP_URL`, `MAIL_FROM` | Outgoing mail (password resets, welcome links, documents), e.g. `smtps://user:pass@smtp.example.com:465` |
 | `MAIL_OUTBOX_DIR` | Instead of SMTP, write each email as an `.eml` file here (development and the demo) |
+| `KEY_ENCRYPTION_KEYS_PREVIOUS` | While rotating the key: older keys still accepted for reading, comma separated |
+| `HOUSEKEEPING_INTERVAL_MS` | Default `300000`: notification emails to businesses, operations alerts, clean-up. `0` turns it off in this process |
+| `ALERT_WEBHOOK_URL`, `DEPLOY_ENVIRONMENT` | Operations alerts (worker stopped, documents stuck, contingency queue, expired certificates) posted as JSON `{text}` to Slack/Teams/Discord, labelled with the environment |
+| `METRICS_TOKEN` | Enables `GET /metrics` (Prometheus) for a bearer token of 32+ characters |
+| `S3_BUCKET`, `S3_ENDPOINT`, `S3_REGION`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_PUBLIC_URL`, `S3_FORCE_PATH_STYLE` | Product photos in S3-compatible storage (S3, R2, Spaces, MinIO) behind a CDN; without them photos stay in the database |
 
 **Conventions:**
 - **Authentication:** `Authorization: Bearer <key>`. Tenant routes take an API key (`etd_<prefix>_<secret>`) or a signed-in person's session cookie; admin routes take the admin token. The business is always taken from the key or the account (which belongs to one business), never from the URL or the body. What a person may do depends on their role (`src/api/permissions.ts`).
@@ -128,7 +136,8 @@ Local database: `docker compose up -d db`, then `DATABASE_URL=postgres://einvoic
 
 | Method and path | What it does |
 |---|---|
-| `GET /health` | Liveness and database check |
+| `GET /health` | `ok` or `degraded` (worker stopped, documents stuck...) while the database answers; 503 when it does not |
+| `GET /metrics` | Prometheus metrics, with `Authorization: Bearer <METRICS_TOKEN>` |
 | `POST /v1/admin/tenants` | Create a business |
 | `POST /v1/admin/tenants/:id/certificate` | Upload its BTS certificate and key (PEM) |
 | `POST /v1/admin/tenants/:id/api-keys` | Create an API key; the secret is shown once |
@@ -142,6 +151,7 @@ Local database: `docker compose up -d db`, then `DATABASE_URL=postgres://einvoic
 | `GET /v1/documents` | List; filters `status`, `type`, `from`/`to` (issue date), `customerId`, and `q` (number like `12` or `001-000000012`, ETDUI, or customer name or TIN); cursor pagination |
 | `GET /v1/documents/:id` | Status, totals, lines, conditions, protocol number, contingency links |
 | `GET /v1/documents/:id/xml` | The signed XML exactly as sent to BTS |
+| `GET /v1/documents/:id/view` | The document as signed (read from its XML) plus its QR code, for the on-screen paper copy |
 | `GET /v1/documents/:id/pdf` | Printed copy. Query options: `format=sheet\|receipt`, `paper=A4\|LETTER`, `orientation`, `widthMm`, `draft=true` |
 | `POST /v1/documents/:id/cancel` | Cancel an authorized document (event 050). Returns 200 when registered or rejected, 202 when BTS couldn't be reached |
 | `POST /v1/documents/:id/email` | Email the printed copy (PDF) and the signed XML to one address, replies going to the business. Recorded; at most 200 emails per business per hour |
@@ -150,6 +160,7 @@ Local database: `docker compose up -d db`, then `DATABASE_URL=postgres://einvoic
 | `GET /v1/reports/summary` | `from`, `to`: totals, GST by rate, by type and by day. Credit notes subtract; only documents with legal value count |
 | `GET /v1/reports/customers`, `/v1/reports/items` | Sales by customer and by item |
 | `GET /v1/reports/documents` | The document register as CSV, every status included |
+| `GET /v1/reports/archive` | `from`, `to`, `pdf=true`: one ZIP with every document's signed XML, BTS's replies, cancellation events, the register and (optionally) the PDFs. Streamed; up to 20,000 documents per download; recorded in the activity log |
 
 Every report also answers `?format=csv` (UTF-8 with BOM for Excel; cells that a spreadsheet would run as formulas are neutralised).
 
@@ -170,7 +181,7 @@ Issuing body:
 
 - **Customer:** use `customerId` for a saved customer, or `customer` to give one inline.
 - **Lines:** a line references a catalog item with `itemId`, or gives its fields in full. Item fields can be overridden per line.
-- **Credit and debit notes:** add `"reference": { "documentId": "…", "reason": "…" }`.
+- **Credit and debit notes:** add `"reference": { "documentId": "…", "reason": "…" }`. A credit note cannot exceed what is left to credit on the original (its total, plus debit notes, minus credit notes already issued or on their way): 422 `credit_exceeds_original`. `GET /v1/documents/:id` returns `credit: { credited, debited, remaining }` for invoices and receipts, and the web app's credit-note form starts with the original's lines.
 
 `POST /v1/certificate/pfx` installs a `.pfx` certificate (owners and admins). `POST /v1/documents/preview` returns totals without issuing anything.
 
@@ -179,7 +190,10 @@ Issuing body:
 | Method and path | What it does |
 |---|---|
 | `POST /v1/auth/signup` | Create a business (test environment) and its first owner |
-| `POST /v1/auth/login` | `{ business: slug, login: email or username, password }` |
+| `POST /v1/auth/login` | `{ business: slug, login: email or username, password }`. With two-step sign-in on, answers `{ twoFactorRequired, challenge }` instead of a session |
+| `POST /v1/auth/login/verify` | `{ challenge, code }`: the 6-digit code from the authenticator app, or a recovery code. The challenge lasts 5 minutes and allows 5 tries; a code works once |
+| `GET /v1/auth/two-factor`, `POST .../setup`, `.../confirm`, `.../disable`, `.../recovery-codes` | Two-step sign-in for the signed-in person (TOTP, RFC 6238): setup needs the password and returns the secret and a QR code; confirming with a code returns ten single-use recovery codes |
+| `PUT /v1/business/security` | Owners: `{ requireTwoFactor }` for owners and admins (who must then set it up before anything else) |
 | `GET /v1/auth/session` | The account, its business and its permissions |
 | `POST /v1/auth/password/forgot` | `{ business, email }`; always 204, so it cannot reveal who has an account |
 | `GET /v1/auth/password/link/:token`, `POST /v1/auth/password/reset` | Who a reset or welcome link is for; set the password and sign in |
@@ -187,10 +201,13 @@ Issuing body:
 | `GET /v1/auth/business/:slug`, `GET /v1/auth/slug` | A business's public name (for its login page); is an address free |
 | `GET/POST /v1/users`, `PATCH /v1/users/:id` | The business's accounts: create with a temporary password or an emailed welcome link; name, email, username, role |
 | `POST /v1/users/:id/disable`, `/enable`, `/password`, `/sign-out` | Deactivate (signs them out), reactivate, set a temporary password or send a link, end all sessions |
+| `POST /v1/users/:id/two-factor/reset` | A lost phone: turns their two-step sign-in off and ends their sessions |
 | `GET/POST/DELETE /v1/api-keys` | The business's API keys |
 | `GET /v1/audit` | The activity log |
 
 Each business has its own session cookie (`etd_s_<slug>`), so one browser can be signed in to several. Requests name the business with the `X-Business` header, or `?b=<slug>` on plain links such as PDF downloads.
+
+Sign-in, sign-up, password-link, order and email limits are kept in the database (`rate_limits`), so they hold across any number of server processes.
 
 **Not built yet:** rate limiting per API key, and OpenAPI docs.
 
@@ -304,7 +321,7 @@ Every business can open an online store at `app.example.bz/<slug>/shop`. Its def
   - an optional TIN and business name, for a tax invoice
   - stock is reserved in the same database transaction that creates the order, so the last item cannot be sold twice
 - **Orders:** numbered per business (#1001 and up). The buyer gets an emailed confirmation and a private order page (an unguessable link) that shows progress and, once paid, the receipt PDF. The business is emailed about each new order.
-- **Staff** see a to-do list (unpaid, to deliver), mark an order **paid** (this issues the BTS document and emails it to the buyer; doing it twice never issues twice, and a rejected document can be issued again), mark it delivered or picked up, or cancel an unpaid order (its stock goes back). Paid orders are refunded with a credit note (phase 2).
+- **Staff** see a to-do list (unpaid, to deliver), mark an order **paid** (this issues the BTS document and emails it to the buyer; doing it twice never issues twice, and a rejected document can be issued again), mark it delivered or picked up, or cancel an unpaid order (its stock goes back). A paid order is **refunded** in full or in part (chosen lines and quantities, the delivery fee, optionally back into stock): each refund is a credit note against its receipt, sent to BTS and emailed to the buyer, and never more than was paid (`POST /v1/orders/:id/refund`).
 - **Roles:** managers and cashiers handle orders; managers and above manage products; owners and admins configure the store. API keys can sync products and handle orders.
 
 | Method and path | What it does |
@@ -318,7 +335,7 @@ Every business can open an online store at `app.example.bz/<slug>/shop`. Its def
 | `POST /v1/store/:slug/quote`, `POST /v1/store/:slug/orders` | Price a cart; place an order (rate-limited per IP) |
 | `GET /v1/store/:slug/orders/:number?t=`, `.../document?t=` | The buyer's order page and receipt PDF (the token from the order link) |
 
-**Phase 2 (next):** card payments through a Belizean gateway and PayPal, refunds as credit notes, discount codes, custom domains. **Phase 3:** theme editor, search-engine friendly pages, social catalogs, abandoned-cart reminders, customer accounts, one stock count for the counter and the store.
+**Phase 2 (next):** card payments through a Belizean gateway and PayPal, discount codes, custom domains. **Phase 3:** theme editor, search-engine friendly pages, social catalogs, abandoned-cart reminders, customer accounts, one stock count for the counter and the store.
 
 ## Platform console (`/admin`)
 
@@ -346,6 +363,16 @@ For the team that runs this service, not for businesses. Staff move a business f
 | `GET /v1/platform/audit` | The staff log |
 
 To confirm with BTS: whether production numbering should restart at 1 (what this does) and whether production needs a different certificate (the console lets staff choose).
+
+## Operations (`docs/operations.md`, `docs/staging.md`)
+
+- **Deploying:** `Dockerfile` (server and web app in one image, health check included), `deploy/docker-compose.prod.yml` (app, PostgreSQL, nightly backups) and `deploy/env.example` (every setting, commented). App servers are stateless; run the worker and housekeeping in one of them.
+- **CI:** `.github/workflows/ci.yml` runs the typecheck, the server tests (with a real PostgreSQL), the web build, the browser tests and an image build with a smoke test on every push.
+- **Monitoring:** worker heartbeats, `/health` (`ok`/`degraded`), `/metrics` (Prometheus), and webhook alerts when the worker stops, documents get stuck, the contingency queue grows or certificates expire, and again when resolved.
+- **Notifications:** owners and admins are emailed (once) when BTS rejects a document, when BTS becomes unreachable and when it is back, and 30, 14, 7 and 1 days before their certificate expires.
+- **Backups:** managed PostgreSQL point-in-time recovery, plus `npm run backup` nightly dumps kept off-site; a monthly restore drill. The key-encryption key is backed up separately.
+- **Keys:** stored secrets name the key that encrypted them; `npm run rotate-keys` moves them to a new key. A cloud KMS plugs in behind the same `KeyProtector` interface.
+- **Photos:** S3-compatible object storage behind a CDN (SigV4, no SDK), `npm run move-photos` for existing ones.
 
 ## Printed copy (`src/render`, manual 3.4 and 3.5)
 

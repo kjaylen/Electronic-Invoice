@@ -332,6 +332,7 @@ export interface OrderRow {
   line_extension_cents: unknown;
   gst_cents: unknown;
   total_cents: unknown;
+  refunded_cents: unknown;
   document_id: string | null;
   created_at: string | Date;
   paid_at: string | Date | null;
@@ -430,7 +431,7 @@ export async function fulfillOrder(db: Queryable, tenantId: string, orderId: str
   if (!r.rows.length) throw new StoreError('conflict', 'Only an open order can be marked fulfilled');
 }
 
-/** Cancel an unpaid order and put its stock back. (Refunding a paid order is a credit note, phase 2.) */
+/** Cancel an unpaid order and put its stock back. (A paid order is refunded instead: refundOrder.) */
 export async function cancelOrder(db: Database, tenantId: string, orderId: string, reason: string): Promise<void> {
   await db.transaction(async (tx) => {
     const order = (await tx.query<{ status: string; payment_status: string }>('select status, payment_status from orders where id = $1 and tenant_id = $2 for update', [orderId, tenantId])).rows[0];
@@ -447,3 +448,126 @@ export async function cancelOrder(db: Database, tenantId: string, orderId: strin
 }
 
 export const centsString = (v: unknown) => formatCents(toBigInt(v));
+
+// ---------- refunds (each one a credit note against the order's document) ----------
+
+export interface RefundInput {
+  reason: string;
+  /** Which lines and how many; every quantity not yet refunded when left out. */
+  lines?: Array<{ lineNumber: number; quantity: number }>;
+  /** Refund the delivery fee too. Defaults to true for a full refund, false otherwise. */
+  delivery?: boolean;
+  /** Put the refunded quantities back in stock. */
+  restock?: boolean;
+}
+
+export interface RefundRow {
+  id: string;
+  document_id: string;
+  amount_cents: unknown;
+  lines: Array<{ lineNumber: number; quantity: number }>;
+  delivery: boolean;
+  reason: string;
+  restocked: boolean;
+  created_by: string | null;
+  created_at: string | Date;
+}
+
+/** The order's refunds whose credit notes are valid (or still on their way to BTS). */
+export async function loadRefunds(db: Queryable, tenantId: string, orderId: string): Promise<RefundRow[]> {
+  return (await db.query<RefundRow>(
+    `select r.id, r.document_id, r.amount_cents, r.lines, r.delivery, r.reason, r.restocked, r.created_by, r.created_at
+     from order_refunds r join documents d on d.id = r.document_id
+     where r.tenant_id = $1 and r.order_id = $2 and d.status = any($3::text[]) order by r.created_at`,
+    [tenantId, orderId, VALID_DOCUMENT],
+  )).rows;
+}
+
+/** What is still refundable on each line, and whether delivery is. */
+export function refundable(order: OrderRow, lines: OrderLineRow[], refunds: RefundRow[]): { lines: Map<number, number>; delivery: boolean } {
+  const left = new Map(lines.map((l) => [l.line_number, Number(l.quantity)]));
+  for (const r of refunds) for (const l of r.lines) left.set(l.lineNumber, (left.get(l.lineNumber) ?? 0) - l.quantity);
+  const deliveryCharged = order.fulfillment === 'delivery' && compare(parseDecimal(order.delivery_fee), ZERO) > 0;
+  return { lines: left, delivery: deliveryCharged && !refunds.some((r) => r.delivery) };
+}
+
+/**
+ * Refund some or all of a paid order: issues a credit note against its BTS
+ * document, records the refund, and (if asked) puts the stock back.
+ * `check` runs on the credit note before it is issued (the credit limit).
+ */
+export async function refundOrder(
+  deps: PipelineDeps, tenantId: string, orderId: string, input: RefundInput, userId: string | null,
+  check?: (req: IssueRequest) => Promise<void>,
+): Promise<{ refundId: string; document: IssueResult; amount: string }> {
+  const loaded = await loadOrder(deps.db, tenantId, { id: orderId });
+  if (!loaded) throw new StoreError('not_found', 'Order not found');
+  const { order, lines } = loaded;
+  if (order.payment_status !== 'paid' || !order.document_id) throw new StoreError('conflict', 'Only a paid order can be refunded; cancel an unpaid one instead');
+  const original = (await deps.db.query<{ status: string; etdui: string; issue_date: string; issue_time: string }>(
+    `select status, etdui, to_char(issue_date, 'YYYY-MM-DD') as issue_date, issue_time::text as issue_time from documents where id = $1 and tenant_id = $2`,
+    [order.document_id, tenantId],
+  )).rows[0];
+  if (!original || !VALID_DOCUMENT.includes(original.status)) throw new StoreError('conflict', 'The order’s receipt is not valid, so there is nothing to credit');
+  if (original.status === 'pending') throw new StoreError('conflict', 'The order’s receipt is still on its way to BTS; refund it once BTS has answered');
+
+  const left = refundable(order, lines, await loadRefunds(deps.db, tenantId, orderId));
+  const full = !input.lines;
+  const wanted = input.lines ?? [...left.lines.entries()].filter(([, q]) => q > 0).map(([lineNumber, quantity]) => ({ lineNumber, quantity }));
+  const delivery = input.delivery ?? (full && left.delivery);
+  if (delivery && !left.delivery) throw new StoreError('invalid_order', 'The delivery fee was not charged or was already refunded');
+  const seen = new Set<number>();
+  const chosen: Array<{ line: OrderLineRow; quantity: number }> = [];
+  for (const w of wanted) {
+    const line = lines.find((l) => l.line_number === w.lineNumber);
+    if (!line || seen.has(w.lineNumber)) throw new StoreError('invalid_order', `Line ${w.lineNumber} is not on this order`);
+    seen.add(w.lineNumber);
+    if (!Number.isInteger(w.quantity) || w.quantity < 0) throw new StoreError('invalid_order', 'Refund quantities must be whole numbers');
+    if (w.quantity === 0) continue;
+    const max = left.lines.get(w.lineNumber) ?? 0;
+    if (w.quantity > max) throw new StoreError('invalid_order', max <= 0 ? `${line.product_title} was already refunded` : `Only ${max} of ${line.product_title} can still be refunded`);
+    chosen.push({ line, quantity: w.quantity });
+  }
+  if (chosen.length === 0 && !delivery) throw new StoreError('invalid_order', 'Nothing left to refund on this order');
+
+  const base = orderToIssueRequest(order, lines);
+  const request: IssueRequest = {
+    etdType: '04',
+    ...(base.customer && { customer: base.customer }),
+    lines: toLineInputs(
+      chosen.map(({ line: l, quantity }) => ({
+        productTitle: l.product_title, variantTitle: l.variant_title, sellerCode: l.seller_code, quantity, unitCode: l.unit_code,
+        unitPrice: trimDecimal(l.unit_price), gstCategory: l.gst_category, exemptionReasonCode: l.exemption_reason_code,
+      })),
+      delivery ? { zone: order.delivery_zone ?? 'Delivery', fee: trimDecimal(order.delivery_fee) } : null,
+    ),
+    reference: { etdui: original.etdui, issueDate: original.issue_date, issueTime: original.issue_time.slice(0, 8), reason: input.reason.trim() },
+    payment: { meansCode: MEANS[order.payment_method], terms: `Refund for online order #${order.number}` },
+    note: `Refund for online order #${order.number}`,
+  };
+  const amount = calculateDocument({ lines: request.lines }, deps.tax).taxInclusiveAmount;
+  if (check) await check(request);
+
+  const document = await issueDocument(deps, tenantId, request);
+  if (!VALID_DOCUMENT.includes(document.status)) {
+    throw new StoreError('conflict', 'BTS rejected the credit note, so nothing was refunded. See it under Documents for the reason.');
+  }
+  if (userId) await deps.db.query('update documents set issued_by = $3 where tenant_id = $1 and (id = $2 or supersedes_document_id = $2)', [tenantId, document.documentId, userId]);
+  const refundId = randomUUID();
+  const restock = Boolean(input.restock) && chosen.length > 0;
+  await deps.db.transaction(async (tx) => {
+    await tx.query(
+      `insert into order_refunds (id, tenant_id, order_id, document_id, amount_cents, lines, delivery, reason, restocked, created_by)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      [refundId, tenantId, orderId, document.documentId, String(amount), JSON.stringify(chosen.map((c) => ({ lineNumber: c.line.line_number, quantity: c.quantity }))),
+        delivery, input.reason.trim(), restock, userId],
+    );
+    await tx.query('update orders set refunded_cents = refunded_cents + $3 where id = $1 and tenant_id = $2', [orderId, tenantId, String(amount)]);
+    if (restock) {
+      for (const c of chosen) {
+        if (c.line.item_id) await tx.query('update items set stock_quantity = stock_quantity + $3 where id = $1 and tenant_id = $2 and stock_quantity is not null', [c.line.item_id, tenantId, c.quantity]);
+      }
+    }
+  });
+  return { refundId, document, amount: formatCents(amount) };
+}

@@ -7,11 +7,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../src/api/app.ts';
-import { resetLoginAttempts } from '../src/api/auth.ts';
 import { csvCell } from '../src/api/reports.ts';
 import { createApiKey } from '../src/db/apikeys.ts';
 import { SUBMIT_PATHS } from '../src/engine/transport.ts';
 import { memoryMailer } from '../src/mail/mailer.ts';
+import { readZip } from '../src/render/zip.ts';
 import { applicationResponse } from './fake-bts.ts';
 import { AUTHORIZED, setupPipeline, type PipelineFixture } from './pipeline-setup.ts';
 
@@ -26,7 +26,6 @@ interface Ctx {
 }
 
 async function withApp(fn: (c: Ctx) => Promise<void>, options: { mail?: boolean; publicUrl?: boolean } = {}) {
-  resetLoginAttempts();
   const f = await setupPipeline();
   const mail = memoryMailer();
   const app = await buildApp({
@@ -227,6 +226,39 @@ test('reports: totals and GST by rate, credit notes subtract, rejected documents
 
     assert.equal((await c.app.inject({ method: 'GET', url: `/v1/reports/summary?from=${day}`, headers: c.as(c.key) })).statusCode, 400);
     assert.equal((await c.app.inject({ method: 'GET', url: '/v1/reports/summary?from=2026-02-01&to=2026-01-01', headers: c.as(c.key) })).statusCode, 400);
+  }));
+
+test('archive: a ZIP of the period with signed XML, BTS replies, PDFs and the register', () =>
+  withApp(async (c) => {
+    c.f.bts.script(SUBMIT_PATHS['01'], AUTHORIZED);
+    c.f.bts.script(SUBMIT_PATHS['02'], AUTHORIZED);
+    const customer = { name: 'Reef Divers Ltd.', tin: '998877', address: { street: '1 A St', city: 'Orange Walk', districtCode: '4' } };
+    const inv = await issue(c, { type: '01', customer, lines: [line('Cement bag', '10', '20.00')] });
+    await issue(c, { type: '02', lines: [line('Rice', '2', '2.00', 'Z')] });
+    c.f.bts.script(SUBMIT_PATHS['02'], { status: 201, body: applicationResponse({ responseCode: '003', referencedEtdui: '0'.repeat(44), conditions: [{ code: '271', description: 'x' }] }) });
+    await issue(c, { type: '02', lines: [line('Rejected', '1', '5')] });
+
+    const day = inv.issueDate;
+    const res = await c.app.inject({ method: 'GET', url: `/v1/reports/archive?from=${day}&to=${day}&pdf=true`, headers: c.as(c.key) });
+    assert.equal(res.statusCode, 200, res.body);
+    assert.equal(res.headers['content-type'], 'application/zip');
+    assert.match(String(res.headers['content-disposition']), /attachment; filename="documents-TEST-/);
+    const files = await readZip(res.rawPayload);
+    const names = [...files.keys()].sort();
+    assert.ok(names.includes('README.txt') && names.includes('register.csv'));
+    const xml = names.filter((n) => n.startsWith('signed-xml/'));
+    assert.equal(xml.length, 2, 'the rejected receipt is only in the register');
+    assert.ok(xml.includes(`signed-xml/${day}_Tax-Invoice_001-000000001.xml`), names.join('\n'));
+    assert.equal(files.get(`signed-xml/${day}_Tax-Invoice_001-000000001.xml`)!.toString('utf8'), (await c.f.db.query<{ signed_xml: string }>('select signed_xml from documents where id = $1', [inv.id])).rows[0]!.signed_xml, 'byte for byte');
+    assert.equal(names.filter((n) => n.startsWith('bts-replies/')).length, 2);
+    assert.equal(names.filter((n) => n.startsWith('pdf/')).length, 2);
+    assert.equal(files.get(`pdf/${day}_Tax-Invoice_001-000000001.pdf`)!.subarray(0, 5).toString(), '%PDF-');
+    assert.equal(files.get('register.csv')!.toString('utf8').trim().split('\r\n').length, 1 + 3);
+    assert.match(files.get('README.txt')!.toString('utf8'), /TEST ENVIRONMENT/);
+
+    const plain = await readZip((await c.app.inject({ method: 'GET', url: `/v1/reports/archive?from=${day}&to=${day}`, headers: c.as(c.key) })).rawPayload);
+    assert.equal([...plain.keys()].filter((n) => n.startsWith('pdf/')).length, 0, 'PDFs only when asked');
+    assert.equal((await c.app.inject({ method: 'GET', url: '/v1/reports/archive?from=2026-02-01&to=2026-01-01', headers: c.as(c.key) })).statusCode, 400);
   }));
 
 test('csvCell neutralises formulas and quotes', () => {

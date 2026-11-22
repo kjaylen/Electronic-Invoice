@@ -7,7 +7,8 @@ import { defineConfig } from 'vite';
 export default defineConfig({
   root: fileURLToPath(new URL('.', import.meta.url)),
   plugins: [react()],
-  build: { outDir: 'dist', emptyOutDir: true, sourcemap: true },
+  // three.js (the sign-in background) is one ~130 KB gzipped chunk, loaded after the form.
+  build: { outDir: 'dist', emptyOutDir: true, sourcemap: true, chunkSizeWarningLimit: 600 },
   server: {
     port: 5173,
     proxy: {

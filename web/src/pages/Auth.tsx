@@ -7,6 +7,7 @@ import { AuthArt } from '../art';
 import { BUSINESS } from '../business';
 import { LanguageToggle, useT } from '../i18n';
 import { useSession } from '../session';
+import { CodeForm, isChallenge, RecoveryCodes, SetupSteps, type TwoFactorChallenge, type TwoFactorSetupInfo } from '../twofactor';
 import { ErrorText, Field, usePageTitle } from '../ui';
 
 /** The business's public name, for its sign-in pages. */
@@ -74,14 +75,37 @@ export function Login() {
   const location = useLocation();
   const [login, setLogin] = useState('');
   const [password, setPassword] = useState('');
-  const { submit, error, busy } = useSubmit(async () => {
-    const s = await api<SessionInfo>('/v1/auth/login', { method: 'POST', body: { business: BUSINESS, login, password } });
+  const [challenge, setChallenge] = useState<TwoFactorChallenge | null>(null);
+  const enter = (s: SessionInfo) => {
     setSession(s);
     const from = (location.state as { from?: string } | null)?.from;
     navigate(from ?? '/', { replace: true, viewTransition: true });
+  };
+  const { submit, error, busy } = useSubmit(async () => {
+    const r = await api<SessionInfo | TwoFactorChallenge>('/v1/auth/login', { method: 'POST', body: { business: BUSINESS, login, password } });
+    if (isChallenge(r)) setChallenge(r);
+    else enter(r);
   });
   if (missing) return <NoSuchBusiness />;
   if (session) return <Navigate to="/" replace />;
+  if (challenge) {
+    return (
+      <AuthLayout art={{ kicker: name ?? t('Account'), title: t('One more step.'), text: t('Your account is protected with two-step sign-in. Open your authenticator app for the code.') }}>
+        <div className="card auth-card stack">
+          <div>
+            <span className="kicker">{name ?? '…'}</span>
+            <h1>{t('Enter your code')}</h1>
+            <p className="muted">{t('Signing in as {login}.', { login })}</p>
+          </div>
+          <CodeForm
+            submitLabel={t('Log in')}
+            onBack={() => { setChallenge(null); setPassword(''); }}
+            onSubmit={async (code) => enter(await api<SessionInfo>('/v1/auth/login/verify', { method: 'POST', body: { challenge: challenge.challenge, code } }))}
+          />
+        </div>
+      </AuthLayout>
+    );
+  }
 
   return (
     <AuthLayout art={{ kicker: t('Electronic tax documents'), title: name ?? t('Issue it. Sign it. Get it authorized.'), text: t('Sign in with the email or username your administrator gave you.') }}>
@@ -151,6 +175,7 @@ export function ResetPassword() {
   const [linkError, setLinkError] = useState<unknown>(null);
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
+  const [challenge, setChallenge] = useState<TwoFactorChallenge | null>(null);
   useEffect(() => {
     if (!token) return setLinkError(new ApiError(400, 'invalid_token', ''));
     void api<LinkInfo>(`/v1/auth/password/link/${encodeURIComponent(token)}`).then(setInfo).catch(setLinkError);
@@ -159,9 +184,24 @@ export function ResetPassword() {
   usePageTitle(welcome ? t('Welcome') : t('Choose a new password'));
   const { submit, error, busy } = useSubmit(async () => {
     if (password !== confirm) throw new Error(t('The two passwords do not match'));
-    setSession(await api<SessionInfo>('/v1/auth/password/reset', { method: 'POST', body: { token, password } }));
+    const r = await api<SessionInfo | TwoFactorChallenge>('/v1/auth/password/reset', { method: 'POST', body: { token, password } });
+    if (isChallenge(r)) return setChallenge(r);
+    setSession(r);
     navigate('/', { replace: true, viewTransition: true });
   });
+  if (challenge) {
+    return (
+      <AuthLayout art={{ kicker: info?.business.name ?? t('Account'), title: t('Password saved.'), text: t('Your account also uses two-step sign-in: enter the code from your authenticator app.') }}>
+        <div className="card auth-card stack">
+          <div><span className="kicker">{info?.business.name ?? t('Account')}</span><h1>{t('Enter your code')}</h1></div>
+          <CodeForm submitLabel={t('Log in')} onSubmit={async (code) => {
+            setSession(await api<SessionInfo>('/v1/auth/login/verify', { method: 'POST', body: { challenge: challenge.challenge, code } }));
+            navigate('/', { replace: true, viewTransition: true });
+          }} />
+        </div>
+      </AuthLayout>
+    );
+  }
   return (
     <AuthLayout art={{ kicker: info?.business.name ?? t('Account'), title: welcome ? t('Welcome to the team.') : t('A fresh start.'), text: welcome ? t('Choose your password, then you are in.') : t('Choose a new password. You will be signed out on every other device.') }}>
       <form className="card auth-card stack" onSubmit={submit}>
@@ -215,6 +255,42 @@ export function ChangePasswordRequired() {
         <button type="submit" className="big" disabled={busy}>{busy ? t('Saving…') : t('Save and continue')}<span className="chip" aria-hidden="true">→</span></button>
         <button type="button" className="link" onClick={() => void logout()}>{t('Log out')}</button>
       </form>
+    </AuthLayout>
+  );
+}
+
+/** The business requires two-step sign-in for owners and admins: set it up before anything else. */
+export function TwoFactorRequired() {
+  const t = useT();
+  usePageTitle(t('Set up two-step sign-in'));
+  const { session, refresh, logout } = useSession();
+  const [password, setPassword] = useState('');
+  const [info, setInfo] = useState<TwoFactorSetupInfo | null>(null);
+  const [codes, setCodes] = useState<string[] | null>(null);
+  const { submit, error, busy } = useSubmit(async () => {
+    setInfo(await api<TwoFactorSetupInfo>('/v1/auth/two-factor/setup', { method: 'POST', body: { password } }));
+  });
+  const business = session?.business.tradeName ?? session?.business.legalName ?? '';
+  return (
+    <AuthLayout art={{ kicker: business, title: t('Lock the door.'), text: t('{business} requires two-step sign-in for owners and admins. After your password, you will also enter a code from your phone.', { business }) }}>
+      <div className="card auth-card stack">
+        <div>
+          <span className="kicker">{session?.user.name}</span>
+          <h1>{t('Set up two-step sign-in')}</h1>
+        </div>
+        {codes ? (
+          <RecoveryCodes codes={codes} label={`${business}: ${session?.user.email ?? session?.user.username ?? ''}`} onDone={() => void refresh()} />
+        ) : info ? (
+          <SetupSteps info={info} onConfirm={async (code) => setCodes((await api<{ recoveryCodes: string[] }>('/v1/auth/two-factor/confirm', { method: 'POST', body: { code } })).recoveryCodes)} />
+        ) : (
+          <form className="stack" onSubmit={submit}>
+            <Field label={t('Your password')}><input type="password" autoComplete="current-password" required autoFocus value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
+            <ErrorText error={error} />
+            <button type="submit" className="big" disabled={busy}>{busy ? t('Checking…') : t('Start')}<span className="chip" aria-hidden="true">→</span></button>
+          </form>
+        )}
+        <button type="button" className="link" onClick={() => void logout()}>{t('Log out')}</button>
+      </div>
     </AuthLayout>
   );
 }

@@ -23,6 +23,7 @@ const Login = page(() => import('./pages/Auth'), 'Login');
 const ForgotPassword = page(() => import('./pages/Auth'), 'ForgotPassword');
 const ResetPassword = page(() => import('./pages/Auth'), 'ResetPassword');
 const ChangePasswordRequired = page(() => import('./pages/Auth'), 'ChangePasswordRequired');
+const TwoFactorRequired = page(() => import('./pages/Auth'), 'TwoFactorRequired');
 const Onboarding = page(() => import('./pages/Onboarding'), 'Onboarding');
 const Dashboard = page(() => import('./pages/Dashboard'), 'Dashboard');
 const Counter = page(() => import('./pages/Counter'), 'Counter');
@@ -242,6 +243,7 @@ function RequireSession() {
   if (loading) return <main><PageSkeleton /></main>;
   if (!session) return <Navigate to="/login" replace state={{ from: location.pathname + location.search }} />;
   if (session.user.mustChangePassword) return <Suspense fallback={<main><PageSkeleton /></main>}><ChangePasswordRequired /></Suspense>;
+  if (session.twoFactor?.setupRequired) return <Suspense fallback={<main><PageSkeleton /></main>}><TwoFactorRequired /></Suspense>;
   return <Layout />;
 }
 

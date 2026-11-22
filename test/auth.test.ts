@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
 import { buildApp } from '../src/api/app.ts';
-import { resetLoginAttempts } from '../src/api/auth.ts';
+import { base32Decode, stepAt, totpCode } from '../src/db/twofactor.ts';
 import { createUser } from '../src/db/users.ts';
 import { slugify } from '../src/db/tenants.ts';
 import { SUBMIT_PATHS } from '../src/engine/transport.ts';
@@ -27,7 +27,6 @@ const BUSINESS = {
 };
 
 async function withApp(fn: (f: PipelineFixture, app: FastifyInstance) => Promise<void>, options: { allowSignup?: boolean; webRoot?: string } = {}) {
-  resetLoginAttempts();
   const f = await setupPipeline();
   // The fixture's tenants use TINs 123456 and 654321 in "test"; free 123456 for the self-service business.
   await f.db.query(`update tenants set environment = 'production' where id = $1`, [f.tenantA]);
@@ -255,3 +254,65 @@ test('serves the web app: files, client-side routes, JSON 404s for the API, secu
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('two-step sign-in: setup with a code, sign-in needs the code, recovery codes, required by the business, reset by an admin', () =>
+  withApp(async (f, app) => {
+    const { cookie, slug } = await signUp(app);
+    const owner = { ...CSRF, cookie, 'x-business': slug };
+    const code = (secret: string, offset = 0) => totpCode(base32Decode(secret), stepAt(Date.now()) + offset);
+
+    assert.equal((await app.inject({ method: 'GET', url: '/v1/auth/two-factor', headers: owner })).json().enabled, false);
+    assert.equal((await app.inject({ method: 'POST', url: '/v1/auth/two-factor/setup', headers: owner, payload: { password: 'wrong password' } })).statusCode, 403, 'the password is needed');
+    const setup = await app.inject({ method: 'POST', url: '/v1/auth/two-factor/setup', headers: owner, payload: { password: PASSWORD } });
+    assert.equal(setup.statusCode, 200, setup.body);
+    const { secret, otpauthUrl } = setup.json();
+    assert.match(otpauthUrl, /^otpauth:\/\/totp\/.+\?secret=[A-Z2-7]+&issuer=/);
+    assert.equal((await app.inject({ method: 'POST', url: '/v1/auth/two-factor/confirm', headers: owner, payload: { code: '123456' } })).statusCode, 422);
+    const confirmed = await app.inject({ method: 'POST', url: '/v1/auth/two-factor/confirm', headers: owner, payload: { code: code(secret) } });
+    assert.equal(confirmed.statusCode, 200, confirmed.body);
+    const recovery: string[] = confirmed.json().recoveryCodes;
+    assert.equal(recovery.length, 10);
+    assert.match(recovery[0]!, /^[a-z0-9]{5}-[a-z0-9]{5}$/);
+
+    // Signing in: the password gives a challenge, not a session.
+    const step1 = await login(app, slug, 'owner@corozalhw.example');
+    assert.equal(step1.statusCode, 200);
+    assert.equal(step1.json().twoFactorRequired, true);
+    assert.equal(step1.headers['set-cookie'], undefined);
+    const verify = (challenge: string, c: string) => app.inject({ method: 'POST', url: '/v1/auth/login/verify', headers: CSRF, payload: { challenge, code: c } });
+    assert.equal((await verify(step1.json().challenge, '000000')).statusCode, 401);
+    const ok = await verify(step1.json().challenge, code(secret, 1));
+    assert.equal(ok.statusCode, 200, ok.body);
+    assert.ok(cookieFrom(ok));
+    assert.equal(ok.json().twoFactor.enabled, true);
+
+    // A recovery code works once (spaces and capitals do not matter).
+    const step2 = (await login(app, slug, 'owner@corozalhw.example')).json();
+    assert.equal((await verify(step2.challenge, ` ${recovery[0]!.toUpperCase()} `)).statusCode, 200);
+    const step3 = (await login(app, slug, 'owner@corozalhw.example')).json();
+    assert.equal((await verify(step3.challenge, recovery[0]!)).statusCode, 401, 'used already');
+    assert.equal((await app.inject({ method: 'GET', url: '/v1/auth/two-factor', headers: owner })).json().recoveryCodesLeft, 9);
+
+    // The business requires it for owners and admins: an admin without it must set it up first.
+    const admin = await createUser(f.db, { tenantId: (await f.db.query<{ id: string }>('select id from tenants where slug = $1', [slug])).rows[0]!.id, name: 'Ana Admin', email: 'admin@corozalhw.example', role: 'admin', password: PASSWORD });
+    const adminLogin = await login(app, slug, 'admin@corozalhw.example');
+    const adminHeaders = { ...CSRF, cookie: cookieFrom(adminLogin), 'x-business': slug };
+    assert.equal((await app.inject({ method: 'PUT', url: '/v1/business/security', headers: adminHeaders, payload: { requireTwoFactor: true } })).statusCode, 403, 'only an owner');
+    const required = await app.inject({ method: 'PUT', url: '/v1/business/security', headers: owner, payload: { requireTwoFactor: true } });
+    assert.equal(required.statusCode, 200, required.body);
+    assert.equal(required.json().requireTwoFactor, true);
+    assert.equal((await app.inject({ method: 'GET', url: '/v1/documents', headers: adminHeaders })).json().error.code, 'two_factor_setup_required');
+    assert.equal((await app.inject({ method: 'GET', url: '/v1/auth/session', headers: adminHeaders })).json().twoFactor.setupRequired, true);
+    const adminSecret = (await app.inject({ method: 'POST', url: '/v1/auth/two-factor/setup', headers: adminHeaders, payload: { password: PASSWORD } })).json().secret;
+    assert.equal((await app.inject({ method: 'POST', url: '/v1/auth/two-factor/confirm', headers: adminHeaders, payload: { code: code(adminSecret) } })).statusCode, 200);
+    assert.equal((await app.inject({ method: 'GET', url: '/v1/documents', headers: adminHeaders })).statusCode, 200);
+    assert.equal((await app.inject({ method: 'POST', url: '/v1/auth/two-factor/disable', headers: adminHeaders, payload: { password: PASSWORD } })).statusCode, 409, 'required for admins');
+
+    // Lost phone: the owner resets the admin's two-step sign-in; their sessions end.
+    const users = (await app.inject({ method: 'GET', url: '/v1/users', headers: owner })).json().data;
+    assert.equal(users.find((u: { id: string }) => u.id === admin.id).twoFactor, true);
+    assert.equal((await app.inject({ method: 'POST', url: `/v1/users/${admin.id}/two-factor/reset`, headers: owner })).statusCode, 200);
+    assert.equal((await app.inject({ method: 'GET', url: '/v1/auth/session', headers: adminHeaders })).statusCode, 401, 'signed out');
+    const log = (await app.inject({ method: 'GET', url: '/v1/audit', headers: owner })).json().data.map((e: { action: string }) => e.action);
+    for (const a of ['two_factor.enabled', 'business.two_factor_required', 'user.two_factor_reset']) assert.ok(log.includes(a), a);
+  }));

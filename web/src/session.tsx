@@ -39,7 +39,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     try {
       const s = await api<SessionInfo>('/v1/auth/session');
       accept(s);
-      setMe(s.user.mustChangePassword ? null : await api<Me>('/v1/me'));
+      setMe(s.user.mustChangePassword || s.twoFactor?.setupRequired ? null : await api<Me>('/v1/me'));
     } catch (e) {
       if (!(e instanceof ApiError && e.status === 401)) console.error(e);
       setSessionState(null);
@@ -72,7 +72,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // Keep the outage banner and queue count live while the tab is visible.
-  const signedIn = Boolean(session && !session.user.mustChangePassword);
+  const signedIn = Boolean(session && !session.user.mustChangePassword && !session.twoFactor?.setupRequired);
   useEffect(() => {
     if (!signedIn) return;
     const tick = () => document.visibilityState === 'visible' && void refreshMe();

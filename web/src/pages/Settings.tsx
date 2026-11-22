@@ -11,6 +11,7 @@ import { type T, useI18n, useT } from '../i18n';
 import { assignableRoles, ROLE_DESCRIPTION, ROLE_LABEL } from '../permissions';
 import { useSession } from '../session';
 import { useToast } from '../toast';
+import { CodeForm, RecoveryCodes, SetupSteps, type TwoFactorSetupInfo } from '../twofactor';
 import { DISTRICTS, ErrorText, Field, Modal, Segmented, usePageTitle } from '../ui';
 import { StoreSettingsTab } from './StoreSettings';
 
@@ -140,7 +141,123 @@ function AccountTab() {
         </div>
         <ErrorText error={signOutAll.error} />
       </section>
+      <TwoFactorCard />
     </div>
+  );
+}
+
+/** Your two-step sign-in: turn on (password → scan → code → recovery codes), new recovery codes, turn off. */
+function TwoFactorCard() {
+  const t = useT();
+  const toast = useToast();
+  const { session, refresh } = useSession();
+  const [status, setStatus] = useState<{ enabled: boolean; recoveryCodesLeft: number; required: boolean } | null>(null);
+  const [dialog, setDialog] = useState<'setup' | 'disable' | 'codes' | null>(null);
+  const [password, setPassword] = useState('');
+  const [info, setInfo] = useState<TwoFactorSetupInfo | null>(null);
+  const [codes, setCodes] = useState<string[] | null>(null);
+  const load = useCallback(() => api<typeof status>('/v1/auth/two-factor').then(setStatus), []);
+  useEffect(() => {
+    void load();
+  }, [load]);
+  const close = () => {
+    setDialog(null);
+    setPassword('');
+    setInfo(null);
+    setCodes(null);
+    void load();
+    void refresh();
+  };
+  const start = useAction(async () => setInfo(await api<TwoFactorSetupInfo>('/v1/auth/two-factor/setup', { method: 'POST', body: { password } })));
+  const disable = useAction(async () => {
+    await api('/v1/auth/two-factor/disable', { method: 'POST', body: { password } });
+    toast(t('Two-step sign-in is off'));
+    close();
+  });
+  if (!status) return <div className="skeleton" style={{ height: '6rem' }} />;
+  const who = `${session?.business.tradeName ?? session?.business.legalName ?? ''}: ${session?.user.email ?? session?.user.username ?? ''}`;
+  return (
+    <section className="card stack">
+      <div className="row">
+        <h2>{t('Two-step sign-in')}</h2>
+        <span className="spacer" />
+        <span className={`badge ${status.enabled ? 'authorized' : 'test'}`}>{status.enabled ? t('On') : t('Off')}</span>
+      </div>
+      <p className="small muted">{status.enabled
+        ? t('After your password, you also enter a code from your authenticator app. {n} recovery codes left.', { n: status.recoveryCodesLeft })
+        : t('Protect your account with a code from your phone, so a stolen password is not enough to get in.')}</p>
+      {status.required && <p className="small">{t('Your business requires it for your role.')}</p>}
+      {status.enabled && status.recoveryCodesLeft <= 3 && <div className="banner warn"><div><strong>{t('Few recovery codes left')}</strong>{t('Make new ones so you are not locked out if you lose your phone.')}</div></div>}
+      <div className="row">
+        {status.enabled ? (
+          <>
+            <button className="secondary" onClick={() => setDialog('codes')}>{t('New recovery codes')}</button>
+            {!status.required && <button className="secondary" onClick={() => setDialog('disable')}>{t('Turn off')}</button>}
+          </>
+        ) : (
+          <button onClick={() => setDialog('setup')}>{t('Turn on two-step sign-in')}</button>
+        )}
+      </div>
+
+      {dialog === 'setup' && (
+        <Modal title={t('Turn on two-step sign-in')} onClose={close}>
+          {codes ? <RecoveryCodes codes={codes} label={who} onDone={() => { toast(t('Two-step sign-in is on')); close(); }} />
+            : info ? <SetupSteps info={info} onConfirm={async (code) => setCodes((await api<{ recoveryCodes: string[] }>('/v1/auth/two-factor/confirm', { method: 'POST', body: { code } })).recoveryCodes)} />
+              : (
+                <form className="stack" onSubmit={(e) => { e.preventDefault(); void start.run(); }}>
+                  <Field label={t('Your password')}><input type="password" autoComplete="current-password" required autoFocus value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
+                  <ErrorText error={start.error} />
+                  <div className="row"><span className="spacer" /><button type="button" className="secondary" onClick={close}>{t('Cancel')}</button><button type="submit" disabled={start.busy}>{t('Continue')}</button></div>
+                </form>
+              )}
+        </Modal>
+      )}
+      {dialog === 'codes' && (
+        <Modal title={t('New recovery codes')} onClose={close}>
+          {codes ? <RecoveryCodes codes={codes} label={who} onDone={close} /> : (
+            <div className="stack">
+              <p className="small muted">{t('Your old recovery codes stop working. Enter the current code from your app to continue.')}</p>
+              <CodeForm submitLabel={t('Make new codes')} onSubmit={async (code) => setCodes((await api<{ recoveryCodes: string[] }>('/v1/auth/two-factor/recovery-codes', { method: 'POST', body: { code } })).recoveryCodes)} />
+            </div>
+          )}
+        </Modal>
+      )}
+      {dialog === 'disable' && (
+        <Modal title={t('Turn off two-step sign-in?')} onClose={close}>
+          <form className="stack" onSubmit={(e) => { e.preventDefault(); void disable.run(); }}>
+            <p>{t('Your password alone will be enough to sign in again.')}</p>
+            <Field label={t('Your password')}><input type="password" autoComplete="current-password" required autoFocus value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
+            <ErrorText error={disable.error} />
+            <div className="row"><span className="spacer" /><button type="button" className="secondary" onClick={close}>{t('Cancel')}</button><button type="submit" className="danger" disabled={disable.busy}>{t('Turn off')}</button></div>
+          </form>
+        </Modal>
+      )}
+    </section>
+  );
+}
+
+/** Owners: require two-step sign-in for owners and admins. */
+function SecurityRules({ profile, onSaved }: { profile: BusinessProfile; onSaved: () => void }) {
+  const t = useT();
+  const toast = useToast();
+  const { role } = useSession();
+  const save = useAction(async (requireTwoFactor: boolean) => {
+    await api('/v1/business/security', { method: 'PUT', body: { requireTwoFactor } });
+    toast(requireTwoFactor ? t('Owners and admins now need two-step sign-in') : t('Two-step sign-in is now optional'));
+    onSaved();
+  });
+  return (
+    <section className="card stack">
+      <h2>{t('Sign-in rules')}</h2>
+      <label className="row small">
+        <input type="checkbox" checked={profile.requireTwoFactor} disabled={role !== 'owner' || save.busy} onChange={(e) => void save.run(e.target.checked)} />
+        {t('Require two-step sign-in for owners and admins')}
+      </label>
+      <p className="small muted">{role === 'owner'
+        ? t('Owners and admins without it are asked to set it up the next time they use the app. Turn it on for your own account first.')
+        : t('Only an owner can change this.')}</p>
+      <ErrorText error={save.error} />
+    </section>
   );
 }
 
@@ -234,6 +351,7 @@ function BusinessTab() {
         )}
         {profile.environment === 'test' && <p className="small muted">{t('Moving to production is done by our team once BTS has approved your business.')}</p>}
       </section>
+      {editable && <SecurityRules profile={profile} onSaved={() => void load()} />}
     </div>
   );
 }
@@ -417,7 +535,7 @@ function UsersTab() {
   const toast = useToast();
   const { session } = useSession();
   const [users, setUsers] = useState<ManagedAccount[] | null>(null);
-  const [dialog, setDialog] = useState<{ kind: 'add' } | { kind: 'edit' | 'password' | 'disable'; user: ManagedAccount } | null>(null);
+  const [dialog, setDialog] = useState<{ kind: 'add' } | { kind: 'edit' | 'password' | 'disable' | 'reset2fa'; user: ManagedAccount } | null>(null);
   const [error, setError] = useState<unknown>(null);
   const load = useCallback(() => api<{ data: ManagedAccount[] }>('/v1/users').then((r) => setUsers(r.data)).catch(setError), []);
   useEffect(() => {
@@ -456,6 +574,7 @@ function UsersTab() {
                   <strong>{u.name}</strong>{u.id === session!.user.id && <span className="small muted"> ({t('you')})</span>}
                   {u.status === 'disabled' && <span className="badge cancelled">{t('Deactivated')}</span>}
                   {u.mustChangePassword && u.status === 'active' && <span className="badge pending">{t('Temporary password')}</span>}
+                  {u.twoFactor && <span className="badge authorized" title={t('Two-step sign-in is on')}>{t('2-step')}</span>}
                 </td>
                 <td data-label={t('Sign-in')} className="mono small">{[u.email, u.username].filter(Boolean).join(' · ')}</td>
                 <td data-label={t('Role')}><span className={`role-pill ${u.role}`}>{t(ROLE_LABEL[u.role])}</span></td>
@@ -465,6 +584,7 @@ function UsersTab() {
                     <>
                       <button className="link" onClick={() => setDialog({ kind: 'edit', user: u })}>{t('Edit')}</button>
                       {u.status === 'active' && <button className="link" onClick={() => setDialog({ kind: 'password', user: u })}>{t('Password')}</button>}
+                      {u.twoFactor && <button className="link" onClick={() => setDialog({ kind: 'reset2fa', user: u })}>{t('Reset 2-step')}</button>}
                       {u.status === 'active' && u.activeSessions > 0 && <button className="link" onClick={() => void act(() => api(`/v1/users/${u.id}/sign-out`, { method: 'POST' }), t('{name} was signed out everywhere', { name: u.name }))}>{t('Sign out')}</button>}
                       {u.status === 'active'
                         ? <button className="link danger-link" onClick={() => setDialog({ kind: 'disable', user: u })}>{t('Deactivate')}</button>
@@ -487,6 +607,16 @@ function UsersTab() {
       {dialog?.kind === 'add' && <AddUser onClose={() => setDialog(null)} onSaved={() => void load()} />}
       {dialog?.kind === 'edit' && <EditUser user={dialog.user} onClose={() => setDialog(null)} onSaved={() => void load()} />}
       {dialog?.kind === 'password' && <ResetUserPassword user={dialog.user} onClose={() => { setDialog(null); void load(); }} />}
+      {dialog?.kind === 'reset2fa' && (
+        <Modal title={t('Reset two-step sign-in for {name}?', { name: dialog.user.name })} onClose={() => setDialog(null)}>
+          <p>{t('For a lost or replaced phone. They are signed out everywhere and set up two-step sign-in again with their password.')}</p>
+          <div className="row">
+            <span className="spacer" />
+            <button className="secondary" onClick={() => setDialog(null)}>{t('Cancel')}</button>
+            <button className="danger" onClick={() => { const u = dialog.user; setDialog(null); void act(() => api(`/v1/users/${u.id}/two-factor/reset`, { method: 'POST' }), t('Two-step sign-in reset for {name}', { name: u.name })); }}>{t('Reset')}</button>
+          </div>
+        </Modal>
+      )}
       {dialog?.kind === 'disable' && (
         <Modal title={t('Deactivate {name}?', { name: dialog.user.name })} onClose={() => setDialog(null)}>
           <p>{t('They are signed out at once and cannot sign in until reactivated. Documents they issued stay, with their name.')}</p>
@@ -532,6 +662,15 @@ function describe(t: T, e: AuditEvent): string {
     'order.paid': t('Marked order {target} paid', { target }),
     'order.fulfilled': t('Marked order {target} delivered', { target }),
     'order.cancelled': t('Cancelled order {target}', { target }),
+    'order.refunded': t('Refunded order {target}', { target }),
+    'documents.exported': t('Downloaded the archive for {target}', { target }),
+    'login.code_failed': t('Entered a wrong sign-in code'),
+    'two_factor.enabled': t('Turned on two-step sign-in'),
+    'two_factor.disabled': t('Turned off two-step sign-in'),
+    'two_factor.recovery_codes': t('Made new recovery codes'),
+    'user.two_factor_reset': t('Reset two-step sign-in for {target}', { target }),
+    'business.two_factor_required': t('Required two-step sign-in for owners and admins'),
+    'business.two_factor_optional': t('Made two-step sign-in optional'),
   };
   return texts[e.action] ?? e.action;
 }

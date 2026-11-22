@@ -1,7 +1,8 @@
 /**
  * The HTTP API (v1) and, when built, the web app.
  *
- *   /health                         liveness and database check, no auth
+ *   /health                         liveness, database check and "ok" or "degraded", no auth
+ *   /metrics                        Prometheus metrics (Authorization: Bearer METRICS_TOKEN); off without a token
  *   /v1/admin/...                   onboarding, Bearer <ADMIN_TOKEN>
  *   /v1/auth/...                    signing in to a business (web app)
  *   /v1/...                         everything else: Bearer <tenant API key>, or a session cookie
@@ -39,6 +40,8 @@ import { registerProductRoutes } from './products.ts';
 import { registerReportRoutes } from './reports.ts';
 import { registerStorefrontRoutes } from './storefront.ts';
 import { registerUserRoutes } from './users.ts';
+import { counters, metricsText, opsStatus } from '../ops/monitoring.ts';
+import type { ObjectStore } from '../storage/objects.ts';
 
 export type Principal = 'api' | Role;
 
@@ -68,6 +71,10 @@ export interface AppOptions {
   mailer?: Mailer;
   /** Public base URL of the web app, for links in emails and share links. Never taken from the Host header. */
   publicUrl?: string;
+  /** Enables /metrics for a scraper sending this bearer token. At least 32 characters. */
+  metricsToken?: string;
+  /** S3-compatible storage for product photos. Unset: photos are kept in the database. */
+  objectStore?: ObjectStore;
 }
 
 function bearer(request: FastifyRequest): string | undefined {
@@ -121,12 +128,34 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     ...(options.publicUrl && { publicUrl: options.publicUrl }),
     cookieSecure: options.cookieSecure ?? true,
     allowSignup: options.allowSignup ?? true,
+    ...(options.objectStore && { objects: options.objectStore }),
   };
 
-  app.get('/health', async () => {
-    await db.query('select 1');
-    return { status: 'ok' };
+  app.addHook('onResponse', async (_request, reply) => {
+    counters.requests++;
+    if (reply.statusCode >= 500) counters.serverErrors++;
   });
+
+  // For load balancers: 200 while the database answers ("degraded" says something needs a look), 503 when it does not.
+  app.get('/health', async (_request, reply) => {
+    try {
+      const s = await opsStatus(db);
+      return { status: s.status, worker: s.worker.stale ? 'stale' : 'ok' };
+    } catch {
+      return reply.code(503).send({ status: 'down' });
+    }
+  });
+
+  if (options.metricsToken !== undefined && options.metricsToken.length < 32) throw new Error('metricsToken must be at least 32 characters');
+  if (options.metricsToken) {
+    const token = options.metricsToken;
+    app.get('/metrics', async (request, reply) => {
+      const given = bearer(request);
+      if (!given || !constantTimeEquals(given, token)) return reply.code(401).send({ error: { code: 'unauthorized', message: 'Bearer token required' } });
+      const s = await opsStatus(db);
+      return reply.type('text/plain; version=0.0.4').send(`${metricsText(s)}${s.problems.map((p) => `# problem ${p.key}: ${p.message}`).join('\n')}\n`);
+    });
+  }
 
   // Admin routes: onboarding businesses, certificates and API keys.
   await app.register(async (admin) => {
@@ -159,6 +188,8 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       requireCsrfHeader(request);
       // A temporary password set by an administrator must be replaced before anything else.
       if (session.user.mustChangePassword) throw new ApiError(403, 'password_change_required', 'Choose a new password first');
+      // The business requires two-step sign-in for owners and admins: set it up before anything else.
+      if (session.twoFactor.required && !session.twoFactor.enabled) throw new ApiError(403, 'two_factor_setup_required', 'Set up two-step sign-in first');
       request.tenantId = session.business.id;
       request.principal = session.user.role;
       request.userId = session.user.id;
@@ -172,7 +203,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     registerDocumentRoutes(tenant, deps, ctx);
     registerUserRoutes(tenant, deps, ctx);
     registerBusinessRoutes(tenant, deps, ctx);
-    registerProductRoutes(tenant, deps);
+    registerProductRoutes(tenant, deps, ctx);
     registerOrderRoutes(tenant, deps, ctx);
     registerReportRoutes(tenant, deps);
   }, { prefix: '/v1' });

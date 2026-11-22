@@ -278,7 +278,12 @@ export interface Session {
   id: string;
   user: User;
   business: BusinessRef;
+  /** required: the business requires it for this person's role (owners and admins). */
+  twoFactor: { enabled: boolean; required: boolean };
 }
+
+/** Roles a business can require two-step sign-in for. */
+export const TWO_FACTOR_ROLES: readonly Role[] = ['owner', 'admin'];
 
 export async function createSession(db: Queryable, userId: string): Promise<{ token: string; expiresAt: Date }> {
   const token = randomBytes(32).toString('base64url');
@@ -289,8 +294,9 @@ export async function createSession(db: Queryable, userId: string): Promise<{ to
 
 export async function lookupSession(db: Queryable, token: string): Promise<Session | null> {
   if (!/^[A-Za-z0-9_-]{43}$/.test(token)) return null;
-  const row = (await db.query<UserRow & { session_id: string; s_created_at: string | Date; expires_at: string | Date; slug: string; legal_name: string; trade_name: string | null; environment: string }>(
-    `select ${USER_COLUMNS}, s.id as session_id, s.created_at as s_created_at, s.expires_at, t.slug, t.legal_name, t.trade_name, t.environment
+  const row = (await db.query<UserRow & { session_id: string; s_created_at: string | Date; expires_at: string | Date; slug: string; legal_name: string; trade_name: string | null; environment: string; require_two_factor: boolean; tf_enabled: boolean }>(
+    `select ${USER_COLUMNS}, s.id as session_id, s.created_at as s_created_at, s.expires_at, t.slug, t.legal_name, t.trade_name, t.environment, t.require_two_factor,
+       exists (select 1 from two_factor tf where tf.owner_kind = 'user' and tf.owner_id = u.id and tf.confirmed_at is not null) as tf_enabled
      from sessions s join users u on u.id = s.user_id join tenants t on t.id = u.tenant_id
      where s.token_hash = $1`,
     [tokenHash(token)],
@@ -310,7 +316,29 @@ export async function lookupSession(db: Queryable, token: string): Promise<Sessi
     id: row.session_id,
     user: toUser(row),
     business: { id: row.tenant_id, slug: row.slug, legalName: row.legal_name, tradeName: row.trade_name, environment: row.environment },
+    twoFactor: { enabled: row.tf_enabled, required: row.require_two_factor && TWO_FACTOR_ROLES.includes(row.role) },
   };
+}
+
+/** Two-step sign-in state for a person (when there is no session yet). */
+export async function twoFactorFor(db: Queryable, user: Pick<User, 'id' | 'tenantId' | 'role'>): Promise<Session['twoFactor']> {
+  const r = (await db.query<{ required: boolean; enabled: boolean }>(
+    `select t.require_two_factor as required, exists (select 1 from two_factor tf where tf.owner_kind = 'user' and tf.owner_id = $2 and tf.confirmed_at is not null) as enabled
+     from tenants t where t.id = $1`,
+    [user.tenantId, user.id],
+  )).rows[0]!;
+  return { enabled: r.enabled, required: r.required && TWO_FACTOR_ROLES.includes(user.role) };
+}
+
+/** A person by id, in any business (for the second step of signing in). */
+export async function getUserById(db: Queryable, id: string): Promise<User | null> {
+  const r = (await db.query<UserRow>(`select ${USER_COLUMNS} from users u where u.id = $1`, [id])).rows[0];
+  return r ? toUser(r) : null;
+}
+
+export async function passwordMatches(db: Queryable, userId: string, password: string): Promise<boolean> {
+  const r = (await db.query<{ password_hash: string | null }>('select password_hash from users where id = $1', [userId])).rows[0];
+  return Boolean(r?.password_hash) && verifyPassword(password, r!.password_hash!);
 }
 
 export async function deleteSession(db: Queryable, token: string): Promise<void> {

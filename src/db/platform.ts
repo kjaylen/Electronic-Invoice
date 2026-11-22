@@ -46,6 +46,17 @@ export async function listPlatformAdmins(db: Queryable): Promise<Array<PlatformA
   return rows.map((r) => ({ id: r.id, email: r.email, name: r.name, status: r.status, lastLoginAt: r.last_login_at ? new Date(r.last_login_at).toISOString() : null }));
 }
 
+/** An active staff member by id (for the second step of signing in). */
+export async function getPlatformAdmin(db: Queryable, id: string): Promise<PlatformAdmin | null> {
+  const r = (await db.query<{ id: string; email: string; name: string }>("select id, email, name from platform_admins where id = $1 and status = 'active'", [id])).rows[0];
+  return r ? { id: r.id, email: r.email, name: r.name } : null;
+}
+
+/** The id of a staff member by email (for the command line). */
+export async function platformAdminId(db: Queryable, email: string): Promise<string | null> {
+  return (await db.query<{ id: string }>('select id from platform_admins where lower(email) = $1', [normalizeEmail(email)])).rows[0]?.id ?? null;
+}
+
 let dummyHash: Promise<string> | undefined;
 
 export async function checkPlatformCredentials(db: Queryable, email: string, password: string): Promise<PlatformAdmin | null> {

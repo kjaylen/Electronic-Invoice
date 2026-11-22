@@ -4,6 +4,10 @@
  *
  *   POST /v1/auth/signup            create a business and its first owner
  *   POST /v1/auth/login             { business: slug, login: email or username, password }
+ *                                   → the session, or { twoFactorRequired, challenge } when two-step sign-in is on
+ *   POST /v1/auth/login/verify      { challenge, code }: the code from the authenticator app (or a recovery code)
+ *   GET  /v1/auth/two-factor        status; POST .../setup { password }, .../confirm { code },
+ *                                   .../disable { password }, .../recovery-codes { code }
  *   POST /v1/auth/logout
  *   GET  /v1/auth/session           who is signed in, their business and permissions
  *   POST /v1/auth/password/change
@@ -25,6 +29,7 @@
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { audit } from '../db/audit.ts';
+import { atLimit, countHit, overLimit } from '../db/ratelimit.ts';
 import { createTenant, freeSlug, type NewTenant, slugify, slugProblem, slugTaken, tenantBySlug } from '../db/tenants.ts';
 import {
   changePassword,
@@ -37,10 +42,27 @@ import {
   findActiveUserByEmail,
   lookupSession,
   peekPasswordLink,
+  getUserById,
+  passwordMatches,
   SESSION_MAX_MS,
   type Session,
+  twoFactorFor,
   type User,
 } from '../db/users.ts';
+import {
+  beginTwoFactorSetup,
+  confirmTwoFactorSetup,
+  createLoginChallenge,
+  disableTwoFactor,
+  endLoginChallenge,
+  newRecoveryCodes,
+  otpauthQr,
+  otpauthUrl,
+  TOTP_ISSUER,
+  twoFactorStatus,
+  useLoginChallenge,
+  verifySecondFactor,
+} from '../db/twofactor.ts';
 import { simpleHtml } from '../mail/mailer.ts';
 import type { PipelineDeps } from '../pipeline/issue.ts';
 import { publicLink, requireMail, type ServerContext } from './context.ts';
@@ -109,35 +131,9 @@ export function requireCsrfHeader(request: FastifyRequest) {
   }
 }
 
-// ---------- rate limiting (per process; use a shared store when running several instances) ----------
+// ---------- rate limiting (in the database, shared by every server process) ----------
 
 const WINDOW_MS = 15 * 60 * 1000;
-const attempts = new Map<string, { count: number; resetAt: number }>();
-
-function tooManyAttempts(key: string, limit: number): boolean {
-  const now = Date.now();
-  const entry = attempts.get(key);
-  if (!entry || entry.resetAt <= now) {
-    attempts.set(key, { count: 1, resetAt: now + WINDOW_MS });
-    return false;
-  }
-  entry.count++;
-  return entry.count > limit;
-}
-
-/** Failed sign-ins only: successful ones never count, so a busy shop behind one IP is not locked out. */
-function failuresExceeded(key: string, limit: number): boolean {
-  const entry = attempts.get(key);
-  return Boolean(entry && entry.resetAt > Date.now() && entry.count >= limit);
-}
-function noteFailure(key: string) {
-  tooManyAttempts(key, Number.MAX_SAFE_INTEGER);
-}
-
-/** For tests. */
-export function resetLoginAttempts() {
-  attempts.clear();
-}
 
 // ---------- responses ----------
 
@@ -145,11 +141,12 @@ export function userJson(u: User) {
   return { id: u.id, name: u.name, email: u.email, username: u.username, role: u.role, status: u.status, mustChangePassword: u.mustChangePassword, lastLoginAt: u.lastLoginAt, createdAt: u.createdAt };
 }
 
-export function sessionBody(s: Pick<Session, 'user' | 'business'>) {
+export function sessionBody(s: Pick<Session, 'user' | 'business' | 'twoFactor'>) {
   return {
     user: userJson(s.user),
     business: s.business,
     permissions: [...ROLE_PERMISSIONS[s.user.role]],
+    twoFactor: { ...s.twoFactor, setupRequired: s.twoFactor.required && !s.twoFactor.enabled },
   };
 }
 
@@ -175,7 +172,14 @@ export function registerAuthRoutes(app: FastifyInstance, deps: PipelineDeps, opt
     const { token } = await createSession(db, user.id);
     setSessionCookie(reply, slug, token, options);
     const business = (await tenantBySlug(db, slug))!;
-    return sessionBody({ user, business });
+    return sessionBody({ user, business, twoFactor: await twoFactorFor(db, user) });
+  };
+  /** After the password: the session, or (when two-step sign-in is on) a challenge for the code. */
+  const passwordAccepted = async (reply: FastifyReply, user: User, slug: string) => {
+    if ((await twoFactorStatus(db, 'user', user.id)).enabled) {
+      return { twoFactorRequired: true, challenge: await createLoginChallenge(db, 'user', user.id) };
+    }
+    return startSession(reply, user, slug);
   };
 
   // ---------- addresses ----------
@@ -194,7 +198,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: PipelineDeps, opt
   );
 
   app.get<{ Params: { slug: string } }>('/business/:slug', async (request) => {
-    if (tooManyAttempts(`lookup|${request.ip}`, 300)) throw tooMany();
+    if (await overLimit(db, `lookup|${request.ip}`, 300, WINDOW_MS)) throw tooMany();
     const b = await businessOr404(request.params.slug);
     return { slug: b.slug, name: b.tradeName ?? b.legalName };
   });
@@ -224,7 +228,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: PipelineDeps, opt
     },
     async (request, reply) => {
       if (!options.allowSignup) throw new ApiError(403, 'signup_closed', 'Creating businesses is closed on this server');
-      if (tooManyAttempts(`signup|${request.ip}`, 20)) throw tooMany('later');
+      if (await overLimit(db, `signup|${request.ip}`, 20, WINDOW_MS)) throw tooMany('later');
       const { business, owner } = request.body;
       // Self-service businesses start in the BTS test environment; moving to production is an admin step.
       const dup = await db.query(`select 1 from tenants where tin = $1 and environment = 'test'`, [business.tin]);
@@ -259,18 +263,42 @@ export function registerAuthRoutes(app: FastifyInstance, deps: PipelineDeps, opt
       const login = request.body.login.trim().toLowerCase();
       const accountKey = `login|${request.ip}|${slug}|${login}`;
       const ipKey = `login|${request.ip}`;
-      if (failuresExceeded(accountKey, 10) || failuresExceeded(ipKey, 50)) throw tooMany();
+      if (await atLimit(db, accountKey, 10) || await atLimit(db, ipKey, 50)) throw tooMany();
       const business = await businessOr404(slug);
       const result = await checkCredentials(db, business.id, login, request.body.password);
       if (!result.ok) {
-        noteFailure(accountKey);
-        noteFailure(ipKey);
+        await countHit(db, accountKey, WINDOW_MS);
+        await countHit(db, ipKey, WINDOW_MS);
         await audit(db, { tenantId: business.id, action: 'login.failed', target: login, ip: request.ip });
         if (result.reason === 'disabled') throw new ApiError(403, 'account_disabled', 'This account is deactivated. Ask an administrator of this business.');
         throw new ApiError(401, 'invalid_credentials', 'Email, username or password is incorrect');
       }
-      await audit(db, { tenantId: business.id, userId: result.user.id, action: 'login', ip: request.ip });
-      return startSession(reply, result.user, business.slug);
+      const next = await passwordAccepted(reply, result.user, business.slug);
+      if (!('twoFactorRequired' in next)) await audit(db, { tenantId: business.id, userId: result.user.id, action: 'login', ip: request.ip });
+      return next;
+    },
+  );
+
+  app.post<{ Body: { challenge: string; code: string } }>(
+    '/login/verify',
+    { schema: { body: { type: 'object', required: ['challenge', 'code'], additionalProperties: false, properties: { challenge: { type: 'string', maxLength: 100 }, code: { type: 'string', minLength: 6, maxLength: 20 } } } } },
+    async (request, reply) => {
+      const ipKey = `2fa|${request.ip}`;
+      if (await atLimit(db, ipKey, 30)) throw tooMany();
+      const userId = await useLoginChallenge(db, 'user', request.body.challenge);
+      if (!userId) throw new ApiError(401, 'challenge_expired', 'This sign-in has expired. Enter your password again.');
+      const user = await getUserById(db, userId);
+      if (!user || user.status !== 'active') throw new ApiError(401, 'challenge_expired', 'This sign-in has expired. Enter your password again.');
+      const method = await verifySecondFactor(db, deps.keys, 'user', user.id, request.body.code);
+      if (!method) {
+        await countHit(db, ipKey, WINDOW_MS);
+        await audit(db, { tenantId: user.tenantId, userId: user.id, action: 'login.code_failed', ip: request.ip });
+        throw new ApiError(401, 'invalid_code', 'That code is not right. Try the newest code from your app.');
+      }
+      await endLoginChallenge(db, request.body.challenge);
+      await audit(db, { tenantId: user.tenantId, userId: user.id, action: 'login', details: { twoFactor: method }, ip: request.ip });
+      const slug = (await db.query<{ slug: string }>('select slug from tenants where id = $1', [user.tenantId])).rows[0]!.slug;
+      return startSession(reply, user, slug);
     },
   );
 
@@ -285,6 +313,57 @@ export function registerAuthRoutes(app: FastifyInstance, deps: PipelineDeps, opt
 
   app.get('/session', async (request) => sessionBody(await requireSession(request)));
 
+  // ---------- two-step sign-in (for the signed-in person) ----------
+
+  const confirmPassword = async (session: Session, password: string) => {
+    if (!(await passwordMatches(db, session.user.id, password))) throw new ApiError(403, 'wrong_password', 'Your password is not right');
+  };
+  const passwordBody = { type: 'object', required: ['password'], additionalProperties: false, properties: { password: passwordField } } as const;
+  const codeBody = { type: 'object', required: ['code'], additionalProperties: false, properties: { code: { type: 'string', minLength: 6, maxLength: 20 } } } as const;
+  const log = (session: Session, action: string, ip: string) => audit(db, { tenantId: session.business.id, userId: session.user.id, action, target: session.user.email ?? session.user.username ?? session.user.name, ip });
+
+  app.get('/two-factor', async (request) => {
+    const session = await requireSession(request);
+    return { ...(await twoFactorStatus(db, 'user', session.user.id)), required: session.twoFactor.required };
+  });
+
+  app.post<{ Body: { password: string } }>('/two-factor/setup', { schema: { body: passwordBody } }, async (request) => {
+    const session = await requireSession(request);
+    if (await overLimit(db, `2fa-setup|${session.user.id}`, 10, WINDOW_MS)) throw tooMany();
+    await confirmPassword(session, request.body.password);
+    const secret = await beginTwoFactorSetup(db, deps.keys, 'user', session.user.id);
+    const account = `${session.user.email ?? session.user.username ?? session.user.name} (${session.business.slug})`;
+    const url = otpauthUrl(TOTP_ISSUER, account, secret);
+    return { secret, otpauthUrl: url, qr: await otpauthQr(url) };
+  });
+
+  app.post<{ Body: { code: string } }>('/two-factor/confirm', { schema: { body: codeBody } }, async (request) => {
+    const session = await requireSession(request);
+    if (await overLimit(db, `2fa-setup|${session.user.id}`, 10, WINDOW_MS)) throw tooMany();
+    const recoveryCodes = await confirmTwoFactorSetup(db, deps.keys, 'user', session.user.id, request.body.code);
+    await log(session, 'two_factor.enabled', request.ip);
+    return { recoveryCodes };
+  });
+
+  app.post<{ Body: { password: string } }>('/two-factor/disable', { schema: { body: passwordBody } }, async (request) => {
+    const session = await requireSession(request);
+    if (session.twoFactor.required) throw new ApiError(409, 'two_factor_required', 'Your business requires two-step sign-in for your role');
+    await confirmPassword(session, request.body.password);
+    if (await disableTwoFactor(db, 'user', session.user.id)) await log(session, 'two_factor.disabled', request.ip);
+    return { enabled: false };
+  });
+
+  app.post<{ Body: { code: string } }>('/two-factor/recovery-codes', { schema: { body: codeBody } }, async (request) => {
+    const session = await requireSession(request);
+    if (await overLimit(db, `2fa-setup|${session.user.id}`, 10, WINDOW_MS)) throw tooMany();
+    if ((await verifySecondFactor(db, deps.keys, 'user', session.user.id, request.body.code)) !== 'totp') {
+      throw new ApiError(422, 'invalid_code', 'Enter the current code from your authenticator app');
+    }
+    const recoveryCodes = await newRecoveryCodes(db, 'user', session.user.id);
+    await log(session, 'two_factor.recovery_codes', request.ip);
+    return { recoveryCodes };
+  });
+
   // ---------- passwords ----------
 
   app.post<{ Body: { currentPassword: string; newPassword: string } }>(
@@ -292,7 +371,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: PipelineDeps, opt
     { schema: { body: { type: 'object', required: ['currentPassword', 'newPassword'], additionalProperties: false, properties: { currentPassword: passwordField, newPassword: passwordField } } } },
     async (request, reply) => {
       const session = await requireSession(request);
-      if (tooManyAttempts(`change|${session.user.id}`, 10)) throw tooMany();
+      if (await overLimit(db, `change|${session.user.id}`, 10, WINDOW_MS)) throw tooMany();
       if (!(await changePassword(db, session.user.id, request.body.currentPassword, request.body.newPassword, session.id))) {
         throw new ApiError(422, 'wrong_password', 'Your current password is incorrect');
       }
@@ -309,7 +388,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: PipelineDeps, opt
       requireMail(options);
       publicLink(options, '/'); // fail now, not silently in the background, when links cannot be built
       const email = request.body.email.trim().toLowerCase();
-      if (tooManyAttempts(`forgot|${request.ip}`, 20) || tooManyAttempts(`forgot|${email}`, 5)) throw tooMany();
+      if (await overLimit(db, `forgot|${request.ip}`, 20, WINDOW_MS) || await overLimit(db, `forgot|${email}`, 5, WINDOW_MS)) throw tooMany();
       const business = await businessOr404(request.body.business);
       // In the background, so the response time does not reveal whether the account exists.
       void (async () => {
@@ -337,7 +416,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: PipelineDeps, opt
   const invalidLink = () => new ApiError(400, 'invalid_token', 'This link is invalid, already used or expired. Ask for a new one.');
 
   app.get<{ Params: { token: string } }>('/password/link/:token', async (request) => {
-    if (tooManyAttempts(`link|${request.ip}`, 60)) throw tooMany();
+    if (await overLimit(db, `link|${request.ip}`, 60, WINDOW_MS)) throw tooMany();
     const found = await peekPasswordLink(db, request.params.token);
     if (!found) throw invalidLink();
     const business = (await db.query<{ slug: string; name: string }>('select slug, coalesce(trade_name, legal_name) as name from tenants where id = $1', [found.user.tenantId])).rows[0]!;
@@ -348,12 +427,13 @@ export function registerAuthRoutes(app: FastifyInstance, deps: PipelineDeps, opt
     '/password/reset',
     { schema: { body: { type: 'object', required: ['token', 'password'], additionalProperties: false, properties: { token: { type: 'string', maxLength: 100 }, password: passwordField } } } },
     async (request, reply) => {
-      if (tooManyAttempts(`reset|${request.ip}`, 30)) throw tooMany('later');
+      if (await overLimit(db, `reset|${request.ip}`, 30, WINDOW_MS)) throw tooMany('later');
       const user = await consumePasswordLink(db, request.body.token, request.body.password);
       if (!user) throw invalidLink();
       const slug = (await db.query<{ slug: string }>('select slug from tenants where id = $1', [user.tenantId])).rows[0]!.slug;
       await audit(db, { tenantId: user.tenantId, userId: user.id, action: 'password.reset', ip: request.ip });
-      return startSession(reply, user, slug);
+      // With two-step sign-in on, a reset link alone does not sign in: the code is still needed.
+      return passwordAccepted(reply, user, slug);
     },
   );
 }

@@ -37,6 +37,7 @@ import { publicLink, type ServerContext } from './context.ts';
 import { ApiError, notFound } from './errors.ts';
 import { canManageRole, requirePersonWith, type Role, ROLES } from './permissions.ts';
 import { uuid } from './schemas.ts';
+import { disableTwoFactor } from '../db/twofactor.ts';
 
 const role = { type: 'string', enum: [...ROLES] } as const;
 const idParams = { type: 'object', required: ['id'], properties: { id: uuid } } as const;
@@ -97,7 +98,10 @@ export function registerUserRoutes(app: FastifyInstance, deps: PipelineDeps, ctx
     requirePersonWith(request, 'users.manage');
     const users = await listUsers(db, request.tenantId);
     const sessions = await Promise.all(users.map((u) => activeSessionCount(db, u.id)));
-    return { data: users.map((u, i) => ({ ...userJson(u), activeSessions: sessions[i], manageable: canManageRole(actorRole(request), u.role) && u.id !== request.userId })) };
+    const withTwoFactor = new Set((await db.query<{ owner_id: string }>(
+      `select owner_id from two_factor where owner_kind = 'user' and confirmed_at is not null and owner_id = any($1::uuid[])`, [users.map((u) => u.id)],
+    )).rows.map((r) => r.owner_id));
+    return { data: users.map((u, i) => ({ ...userJson(u), activeSessions: sessions[i], twoFactor: withTwoFactor.has(u.id), manageable: canManageRole(actorRole(request), u.role) && u.id !== request.userId })) };
   });
 
   app.post<{ Body: { name: string; email?: string; username?: string; role: Role; password?: string; sendWelcome?: boolean } }>(
@@ -214,6 +218,17 @@ export function registerUserRoutes(app: FastifyInstance, deps: PipelineDeps, ctx
       return { ok: true, link, emailSent };
     },
   );
+
+  app.post<{ Params: { id: string } }>('/users/:id/two-factor/reset', { schema: { params: idParams } }, async (request) => {
+    if (request.params.id === request.userId) throw new ApiError(409, 'own_account', 'Turn off your own two-step sign-in from your account settings');
+    const target = await manageable(request, request.params.id);
+    if (await disableTwoFactor(db, 'user', target.id)) {
+      // Whoever had the phone may have a session: end them all.
+      await signOutEverywhere(db, target.id);
+      await log(request, 'user.two_factor_reset', target);
+    }
+    return userJson((await getUser(db, request.tenantId, target.id))!);
+  });
 
   app.post<{ Params: { id: string } }>('/users/:id/sign-out', { schema: { params: idParams } }, async (request) => {
     const target = request.params.id === request.userId ? (await getUser(db, request.tenantId, request.userId))! : await manageable(request, request.params.id);

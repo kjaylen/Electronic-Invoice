@@ -4,6 +4,7 @@
  *   npm run platform-admin -- add you@example.com "Your Name"   create; prints a generated password once
  *   npm run platform-admin -- reset you@example.com             new password, signs out everywhere
  *   npm run platform-admin -- disable you@example.com           (and: enable)
+ *   npm run platform-admin -- reset-2fa you@example.com         lost phone: sets up two-step sign-in again at the next sign-in
  *   npm run platform-admin -- list
  *
  * Uses DATABASE_URL. Set PLATFORM_ADMIN_PASSWORD to choose the password
@@ -13,12 +14,13 @@
 import { randomBytes } from 'node:crypto';
 import pg from 'pg';
 import { migrate, pgDatabase } from '../src/db/database.ts';
-import { createPlatformAdmin, listPlatformAdmins, setPlatformAdminPassword, setPlatformAdminStatus } from '../src/db/platform.ts';
+import { createPlatformAdmin, listPlatformAdmins, platformAdminId, setPlatformAdminPassword, setPlatformAdminStatus } from '../src/db/platform.ts';
+import { disableTwoFactor } from '../src/db/twofactor.ts';
 
 const [command, email, ...nameParts] = process.argv.slice(2);
 const url = process.env.DATABASE_URL;
 if (!url || !command) {
-  console.error('Usage: npm run platform-admin -- add|reset|disable|enable|list [email] ["Name"]   (needs DATABASE_URL)');
+  console.error('Usage: npm run platform-admin -- add|reset|reset-2fa|disable|enable|list [email] ["Name"]   (needs DATABASE_URL)');
   process.exit(1);
 }
 
@@ -50,6 +52,14 @@ try {
       if (!email || !(await setPlatformAdminStatus(db, email, command === 'disable' ? 'disabled' : 'active'))) throw new Error(`No platform admin ${email ?? ''}`);
       console.log(`${email} ${command}d.`);
       break;
+    case 'reset-2fa': {
+      const id = email ? await platformAdminId(db, email) : null;
+      if (!id) throw new Error(`No platform admin ${email ?? ''}`);
+      await disableTwoFactor(db, 'staff', id);
+      await db.query('delete from platform_sessions where admin_id = $1', [id]);
+      console.log(`Two-step sign-in for ${email} was reset: they set it up again at their next sign-in. All their sessions were signed out.`);
+      break;
+    }
     case 'list':
       for (const a of await listPlatformAdmins(db)) console.log(`${a.status === 'active' ? ' ' : 'x'} ${a.email}  ${a.name}  last sign-in: ${a.lastLoginAt ?? 'never'}`);
       break;

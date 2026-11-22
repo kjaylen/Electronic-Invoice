@@ -1,0 +1,17 @@
+.git
+node_modules
+web/dist
+.demo
+.demo-e2e
+backups
+out
+test-results
+playwright-report
+coverage
+.env
+.env.*
+*.pem
+*.p12
+*.pfx
+*.key
+*.dump

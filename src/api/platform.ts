@@ -2,6 +2,7 @@
  * The platform console API, for our own staff (not businesses).
  *
  *   POST /v1/platform/auth/login | logout,  GET /v1/platform/auth/session
+ *   POST /v1/platform/auth/login/verify    { challenge, code }: two-step sign-in, always required for staff
  *   GET  /v1/platform/tenants                      every business: q, environment
  *   GET  /v1/platform/tenants/:id                  details, people, certificate, documents, readiness for production
  *   POST /v1/platform/tenants/:id/go-live          move to the BTS production environment (BTS approval reference required)
@@ -10,6 +11,8 @@
  *
  * Staff sign in with their own accounts (npm run platform-admin), in a cookie
  * of their own ("etd_admin"), with the same CSRF header rule as the web app.
+ * Two-step sign-in is mandatory: the first sign-in sets up the authenticator
+ * app (the password returns its secret), every sign-in then needs a code.
  *
  * Going live needs: an active certificate for the business's TIN, and nothing
  * still on its way to BTS test (no pending or contingency documents, no
@@ -23,6 +26,7 @@ import {
   checkPlatformCredentials,
   createPlatformSession,
   deletePlatformSession,
+  getPlatformAdmin,
   lookupPlatformSession,
   type PlatformAdmin,
   PLATFORM_SESSION_MAX_MS,
@@ -36,6 +40,8 @@ import { readCookie, requireCsrfHeader } from './auth.ts';
 import { publicLink, type ServerContext } from './context.ts';
 import { ApiError, notFound } from './errors.ts';
 import { uuid } from './schemas.ts';
+import { atLimit, countHit } from '../db/ratelimit.ts';
+import { beginTwoFactorSetup, confirmTwoFactorSetup, createLoginChallenge, endLoginChallenge, otpauthQr, otpauthUrl, TOTP_ISSUER, twoFactorStatus, useLoginChallenge, verifySecondFactor } from '../db/twofactor.ts';
 
 export const PLATFORM_COOKIE = 'etd_admin';
 
@@ -45,21 +51,6 @@ declare module 'fastify' {
   }
 }
 
-// Failed staff sign-ins, per process.
-const failures = new Map<string, { count: number; resetAt: number }>();
-function tooManyFailures(key: string): boolean {
-  const e = failures.get(key);
-  return Boolean(e && e.resetAt > Date.now() && e.count >= 5);
-}
-function noteFailure(key: string) {
-  const now = Date.now();
-  const e = failures.get(key);
-  if (!e || e.resetAt <= now) failures.set(key, { count: 1, resetAt: now + 15 * 60 * 1000 });
-  else e.count++;
-}
-export function resetPlatformLimits() {
-  failures.clear();
-}
 
 interface TenantRow {
   id: string;
@@ -77,6 +68,9 @@ interface TenantRow {
 }
 
 const iso = (v: string | Date | null) => (v ? new Date(v).toISOString() : null);
+
+// Failed staff sign-ins, shared by every server process.
+const STAFF_WINDOW_MS = 15 * 60 * 1000;
 
 export function registerPlatformRoutes(app: FastifyInstance, deps: PipelineDeps, ctx: ServerContext) {
   const { db } = deps;
@@ -99,18 +93,55 @@ export function registerPlatformRoutes(app: FastifyInstance, deps: PipelineDeps,
     '/auth/login',
     { schema: { body: { type: 'object', required: ['email', 'password'], additionalProperties: false, properties: { email: { type: 'string', minLength: 3, maxLength: 254 }, password: { type: 'string', minLength: 1, maxLength: 200 } } } } },
     async (request, reply) => {
-      const key = `${request.ip}|${request.body.email.trim().toLowerCase()}`;
-      if (tooManyFailures(key) || tooManyFailures(request.ip)) throw new ApiError(429, 'too_many_attempts', 'Too many attempts; try again in 15 minutes');
+      const key = `staff|${request.ip}|${request.body.email.trim().toLowerCase()}`;
+      const ipKey = `staff|${request.ip}`;
+      if (await atLimit(db, key, 5) || await atLimit(db, ipKey, 5)) throw new ApiError(429, 'too_many_attempts', 'Too many attempts; try again in 15 minutes');
       const a = await checkPlatformCredentials(db, request.body.email, request.body.password);
       if (!a) {
-        noteFailure(key);
-        noteFailure(request.ip);
+        await countHit(db, key, STAFF_WINDOW_MS);
+        await countHit(db, ipKey, STAFF_WINDOW_MS);
         await platformAudit(db, { adminId: null, action: 'login.failed', details: { email: request.body.email.trim().toLowerCase() }, ip: request.ip });
         throw new ApiError(401, 'invalid_credentials', 'Email or password is incorrect');
       }
+      // The password alone never gives a session: the code is always needed.
+      const challenge = await createLoginChallenge(db, 'staff', a.id);
+      if ((await twoFactorStatus(db, 'staff', a.id)).enabled) return { twoFactorRequired: true, challenge };
+      const secret = await beginTwoFactorSetup(db, deps.keys, 'staff', a.id);
+      const url = otpauthUrl(`${TOTP_ISSUER} console`, a.email, secret);
+      return { twoFactorRequired: true, setup: true, challenge, secret, otpauthUrl: url, qr: await otpauthQr(url) };
+    },
+  );
+
+  app.post<{ Body: { challenge: string; code: string } }>(
+    '/auth/login/verify',
+    { schema: { body: { type: 'object', required: ['challenge', 'code'], additionalProperties: false, properties: { challenge: { type: 'string', maxLength: 100 }, code: { type: 'string', minLength: 6, maxLength: 20 } } } } },
+    async (request, reply) => {
+      const ipKey = `staff-2fa|${request.ip}`;
+      if (await atLimit(db, ipKey, 10)) throw new ApiError(429, 'too_many_attempts', 'Too many attempts; try again in 15 minutes');
+      const adminId = await useLoginChallenge(db, 'staff', request.body.challenge);
+      const a = adminId ? await getPlatformAdmin(db, adminId) : null;
+      if (!a) throw new ApiError(401, 'challenge_expired', 'This sign-in has expired. Enter your password again.');
+      let recoveryCodes: string[] | undefined;
+      if ((await twoFactorStatus(db, 'staff', a.id)).enabled) {
+        const method = await verifySecondFactor(db, deps.keys, 'staff', a.id, request.body.code);
+        if (!method) {
+          await countHit(db, ipKey, STAFF_WINDOW_MS);
+          await platformAudit(db, { adminId: a.id, action: 'login.code_failed', ip: request.ip });
+          throw new ApiError(401, 'invalid_code', 'That code is not right. Try the newest code from your app.');
+        }
+      } else {
+        try {
+          recoveryCodes = await confirmTwoFactorSetup(db, deps.keys, 'staff', a.id, request.body.code);
+        } catch (e) {
+          await countHit(db, ipKey, STAFF_WINDOW_MS);
+          throw e;
+        }
+        await platformAudit(db, { adminId: a.id, action: 'two_factor.enabled', ip: request.ip });
+      }
+      await endLoginChallenge(db, request.body.challenge);
       setCookie(reply, await createPlatformSession(db, a.id), PLATFORM_SESSION_MAX_MS / 1000);
       await platformAudit(db, { adminId: a.id, action: 'login', ip: request.ip });
-      return { admin: a };
+      return { admin: a, ...(recoveryCodes && { recoveryCodes }) };
     },
   );
 

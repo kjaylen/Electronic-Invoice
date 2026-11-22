@@ -69,6 +69,14 @@ const ERROR_CODES: Record<string, string> = {
   invalid_token: 'This link is invalid, already used or expired. Ask for a new one.',
   last_owner: 'A business needs at least one owner. Make someone else an owner first.',
   csrf: 'Please reload the page and try again.',
+  invalid_code: 'That code is not right. Try the newest code from your app.',
+  challenge_expired: 'This sign-in has expired. Enter your password again.',
+  two_factor_required: 'Your business requires two-step sign-in for your role',
+  two_factor_first: 'Turn on two-step sign-in for your own account first',
+  already_enabled: 'Two-step sign-in is already on',
+  two_factor_setup_required: 'Set up two-step sign-in first',
+  credit_exceeds_original: 'This credit note is more than what is left to credit on the original',
+  too_many_documents: 'Too many documents for one archive. Choose a shorter period.',
 };
 
 export function errorMessage(t: T, error: unknown): string {

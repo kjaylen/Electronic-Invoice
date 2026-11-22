@@ -8,7 +8,6 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
 import { buildApp } from '../src/api/app.ts';
-import { resetLoginAttempts } from '../src/api/auth.ts';
 import { can, canManageRole } from '../src/api/permissions.ts';
 import { createUser } from '../src/db/users.ts';
 import { SUBMIT_PATHS } from '../src/engine/transport.ts';
@@ -30,7 +29,6 @@ interface Ctx {
 }
 
 async function withApp(fn: (c: Ctx) => Promise<void>, options: { mail?: boolean } = {}) {
-  resetLoginAttempts();
   const f = await setupPipeline();
   const mail = memoryMailer();
   const app = await buildApp({ pipeline: f.deps, cookieSecure: true, publicUrl: PUBLIC_URL, ...(options.mail !== false && { mailer: mail }) });
