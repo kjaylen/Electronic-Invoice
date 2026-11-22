@@ -123,6 +123,8 @@ export interface Item {
   exemptionReasonCode: string | null;
   barcode: string | null;
   favorite: boolean;
+  /** In stock now; null when stock is not tracked. */
+  stock?: number | null;
 }
 
 export interface Condition {

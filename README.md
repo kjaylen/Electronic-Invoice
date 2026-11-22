@@ -371,6 +371,14 @@ Neither is a tax document: each keeps the `POST /v1/documents` body it will issu
 - **GST return worksheet** (Reports → GST return, also CSV and PDF): sales from the authorized e-invoices of the period by GST rate (credit notes subtract), purchases from the recorded expenses by GST treatment; GST paid is claimable only with a tax invoice from a GST-registered supplier (its TIN). It shows output tax, input tax and what to pay or carry forward, with warnings (documents still waiting for BTS, GST without a supplier TIN, claimed GST without a receipt). A working paper for the return filed with BTS, not the return itself.
 - **Profit and loss** (Reports → Profit and loss): income is sales before GST; costs are expenses before the GST claimed back (GST that cannot be claimed is a cost); by month and by category.
 
+## Inventory (`src/inventory/stock.ts`, `src/api/inventory.ts`)
+
+- **A ledger**: every change to an item's stock is a movement (`stock_movements`, never changed or deleted) written in the same statement as the new level, with its reason and source: a sale (the tax document), an online order, a refund, stock received (the delivery and its unit cost), a count, damage, loss, a customer return. Each item's history is on its page.
+- **Sales take stock off**: tax invoices and receipts issued with catalog items (at the counter, from the form, from quotes and recurring invoices) take their quantities off tracked items. A sale whose document BTS rejects never counts; one later cancelled or rejected is put back once (`reverseVoidedSales`, at once on cancel and in housekeeping). A contingency reissue keeps the original sale. Online orders reserve stock when placed and never take more than there is; cancelled orders and refunds with "put back in stock" return it.
+- **Quantities** have up to 3 decimals (sold by the pound or litre). Levels can go below zero: the counter never refuses a sale because a count is off; it shows as out of stock to recount.
+- **Receiving stock** from a supplier (Inventory → Receive stock): items, quantities and unit costs before GST; the moving average cost of each item is updated; the supplier's bill can be recorded as an expense in the same step (stock for resale, GST on top for standard-rated, paid or a bill to pay).
+- **Counts and adjustments**: a stock count sets the levels typed in (only differences are recorded); single adjustments add, take off or set with a reason. Low-stock levels per item; low and out-of-stock items show on the overview's to-do list. Stock value at average cost; CSV export. Changing a variant's stock in the product editor is recorded as a count.
+
 ## Platform console (`/admin`)
 
 For the team that runs this service, not for businesses. Staff move a business from the BTS **test** environment to **production** once BTS has approved it; before, that was a manual database step.

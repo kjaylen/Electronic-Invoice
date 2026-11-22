@@ -8,6 +8,7 @@
  * so the order, the quote and the e-invoice agree to the cent.
  */
 
+import { moveStock, takeForOrder } from '../inventory/stock.ts';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type { Database, Queryable } from '../db/database.ts';
 import { toBigInt } from '../db/database.ts';
@@ -202,7 +203,7 @@ export async function quoteCart(db: Queryable, deps: Pick<PipelineDeps, 'tax'>, 
   }
   const rows = (await db.query<VariantRow>(
     `select i.id, i.product_id, p.title, p.status, i.option1, i.option2, i.seller_code, i.unit_code, i.unit_price::text as unit_price, i.gst_category,
-            i.exemption_reason_code, i.stock_quantity, i.archived_at
+            i.exemption_reason_code, i.stock_quantity::float8 as stock_quantity, i.archived_at
      from items i join products p on p.id = i.product_id
      where i.tenant_id = $1 and i.id = any($2::uuid[])`,
     [store.tenantId, [...merged.keys()]],
@@ -324,14 +325,6 @@ export async function placeOrder(db: Database, deps: Pick<PipelineDeps, 'tax'>, 
       const used = await tx.query("update discount_codes set uses = uses + 1 where id = $1 and active and (max_uses is null or uses < max_uses) returning id", [quote.discount.id]);
       if (!used.rows.length) throw new StoreError('invalid_order', 'This discount code has just been used up');
     }
-    // Reserve stock; the update fails for a variant that sold out since the quote.
-    for (const l of quote.lines) {
-      const r = await tx.query(
-        'update items set stock_quantity = stock_quantity - $3 where id = $1 and tenant_id = $2 and (stock_quantity is null or stock_quantity >= $3) returning id',
-        [l.variantId, store.tenantId, l.quantity],
-      );
-      if (!r.rows.length) throw new StoreError('out_of_stock', `${l.productTitle} just sold out`);
-    }
     const number = (await tx.query<{ n: number }>('update tenants set next_order_number = next_order_number + 1 where id = $1 returning next_order_number - 1 as n', [store.tenantId])).rows[0]!.n;
     const id = randomUUID();
     const token = randomBytes(24).toString('base64url');
@@ -354,6 +347,10 @@ export async function placeOrder(db: Database, deps: Pick<PipelineDeps, 'tax'>, 
         [id, store.tenantId, ++n, l.variantId, l.productTitle, l.variantTitle, l.sellerCode, l.quantity, l.unitCode, l.unitPrice, l.gstCategory, l.exemptionReasonCode,
           String(parseCents(l.total)), String(l.discountCents)],
       );
+    }
+    // Reserve the stock (in the same transaction): fails for a variant that sold out since the quote.
+    for (const l of quote.lines) {
+      if (!(await takeForOrder(tx, store.tenantId, l.variantId, l.quantity, id))) throw new StoreError('out_of_stock', `${l.productTitle} just sold out`);
     }
     return { id, number, token, quote };
   });
@@ -495,11 +492,8 @@ export async function cancelOrder(db: Database, tenantId: string, orderId: strin
     if (order.status === 'cancelled') throw new StoreError('conflict', 'This order is already cancelled');
     if (order.payment_status === 'paid') throw new StoreError('conflict', 'A paid order is refunded with a credit note, not cancelled');
     await tx.query(`update orders set status = 'cancelled', cancelled_at = now(), cancel_reason = $3 where id = $1 and tenant_id = $2`, [orderId, tenantId, reason]);
-    await tx.query(
-      `update items i set stock_quantity = i.stock_quantity + l.quantity::int
-       from order_lines l where l.order_id = $1 and l.item_id = i.id and i.stock_quantity is not null`,
-      [orderId],
-    );
+    const lines = (await tx.query<{ item_id: string; quantity: string }>('select item_id, quantity::text as quantity from order_lines where order_id = $1 and item_id is not null', [orderId])).rows;
+    for (const l of lines) await moveStock(tx, { tenantId, itemId: l.item_id, quantity: l.quantity, reason: 'order_cancelled', orderId });
   });
 }
 
@@ -623,7 +617,7 @@ export async function refundOrder(
     await tx.query('update orders set refunded_cents = refunded_cents + $3 where id = $1 and tenant_id = $2', [orderId, tenantId, String(amount)]);
     if (restock) {
       for (const c of chosen) {
-        if (c.line.item_id) await tx.query('update items set stock_quantity = stock_quantity + $3 where id = $1 and tenant_id = $2 and stock_quantity is not null', [c.line.item_id, tenantId, c.quantity]);
+        if (c.line.item_id) await moveStock(tx, { tenantId, itemId: c.line.item_id, quantity: String(c.quantity), reason: 'refund', orderId, userId });
       }
     }
   });

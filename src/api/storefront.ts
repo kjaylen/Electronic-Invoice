@@ -95,7 +95,7 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
       const rows = (await db.query<{ id: string; handle: string; title: string; image_id: string | null; prices: Array<{ price: string; gst: 'S' | 'Z' | 'E'; stock: number | null }> | null }>(
         `select p.id, p.handle, p.title,
            (select g.id from product_images g where g.product_id = p.id order by g.position, g.created_at limit 1) as image_id,
-           (select json_agg(json_build_object('price', i.unit_price::text, 'gst', i.gst_category, 'stock', i.stock_quantity)) from items i where i.product_id = p.id and i.archived_at is null) as prices
+           (select json_agg(json_build_object('price', i.unit_price::text, 'gst', i.gst_category, 'stock', i.stock_quantity::float8)) from items i where i.product_id = p.id and i.archived_at is null) as prices
          from products p where ${where} order by p.created_at desc limit 500`,
         params,
       )).rows;
@@ -127,7 +127,7 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
       )).rows[0];
       if (!p) throw new StoreError('not_found', 'This product is not available');
       const variants = (await db.query<{ id: string; option1: string | null; option2: string | null; unit_price: string; gst_category: 'S' | 'Z' | 'E'; stock_quantity: number | null }>(
-        `select id, option1, option2, unit_price::text as unit_price, gst_category, stock_quantity from items where product_id = $1 and archived_at is null order by position, created_at`, [p.id],
+        `select id, option1, option2, unit_price::text as unit_price, gst_category, stock_quantity::float8 as stock_quantity from items where product_id = $1 and archived_at is null order by position, created_at`, [p.id],
       )).rows;
       const images = (await db.query<{ id: string }>('select id from product_images where product_id = $1 order by position, created_at', [p.id])).rows;
       return {

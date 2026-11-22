@@ -112,6 +112,7 @@ interface ItemRow {
   exemption_reason_code: string | null;
   barcode: string | null;
   favorite: boolean;
+  stock_quantity?: string | null;
   archived_at: string | Date | null;
   created_at: string | Date;
 }
@@ -130,6 +131,8 @@ const itemJson = (r: ItemRow) => ({
   exemptionReasonCode: r.exemption_reason_code,
   barcode: r.barcode,
   favorite: r.favorite,
+  /** In stock now; null when stock is not tracked. */
+  stock: r.stock_quantity === null || r.stock_quantity === undefined ? null : Number(r.stock_quantity),
   archived: Boolean(r.archived_at),
   createdAt: new Date(r.created_at).toISOString(),
 });

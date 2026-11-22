@@ -13,6 +13,7 @@
  * your code, barcode and stock, and it sells at the counter and on invoices too.
  */
 
+import { moveStock } from '../inventory/stock.ts';
 import { randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { audit } from '../db/audit.ts';
@@ -157,7 +158,7 @@ export async function productDetail(db: Queryable, tenantId: string, id: string)
   const p = (await db.query<ProductRow>('select * from products where id = $1 and tenant_id = $2', [id, tenantId])).rows[0];
   if (!p) throw notFound('Product');
   const variants = (await db.query<VariantRow>(
-    `select id, option1, option2, unit_price::text as unit_price, gst_category, exemption_reason_code, unit_code, seller_code, barcode, stock_quantity, position
+    `select id, option1, option2, unit_price::text as unit_price, gst_category, exemption_reason_code, unit_code, seller_code, barcode, stock_quantity::float8 as stock_quantity, position
      from items where product_id = $1 and tenant_id = $2 and archived_at is null order by position, created_at`,
     [id, tenantId],
   )).rows;
@@ -191,28 +192,39 @@ function checkVariants(b: ProductBody) {
 }
 
 /** Write the variants: update the ones that exist, add new ones, archive the ones left out. */
-async function saveVariants(tx: Queryable, tenantId: string, productId: string, b: ProductBody) {
+async function saveVariants(tx: Queryable, tenantId: string, productId: string, b: ProductBody, userId?: string | null) {
   const existing = new Set((await tx.query<{ id: string }>('select id from items where product_id = $1 and tenant_id = $2 and archived_at is null', [productId, tenantId])).rows.map((r) => r.id));
   const kept = new Set<string>();
   let position = 0;
   for (const v of b.variants) {
     const vt = variantTitle({ option1: v.option1 ?? null, option2: v.option2 ?? null });
     const name = vt ? `${b.title} – ${vt}` : b.title;
-    const values = [v.option1 || null, v.option2 || null, v.price, v.gstCategory, v.gstCategory === 'E' ? v.exemptionReasonCode ?? null : null, v.unitCode ?? 'H87', v.sellerCode || null, v.barcode || null, v.stock ?? null, position++, name];
+    const values = [v.option1 || null, v.option2 || null, v.price, v.gstCategory, v.gstCategory === 'E' ? v.exemptionReasonCode ?? null : null, v.unitCode ?? 'H87', v.sellerCode || null, v.barcode || null, position++, name];
+    let itemId: string;
+    let before: string | null = null;
     if (v.id) {
       if (!existing.has(v.id)) throw new ApiError(422, 'invalid_product', 'A variant does not belong to this product');
       kept.add(v.id);
+      itemId = v.id;
+      before = (await tx.query<{ s: string | null }>('select stock_quantity::text as s from items where id = $1', [v.id])).rows[0]!.s;
       await tx.query(
         `update items set option1 = $3, option2 = $4, unit_price = $5, gst_category = $6, exemption_reason_code = $7, unit_code = $8, seller_code = $9, barcode = $10,
-           stock_quantity = $11, position = $12, name = $13, description = $13 where id = $1 and tenant_id = $2`,
+           position = $11, name = $12, description = $12 where id = $1 and tenant_id = $2`,
         [v.id, tenantId, ...values],
       );
     } else {
+      itemId = randomUUID();
       await tx.query(
-        `insert into items (id, tenant_id, product_id, option1, option2, unit_price, gst_category, exemption_reason_code, unit_code, seller_code, barcode, stock_quantity, position, name, description)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $14)`,
-        [randomUUID(), tenantId, productId, ...values],
+        `insert into items (id, tenant_id, product_id, option1, option2, unit_price, gst_category, exemption_reason_code, unit_code, seller_code, barcode, position, name, description)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $13)`,
+        [itemId, tenantId, productId, ...values],
       );
+    }
+    // Stock changed here is a count (recorded in the item's history); left empty, it stops being tracked.
+    const wanted = v.stock ?? null;
+    if (wanted === null && before !== null) await tx.query('update items set stock_quantity = null where id = $1', [itemId]);
+    else if (wanted !== null && (before === null || Number(before) !== wanted)) {
+      await moveStock(tx, { tenantId, itemId, quantity: String(wanted), mode: 'set', reason: 'count', startTracking: true, note: 'Changed in the product editor', userId: userId ?? null });
     }
   }
   for (const id of existing) {
@@ -336,7 +348,7 @@ export function registerProductRoutes(app: FastifyInstance, deps: PipelineDeps, 
            (select min(i.unit_price)::text from items i where i.product_id = p.id and i.archived_at is null) as min_price,
            (select max(i.unit_price)::text from items i where i.product_id = p.id and i.archived_at is null) as max_price,
            (select i.gst_category from items i where i.product_id = p.id and i.archived_at is null order by i.position limit 1) as gst,
-           (select sum(i.stock_quantity)::int from items i where i.product_id = p.id and i.archived_at is null) as stock,
+           (select sum(i.stock_quantity)::float8 from items i where i.product_id = p.id and i.archived_at is null) as stock,
            (select count(*)::int from items i where i.product_id = p.id and i.archived_at is null and i.stock_quantity is null) as untracked,
            (select g.id from product_images g where g.product_id = p.id order by g.position, g.created_at limit 1) as image_id
          from products p where ${where} order by p.updated_at desc limit 500`,
@@ -374,7 +386,7 @@ export function registerProductRoutes(app: FastifyInstance, deps: PipelineDeps, 
         'insert into products (id, tenant_id, title, handle, description, status, option1_name, option2_name) values ($1, $2, $3, $4, $5, $6, $7, $8)',
         [id, request.tenantId, b.title.trim(), handle, b.description ?? '', b.status ?? 'draft', b.option1Name || null, b.option2Name || null],
       );
-      await saveVariants(tx, request.tenantId, id, b);
+      await saveVariants(tx, request.tenantId, id, b, request.userId || null);
     }).catch(barcodeConflict);
     return reply.code(201).send(await productDetail(db, request.tenantId, id));
   });
@@ -394,7 +406,7 @@ export function registerProductRoutes(app: FastifyInstance, deps: PipelineDeps, 
           `update products set title = $3, handle = $4, description = $5, status = $6, option1_name = $7, option2_name = $8, updated_at = now() where id = $1 and tenant_id = $2`,
           [request.params.id, request.tenantId, b.title.trim(), handle, b.description ?? '', b.status ?? 'draft', b.option1Name || null, b.option2Name || null],
         );
-        await saveVariants(tx, request.tenantId, request.params.id, b);
+        await saveVariants(tx, request.tenantId, request.params.id, b, request.userId || null);
       }).catch(barcodeConflict);
       return productDetail(db, request.tenantId, request.params.id);
     },

@@ -11,6 +11,7 @@
  * request returns the original response instead of issuing twice.
  */
 
+import { recordSale, reverseVoidedSales } from '../inventory/stock.ts';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { formatCents } from '../engine/decimal.ts';
@@ -226,6 +227,10 @@ export async function issueFromBody(deps: PipelineDeps, tenantId: string, body: 
   const result = await issueDocument(deps, tenantId, issueRequest);
   // Who issued it (not part of the signed record). Also on the contingency reissue, if there was one.
   if (userId) await deps.db.query('update documents set issued_by = $3 where tenant_id = $1 and (id = $2 or supersedes_document_id = $2)', [tenantId, result.documentId, userId]);
+  // A sale takes the items off the shelf (tracked ones), once it has legal value or is on its way to BTS.
+  if ((issueRequest.etdType === '01' || issueRequest.etdType === '02') && ['authorized', 'authorized_with_alert', 'contingency_pending', 'pending'].includes(result.status)) {
+    await recordSale(deps.db, tenantId, result.documentId, body.lines.map((l) => ({ itemId: l.itemId ?? null, quantity: l.quantity })), userId).catch(() => {});
+  }
   return result;
 }
 
@@ -743,6 +748,8 @@ export function registerDocumentRoutes(app: FastifyInstance, deps: PipelineDeps,
       requirePermission(request, 'documents.cancel');
       const original = await loadDocument(deps, request.tenantId, request.params.id); // 404 for another tenant's document
       const result = await cancelDocument(deps, request.tenantId, request.params.id, request.body.reason);
+      // A cancelled sale goes back on the shelf.
+      await reverseVoidedSales(db, { documentId: request.params.id }).catch(() => {});
       await audit(db, { tenantId: request.tenantId, userId: request.userId || null, action: 'document.cancelled', target: `${original.etd_type}-${String(original.series_number).padStart(3, '0')}-${String(original.serial).padStart(9, '0')}`, details: { reason: request.body.reason, result: result.status }, ip: request.ip });
       const document = documentJson(await loadDocument(deps, request.tenantId, request.params.id));
       return reply.code(result.status === 'pending' ? 202 : 200).send({

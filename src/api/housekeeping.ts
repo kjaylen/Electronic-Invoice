@@ -15,6 +15,7 @@ import type { Mailer } from '../mail/mailer.ts';
 import { runNotifications, type NotifyResult } from '../notify/notifications.ts';
 import { heartbeat, opsStatus, type OpsThresholds, sendAlerts } from '../ops/monitoring.ts';
 import { backfillDueDates } from '../receivables/receivables.ts';
+import { reverseVoidedSales } from '../inventory/stock.ts';
 
 export interface HousekeepingOptions {
   mailer?: Mailer;
@@ -56,6 +57,8 @@ export async function runHousekeepingOnce(db: Queryable, options: HousekeepingOp
     result.billing = await step('billing', async () => runBilling(await billing()));
   }
   if (options.reconcilePayments) await step('payments', options.reconcilePayments);
+  // Stock sold on documents that were rejected or cancelled since goes back on the shelf.
+  await step('stock', () => reverseVoidedSales(db));
   // Due dates for invoices issued before they were kept (read from the signed XML).
   await step('due dates', () => backfillDueDates(db));
   if (options.recurring) await step('recurring invoices', options.recurring);

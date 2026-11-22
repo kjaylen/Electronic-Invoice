@@ -56,10 +56,12 @@ export function Dashboard() {
   const [rejected, setRejected] = useState<DocumentInfo[]>([]);
   const [pending, setPending] = useState<DocumentInfo[]>([]);
   const [orders, setOrders] = useState<{ unpaid: number; unfulfilled: number } | null>(null);
+  const [stock, setStock] = useState<{ low: number; out: number } | null>(null);
   const [summary, setSummary] = useState<Summary | null>(null);
   const today = belizeToday();
   const [todayDocs, setTodayDocs] = useState<DocumentInfo[]>([]);
   const reports = can('reports.view');
+  const stockKeeper = can('catalog.manage');
 
   const load = useCallback(() => {
     void api<Page<DocumentInfo>>('/v1/documents?limit=8').then((r) => setRecent(r.data)).catch(() => setRecent([]));
@@ -68,7 +70,8 @@ export function Dashboard() {
     void api<Page<DocumentInfo>>('/v1/documents?status=pending&limit=20').then((r) => setPending(r.data)).catch(() => {});
     void api<{ counts: { unpaid: number; unfulfilled: number } }>('/v1/orders?view=to_do&q=%23000000000').then((r) => setOrders(r.counts)).catch(() => {});
     if (reports) void api<Summary>(`/v1/reports/summary?from=${belizeDate(-13)}&to=${today}`).then(setSummary).catch(() => {});
-  }, [today, reports]);
+    if (stockKeeper) void api<{ totals: { low: number; out: number } }>('/v1/inventory?filter=low&limit=1').then((r) => setStock(r.totals)).catch(() => {});
+  }, [today, reports, stockKeeper]);
   useEffect(() => {
     load();
   }, [load]);
@@ -92,6 +95,8 @@ export function Dashboard() {
     ...(orders?.unpaid ? [{ to: '/orders?view=unpaid', tone: 'warn' as const, text: orders.unpaid === 1 ? t('1 online order waiting for payment') : t('{n} online orders waiting for payment', { n: orders.unpaid }) }] : []),
     ...(orders?.unfulfilled ? [{ to: '/orders?view=unfulfilled', tone: 'warn' as const, text: orders.unfulfilled === 1 ? t('1 order to deliver or hand over') : t('{n} orders to deliver or hand over', { n: orders.unfulfilled }) }] : []),
     ...(rejected.length ? [{ to: '/documents?status=rejected', tone: 'bad' as const, text: rejected.length === 1 ? t('1 document rejected by BTS') : t('{n} documents rejected by BTS', { n: rejected.length }) }] : []),
+    ...(stock && stock.out ? [{ to: '/inventory?filter=low', tone: 'warn' as const, text: stock.out === 1 ? t('1 item out of stock') : t('{n} items out of stock', { n: stock.out }) }] : []),
+    ...(stock && stock.low ? [{ to: '/inventory?filter=low', tone: 'warn' as const, text: stock.low === 1 ? t('1 item running low') : t('{n} items running low', { n: stock.low }) }] : []),
     ...(pending.length ? [{ to: '/documents?status=pending', tone: 'warn' as const, text: pending.length === 1 ? t('1 document still waiting for BTS') : t('{n} documents still waiting for BTS', { n: pending.length }) }] : []),
   ];
 

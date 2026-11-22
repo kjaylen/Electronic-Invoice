@@ -49,6 +49,8 @@ const ShopTestPayment = page(() => import('./pages/Shop'), 'ShopTestPayment');
 const Reports = page(() => import('./pages/Reports'), 'Reports');
 const Receivables = page(() => import('./pages/Receivables'), 'Receivables');
 const Expenses = page(() => import('./pages/Expenses'), 'Expenses');
+const Inventory = page(() => import('./pages/Inventory'), 'Inventory');
+const ReceiveStock = page(() => import('./pages/Inventory'), 'ReceiveStock');
 const ExpenseEditor = page(() => import('./pages/Expenses'), 'ExpenseEditor');
 const PayInvoice = page(() => import('./pages/Pay'), 'PayInvoice');
 const Quotes = page(() => import('./pages/Quotes'), 'Quotes');
@@ -147,6 +149,7 @@ function Layout() {
       { to: '/expenses', label: t('Expenses'), icon: Icons.expense, permission: 'expenses.manage' },
       { to: '/customers', label: t('Customers'), icon: Icons.customers },
       { to: '/products', label: t('Products'), icon: Icons.products },
+      { to: '/inventory', label: t('Inventory'), icon: Icons.inventory, permission: 'catalog.manage' },
       { to: '/reports', label: t('Reports'), icon: Icons.reports, permission: 'reports.view' },
     ]],
     [t('Business'), [
@@ -329,6 +332,8 @@ function BusinessApp() {
         <Route path="/reports" element={<Allowed permission="reports.view"><Reports /></Allowed>} />
         <Route path="/receivables" element={<Allowed permission="payments.record"><Receivables /></Allowed>} />
         <Route path="/expenses" element={<Allowed permission="expenses.manage"><Expenses /></Allowed>} />
+        <Route path="/inventory" element={<Allowed permission="catalog.manage"><Inventory /></Allowed>} />
+        <Route path="/inventory/receive" element={<Allowed permission="catalog.manage"><ReceiveStock /></Allowed>} />
         <Route path="/expenses/:id" element={<Allowed permission="expenses.manage"><ExpenseEditor /></Allowed>} />
         <Route path="/quotes" element={<Allowed permission="documents.issue"><Quotes /></Allowed>} />
         <Route path="/quotes/new" element={<QuoteEditor />} />

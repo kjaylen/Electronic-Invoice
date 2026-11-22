@@ -596,7 +596,7 @@ export function NewDocument({ mode = 'issue' }: { mode?: FormMode } = {}) {
                   }}
                   placeholder={t('Search your items, scan a barcode, or describe it')}
                   search={(q) => searchItems(q)}
-                  render={(it) => <><strong>{it.name}</strong> <span className="muted">· {money(it.unitPrice)}{it.sellerCode && ` · ${it.sellerCode}`}</span></>}
+                  render={(it) => <><strong>{it.name}</strong> <span className="muted">· {money(it.unitPrice)}{it.sellerCode && ` · ${it.sellerCode}`}{it.stock !== null && it.stock !== undefined && ` · ${t('{n} in stock', { n: it.stock })}`}</span></>}
                   value={l.description}
                   onText={(v) => updateLine(l.key, { description: v, itemId: undefined })}
                   onPick={(it) => updateLine(l.key, { itemId: it.id, description: it.description, unitCode: it.unitCode, unitPrice: it.unitPrice, gstCategory: it.gstCategory, exemptionReasonCode: it.exemptionReasonCode ?? '' })}
