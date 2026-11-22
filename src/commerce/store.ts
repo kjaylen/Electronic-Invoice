@@ -17,6 +17,7 @@ import { calculateDocument, type LineInput } from '../engine/calc.ts';
 import { BELIZE_DISTRICTS, type Customer, type DistrictCode } from '../engine/ubl.ts';
 import { issueDocument, type IssueRequest, type IssueResult, type PipelineDeps } from '../pipeline/issue.ts';
 import { allocateDiscount, DiscountError, type DiscountKind, discountShare, findUsableDiscount } from './discounts.ts';
+import { openShiftSql } from '../db/shifts.ts';
 
 export class StoreError extends Error {
   override name = 'StoreError';
@@ -458,7 +459,7 @@ const VALID_DOCUMENT = ['authorized', 'authorized_with_alert', 'contingency_pend
  * Mark an order paid and issue its document. Safe to call again: a document
  * that is valid (or still on its way) is kept; a rejected one is replaced.
  */
-export async function markOrderPaid(deps: PipelineDeps, tenantId: string, orderId: string, userId: string | null): Promise<{ order: OrderRow; document: IssueResult | null }> {
+export async function markOrderPaid(deps: PipelineDeps, tenantId: string, orderId: string, userId: string | null, deviceId: string | null = null): Promise<{ order: OrderRow; document: IssueResult | null }> {
   const loaded = await loadOrder(deps.db, tenantId, { id: orderId });
   if (!loaded) throw new StoreError('not_found', 'Order not found');
   const { order, lines } = loaded;
@@ -478,9 +479,9 @@ export async function markOrderPaid(deps: PipelineDeps, tenantId: string, orderI
   // Marked paid at the counter (paid at pickup, cash on delivery): in that person's open shift.
   if (userId) {
     await deps.db.query(
-      `update documents set issued_by = $3, shift_id = (select s.id from register_shifts s where s.tenant_id = $1 and s.opened_by = $3 and s.closed_at is null)
+      `update documents set issued_by = $3, device_id = $4, shift_id = ${openShiftSql('$1', '$3', '$4')}
        where tenant_id = $1 and (id = $2 or supersedes_document_id = $2)`,
-      [tenantId, result.documentId, userId],
+      [tenantId, result.documentId, userId, deviceId],
     );
   }
   return { order: (await loadOrder(deps.db, tenantId, { id: orderId }))!.order, document: result };

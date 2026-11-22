@@ -18,3 +18,12 @@ test-results/
 playwright-report/
 backups/
 *.dump
+
+# Till apps: copies of the web build and packaged installers
+apps/desktop/web/
+apps/desktop/release/
+apps/mobile/www/
+apps/mobile/android/app/build/
+apps/mobile/android/.gradle/
+apps/mobile/ios/App/Pods/
+apps/mobile/ios/App/build/

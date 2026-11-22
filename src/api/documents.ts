@@ -18,7 +18,7 @@ import { formatCents } from '../engine/decimal.ts';
 import { calculateDocument, type LineInput } from '../engine/calc.ts';
 import { BELIZE_DISTRICTS, type Customer, type DocumentReference, ETD_TYPE_NAMES, type IssuedEtdType } from '../engine/ubl.ts';
 import { cancelDocument, issueDocument, type IssueRequest, type IssueResult, type PipelineDeps } from '../pipeline/issue.ts';
-import { renderReceipt, renderSheet } from '../render/pdf.ts';
+import { authorizationText, infoLines, regulatoryLines, renderReceipt, renderSheet } from '../render/pdf.ts';
 import QRCode from 'qrcode';
 import { qrUrl, readEtdForPrint } from '../render/view.ts';
 import { type Queryable, toBigInt } from '../db/database.ts';
@@ -32,6 +32,7 @@ import { ApiError, notFound } from './errors.ts';
 import { date as dateSchema, issueSchema, listQuery, uuid } from './schemas.ts';
 import { assertCanIssue } from '../billing/billing.ts';
 import { type PaymentMethod, receivable, recordPayment, statusesFor } from '../receivables/receivables.ts';
+import { openShiftSql } from '../db/shifts.ts';
 
 const PRINTABLE = ['authorized', 'authorized_with_alert', 'contingency_pending'];
 // Emails per business per hour (shared by every server process), so a compromised account cannot send spam at volume.
@@ -220,17 +221,17 @@ export async function toIssueRequest(deps: PipelineDeps, tenantId: string, body:
  * (credit notes never do), checks the customer's credit limit, signs and
  * sends it to BTS. Quotes and recurring invoices issue through here too.
  */
-export async function issueFromBody(deps: PipelineDeps, tenantId: string, body: IssueBody, userId: string | null): Promise<IssueResult> {
+export async function issueFromBody(deps: PipelineDeps, tenantId: string, body: IssueBody, userId: string | null, options: { deviceId?: string | null } = {}): Promise<IssueResult> {
   const issueRequest = await toIssueRequest(deps, tenantId, body);
   if (issueRequest.etdType !== '04') await assertCanIssue(deps.db, tenantId);
   await checkCreditLimit(deps, tenantId, issueRequest);
   const result = await issueDocument(deps, tenantId, issueRequest);
-  // Who issued it (not part of the signed record). Also on the contingency reissue, if there was one.
+  // Who issued it, on which till and in which shift (not part of the signed record). Also on the contingency reissue, if there was one.
   if (userId) {
     await deps.db.query(
-      `update documents set issued_by = $3, shift_id = (select s.id from register_shifts s where s.tenant_id = $1 and s.opened_by = $3 and s.closed_at is null)
+      `update documents set issued_by = $3, device_id = $4, shift_id = ${openShiftSql('$1', '$3', '$4')}
        where tenant_id = $1 and (id = $2 or supersedes_document_id = $2)`,
-      [tenantId, result.documentId, userId],
+      [tenantId, result.documentId, userId, options.deviceId ?? null],
     );
   }
   // A sale takes the items off the shelf (tracked ones), once it has legal value or is on its way to BTS.
@@ -491,14 +492,14 @@ export function registerDocumentRoutes(app: FastifyInstance, deps: PipelineDeps,
 
     let documentId: string | undefined;
     try {
-      const result = await issueFromBody(deps, tenantId, request.body, request.userId || null);
+      const result = await issueFromBody(deps, tenantId, request.body, request.userId || null, { deviceId: request.posDevice?.id ?? null });
       documentId = result.documentId;
       // Paid on the spot: record it, once the invoice has legal value (a rejected one is never owed).
       const paid = request.body.paid;
       if (paid && (request.body.type === '01' || request.body.type === '03') && can(request.principal, 'payments.record')) {
         const open = await receivable(db, tenantId, result.documentId);
         if (open && open.balanceCents > 0n) {
-          await recordPayment(db, tenantId, result.documentId, { amountCents: open.balanceCents, method: paid.method, reference: paid.reference ?? null, paidOn: open.issueDate }, request.userId || null);
+          await recordPayment(db, tenantId, result.documentId, { amountCents: open.balanceCents, method: paid.method, reference: paid.reference ?? null, paidOn: open.issueDate }, request.userId || null, { deviceId: request.posDevice?.id ?? null });
         }
       }
       const body = await withPayment(tenantId, documentJson(await loadDocument(deps, tenantId, result.documentId)));
@@ -696,11 +697,19 @@ export function registerDocumentRoutes(app: FastifyInstance, deps: PipelineDeps,
     const view = readEtdForPrint(row.signed_xml);
     const url = qrUrl(row.etdui);
     const svg = await QRCode.toString(url, { type: 'svg', errorCorrectionLevel: 'M', margin: 0 });
+    const options = row.protocol_number ? { protocolNumber: row.protocol_number } : {};
     return {
       view,
       status: row.status,
       protocolNumber: row.protocol_number,
       qr: { url, image: `data:image/svg+xml;base64,${Buffer.from(svg, 'utf8').toString('base64')}` },
+      // The printed copy's texts, as the PDF writes them (receipt printers on tills print from these).
+      printed: {
+        printable: PRINTABLE.includes(row.status),
+        authorization: authorizationText(view, { ...options, draft: true }),
+        regulatory: regulatoryLines(view, options),
+        info: infoLines(view),
+      },
     };
   });
 

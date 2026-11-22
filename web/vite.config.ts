@@ -8,7 +8,17 @@ export default defineConfig({
   root: fileURLToPath(new URL('.', import.meta.url)),
   plugins: [react()],
   // three.js (the sign-in background) is one ~130 KB gzipped chunk, loaded after the form.
-  build: { outDir: 'dist', emptyOutDir: true, sourcemap: true, chunkSizeWarningLimit: 600 },
+  // Three pages: the web app, the till (iOS, Android, desktop and /pos), and the till's customer display.
+  build: {
+    outDir: 'dist', emptyOutDir: true, sourcemap: true, chunkSizeWarningLimit: 600,
+    rollupOptions: {
+      input: {
+        main: fileURLToPath(new URL('index.html', import.meta.url)),
+        pos: fileURLToPath(new URL('pos.html', import.meta.url)),
+        display: fileURLToPath(new URL('display.html', import.meta.url)),
+      },
+    },
+  },
   server: {
     port: 5173,
     proxy: {

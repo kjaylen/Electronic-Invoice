@@ -13,7 +13,9 @@
  *
  * What a shift holds: the documents issued and the invoice payments recorded
  * by the person who opened it while it was open (attached when made), and
- * its cash movements. Money in: receipts by their payment means, and invoice
+ * its cash movements. On a till, the shift is the till's drawer: everyone
+ * signed in on that till sells into it, records cash in and out, and may
+ * close it. Money in: receipts by their payment means, and invoice
  * payments by method. Money out: credit notes against receipts (refunds)
  * by their means, and cash paid out.
  */
@@ -161,7 +163,8 @@ export function registerShiftRoutes(app: FastifyInstance, deps: PipelineDeps) {
   const { db } = deps;
   const idParams = { type: 'object', required: ['id'], properties: { id: uuid } } as const;
   const seesAll = (request: FastifyRequest) => can(request.principal, 'reports.view');
-  const mayHandle = (request: FastifyRequest, s: ShiftRow) => s.opened_by === request.userId || can(request.principal, 'documents.adjust');
+  const atThisTill = (request: FastifyRequest, s: ShiftRow) => Boolean(request.posDevice && request.posDevice.registerId === s.register_id);
+  const mayHandle = (request: FastifyRequest, s: ShiftRow) => s.opened_by === request.userId || atThisTill(request, s) || can(request.principal, 'documents.adjust');
   const person = (request: FastifyRequest) => {
     if (!request.userId) throw new ApiError(403, 'forbidden', 'Shifts are for people at the counter, not API keys');
     return request.userId;
@@ -208,7 +211,13 @@ export function registerShiftRoutes(app: FastifyInstance, deps: PipelineDeps) {
   // ---------- shifts ----------
   app.get('/shifts/current', async (request) => {
     if (!request.userId) return { shift: null, report: null };
-    const s = (await db.query<ShiftRow>(`select ${SHIFT_COLUMNS} from ${SHIFT_FROM} where s.tenant_id = $1 and s.opened_by = $2 and s.closed_at is null`, [request.tenantId, request.userId])).rows[0];
+    // On a till: its drawer's open shift. Elsewhere: my own (not a till's).
+    const s = (await db.query<ShiftRow>(
+      `select ${SHIFT_COLUMNS} from ${SHIFT_FROM} where s.tenant_id = $1 and s.closed_at is null
+         and (case when $3::uuid is null then s.opened_by = $2 and s.device_id is null else s.register_id = $3 end)
+       order by s.opened_at desc limit 1`,
+      [request.tenantId, request.userId, request.posDevice?.registerId ?? null],
+    )).rows[0];
     return s ? { shift: shiftJson(s), report: await shiftReport(db, request.tenantId, s) } : { shift: null, report: null };
   });
 
@@ -220,7 +229,8 @@ export function registerShiftRoutes(app: FastifyInstance, deps: PipelineDeps) {
       const userId = person(request);
       const float = parseCents(request.body.openingFloat);
       if (float < 0n) throw new ApiError(422, 'invalid_shift', 'The float cannot be negative');
-      let registerId = request.body.registerId;
+      // A till always opens its own drawer.
+      let registerId = request.posDevice ? request.posDevice.registerId : request.body.registerId;
       if (!registerId) {
         // The first shift of a business creates its register.
         const first = (await db.query<{ id: string }>('select id from registers where tenant_id = $1 and archived_at is null order by created_at limit 2', [request.tenantId])).rows;
@@ -237,8 +247,8 @@ export function registerShiftRoutes(app: FastifyInstance, deps: PipelineDeps) {
       try {
         await db.transaction(async (tx) => {
           const n = (await tx.query<{ n: number }>('update tenants set next_shift_number = next_shift_number + 1 where id = $1 returning next_shift_number - 1 as n', [request.tenantId])).rows[0]!.n;
-          await tx.query('insert into register_shifts (id, tenant_id, register_id, number, opened_by, opening_float_cents) values ($1, $2, $3, $4, $5, $6)',
-            [id, request.tenantId, registerId, n, userId, String(float)]);
+          await tx.query('insert into register_shifts (id, tenant_id, register_id, number, opened_by, opening_float_cents, device_id) values ($1, $2, $3, $4, $5, $6, $7)',
+            [id, request.tenantId, registerId, n, userId, String(float), request.posDevice?.id ?? null]);
         });
       } catch (e) {
         const m = String((e as Error).message);
@@ -317,10 +327,10 @@ export function registerShiftRoutes(app: FastifyInstance, deps: PipelineDeps) {
       requirePermission(request, 'documents.issue');
       const all = seesAll(request);
       const rows = (await db.query<ShiftRow>(
-        `select ${SHIFT_COLUMNS} from ${SHIFT_FROM} where s.tenant_id = $1 and ($2::uuid is null or s.opened_by = $2)
+        `select ${SHIFT_COLUMNS} from ${SHIFT_FROM} where s.tenant_id = $1 and ($2::uuid is null or s.opened_by = $2 or s.register_id = $5::uuid)
            and ($3::date is null or (s.opened_at - interval '6 hours')::date >= $3::date) and ($4::date is null or (s.opened_at - interval '6 hours')::date <= $4::date)
          order by s.opened_at desc limit 200`,
-        [request.tenantId, all ? null : request.userId || null, request.query.from ?? null, request.query.to ?? null],
+        [request.tenantId, all ? null : request.userId || null, request.query.from ?? null, request.query.to ?? null, request.posDevice?.registerId ?? null],
       )).rows;
       return { data: rows.map(shiftJson) };
     },
@@ -329,7 +339,7 @@ export function registerShiftRoutes(app: FastifyInstance, deps: PipelineDeps) {
   const visible = async (request: FastifyRequest<{ Params: { id: string } }>) => {
     requirePermission(request, 'documents.issue');
     const s = await loadShift(db, request.tenantId, request.params.id);
-    if (!seesAll(request) && s.opened_by !== request.userId) throw notFound('Shift');
+    if (!seesAll(request) && s.opened_by !== request.userId && !atThisTill(request, s)) throw notFound('Shift');
     return s;
   };
 

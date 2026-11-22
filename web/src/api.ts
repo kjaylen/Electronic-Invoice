@@ -1,6 +1,7 @@
 /**
  * Calls to the API. Same origin, session cookie, and the CSRF header the
- * server requires on every cookie-authenticated change.
+ * server requires on every cookie-authenticated change. On a till (the POS
+ * apps), the server's address and the cashier's bearer token instead.
  */
 
 export class ApiError extends Error {
@@ -20,16 +21,31 @@ import { BUSINESS } from './business';
 /** Fired when a signed-in call answers 401 (session expired or signed out elsewhere). */
 export const UNAUTHORIZED_EVENT = 'etd:unauthorized';
 
-export async function api<T = unknown>(path: string, options: { method?: string; body?: unknown; headers?: Record<string, string>; signal?: AbortSignal } = {}): Promise<T> {
-  let res: Response;
+/** On a till: where the server is and the token to send (the cashier's session, or the till's own before sign-in). */
+interface TillTransport {
+  baseUrl: string;
+  token: () => string | null;
+}
+let till: TillTransport | null = null;
+
+/** Make every API call go to the till's server with its bearer token (the POS apps). */
+export function setTillTransport(t: TillTransport | null) {
+  till = t;
+}
+
+type CallOptions = { method?: string; body?: unknown; headers?: Record<string, string>; signal?: AbortSignal; token?: string | null };
+
+async function call(path: string, options: CallOptions): Promise<Response> {
+  const token = options.token !== undefined ? options.token : till?.token() ?? null;
   try {
-    res = await fetch(path, {
+    return await fetch(till ? `${till.baseUrl}${path}` : path, {
       method: options.method ?? 'GET',
-      credentials: 'same-origin',
+      credentials: till ? 'omit' : 'same-origin',
       headers: {
         'X-Requested-With': 'etd-web',
         // Which business this call is for: each business has its own sign-in cookie.
-        ...(BUSINESS && { 'X-Business': BUSINESS }),
+        ...(!till && BUSINESS && { 'X-Business': BUSINESS }),
+        ...(till && token && { Authorization: `Bearer ${token}` }),
         ...(options.body !== undefined && { 'Content-Type': 'application/json' }),
         ...options.headers,
       },
@@ -40,6 +56,29 @@ export async function api<T = unknown>(path: string, options: { method?: string;
     if ((e as Error).name === 'AbortError') throw e;
     throw new ApiError(0, 'network', 'Cannot reach the server. Check your connection and try again.');
   }
+}
+
+async function failure(res: Response, path: string): Promise<ApiError> {
+  let data: { error?: { code?: string; message?: string; details?: unknown } } | undefined;
+  try {
+    data = JSON.parse(await res.text());
+  } catch {
+    data = undefined;
+  }
+  const e = data?.error ?? {};
+  if (res.status === 401 && !path.startsWith('/v1/auth/') && !path.startsWith('/v1/pos/')) window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
+  return new ApiError(res.status, e.code ?? 'error', e.message ?? `Request failed (${res.status})`, e.details);
+}
+
+/** A file from the API (a PDF), with the same sign-in as other calls. */
+export async function apiBlob(path: string, options: CallOptions = {}): Promise<Blob> {
+  const res = await call(path, options);
+  if (!res.ok) throw await failure(res, path);
+  return res.blob();
+}
+
+export async function api<T = unknown>(path: string, options: CallOptions = {}): Promise<T> {
+  const res = await call(path, options);
   if (res.status === 204) return undefined as T;
   const text = await res.text();
   let data: { error?: { code?: string; message?: string; details?: unknown } } | undefined;
@@ -50,7 +89,7 @@ export async function api<T = unknown>(path: string, options: { method?: string;
   }
   if (!res.ok) {
     const e = data?.error ?? {};
-    if (res.status === 401 && !path.startsWith('/v1/auth/')) window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
+    if (res.status === 401 && !path.startsWith('/v1/auth/') && !path.startsWith('/v1/pos/')) window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
     throw new ApiError(res.status, e.code ?? 'error', e.message ?? `Request failed (${res.status})`, e.details);
   }
   return data as T;
@@ -82,6 +121,8 @@ export interface Account {
   mustChangePassword: boolean;
   lastLoginAt: string | null;
   createdAt: string;
+  /** Has a PIN for signing in on tills. */
+  hasPin?: boolean;
 }
 
 export interface SessionInfo {

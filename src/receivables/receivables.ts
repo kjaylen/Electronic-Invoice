@@ -17,6 +17,7 @@ import type { Queryable } from '../db/database.ts';
 import { toBigInt } from '../db/database.ts';
 import { formatCents } from '../engine/decimal.ts';
 import { readEtdForPrint } from '../render/view.ts';
+import { openShiftSql } from '../db/shifts.ts';
 
 export class ReceivableError extends Error {
   override name = 'ReceivableError';
@@ -165,7 +166,7 @@ export interface NewPayment {
  * Record money received against an invoice (or debit note). Never more than
  * the balance. When it settles the invoice, an "invoice.paid" event goes out.
  */
-export async function recordPayment(db: Queryable, tenantId: string, documentId: string, p: NewPayment, userId: string | null, options: { allowOverpay?: boolean } = {}): Promise<{ payment: PaymentRow; receivable: Receivable }> {
+export async function recordPayment(db: Queryable, tenantId: string, documentId: string, p: NewPayment, userId: string | null, options: { allowOverpay?: boolean; deviceId?: string | null } = {}): Promise<{ payment: PaymentRow; receivable: Receivable }> {
   const before = await receivable(db, tenantId, documentId);
   if (!before) throw new ReceivableError('Only an authorized tax invoice or debit note takes payments');
   if (p.method !== 'refund') {
@@ -182,9 +183,9 @@ export async function recordPayment(db: Queryable, tenantId: string, documentId:
   const inserted = await db.query(
     `insert into invoice_payments (id, tenant_id, document_id, amount_cents, method, reference, paid_on, note, created_by, online_payment_id, external_id, shift_id)
      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
-       (select s.id from register_shifts s where s.tenant_id = $2 and s.opened_by = $9 and s.closed_at is null))
+       ${openShiftSql('$2', '$9', '$12')})
      on conflict do nothing returning id`,
-    [id, tenantId, documentId, String(p.amountCents), p.method, p.reference?.trim() || null, paidOn, p.note?.trim() || null, userId, p.onlinePaymentId ?? null, p.externalId ?? null],
+    [id, tenantId, documentId, String(p.amountCents), p.method, p.reference?.trim() || null, paidOn, p.note?.trim() || null, userId, p.onlinePaymentId ?? null, p.externalId ?? null, options.deviceId ?? null],
   );
   if (!inserted.rows.length) throw new ReceivableError('This payment is already recorded');
   const after = (await receivable(db, tenantId, documentId))!;

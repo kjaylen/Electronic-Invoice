@@ -1,0 +1,62 @@
+{
+  "name": "einvoicing-till",
+  "productName": "eInvoicing Till",
+  "version": "1.0.0",
+  "private": true,
+  "description": "The till for Windows, macOS and Linux: sell, print receipts on network and USB receipt printers, open the cash drawer, show the customer the total.",
+  "main": "main.cjs",
+  "scripts": {
+    "web": "node scripts/copy-web.mjs",
+    "start": "npm run web && electron .",
+    "smoke": "npm run web && node scripts/smoke.mjs",
+    "dist": "npm run web && electron-builder",
+    "dist:win": "npm run web && electron-builder --win",
+    "dist:mac": "npm run web && electron-builder --mac",
+    "dist:linux": "npm run web && electron-builder --linux"
+  },
+  "build": {
+    "appId": "bz.einvoicing.till",
+    "productName": "eInvoicing Till",
+    "files": [
+      "main.cjs",
+      "preload.cjs",
+      "display-preload.cjs",
+      "network.cjs",
+      "web/**/*",
+      "!web/**/*.map"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "artifactName": "eInvoicing-Till-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.business",
+      "artifactName": "eInvoicing-Till-${version}.${ext}"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Office",
+      "artifactName": "eInvoicing-Till-${version}.${ext}"
+    }
+  },
+  "devDependencies": {
+    "electron": "45.4.1",
+    "electron-builder": "26.18.0"
+  }
+}

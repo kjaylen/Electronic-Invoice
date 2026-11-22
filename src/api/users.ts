@@ -7,6 +7,8 @@
  *   POST  /v1/users/:id/disable|enable    deactivate (signs them out) or reactivate
  *   POST  /v1/users/:id/password          set a temporary password, or send a set-password link
  *   POST  /v1/users/:id/sign-out          end all their sessions
+ *   PUT|DELETE /v1/users/:id/pin          set or remove someone's PIN for signing in on tills
+ *   PUT|DELETE /v1/me/pin                 set or remove my own
  *   GET   /v1/audit                       the activity log
  *
  * Owners manage everyone; admins manage managers, cashiers and accountants.
@@ -18,6 +20,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { audit, auditEvents } from '../db/audit.ts';
 import {
+  AccountError,
   activeOwnerCount,
   activeSessionCount,
   createPasswordLink,
@@ -25,6 +28,7 @@ import {
   getUser,
   listUsers,
   setPassword,
+  setPin,
   setUserStatus,
   signOutEverywhere,
   updateUser,
@@ -232,6 +236,29 @@ export function registerUserRoutes(app: FastifyInstance, deps: PipelineDeps, ctx
     }
     return userJson((await getUser(db, request.tenantId, target.id))!);
   });
+
+  // A PIN for signing in on tills. Setting or removing it signs the person out of every till.
+  const pinBody = { type: 'object', required: ['pin'], additionalProperties: false, properties: { pin: { type: 'string', minLength: 1, maxLength: 12 } } } as const;
+  const savePin = async (request: FastifyRequest, target: User, pin: string | null) => {
+    try {
+      await setPin(db, request.tenantId, target.id, pin);
+    } catch (e) {
+      if (e instanceof AccountError) throw new ApiError(422, 'invalid_pin', e.message);
+      throw e;
+    }
+    await log(request, pin ? 'user.pin_set' : 'user.pin_removed', target);
+    return userJson((await getUser(db, request.tenantId, target.id))!);
+  };
+  const me = async (request: FastifyRequest) => {
+    if (request.principal === 'api' || request.posDevice || !request.userId) throw new ApiError(403, 'forbidden', 'Set your PIN in the web app');
+    return (await getUser(db, request.tenantId, request.userId))!;
+  };
+  app.put<{ Params: { id: string }; Body: { pin: string } }>('/users/:id/pin', { schema: { params: idParams, body: pinBody } }, async (request) =>
+    savePin(request, await manageable(request, request.params.id), request.body.pin));
+  app.delete<{ Params: { id: string } }>('/users/:id/pin', { schema: { params: idParams } }, async (request) =>
+    savePin(request, await manageable(request, request.params.id), null));
+  app.put<{ Body: { pin: string } }>('/me/pin', { schema: { body: pinBody } }, async (request) => savePin(request, await me(request), request.body.pin));
+  app.delete('/me/pin', async (request) => savePin(request, await me(request), null));
 
   app.post<{ Params: { id: string } }>('/users/:id/sign-out', { schema: { params: idParams } }, async (request) => {
     const target = request.params.id === request.userId ? (await getUser(db, request.tenantId, request.userId))! : await manageable(request, request.params.id);

@@ -22,6 +22,9 @@ const SCRYPT = { N: 2 ** 15, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
 export const MIN_PASSWORD_LENGTH = 10;
 export const SESSION_IDLE_MS = 7 * 24 * 3600 * 1000;
 export const SESSION_MAX_MS = 30 * 24 * 3600 * 1000;
+/** A cashier's session on a till: ends after 12 hours unused, and within a day at most. */
+export const POS_SESSION_IDLE_MS = 12 * 3600 * 1000;
+export const POS_SESSION_MAX_MS = 24 * 3600 * 1000;
 export const RESET_TTL_MS = 60 * 60 * 1000;
 export const WELCOME_TTL_MS = 7 * 24 * 3600 * 1000;
 
@@ -43,6 +46,8 @@ export interface User {
   mustChangePassword: boolean;
   lastLoginAt: string | null;
   createdAt: string;
+  /** Has a PIN for signing in on tills. */
+  hasPin: boolean;
 }
 
 export interface BusinessRef {
@@ -64,9 +69,10 @@ interface UserRow {
   must_change_password: boolean;
   last_login_at: string | Date | null;
   created_at: string | Date;
+  pos_pin_set_at: string | Date | null;
 }
 
-const USER_COLUMNS = 'u.id, u.tenant_id, u.name, u.email, u.username, u.role, u.status, u.must_change_password, u.last_login_at, u.created_at';
+const USER_COLUMNS = 'u.id, u.tenant_id, u.name, u.email, u.username, u.role, u.status, u.must_change_password, u.last_login_at, u.created_at, u.pos_pin_set_at';
 
 const toUser = (r: UserRow): User => ({
   id: r.id,
@@ -79,7 +85,41 @@ const toUser = (r: UserRow): User => ({
   mustChangePassword: r.must_change_password,
   lastLoginAt: r.last_login_at ? new Date(r.last_login_at).toISOString() : null,
   createdAt: new Date(r.created_at).toISOString(),
+  hasPin: r.pos_pin_set_at !== null,
 });
+
+// ---------- PINs for tills ----------
+
+/** Why a PIN is refused, or null when it is fine: 4 to 8 digits, not all one digit, not a run like 1234 or 9876. */
+export function pinProblem(pin: string): string | null {
+  if (!/^\d{4,8}$/.test(pin)) return 'A PIN is 4 to 8 digits';
+  if (new Set(pin).size === 1) return 'Choose a PIN that is not one digit repeated';
+  const steps = [...pin].slice(1).map((d, i) => (Number(d) - Number(pin[i]) + 10) % 10);
+  if (steps.every((s) => s === 1) || steps.every((s) => s === 9)) return 'Choose a PIN that is not a run of digits like 1234';
+  return null;
+}
+
+/** Set (or with null, remove) a person's till PIN. Their sessions on tills end. */
+export async function setPin(db: Queryable, tenantId: string, userId: string, pin: string | null): Promise<void> {
+  if (pin !== null) {
+    const problem = pinProblem(pin);
+    if (problem) throw new AccountError(problem);
+  }
+  const hash = pin === null ? null : await hashPassword(pin);
+  await db.query('update users set pos_pin_hash = $3, pos_pin_set_at = case when $3::text is null then null else now() end where id = $1 and tenant_id = $2', [userId, tenantId, hash]);
+  await db.query('delete from sessions where user_id = $1 and device_id is not null', [userId]);
+}
+
+/** Check a person's till PIN (active accounts only). */
+export async function checkPin(db: Queryable, tenantId: string, userId: string, pin: string): Promise<User | null> {
+  const row = (await db.query<UserRow & { pos_pin_hash: string | null }>(`select ${USER_COLUMNS}, u.pos_pin_hash from users u where u.id = $1 and u.tenant_id = $2`, [userId, tenantId])).rows[0];
+  if (!row?.pos_pin_hash || row.status !== 'active') {
+    dummyHash ??= hashPassword(randomBytes(16).toString('hex'));
+    await verifyPassword(pin, await dummyHash);
+    return null;
+  }
+  return (await verifyPassword(pin, row.pos_pin_hash)) ? toUser(row) : null;
+}
 
 export async function hashPassword(password: string): Promise<string> {
   const salt = randomBytes(16);
@@ -278,6 +318,8 @@ export interface Session {
   id: string;
   user: User;
   business: BusinessRef;
+  /** A session on a till: the till and its cash drawer. */
+  device?: { id: string; registerId: string };
   /** required: the business requires it for this person's role (owners and admins). */
   twoFactor: { enabled: boolean; required: boolean };
 }
@@ -285,37 +327,40 @@ export interface Session {
 /** Roles a business can require two-step sign-in for. */
 export const TWO_FACTOR_ROLES: readonly Role[] = ['owner', 'admin'];
 
-export async function createSession(db: Queryable, userId: string): Promise<{ token: string; expiresAt: Date }> {
+export async function createSession(db: Queryable, userId: string, options: { deviceId?: string } = {}): Promise<{ token: string; expiresAt: Date }> {
   const token = randomBytes(32).toString('base64url');
-  const expiresAt = new Date(Date.now() + SESSION_IDLE_MS);
-  await db.query('insert into sessions (id, token_hash, user_id, expires_at) values ($1, $2, $3, $4)', [randomUUID(), tokenHash(token), userId, expiresAt.toISOString()]);
+  const expiresAt = new Date(Date.now() + (options.deviceId ? POS_SESSION_IDLE_MS : SESSION_IDLE_MS));
+  await db.query('insert into sessions (id, token_hash, user_id, expires_at, device_id) values ($1, $2, $3, $4, $5)', [randomUUID(), tokenHash(token), userId, expiresAt.toISOString(), options.deviceId ?? null]);
   return { token, expiresAt };
 }
 
 export async function lookupSession(db: Queryable, token: string): Promise<Session | null> {
   if (!/^[A-Za-z0-9_-]{43}$/.test(token)) return null;
-  const row = (await db.query<UserRow & { session_id: string; s_created_at: string | Date; expires_at: string | Date; slug: string; legal_name: string; trade_name: string | null; environment: string; require_two_factor: boolean; tf_enabled: boolean }>(
+  const row = (await db.query<UserRow & { session_id: string; s_created_at: string | Date; expires_at: string | Date; slug: string; legal_name: string; trade_name: string | null; environment: string; require_two_factor: boolean; tf_enabled: boolean; device_id: string | null; device_register: string | null; device_revoked: boolean | null }>(
     `select ${USER_COLUMNS}, s.id as session_id, s.created_at as s_created_at, s.expires_at, t.slug, t.legal_name, t.trade_name, t.environment, t.require_two_factor,
-       exists (select 1 from two_factor tf where tf.owner_kind = 'user' and tf.owner_id = u.id and tf.confirmed_at is not null) as tf_enabled
-     from sessions s join users u on u.id = s.user_id join tenants t on t.id = u.tenant_id
+       exists (select 1 from two_factor tf where tf.owner_kind = 'user' and tf.owner_id = u.id and tf.confirmed_at is not null) as tf_enabled,
+       s.device_id, d.register_id as device_register, d.revoked_at is not null as device_revoked
+     from sessions s join users u on u.id = s.user_id join tenants t on t.id = u.tenant_id left join pos_devices d on d.id = s.device_id
      where s.token_hash = $1`,
     [tokenHash(token)],
   )).rows[0];
   if (!row) return null;
   const now = Date.now();
   const created = new Date(row.s_created_at).getTime();
-  if (row.status !== 'active' || new Date(row.expires_at).getTime() <= now || created + SESSION_MAX_MS <= now) {
+  const [idle, max] = row.device_id ? [POS_SESSION_IDLE_MS, POS_SESSION_MAX_MS] : [SESSION_IDLE_MS, SESSION_MAX_MS];
+  if (row.status !== 'active' || row.device_revoked || new Date(row.expires_at).getTime() <= now || created + max <= now) {
     await db.query('delete from sessions where id = $1', [row.session_id]);
     return null;
   }
   // Slide the idle expiry, at most once a minute.
   db.query(`update sessions set last_seen_at = now(), expires_at = $2 where id = $1 and last_seen_at < now() - interval '1 minute'`, [
-    row.session_id, new Date(Math.min(now + SESSION_IDLE_MS, created + SESSION_MAX_MS)).toISOString(),
+    row.session_id, new Date(Math.min(now + idle, created + max)).toISOString(),
   ]).catch(() => {});
   return {
     id: row.session_id,
     user: toUser(row),
     business: { id: row.tenant_id, slug: row.slug, legalName: row.legal_name, tradeName: row.trade_name, environment: row.environment },
+    ...(row.device_id && { device: { id: row.device_id, registerId: row.device_register! } }),
     twoFactor: { enabled: row.tf_enabled, required: row.require_two_factor && TWO_FACTOR_ROLES.includes(row.role) },
   };
 }

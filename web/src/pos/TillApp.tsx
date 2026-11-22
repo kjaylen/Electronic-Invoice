@@ -1,0 +1,601 @@
+/**
+ * The till: pair it once with a code from the web app, then people sign in
+ * with a PIN and sell. It locks itself after a few idle minutes. Runs in the
+ * iOS, Android and desktop apps and in a browser at /pos.
+ */
+
+import { createContext, type FormEvent, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { api, ApiError, type Account, type Me, type Permission, type Role, setTillTransport, UNAUTHORIZED_EVENT } from '../api';
+import { LanguageToggle, useT } from '../i18n';
+import { SessionContext, type SessionState } from '../session';
+import { useToast } from '../toast';
+import { ErrorText, Field } from '../ui';
+import { HardwareSettings } from './Devices';
+import { type HardwareConfig, hardwareReport, HardwareError, loadHardware, openDrawer as kickDrawer, type PrinterConfig, printTicket as sendTicket, saveHardware } from './hardware';
+import { browserCanScan, type Platform, platform as getPlatform } from './platform';
+import { Sales } from './Sales';
+import { Sell } from './Sell';
+import { ShiftPanel } from './ShiftPanel';
+import { type DocumentView, documentTicket, type Ticket } from './ticket';
+import { CameraScanner } from './CameraScanner';
+
+export interface TillInfo {
+  business: { slug: string; name: string; tin: string; environment: string };
+  device: { id: string; name: string; register: { id: string; name: string } };
+  users: Array<{ id: string; name: string; role: Role; hasPin: boolean }>;
+}
+
+interface SignedIn {
+  token: string;
+  user: { id: string; name: string; role: Role };
+  permissions: Permission[];
+}
+
+interface TillContextValue {
+  platform: Platform;
+  server: string;
+  till: TillInfo;
+  hardware: HardwareConfig;
+  setHardware: (h: HardwareConfig) => Promise<void>;
+  user: SignedIn['user'];
+  can: (p: Permission) => boolean;
+  /** Owners, admins and managers set up the till's hardware. */
+  isManager: boolean;
+  receiptPrinter: PrinterConfig | null;
+  printDocument: (id: string, options?: { copy?: boolean; openDrawer?: boolean }) => Promise<void>;
+  printTicket: (ticket: Ticket, options?: { openDrawer?: boolean; title?: string }) => Promise<void>;
+  openDrawer: () => Promise<void>;
+  lock: () => void;
+  unpair: () => Promise<void>;
+  /** Read a barcode with the camera, where the device has one. */
+  scanWithCamera: (() => Promise<string | null>) | null;
+}
+
+const TillContext = createContext<TillContextValue | null>(null);
+export const useTill = () => {
+  const v = useContext(TillContext);
+  if (!v) throw new Error('useTill outside the till');
+  return v;
+};
+
+const SERVER = 'till.server';
+const TOKEN = 'till.token';
+
+/** "app.example.bz" -> "https://app.example.bz" */
+function normalizeServer(s: string): string {
+  const v = s.trim().replace(/\/+$/, '');
+  if (!v) return '';
+  return /^https?:\/\//i.test(v) ? v : `https://${v}`;
+}
+
+/** A pairing QR code holds the till page's address with the code: https://app.example.bz/pos?pair=ABCD-EFGH */
+function readPairingLink(text: string): { server: string; code: string } | null {
+  try {
+    const u = new URL(text.trim());
+    const code = u.searchParams.get('pair');
+    return code ? { server: u.origin, code } : null;
+  } catch {
+    return null;
+  }
+}
+
+type Phase =
+  | { kind: 'loading' }
+  | { kind: 'pair'; server: string }
+  | { kind: 'unreachable'; server: string; token: string; error: unknown }
+  | { kind: 'lock'; server: string; token: string; till: TillInfo }
+  | { kind: 'till'; server: string; token: string; till: TillInfo; session: SignedIn };
+
+export function TillApp() {
+  const t = useT();
+  const toast = useToast();
+  const [p, setPlatform] = useState<Platform | null>(null);
+  const [hardware, setHardwareState] = useState<HardwareConfig | null>(null);
+  const [phase, setPhase] = useState<Phase>({ kind: 'loading' });
+  const session = useRef<string | null>(null);
+  const device = useRef<string | null>(null);
+
+  // Every call goes to the till's server: as the cashier once signed in, as the till before.
+  const useServer = useCallback((server: string, token: string | null) => {
+    device.current = token;
+    setTillTransport({ baseUrl: server, token: () => session.current ?? device.current });
+  }, []);
+
+  const loadTill = useCallback(async (server: string, token: string) => {
+    useServer(server, token);
+    try {
+      const till = await api<TillInfo>('/v1/pos/till', { token });
+      setPhase({ kind: 'lock', server, token, till });
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) {
+        const pl = await getPlatform();
+        await pl.removeItem(TOKEN);
+        toast(t('This till was removed or paired again. Pair it with a new code.'), 'bad');
+        setPhase({ kind: 'pair', server });
+      } else {
+        setPhase({ kind: 'unreachable', server, token, error: e });
+      }
+    }
+  }, [t, toast, useServer]);
+
+  useEffect(() => {
+    void (async () => {
+      const pl = await getPlatform();
+      setPlatform(pl);
+      setHardwareState(await loadHardware(pl));
+      const fromLink = pl.kind === 'web' ? new URLSearchParams(window.location.search).get('pair') : null;
+      const saved = normalizeServer((await pl.getItem(SERVER)) ?? '');
+      const token = await pl.getItem(TOKEN);
+      const server = pl.kind === 'web' ? window.location.origin : saved || normalizeServer(import.meta.env.VITE_TILL_SERVER ?? '');
+      if (token && !fromLink) await loadTill(server, token);
+      else setPhase({ kind: 'pair', server });
+    })();
+  }, [loadTill]);
+
+  const lock = useCallback(() => {
+    const token = session.current;
+    session.current = null;
+    if (token) void api('/v1/pos/sign-out', { method: 'POST', token }).catch(() => {});
+    setPhase((ph) => (ph.kind === 'till' ? { kind: 'lock', server: ph.server, token: ph.token, till: ph.till } : ph));
+  }, []);
+
+  // Signed out by the server (session expired, PIN changed, till removed): back to the lock screen.
+  useEffect(() => {
+    const onOut = () => lock();
+    window.addEventListener(UNAUTHORIZED_EVENT, onOut);
+    return () => window.removeEventListener(UNAUTHORIZED_EVENT, onOut);
+  }, [lock]);
+
+  // Tell the server what this till runs and what is plugged in: now, and every 5 minutes.
+  const tillToken = phase.kind === 'lock' || phase.kind === 'till' ? phase.token : null;
+  useEffect(() => {
+    if (!tillToken || !p || !hardware) return;
+    const beat = () => void api('/v1/pos/heartbeat', { method: 'POST', token: tillToken, body: { platform: p.kind, appVersion: p.appVersion.slice(0, 30), hardware: hardwareReport(hardware, p) } }).catch(() => {});
+    beat();
+    const timer = setInterval(beat, 5 * 60_000);
+    return () => clearInterval(timer);
+  }, [tillToken, p, hardware]);
+
+  if (!p || !hardware || phase.kind === 'loading') return <div className="till-loading" aria-busy="true">{t('Loading…')}</div>;
+
+  if (phase.kind === 'pair') {
+    return (
+      <Pair
+        platform={p}
+        initialServer={phase.server}
+        onPaired={async (server, token) => {
+          await p.setItem(SERVER, server);
+          await p.setItem(TOKEN, token);
+          if (p.kind === 'web' && window.location.search) window.history.replaceState(null, '', window.location.pathname);
+          await loadTill(server, token);
+        }}
+      />
+    );
+  }
+
+  if (phase.kind === 'unreachable') {
+    return (
+      <div className="till-center">
+        <div className="card stack till-card">
+          <h1>{t('Cannot reach the server')}</h1>
+          <p className="muted">{phase.server}</p>
+          <ErrorText error={phase.error} />
+          <p className="small muted">{t('Selling needs the internet: every receipt is signed and sent to BTS. Check the connection and try again.')}</p>
+          <button type="button" className="big" onClick={() => void loadTill(phase.server, phase.token)}>{t('Try again')}</button>
+        </div>
+      </div>
+    );
+  }
+
+  const unpair = async () => {
+    await api('/v1/pos/unpair', { method: 'POST', token: phase.token }).catch(() => {});
+    session.current = null;
+    await p.removeItem(TOKEN);
+    setPhase({ kind: 'pair', server: phase.server });
+  };
+
+  if (phase.kind === 'lock') {
+    return (
+      <Lock
+        till={phase.till}
+        deviceToken={phase.token}
+        onRefresh={() => void loadTill(phase.server, phase.token)}
+        onSignedIn={(s) => {
+          session.current = s.token;
+          setPhase({ kind: 'till', server: phase.server, token: phase.token, till: phase.till, session: s });
+        }}
+      />
+    );
+  }
+
+  return (
+    <SignedInTill
+      key={phase.session.token}
+      platform={p}
+      server={phase.server}
+      till={phase.till}
+      session={phase.session}
+      hardware={hardware}
+      setHardware={async (h) => {
+        await saveHardware(p, h);
+        setHardwareState(h);
+      }}
+      lock={lock}
+      unpair={unpair}
+    />
+  );
+}
+
+// ---------- pairing ----------
+
+function Pair({ platform, initialServer, onPaired }: { platform: Platform; initialServer: string; onPaired: (server: string, token: string) => Promise<void> }) {
+  const t = useT();
+  const inBrowser = platform.kind === 'web';
+  const [server, setServer] = useState(initialServer);
+  const [code, setCode] = useState(() => (inBrowser ? new URLSearchParams(window.location.search).get('pair') ?? '' : ''));
+  const [editServer, setEditServer] = useState(!inBrowser && !initialServer);
+  const [error, setError] = useState<unknown>(null);
+  const [busy, setBusy] = useState(false);
+  const [camera, setCamera] = useState(false);
+
+  const pair = async (s: string, c: string) => {
+    const base = normalizeServer(s);
+    if (!base) return setError(new ApiError(0, 'server', t('Enter the address of your eInvoicing server')));
+    setBusy(true);
+    setError(null);
+    setTillTransport({ baseUrl: base, token: () => null });
+    try {
+      const r = await api<{ token: string }>('/v1/pos/pair', { method: 'POST', token: null, body: { code: c.trim(), platform: platform.kind, appVersion: platform.appVersion.slice(0, 30) } });
+      await onPaired(base, r.token);
+    } catch (e) {
+      setError(e);
+      setBusy(false);
+    }
+  };
+  // Opened from the pairing QR code in a browser: pair straight away.
+  const autoPaired = useRef(false);
+  useEffect(() => {
+    if (inBrowser && code && !autoPaired.current) {
+      autoPaired.current = true;
+      void pair(server, code);
+    }
+  });
+
+  const scanned = (text: string | null) => {
+    setCamera(false);
+    if (!text) return;
+    const link = readPairingLink(text);
+    if (!link) return setError(new ApiError(0, 'qr', t('That is not a pairing code from eInvoicing')));
+    setServer(link.server);
+    setCode(link.code);
+    void pair(link.server, link.code);
+  };
+  const scan = async () => {
+    if (platform.scanBarcode) scanned(await platform.scanBarcode().catch(() => null));
+    else setCamera(true);
+  };
+
+  return (
+    <div className="till-center">
+      <form className="card stack till-card" onSubmit={(e) => { e.preventDefault(); void pair(server, code); }}>
+        <span className="kicker">{t('Set up this till')}</span>
+        <h1>{t('Pair with your business')}</h1>
+        <p className="muted">{t('In the web app, a manager opens Settings → Tills, adds this till and gets a pairing code. Scan its QR code or type the code here.')}</p>
+        {(platform.scanBarcode || browserCanScan()) && <button type="button" className="big secondary" onClick={() => void scan()}>{t('Scan the QR code')}</button>}
+        {editServer ? (
+          <Field label={t('Server address')} hint={t('The address you sign in to eInvoicing at, e.g. app.example.bz')}>
+            <input inputMode="url" autoCapitalize="off" autoCorrect="off" value={server} onChange={(e) => setServer(e.target.value)} required />
+          </Field>
+        ) : (
+          <p className="small muted">{t('Server')}: {server || '—'} {!inBrowser && <button type="button" className="link" onClick={() => setEditServer(true)}>{t('Change')}</button>}</p>
+        )}
+        <Field label={t('Pairing code')}>
+          <input className="pair-code" autoCapitalize="characters" autoCorrect="off" autoComplete="off" spellCheck={false} placeholder="ABCD-EFGH" value={code}
+            onChange={(e) => {
+              const raw = e.target.value.toUpperCase().replace(/[^0-9A-Z]/g, '').slice(0, 8);
+              setCode(raw.length > 4 ? `${raw.slice(0, 4)}-${raw.slice(4)}` : raw);
+            }} required autoFocus={!editServer} />
+        </Field>
+        <ErrorText error={error} />
+        <button className="big" disabled={busy || code.replace('-', '').length !== 8}>{busy ? t('Pairing…') : t('Pair this till')}</button>
+        <div className="row"><span className="spacer" /><LanguageToggle /></div>
+      </form>
+      {camera && <CameraScanner onClose={() => setCamera(false)} onScan={scanned} />}
+    </div>
+  );
+}
+
+// ---------- the lock screen: who are you, your PIN ----------
+
+const initials = (name: string) => name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join('');
+
+function Lock({ till, deviceToken, onSignedIn, onRefresh }: { till: TillInfo; deviceToken: string; onSignedIn: (s: SignedIn) => void; onRefresh: () => void }) {
+  const t = useT();
+  const [who, setWho] = useState<TillInfo['users'][number] | null>(till.users.length === 1 && till.users[0]!.hasPin ? till.users[0]! : null);
+  const [setup, setSetup] = useState(false);
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 15_000);
+    return () => clearInterval(timer);
+  }, []);
+  const withPin = till.users.filter((u) => u.hasPin);
+
+  if (setup) return <SetPin deviceToken={deviceToken} onDone={() => { setSetup(false); onRefresh(); }} onCancel={() => setSetup(false)} />;
+  return (
+    <div className="till-lock">
+      <header className="till-lock-head">
+        <div>
+          <strong>{till.business.name}</strong>
+          <span className="muted"> · {till.device.name}</span>
+          {till.business.environment !== 'production' && <span className="badge pending">{t('Test')}</span>}
+        </div>
+        <span className="till-clock num">{now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+      </header>
+      {who ? (
+        <PinPad user={who} deviceToken={deviceToken} onBack={() => setWho(null)} onSignedIn={onSignedIn} />
+      ) : (
+        <main className="till-people">
+          <h1>{t('Who is selling?')}</h1>
+          {withPin.length === 0 && <p className="muted">{t('Nobody has a PIN yet. Each person sets one once: tap "Set up my PIN" and sign in with your password.')}</p>}
+          <div className="people-grid">
+            {withPin.map((u) => (
+              <button key={u.id} type="button" className="person" onClick={() => setWho(u)}>
+                <span className="avatar" aria-hidden="true">{initials(u.name)}</span>
+                <span>{u.name}</span>
+              </button>
+            ))}
+          </div>
+          <div className="row">
+            <button type="button" className="secondary" onClick={() => setSetup(true)}>{t('Set up my PIN')}</button>
+            <button type="button" className="link" onClick={onRefresh}>{t('Refresh')}</button>
+            <span className="spacer" />
+            <LanguageToggle />
+          </div>
+        </main>
+      )}
+    </div>
+  );
+}
+
+function PinPad({ user, deviceToken, onBack, onSignedIn }: { user: TillInfo['users'][number]; deviceToken: string; onBack: () => void; onSignedIn: (s: SignedIn) => void }) {
+  const t = useT();
+  const [pin, setPin] = useState('');
+  const [error, setError] = useState<unknown>(null);
+  const [busy, setBusy] = useState(false);
+  const submit = useCallback(async (value: string) => {
+    if (value.length < 4 || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      onSignedIn(await api<SignedIn>('/v1/pos/sign-in', { method: 'POST', token: deviceToken, body: { userId: user.id, pin: value } }));
+    } catch (e) {
+      setError(e);
+      setPin('');
+      setBusy(false);
+    }
+  }, [busy, deviceToken, onSignedIn, user.id]);
+  const press = (d: string) => setPin((v) => (v.length < 8 ? v + d : v));
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (/^\d$/.test(e.key)) press(e.key);
+      else if (e.key === 'Backspace') setPin((v) => v.slice(0, -1));
+      else if (e.key === 'Enter') void submit(pin);
+      else if (e.key === 'Escape') onBack();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [pin, submit, onBack]);
+  return (
+    <main className="pin-screen">
+      <span className="avatar big" aria-hidden="true">{initials(user.name)}</span>
+      <h1>{user.name}</h1>
+      <p className="muted">{t('Enter your PIN')}</p>
+      <div className={`pin-dots${error ? ' shake' : ''}`} aria-label={t('{n} digits entered', { n: pin.length })} role="status">
+        {Array.from({ length: Math.max(4, pin.length) }, (_, i) => <span key={i} className={i < pin.length ? 'on' : ''} />)}
+      </div>
+      <ErrorText error={error} />
+      <div className="pin-pad" role="group" aria-label={t('PIN')}>
+        {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((d) => <button key={d} type="button" onClick={() => press(d)} disabled={busy}>{d}</button>)}
+        <button type="button" className="secondary" onClick={onBack} aria-label={t('Back')}>←</button>
+        <button type="button" onClick={() => press('0')} disabled={busy}>0</button>
+        <button type="button" className="lime" onClick={() => void submit(pin)} disabled={busy || pin.length < 4} aria-label={t('Sign in')}>{busy ? '…' : '✓'}</button>
+      </div>
+      <button type="button" className="link" onClick={() => setPin((v) => v.slice(0, -1))} disabled={!pin}>{t('Delete a digit')}</button>
+    </main>
+  );
+}
+
+function SetPin({ deviceToken, onDone, onCancel }: { deviceToken: string; onDone: () => void; onCancel: () => void }) {
+  const t = useT();
+  const toast = useToast();
+  const [login, setLogin] = useState('');
+  const [password, setPassword] = useState('');
+  const [pin, setPin] = useState('');
+  const [again, setAgain] = useState('');
+  const [error, setError] = useState<unknown>(null);
+  const [busy, setBusy] = useState(false);
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (pin !== again) return setError(new ApiError(0, 'mismatch', t('The two PINs are not the same')));
+    setBusy(true);
+    setError(null);
+    try {
+      await api('/v1/pos/pin', { method: 'POST', token: deviceToken, body: { login: login.trim(), password, pin } });
+      toast(t('PIN set. Tap your name to sign in.'));
+      onDone();
+    } catch (err) {
+      setError(err);
+      setBusy(false);
+    }
+  };
+  const digits = (v: string) => v.replace(/\D/g, '').slice(0, 8);
+  return (
+    <div className="till-center">
+      <form className="card stack till-card" onSubmit={(e) => void submit(e)}>
+        <h1>{t('Set up my PIN')}</h1>
+        <p className="muted">{t('Sign in with your email or username and password once, and choose a PIN of 4 to 8 digits for this business’s tills.')}</p>
+        <Field label={t('Email or username')}><input autoCapitalize="off" autoCorrect="off" autoComplete="username" value={login} onChange={(e) => setLogin(e.target.value)} required autoFocus /></Field>
+        <Field label={t('Password')}><input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required /></Field>
+        <div className="form-grid">
+          <Field label={t('New PIN')}><input type="password" inputMode="numeric" autoComplete="off" value={pin} onChange={(e) => setPin(digits(e.target.value))} required minLength={4} /></Field>
+          <Field label={t('PIN again')}><input type="password" inputMode="numeric" autoComplete="off" value={again} onChange={(e) => setAgain(digits(e.target.value))} required minLength={4} /></Field>
+        </div>
+        <ErrorText error={error} />
+        <div className="row"><button type="button" className="secondary" onClick={onCancel}>{t('Cancel')}</button><span className="spacer" /><button disabled={busy || pin.length < 4}>{t('Set PIN')}</button></div>
+      </form>
+    </div>
+  );
+}
+
+// ---------- signed in ----------
+
+type Tab = 'sell' | 'sales' | 'shift' | 'devices';
+
+function SignedInTill(props: {
+  platform: Platform;
+  server: string;
+  till: TillInfo;
+  session: SignedIn;
+  hardware: HardwareConfig;
+  setHardware: (h: HardwareConfig) => Promise<void>;
+  lock: () => void;
+  unpair: () => Promise<void>;
+}) {
+  const t = useT();
+  const toast = useToast();
+  const { platform: p, till, session, hardware, lock } = props;
+  const [me, setMe] = useState<Me | null>(null);
+  const [tab, setTab] = useState<Tab>('sell');
+  const [online, setOnline] = useState(() => navigator.onLine);
+  const [camera, setCamera] = useState<((code: string | null) => void) | null>(null);
+  const permissions = useMemo(() => new Set(session.permissions), [session.permissions]);
+  const isManager = ['owner', 'admin', 'manager'].includes(session.user.role);
+
+  const refreshMe = useCallback(async () => {
+    try {
+      setMe(await api<Me>('/v1/me'));
+      setOnline(true);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 0) setOnline(false);
+    }
+  }, []);
+  useEffect(() => {
+    void refreshMe();
+    const timer = setInterval(() => document.visibilityState === 'visible' && void refreshMe(), 30_000);
+    const up = () => void refreshMe();
+    const down = () => setOnline(false);
+    window.addEventListener('online', up);
+    window.addEventListener('offline', down);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener('online', up);
+      window.removeEventListener('offline', down);
+    };
+  }, [refreshMe]);
+
+  // Lock after a few minutes without use.
+  useEffect(() => {
+    if (!hardware.lockAfterMinutes) return;
+    let last = Date.now();
+    const seen = () => {
+      last = Date.now();
+    };
+    const timer = setInterval(() => {
+      if (Date.now() - last > hardware.lockAfterMinutes * 60_000) lock();
+    }, 10_000);
+    for (const ev of ['pointerdown', 'keydown'] as const) window.addEventListener(ev, seen, true);
+    return () => {
+      clearInterval(timer);
+      for (const ev of ['pointerdown', 'keydown'] as const) window.removeEventListener(ev, seen, true);
+    };
+  }, [hardware.lockAfterMinutes, lock]);
+
+  const receiptPrinter = hardware.printers.find((x) => x.id === hardware.receiptPrinter) ?? hardware.printers[0] ?? null;
+  const fallbackPrinter: PrinterConfig | null = p.kind === 'web'
+    ? { id: 'browser', name: t('This browser'), connection: 'browser', paperWidth: 80, codepage: 'ascii', qr: 'native', cut: false, drawer: false }
+    : null;
+
+  const printTicket = useCallback(async (ticket: Ticket, options: { openDrawer?: boolean; title?: string } = {}) => {
+    const printer = receiptPrinter ?? fallbackPrinter;
+    if (!printer) throw new HardwareError(t('Add a receipt printer under Devices first'));
+    await sendTicket(p, printer, ticket, options);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [p, receiptPrinter, t]);
+
+  const value: TillContextValue = {
+    platform: p,
+    server: props.server,
+    till,
+    hardware,
+    setHardware: props.setHardware,
+    user: session.user,
+    can: (x) => permissions.has(x),
+    isManager,
+    receiptPrinter,
+    printTicket,
+    printDocument: async (id, options = {}) => {
+      const view = await api<DocumentView>(`/v1/documents/${id}/view`);
+      if (!view.printed.printable) throw new HardwareError(t('This document has no valid printed copy'));
+      const ticket = documentTicket(view, { message: hardware.receiptMessage, ...(options.copy && { copy: true }) });
+      for (let i = 0; i < (options.copy ? 1 : hardware.copies); i++) await printTicket(ticket, { openDrawer: i === 0 && options.openDrawer, title: view.view.typeName });
+    },
+    openDrawer: async () => {
+      const printer = hardware.printers.find((x) => x.drawer);
+      if (!printer) throw new HardwareError(t('No cash drawer is set up under Devices'));
+      await kickDrawer(p, printer);
+    },
+    lock,
+    unpair: props.unpair,
+    scanWithCamera: p.scanBarcode
+      ? () => p.scanBarcode!()
+      : browserCanScan() ? () => new Promise<string | null>((resolve) => setCamera(() => resolve)) : null,
+  };
+
+  // What the shared counter and shift screens expect of a signed-in session.
+  const account: Account = { id: session.user.id, name: session.user.name, email: null, username: null, role: session.user.role, status: 'active', mustChangePassword: false, lastLoginAt: null, createdAt: '' };
+  const sessionValue: SessionState = {
+    loading: false,
+    session: me ? {
+      user: account,
+      business: { id: me.id, slug: till.business.slug, legalName: me.legalName, tradeName: me.tradeName, environment: me.environment },
+      permissions: session.permissions,
+      twoFactor: { enabled: false, required: false, setupRequired: false },
+    } : null,
+    me,
+    role: session.user.role,
+    can: (x) => permissions.has(x),
+    refresh: refreshMe,
+    refreshMe,
+    setSession: () => {},
+    logout: async () => lock(),
+  };
+
+  const tabs: Array<[Tab, string]> = [['sell', t('Sell')], ['sales', t('Sales')], ['shift', t('Shift')], ...(isManager ? [['devices', t('Devices')] as [Tab, string]] : [])];
+  return (
+    <TillContext.Provider value={value}>
+      <SessionContext.Provider value={sessionValue}>
+        <div className="till">
+          <header className="till-bar">
+            <div className="till-where"><strong>{till.business.name}</strong><span className="muted"> · {till.device.name}</span></div>
+            <nav className="till-tabs" aria-label={t('Till')}>
+              {tabs.map(([k, label]) => <button key={k} type="button" className={tab === k ? 'active' : ''} aria-current={tab === k ? 'page' : undefined} onClick={() => setTab(k)}>{label}</button>)}
+            </nav>
+            <span className="spacer" />
+            <span className="till-user"><span className="avatar" aria-hidden="true">{initials(session.user.name)}</span>{session.user.name}</span>
+            <button type="button" className="secondary small-button" onClick={lock}>{t('Lock')}</button>
+          </header>
+          {!online && <div className="banner bad till-banner"><strong>{t('No connection.')}</strong> {t('Sales need the internet: every receipt is signed and sent to BTS.')}</div>}
+          {me?.contingency.active && <div className="banner warn till-banner">{t('BTS cannot be reached right now. Receipts are issued and sent when it is back.')}</div>}
+          <main className="till-main">
+            {tab === 'sell' && <Sell />}
+            {tab === 'sales' && <Sales />}
+            {tab === 'shift' && <ShiftPanel />}
+            {tab === 'devices' && isManager && <HardwareSettings onError={(e) => toast(e instanceof Error ? e.message : String(e), 'bad')} />}
+          </main>
+        </div>
+        {camera && <CameraScanner onClose={() => { camera(null); setCamera(null); }} onScan={(code) => { camera(code); setCamera(null); }} />}
+      </SessionContext.Provider>
+    </TillContext.Provider>
+  );
+}
+

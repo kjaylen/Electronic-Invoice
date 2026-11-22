@@ -114,7 +114,8 @@ export async function sessionFromRequest(deps: PipelineDeps, request: FastifyReq
   if (!token) return null;
   const session = await lookupSession(deps.db, token);
   const slug = requestedBusiness(request);
-  return session && (!slug || session.business.slug === slug) ? session : null;
+  // A till's session works only as a bearer token from that till, never as a browser cookie.
+  return session && !session.device && (!slug || session.business.slug === slug) ? session : null;
 }
 
 function setSessionCookie(reply: FastifyReply, slug: string, token: string, options: AuthOptions) {
@@ -138,7 +139,7 @@ const WINDOW_MS = 15 * 60 * 1000;
 // ---------- responses ----------
 
 export function userJson(u: User) {
-  return { id: u.id, name: u.name, email: u.email, username: u.username, role: u.role, status: u.status, mustChangePassword: u.mustChangePassword, lastLoginAt: u.lastLoginAt, createdAt: u.createdAt };
+  return { id: u.id, name: u.name, email: u.email, username: u.username, role: u.role, status: u.status, mustChangePassword: u.mustChangePassword, lastLoginAt: u.lastLoginAt, createdAt: u.createdAt, hasPin: u.hasPin };
 }
 
 export function sessionBody(s: Pick<Session, 'user' | 'business' | 'twoFactor'>) {

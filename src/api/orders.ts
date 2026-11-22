@@ -143,7 +143,7 @@ export function registerOrderRoutes(app: FastifyInstance, deps: PipelineDeps, ct
   app.post<{ Params: { id: string } }>('/orders/:id/paid', { schema: { params: idParams } }, async (request) => {
     requirePermission(request, 'documents.issue');
     await assertCanIssue(db, request.tenantId);
-    const { order, document } = await markOrderPaid(deps, request.tenantId, request.params.id, request.userId || null);
+    const { order, document } = await markOrderPaid(deps, request.tenantId, request.params.id, request.userId || null, request.posDevice?.id ?? null);
     await audit(db, { tenantId: request.tenantId, userId: request.userId || null, action: 'order.paid', target: `#${order.number}`, ip: request.ip });
     // Email the buyer their receipt when it is ready (best effort: the order page always has it too).
     let emailed = false;

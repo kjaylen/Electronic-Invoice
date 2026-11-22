@@ -104,9 +104,10 @@ export function registerInventoryRoutes(app: FastifyInstance, deps: PipelineDeps
 
   const listQuery = {
     type: 'object', additionalProperties: false,
-    properties: { filter: { type: 'string', enum: ['tracked', 'low', 'out', 'untracked', 'all'] }, q: { type: 'string', maxLength: 100 }, limit: { type: 'integer', minimum: 1, maximum: 2000 } },
+    properties: { filter: { type: 'string', enum: ['tracked', 'low', 'out', 'untracked', 'all'] }, q: { type: 'string', maxLength: 100 }, limit: { type: 'string', pattern: '^[1-9][0-9]{0,3}$' } },
   } as const;
-  type ListQuery = { filter?: Filter; q?: string; limit?: number };
+  // Query strings arrive as text (no type coercion): the limit is digits.
+  type ListQuery = { filter?: Filter; q?: string; limit?: string };
   const list = async (tenantId: string, query: ListQuery, max = 2000) => {
     const params: unknown[] = [tenantId];
     let where = `i.tenant_id = $1 and i.archived_at is null and ${filterSql(query.filter ?? 'tracked')}`;
@@ -115,7 +116,7 @@ export function registerInventoryRoutes(app: FastifyInstance, deps: PipelineDeps
       params.push(`%${text.replace(/[%_\\]/g, (c) => `\\${c}`)}%`, text);
       where += ` and (i.name ilike $${params.length - 1} or i.seller_code ilike $${params.length - 1} or i.barcode = $${params.length})`;
     }
-    params.push(Math.min(query.limit ?? max, max));
+    params.push(Math.min(query.limit ? Number(query.limit) : max, max));
     return (await db.query<StockRow>(
       `select ${STOCK_COLUMNS} from items i where ${where}
        order by case when i.stock_quantity is null then 2 when i.stock_quantity <= 0 then 0 when i.low_stock is not null and i.stock_quantity <= i.low_stock then 0 else 1 end, lower(i.name)

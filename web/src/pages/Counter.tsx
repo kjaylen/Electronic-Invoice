@@ -3,10 +3,14 @@
  * tap a quick button, adjust quantities, take payment, issue, print. Built to
  * work from the keyboard alone, and to survive a closed tab (the sale in
  * progress is kept on this device).
+ *
+ * CounterPanel is the counter itself; the web page and the till apps wrap it
+ * (the tills print on their own receipt printer and open the cash drawer).
+ * A barcode read anywhere on the page arrives as a SCAN_EVENT.
  */
 
 import { ShiftBar } from './Shifts';
-import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react';
+import { type FormEvent, type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { api, type DocumentDetailInfo, type DocumentInfo, type Item, link, type Page } from '../api';
 import { useT } from '../i18n';
@@ -36,6 +40,17 @@ interface Sale {
   idempotencyKey: string;
 }
 
+/** A barcode scanned outside the search box (a CustomEvent<string> on window). */
+export const SCAN_EVENT = 'etd:scan';
+
+export interface CounterCart {
+  lines: Array<{ name: string; quantity: string; unitPrice: string }>;
+  subtotal: string;
+  gst: string;
+  total: string;
+  change: string | null;
+}
+
 let key = 0;
 const DECIMAL = /^\d+(\.\d{1,6})?$/;
 const newSale = (): Sale => ({ lines: [], meansCode: '10', tendered: '', tin: '', idempotencyKey: crypto.randomUUID() });
@@ -51,6 +66,43 @@ const addQty = (q: string, delta: number) => {
 export function Counter() {
   const t = useT();
   usePageTitle(t('Counter'));
+  const [autoPrint, setAutoPrint] = useState(() => store.get<boolean>('etd.counter.autoprint') ?? false);
+  useEffect(() => {
+    store.set('etd.counter.autoprint', autoPrint);
+  }, [autoPrint]);
+  const print = (doc: DocumentInfo) => printPdf(link(`/v1/documents/${doc.id}/pdf?format=receipt&widthMm=80`));
+  return (
+    <CounterPanel
+      header={(
+        <div className="row">
+          <div><span className="kicker">{t('Tax receipts')}</span><h1>{t('Counter')}</h1></div>
+          <span className="spacer" />
+          <label className="row small"><input type="checkbox" checked={autoPrint} onChange={(e) => setAutoPrint(e.target.checked)} /> {t('Print each receipt automatically')}</label>
+        </div>
+      )}
+      shiftBar={(refreshKey) => <ShiftBar refreshKey={refreshKey} />}
+      onIssued={(doc) => {
+        if (autoPrint && doc.status !== 'rejected') print(doc);
+      }}
+      print={print}
+      lastSaleActions={(doc) => <Link className="button secondary" to={`/documents/${doc.id}`} viewTransition>{t('Open or send')}</Link>}
+    />
+  );
+}
+
+export function CounterPanel(props: {
+  header?: ReactNode;
+  shiftBar?: (refreshKey: string | null) => ReactNode;
+  /** After a sale is issued: print it, open the drawer. */
+  onIssued?: (doc: DocumentInfo, sale: { meansCode: string; change: string | null }) => void;
+  print: (doc: DocumentInfo) => void;
+  lastSaleActions?: (doc: DocumentInfo) => ReactNode;
+  /** More buttons beside "Repeat last sale" (the camera scanner on phones). */
+  extraButtons?: ReactNode;
+  /** The sale as it changes (the customer display). */
+  onCart?: (cart: CounterCart) => void;
+}) {
+  const t = useT();
   const toast = useToast();
   const { me, session } = useSession();
   const storageKey = `etd.counter.${session?.business.id}.${session?.user.id}`;
@@ -62,7 +114,6 @@ export function Counter() {
   const [favorites, setFavorites] = useState<Item[]>([]);
   const [totals, setTotals] = useState<DocumentInfo['totals'] | null>(null);
   const [last, setLast] = useState<{ doc: DocumentInfo; change: string | null } | null>(null);
-  const [autoPrint, setAutoPrint] = useState(() => store.get<boolean>('etd.counter.autoprint') ?? false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const search = useRef<HTMLInputElement>(null);
@@ -75,9 +126,6 @@ export function Counter() {
     const timer = setTimeout(() => search.current?.focus(), 120);
     return () => clearTimeout(timer);
   }, []);
-  useEffect(() => {
-    store.set('etd.counter.autoprint', autoPrint);
-  }, [autoPrint]);
   useEffect(() => {
     void api<Page<Item>>('/v1/items?favorite=true&limit=24').then(async (r) => {
       setFavorites(r.data.length ? r.data : (await api<Page<Item>>('/v1/items?limit=12')).data);
@@ -170,10 +218,11 @@ export function Counter() {
           payment: { meansCode: sale.meansCode, terms: `Paid by ${PAYMENT_MEANS.find(([c]) => c === sale.meansCode)?.[1].toLowerCase()}` },
         },
       });
-      setLast({ doc, change: change !== null ? fromCents(change) : null });
+      const changeText = change !== null ? fromCents(change) : null;
+      setLast({ doc, change: changeText });
       setSale(newSale());
       if (doc.status === 'rejected') toast(t('Rejected by BTS'), 'bad');
-      else if (autoPrint) printPdf(link(`/v1/documents/${doc.id}/pdf?format=receipt&widthMm=80`));
+      props.onIssued?.(doc, { meansCode: sale.meansCode, change: changeText });
       focusSearch();
     } catch (err) {
       setError(err);
@@ -193,6 +242,26 @@ export function Counter() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   });
+  // A barcode scanner read while the search box did not have focus (the till listens for it page-wide).
+  useEffect(() => {
+    const onScan = (e: Event) => void enter((e as CustomEvent<string>).detail);
+    window.addEventListener(SCAN_EVENT, onScan);
+    return () => window.removeEventListener(SCAN_EVENT, onScan);
+  });
+  // The customer display follows the sale.
+  const onCart = props.onCart;
+  const cartKey = JSON.stringify([sale.lines.map((l) => [l.name, l.quantity, l.unitPrice]), totals, change === null ? null : String(change)]);
+  useEffect(() => {
+    onCart?.({
+      lines: sale.lines.map((l) => ({ name: l.name, quantity: l.quantity, unitPrice: l.unitPrice })),
+      subtotal: totals?.lineExtension ?? '0.00',
+      gst: totals?.gst ?? '0.00',
+      total,
+      change: change !== null && change >= 0n ? fromCents(change) : null,
+    });
+    // Only when what the customer sees changes.
+  }, [cartKey, onCart]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const searchKeys = (e: React.KeyboardEvent) => {
     const input = e.target as HTMLInputElement;
     const lastLine = sale.lines.at(-1);
@@ -205,13 +274,9 @@ export function Counter() {
 
   return (
     <div className="stack">
-      <div className="row">
-        <div><span className="kicker">{t('Tax receipts')}</span><h1>{t('Counter')}</h1></div>
-        <span className="spacer" />
-        <label className="row small"><input type="checkbox" checked={autoPrint} onChange={(e) => setAutoPrint(e.target.checked)} /> {t('Print each receipt automatically')}</label>
-      </div>
+      {props.header}
       {!me?.certificate && <div className="banner bad"><div><strong>{t('Install your BTS certificate in Settings before issuing.')}</strong></div></div>}
-      <ShiftBar refreshKey={last?.doc.id ?? null} />
+      {props.shiftBar?.(last?.doc.id ?? null)}
 
       <div className="counter">
         <div className="stack">
@@ -256,6 +321,7 @@ export function Counter() {
           <div className="row">
             <button type="button" className="secondary" onClick={() => void repeatLast()}>{t('Repeat last sale')}</button>
             <button type="button" className="secondary" onClick={() => add({ key: ++key, name: '', quantity: '1', unitCode: 'H87', unitPrice: '', gstCategory: 'S', custom: true })}>+ {t('Custom item')}</button>
+            {props.extraButtons}
           </div>
           {last && (
             <div className={`card last-sale ${last.doc.status}`} role="status">
@@ -270,9 +336,9 @@ export function Counter() {
               </div>
               <div className="row">
                 {['authorized', 'authorized_with_alert', 'contingency_pending'].includes(last.doc.status) && (
-                  <button type="button" onClick={() => printPdf(link(`/v1/documents/${last.doc.id}/pdf?format=receipt&widthMm=80`))}>{t('Print receipt')}</button>
+                  <button type="button" onClick={() => props.print(last.doc)}>{t('Print receipt')}</button>
                 )}
-                <Link className="button secondary" to={`/documents/${last.doc.id}`} viewTransition>{t('Open or send')}</Link>
+                {props.lastSaleActions?.(last.doc)}
               </div>
             </div>
           )}

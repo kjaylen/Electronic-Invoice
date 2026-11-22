@@ -289,7 +289,7 @@ export function registerReceivableRoutes(app: FastifyInstance, deps: PipelineDep
       const { payment, receivable: after } = await wrap(() => recordPayment(db, request.tenantId, request.params.id, {
         amountCents: parseCents(b.amount), method: b.method,
         ...(b.reference !== undefined && { reference: b.reference }), ...(b.paidOn && { paidOn: b.paidOn }), ...(b.note !== undefined && { note: b.note }),
-      }, request.userId || null));
+      }, request.userId || null, { deviceId: request.posDevice?.id ?? null }));
       await audit(db, { tenantId: request.tenantId, userId: request.userId || null, action: 'payment.recorded', target: after.number, details: { amount: paymentJson(payment).amount, method: b.method }, ip: request.ip });
       return reply.code(201).send({ payment: paymentJson(payment), invoice: receivableJson(after) });
     },

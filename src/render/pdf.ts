@@ -87,12 +87,12 @@ function collect(doc: Doc): Promise<Buffer> {
   });
 }
 
-function authorizationText(view: PrintView, options: RenderOptions): string {
+export function authorizationText(view: PrintView, options: RenderOptions): string {
   if (view.pendingAuthorization) return REGULATORY_MESSAGES.pendingAuthorization;
   return options.protocolNumber ?? 'DRAFT - NOT AUTHORIZED BY BTS';
 }
 
-function regulatoryLines(view: PrintView, options: RenderOptions): string[] {
+export function regulatoryLines(view: PrintView, options: RenderOptions): string[] {
   const lines = [...view.regulatory];
   if (!view.pendingAuthorization && !options.protocolNumber && options.draft) lines.unshift('DRAFT - NOT AUTHORIZED BY BTS');
   if (view.contingency) lines.push(`Contingency since ${view.contingency.initDate} ${view.contingency.initTime}: ${view.contingency.reason}`);
@@ -100,7 +100,7 @@ function regulatoryLines(view: PrintView, options: RenderOptions): string[] {
   return lines;
 }
 
-function infoLines(view: PrintView): string[] {
+export function infoLines(view: PrintView): string[] {
   const lines: string[] = [];
   if (view.payment?.dueDate) lines.push(`Payment due ${view.payment.dueDate}`);
   if (view.payment?.terms) lines.push(`Terms: ${view.payment.terms}`);

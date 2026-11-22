@@ -18,7 +18,10 @@ interface SessionState {
   logout: () => Promise<void>;
 }
 
-const Ctx = createContext<SessionState | null>(null);
+/** Exported so the till app can supply its own session (a cashier signed in with a PIN). */
+export type { SessionState };
+export const SessionContext = createContext<SessionState | null>(null);
+const Ctx = SessionContext;
 const POLL_MS = 30_000;
 
 export function SessionProvider({ children }: { children: ReactNode }) {

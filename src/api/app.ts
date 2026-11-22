@@ -56,6 +56,8 @@ import { registerExpenseRoutes } from './expenses.ts';
 import { registerAccountingRoutes } from './accounting.ts';
 import { registerInventoryRoutes } from './inventory.ts';
 import { registerShiftRoutes } from './shifts.ts';
+import { registerPosAdminRoutes, registerPosDeviceRoutes, SESSION_TOKEN_PREFIX, tillMayUse, touchDevice } from './pos.ts';
+import { lookupSession } from '../db/users.ts';
 import { registerDiscountRoutes } from './discounts.ts';
 import { domainCache } from '../commerce/domains.ts';
 import { registerIntegrationCallback, registerIntegrationRoutes } from './integrations.ts';
@@ -71,6 +73,8 @@ declare module 'fastify' {
     /** "api" for an API key; the person's role for a session. */
     principal: Principal;
     userId: string;
+    /** Signed in on a till: the till and its cash drawer. */
+    posDevice: { id: string; registerId: string } | null;
   }
 }
 
@@ -113,7 +117,12 @@ export interface AppOptions {
   site?: { legalName?: string; contactEmail?: string };
   /** The platform's Intuit app, for the QuickBooks Online integration. */
   quickbooks?: { clientId: string; clientSecret: string; environment: 'sandbox' | 'production'; fetch?: typeof fetch };
+  /** Extra origins the till apps call the API from (the built-in ones cover the iOS, Android and desktop apps). */
+  tillOrigins?: string[];
 }
+
+/** Where the till apps run: Capacitor on iOS and Android, the Electron desktop app. They send bearer tokens, never cookies. */
+export const TILL_APP_ORIGINS = ['capacitor://localhost', 'ionic://localhost', 'https://localhost', 'http://localhost', 'app://pos'];
 
 function bearer(request: FastifyRequest): string | undefined {
   const h = request.headers.authorization;
@@ -151,7 +160,25 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   app.decorateRequest('tenantId', '');
   app.decorateRequest('principal', 'api');
   app.decorateRequest('userId', '');
+  app.decorateRequest('posDevice', null);
   app.setErrorHandler(errorHandler);
+
+  // The till apps call the API from their own origin with a bearer token. No cookies are allowed
+  // cross-origin (no Allow-Credentials), so this opens nothing to web pages elsewhere.
+  const tillOrigins = new Set([...TILL_APP_ORIGINS, ...(options.tillOrigins ?? [])]);
+  app.addHook('onRequest', async (request, reply) => {
+    const origin = request.headers.origin;
+    if (!origin || !tillOrigins.has(origin) || !request.url.startsWith('/v1/')) return;
+    reply.header('Access-Control-Allow-Origin', origin);
+    reply.header('Vary', 'Origin');
+    reply.header('Access-Control-Expose-Headers', 'Content-Disposition, Idempotent-Replayed, Retry-After');
+    if (request.method === 'OPTIONS') {
+      reply.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE');
+      reply.header('Access-Control-Allow-Headers', 'Authorization, Content-Type, Idempotency-Key, X-Requested-With');
+      reply.header('Access-Control-Max-Age', '600');
+      return reply.code(204).send();
+    }
+  });
   const photoOrigin = (() => {
     const u = options.objectStore?.publicUrl('probe');
     try {
@@ -243,6 +270,18 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     tenant.addHook('onRequest', async (request, reply) => {
       if (request.url.startsWith('/v1/admin') || request.url.startsWith('/v1/auth')) return;
       const key = bearer(request);
+      // A cashier signed in on a till: their role, limited to what a till does.
+      if (key?.startsWith(SESSION_TOKEN_PREFIX)) {
+        const session = await lookupSession(db, key.slice(SESSION_TOKEN_PREFIX.length));
+        if (!session?.device) throw new ApiError(401, 'signed_out', 'Signed out on this till; sign in again with your PIN');
+        if (!tillMayUse(request)) throw new ApiError(403, 'not_on_till', 'This is done in the web app, not on a till');
+        request.tenantId = session.business.id;
+        request.principal = session.user.role;
+        request.userId = session.user.id;
+        request.posDevice = session.device;
+        touchDevice(db, session.device.id);
+        return;
+      }
       if (key) {
         const principal = await authenticateApiKey(db, key);
         if (!principal) throw new ApiError(401, 'unauthorized', 'Missing or invalid API key');
@@ -295,7 +334,11 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     registerAccountingRoutes(tenant, deps);
     registerInventoryRoutes(tenant, deps);
     registerShiftRoutes(tenant, deps);
+    registerPosAdminRoutes(tenant, deps);
   }, { prefix: '/v1' });
+
+  // The till apps before anyone signs in: pairing, who can sign in, PIN sign-in (the till's own token).
+  await app.register(async (pos) => registerPosDeviceRoutes(pos, deps), { prefix: '/v1/pos' });
 
   registerPublicDocumentRoutes(app, deps);
   registerIntegrationCallback(app, deps, ctx, quickbooks);
@@ -358,8 +401,11 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     });
     await app.register(fastifyStatic, { root: webRoot!, prefix: '/', wildcard: true, index: ['index.html'] });
   }
+  const hasTill = Boolean(webRoot && existsSync(join(webRoot, 'pos.html')));
   app.setNotFoundHandler((request, reply) => {
     const isPage = request.method === 'GET' && !request.url.startsWith('/v1') && !request.url.startsWith('/health') && !request.url.startsWith('/d/');
+    // The till in a browser (the same app the iOS, Android and desktop tills run).
+    if (hasTill && isPage && /^\/pos(\/|\?|$)/.test(request.url)) return reply.type('text/html').header('Cache-Control', 'no-cache').sendFile('pos.html');
     if (hasWeb && isPage) return reply.type('text/html').sendFile('index.html');
     return reply.code(404).send({ error: { code: 'not_found', message: 'Route not found' } });
   });

@@ -1183,3 +1183,11 @@ button.kpi-button:hover:not(:disabled) { transform: translateY(-2px); box-shadow
 .close-summary { display: flex; gap: 2rem; flex-wrap: wrap; align-items: flex-end; padding: 0.8rem 1rem; border-radius: var(--radius-lg); background: var(--sheet-2); }
 .shift-result { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; border-left: 4px solid var(--lime-ink); }
 .shift-result.off { border-left-color: var(--coral); }
+
+/* Settings → Tills */
+.till-admin-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.6rem; }
+.card-inset { padding: 0.85rem 1rem; border: 1px solid var(--hairline); border-radius: var(--radius); background: var(--sheet-2); }
+.till-admin-list p { margin: 0; }
+.pairing-box { display: flex; align-items: center; gap: 1.25rem; flex-wrap: wrap; padding: 1rem; border: 1px solid var(--hairline); border-radius: var(--radius-lg); background: white; }
+.pairing-qr svg { display: block; width: 11rem; height: 11rem; }
+.pairing-code { font-size: 2rem; font-weight: 650; letter-spacing: 0.12em; }

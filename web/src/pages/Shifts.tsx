@@ -48,7 +48,7 @@ interface Register { id: string; name: string; openBy: string | null; openSince:
 const time = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 const MONEY = /^\d{1,13}(\.\d{1,2})?$/;
 
-function DifferenceText({ difference }: { difference: string | null }) {
+export function DifferenceText({ difference }: { difference: string | null }) {
   const t = useT();
   if (difference === null) return <>—</>;
   const c = toCents(difference);
@@ -95,7 +95,7 @@ export function ShiftBar({ refreshKey }: { refreshKey?: string | null } = {}) {
   );
 }
 
-function OpenShiftModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+export function OpenShiftModal({ onClose, onDone, atTill }: { onClose: () => void; onDone: () => void; atTill?: boolean }) {
   const t = useT();
   const toast = useToast();
   const [registers, setRegisters] = useState<Register[] | null>(null);
@@ -103,7 +103,7 @@ function OpenShiftModal({ onClose, onDone }: { onClose: () => void; onDone: () =
   const [float, setFloat] = useState('');
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
-  useEffect(() => void api<{ data: Register[] }>('/v1/registers').then((r) => {
+  useEffect(() => void (atTill ? Promise.resolve({ data: [] as Register[] }) : api<{ data: Register[] }>('/v1/registers')).then((r) => {
     setRegisters(r.data);
     setRegisterId(r.data.find((x) => !x.openBy)?.id ?? '');
   }).catch(setError), []);
@@ -111,7 +111,7 @@ function OpenShiftModal({ onClose, onDone }: { onClose: () => void; onDone: () =
     e.preventDefault();
     setBusy(true);
     try {
-      await api('/v1/shifts', { method: 'POST', body: { openingFloat: float.trim() || '0', ...(registerId && { registerId }) } });
+      await api('/v1/shifts', { method: 'POST', body: { openingFloat: float.trim() || '0', ...(registerId && !atTill && { registerId }) } });
       toast(t('Shift open'));
       onDone();
     } catch (err) {
@@ -122,7 +122,7 @@ function OpenShiftModal({ onClose, onDone }: { onClose: () => void; onDone: () =
   return (
     <Modal title={t('Open a shift')} onClose={onClose}>
       <form className="stack" onSubmit={(e) => void submit(e)}>
-        {registers && registers.length > 1 && (
+        {!atTill && registers && registers.length > 1 && (
           <Field label={t('Register')}>
             <select value={registerId} onChange={(e) => setRegisterId(e.target.value)} required>
               {registers.map((r) => <option key={r.id} value={r.id} disabled={Boolean(r.openBy)}>{r.name}{r.openBy ? ` (${t('open by {name}', { name: r.openBy })})` : ''}</option>)}
@@ -139,7 +139,7 @@ function OpenShiftModal({ onClose, onDone }: { onClose: () => void; onDone: () =
   );
 }
 
-function CashModal({ shift, onClose, onDone }: { shift: Shift; onClose: () => void; onDone: () => void }) {
+export function CashModal({ shift, onClose, onDone }: { shift: Shift; onClose: () => void; onDone: () => void }) {
   const t = useT();
   const toast = useToast();
   const [kind, setKind] = useState<'pay_out' | 'pay_in'>('pay_out');
@@ -178,7 +178,7 @@ function CashModal({ shift, onClose, onDone }: { shift: Shift; onClose: () => vo
   );
 }
 
-function CloseShiftModal({ shift, report, onClose, onDone }: { shift: Shift; report: ShiftReport; onClose: () => void; onDone: (id: string) => void }) {
+export function CloseShiftModal({ shift, report, onClose, onDone }: { shift: Shift; report: ShiftReport; onClose: () => void; onDone: (id: string) => void }) {
   const t = useT();
   const toast = useToast();
   const [byNotes, setByNotes] = useState(true);

@@ -1,6 +1,6 @@
 /**
  * Settings, in tabs: your account; the business (details, address,
- * certificate); users (owners and admins); activity log; API keys.
+ * certificate); tills; users (owners and admins); activity log; API keys.
  */
 
 import { type FormEvent, useCallback, useEffect, useState } from 'react';
@@ -16,6 +16,7 @@ import { PlanTab, UpgradeNotice } from './Billing';
 import { WebhooksPanel } from './Webhooks';
 import { IntegrationsTab } from './Integrations';
 import { StoreSettingsTab } from './StoreSettings';
+import { PinCard, TillsTab, UserPinDialog } from './Tills';
 
 function readAsBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -115,7 +116,7 @@ function ChangePassword() {
 
 function AccountTab() {
   const { t, lang, setLang } = useI18n();
-  const { session, logout } = useSession();
+  const { session, logout, can, refresh } = useSession();
   const user = session!.user;
   const signOutAll = useAction(async () => {
     await api(`/v1/users/${user.id}/sign-out`, { method: 'POST' });
@@ -144,6 +145,7 @@ function AccountTab() {
         <ErrorText error={signOutAll.error} />
       </section>
       <TwoFactorCard />
+      {can('documents.issue') && <PinCard hasPin={Boolean(user.hasPin)} onChanged={() => void refresh()} />}
     </div>
   );
 }
@@ -534,7 +536,7 @@ function UsersTab() {
   const toast = useToast();
   const { session } = useSession();
   const [users, setUsers] = useState<ManagedAccount[] | null>(null);
-  const [dialog, setDialog] = useState<{ kind: 'add' } | { kind: 'edit' | 'password' | 'disable' | 'reset2fa'; user: ManagedAccount } | null>(null);
+  const [dialog, setDialog] = useState<{ kind: 'add' } | { kind: 'edit' | 'password' | 'disable' | 'reset2fa' | 'pin'; user: ManagedAccount } | null>(null);
   const [error, setError] = useState<unknown>(null);
   const load = useCallback(() => api<{ data: ManagedAccount[] }>('/v1/users').then((r) => setUsers(r.data)).catch(setError), []);
   useEffect(() => {
@@ -574,6 +576,7 @@ function UsersTab() {
                   {u.status === 'disabled' && <span className="badge cancelled">{t('Deactivated')}</span>}
                   {u.mustChangePassword && u.status === 'active' && <span className="badge pending">{t('Temporary password')}</span>}
                   {u.twoFactor && <span className="badge authorized" title={t('Two-step sign-in is on')}>{t('2-step')}</span>}
+                  {u.hasPin && u.status === 'active' && <span className="badge test" title={t('Can sign in on tills with a PIN')}>{t('PIN')}</span>}
                 </td>
                 <td data-label={t('Sign-in')} className="mono small">{[u.email, u.username].filter(Boolean).join(' · ')}</td>
                 <td data-label={t('Role')}><span className={`role-pill ${u.role}`}>{t(ROLE_LABEL[u.role])}</span></td>
@@ -583,6 +586,7 @@ function UsersTab() {
                     <>
                       <button className="link" onClick={() => setDialog({ kind: 'edit', user: u })}>{t('Edit')}</button>
                       {u.status === 'active' && <button className="link" onClick={() => setDialog({ kind: 'password', user: u })}>{t('Password')}</button>}
+                      {u.status === 'active' && u.role !== 'accountant' && <button className="link" onClick={() => setDialog({ kind: 'pin', user: u })}>{t('Till PIN')}</button>}
                       {u.twoFactor && <button className="link" onClick={() => setDialog({ kind: 'reset2fa', user: u })}>{t('Reset 2-step')}</button>}
                       {u.status === 'active' && u.activeSessions > 0 && <button className="link" onClick={() => void act(() => api(`/v1/users/${u.id}/sign-out`, { method: 'POST' }), t('{name} was signed out everywhere', { name: u.name }))}>{t('Sign out')}</button>}
                       {u.status === 'active'
@@ -606,6 +610,7 @@ function UsersTab() {
       {dialog?.kind === 'add' && <AddUser onClose={() => setDialog(null)} onSaved={() => void load()} />}
       {dialog?.kind === 'edit' && <EditUser user={dialog.user} onClose={() => setDialog(null)} onSaved={() => void load()} />}
       {dialog?.kind === 'password' && <ResetUserPassword user={dialog.user} onClose={() => { setDialog(null); void load(); }} />}
+      {dialog?.kind === 'pin' && <UserPinDialog user={dialog.user} onClose={() => { setDialog(null); void load(); }} />}
       {dialog?.kind === 'reset2fa' && (
         <Modal title={t('Reset two-step sign-in for {name}?', { name: dialog.user.name })} onClose={() => setDialog(null)}>
           <p>{t('For a lost or replaced phone. They are signed out everywhere and set up two-step sign-in again with their password.')}</p>
@@ -717,6 +722,14 @@ function describe(t: T, e: AuditEvent): string {
     'shift.closed': t('Closed shift {target}', { target }),
     'shift.cash_in': t('Put cash into the drawer on shift {target}', { target }),
     'shift.cash_out': t('Took cash out of the drawer on shift {target}', { target }),
+    'till.added': t('Added the till {target}', { target }),
+    'till.updated': t('Changed the till {target}', { target }),
+    'till.removed': t('Removed the till {target}', { target }),
+    'till.paired': t('Paired the till {target}', { target }),
+    'till.unpaired': t('Unpaired the till {target}', { target }),
+    'till.signed_in': t('Signed in on the till {target}', { target }),
+    'user.pin_set': t('Set the till PIN of {target}', { target }),
+    'user.pin_removed': t('Removed the till PIN of {target}', { target }),
     'store.domain_added': t('Added the store domain {target}', { target }),
     'store.domain_verified': t('Verified the store domain {target}', { target }),
     'store.domain_removed': t('Removed the store domain {target}', { target }),
@@ -864,7 +877,7 @@ function ApiKeysTab() {
 
 // ---------- the page ----------
 
-type Tab = 'account' | 'business' | 'plan' | 'store' | 'users' | 'activity' | 'keys' | 'integrations';
+type Tab = 'account' | 'business' | 'plan' | 'store' | 'tills' | 'users' | 'activity' | 'keys' | 'integrations';
 
 export function Settings() {
   const t = useT();
@@ -876,6 +889,7 @@ export function Settings() {
     ['business', t('Business')],
     ...(can('business.manage') ? [['plan', t('Plan')] as [Tab, string]] : []),
     ...(can('business.manage') ? [['store', t('Online store')] as [Tab, string]] : []),
+    ...(can('business.manage') ? [['tills', t('Tills')] as [Tab, string]] : []),
     ...(can('users.manage') ? [['users', t('Users')] as [Tab, string]] : []),
     ...(can('audit.view') ? [['activity', t('Activity')] as [Tab, string]] : []),
     ...(can('business.manage') ? [['integrations', t('Integrations')] as [Tab, string]] : []),
@@ -896,6 +910,7 @@ export function Settings() {
       {tab === 'plan' && <PlanTab />}
       {tab === 'integrations' && <IntegrationsTab />}
       {tab === 'store' && (me?.billing && !me.billing.features.includes('store') ? <UpgradeNotice feature="store" /> : <StoreSettingsTab />)}
+      {tab === 'tills' && <TillsTab />}
       {tab === 'users' && <UsersTab />}
       {tab === 'activity' && <ActivityTab />}
       {tab === 'keys' && (me?.billing && !me.billing.features.includes('api') ? <UpgradeNotice feature="api" /> : (

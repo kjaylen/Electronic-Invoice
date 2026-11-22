@@ -106,6 +106,10 @@ test('counts, adjustments, low stock, receiving with the bill as an expense, ave
     assert.deepEqual([damaged.json().stock, damaged.json().state], [3, 'low']);
     const low = (await c.app.inject({ method: 'GET', url: '/v1/inventory?filter=low', headers: c.owner })).json();
     assert.deepEqual([low.data.length, low.totals.low], [1, 1]);
+    // As the overview and the stock count call it (the limit arrives as text).
+    const limited = await c.app.inject({ method: 'GET', url: '/v1/inventory?filter=low&limit=1', headers: c.owner });
+    assert.equal(limited.statusCode, 200, limited.body);
+    assert.equal((await c.app.inject({ method: 'GET', url: '/v1/inventory?filter=tracked&limit=500', headers: c.owner })).statusCode, 200);
     assert.equal((await c.app.inject({ method: 'POST', url: `/v1/inventory/${oil}/adjust`, headers: c.owner, payload: { mode: 'change', quantity: '1', reason: 'count' } })).statusCode, 409, 'not tracked yet');
 
     const sup = (await c.app.inject({ method: 'POST', url: '/v1/suppliers', headers: c.owner, payload: { name: 'Island Distributors', tin: '123456' } })).json();
