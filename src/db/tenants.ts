@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { assertCertificateUsable, loadSigningCredentials, parseCertificate, type SigningCredentials } from '../engine/certificate.ts';
 import type { BtsEnvironment } from '../engine/transport.ts';
 import { BELIZE_DISTRICTS, type DistrictCode, type Supplier } from '../engine/ubl.ts';
-import type { Database } from './database.ts';
+import type { Database, Queryable } from './database.ts';
 import type { KeyProtector } from './keystore.ts';
 
 export interface NewTenant {
@@ -16,6 +16,8 @@ export interface NewTenant {
   address: { street: string; additionalStreet?: string; city: string; districtCode: DistrictCode };
   contact: { telephone: string; email: string };
   environment: BtsEnvironment;
+  /** The business's web address: app.example.bz/<slug>. Made from the name when not given. */
+  slug?: string;
 }
 
 export interface TenantContext {
@@ -44,16 +46,69 @@ interface TenantRow {
   environment: BtsEnvironment;
 }
 
-export async function createTenant(db: Database, t: NewTenant): Promise<string> {
+// ---------- business addresses (slugs) ----------
+
+/** First path segments the app itself uses, so no business can take them. */
+export const RESERVED_SLUGS = new Set([
+  'v1', 'd', 'api', 'app', 'admin', 'assets', 'static', 'health', 'signup', 'login', 'logout', 'register', 'new', 'www', 'mail',
+  'help', 'support', 'docs', 'status', 'about', 'pricing', 'terms', 'privacy', 'security', 'settings', 'account', 'businesses',
+]);
+const SLUG = /^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$/;
+
+/** "Corner Store Ltd." -> "corner-store-ltd" */
+export function slugify(name: string): string {
+  const s = name.normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40).replace(/-+$/, '');
+  return s.length >= 3 ? s : `${s || 'business'}-bz`.replace(/^-/, '');
+}
+
+/** Why a slug cannot be used, or null when it is a valid address (not checking whether it is taken). */
+export function slugProblem(slug: string): string | null {
+  if (!SLUG.test(slug)) return 'Use 3 to 40 lowercase letters, digits and dashes, starting and ending with a letter or digit';
+  if (RESERVED_SLUGS.has(slug)) return 'This address is reserved; choose another';
+  return null;
+}
+
+export async function slugTaken(db: Queryable, slug: string, exceptTenantId?: string): Promise<boolean> {
+  return (await db.query('select 1 from tenants where slug = $1 and id is distinct from $2', [slug, exceptTenantId ?? null])).rows.length > 0;
+}
+
+/** A free address based on `base`: base, base-2, base-3, ... */
+export async function freeSlug(db: Queryable, base: string): Promise<string> {
+  const root = slugProblem(base) ? slugify(base) : base;
+  const start = RESERVED_SLUGS.has(root) ? `${root}-bz` : root;
+  for (let i = 1; i < 1000; i++) {
+    const candidate = i === 1 ? start : `${start.slice(0, 36)}-${i}`;
+    if (!(await slugTaken(db, candidate))) return candidate;
+  }
+  return `${start.slice(0, 30)}-${randomUUID().slice(0, 6)}`;
+}
+
+export async function createTenant(db: Queryable, t: NewTenant): Promise<string> {
   if (!/^\d{6}$/.test(t.tin)) throw new TenantError('TIN must be 6 digits');
   if (!BELIZE_DISTRICTS[t.address.districtCode]) throw new TenantError('District code must be 1 to 6');
+  let slug: string;
+  if (t.slug) {
+    const problem = slugProblem(t.slug);
+    if (problem) throw new TenantError(`Address: ${problem}`);
+    if (await slugTaken(db, t.slug)) throw new TenantError('Address: another business already uses this address');
+    slug = t.slug;
+  } else {
+    slug = await freeSlug(db, slugify(t.tradeName ?? t.legalName));
+  }
   const id = randomUUID();
   await db.query(
-    `insert into tenants (id, legal_name, trade_name, tin, street, additional_street, city, district_code, telephone, email, environment)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-    [id, t.legalName, t.tradeName ?? null, t.tin, t.address.street, t.address.additionalStreet ?? null, t.address.city, t.address.districtCode, t.contact.telephone, t.contact.email, t.environment],
+    `insert into tenants (id, legal_name, trade_name, tin, street, additional_street, city, district_code, telephone, email, environment, slug)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+    [id, t.legalName, t.tradeName ?? null, t.tin, t.address.street, t.address.additionalStreet ?? null, t.address.city, t.address.districtCode, t.contact.telephone, t.contact.email, t.environment, slug],
   );
   return id;
+}
+
+export async function tenantBySlug(db: Queryable, slug: string): Promise<{ id: string; slug: string; legalName: string; tradeName: string | null; environment: string } | null> {
+  const r = (await db.query<{ id: string; slug: string; legal_name: string; trade_name: string | null; environment: string }>(
+    'select id, slug, legal_name, trade_name, environment from tenants where slug = $1', [slug],
+  )).rows[0];
+  return r ? { id: r.id, slug: r.slug, legalName: r.legal_name, tradeName: r.trade_name, environment: r.environment } : null;
 }
 
 /**

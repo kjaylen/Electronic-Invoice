@@ -33,7 +33,9 @@ export function toApiError(error: unknown): ApiError {
     case 'CertificateError':
       return new ApiError(422, 'certificate_problem', e.message, e.btsCode ? { btsCode: e.btsCode } : undefined);
     case 'TenantError':
-      return /^Unknown/.test(e.message) ? notFound('Tenant') : new ApiError(409, 'tenant_not_ready', e.message);
+      if (/^Unknown/.test(e.message)) return notFound('Tenant');
+      if (/^(Address|TIN|District)/.test(e.message)) return new ApiError(422, 'invalid_business', e.message);
+      return new ApiError(409, 'tenant_not_ready', e.message);
     case 'PipelineError':
       return /^Unknown/.test(e.message) ? notFound('Document') : new ApiError(409, 'conflict', e.message);
     case 'PrintError':

@@ -1,10 +1,25 @@
+/** Signing in to this business: log in, forgot password, set a password from a link, replace a temporary password. */
+
 import { type FormEvent, type ReactNode, useEffect, useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate, useSearchParams } from 'react-router';
 import { api, ApiError, type SessionInfo } from '../api';
 import { AuthArt } from '../art';
+import { BUSINESS } from '../business';
 import { LanguageToggle, useT } from '../i18n';
 import { useSession } from '../session';
 import { ErrorText, Field, usePageTitle } from '../ui';
+
+/** The business's public name, for its sign-in pages. */
+function useBusinessName(): { name: string | null; missing: boolean } {
+  const [state, setState] = useState<{ name: string | null; missing: boolean }>({ name: null, missing: false });
+  useEffect(() => {
+    if (!BUSINESS) return;
+    void api<{ name: string }>(`/v1/auth/business/${BUSINESS}`)
+      .then((b) => setState({ name: b.name, missing: false }))
+      .catch((e) => setState({ name: null, missing: e instanceof ApiError && e.status === 404 }));
+  }, []);
+  return state;
+}
 
 function AuthLayout(props: { art: { kicker: string; title: string; text: string }; children: ReactNode }) {
   return (
@@ -37,70 +52,50 @@ function useSubmit(fn: () => Promise<void>) {
   return { submit, error, busy };
 }
 
-export function Login() {
+function NoSuchBusiness() {
   const t = useT();
-  usePageTitle(t('Log in'));
-  const { session, setSession } = useSession();
-  const navigate = useNavigate();
-  const location = useLocation();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const { submit, error, busy } = useSubmit(async () => {
-    const s = await api<SessionInfo>('/v1/auth/login', { method: 'POST', body: { email, password } });
-    setSession(s);
-    const from = (location.state as { from?: string } | null)?.from;
-    navigate(from?.startsWith('/invite') ? from : s.currentBusinessId ? (from ?? '/') : '/onboarding', { replace: true, viewTransition: true });
-  });
-  if (session) {
-    const from = (location.state as { from?: string } | null)?.from;
-    return <Navigate to={from?.startsWith('/invite') ? from : '/'} replace />;
-  }
-
   return (
-    <AuthLayout art={{ kicker: t('Electronic tax documents'), title: t('Issue it. Sign it. Get it authorized.'), text: t('Electronic tax documents for Belize: signed, sent to BTS and printed in seconds, with the legal record kept for you.') }}>
-      <form className="card auth-card stack" onSubmit={submit}>
-        <div>
-          <span className="kicker">{t('Welcome back')}</span>
-          <h1>{t('Log in')}</h1>
-        </div>
-        <Field label={t('Email')}><input type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
-        <Field label={t('Password')}><input type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
-        <p className="small right"><Link to="/forgot-password" viewTransition>{t('Forgot your password?')}</Link></p>
-        <ErrorText error={error} />
-        <button type="submit" className="big" disabled={busy}>{busy ? t('Logging in…') : t('Log in')}<span className="chip" aria-hidden="true">→</span></button>
-        <p className="small">{t('New here?')} <Link to="/signup" viewTransition>{t('Create an account')}</Link></p>
-      </form>
+    <AuthLayout art={{ kicker: t('Electronic tax documents'), title: t('Nothing at this address.'), text: t('Check the link with your administrator.') }}>
+      <div className="card auth-card stack">
+        <h1>{t('No business here')}</h1>
+        <p className="muted">{t('There is no business at /{slug}.', { slug: BUSINESS ?? '' })}</p>
+        <a className="button big" href="/?choose=1">{t('Find your business')}<span className="chip" aria-hidden="true">→</span></a>
+      </div>
     </AuthLayout>
   );
 }
 
-export function Signup() {
+export function Login() {
   const t = useT();
-  usePageTitle(t('Create your account'));
+  const { name, missing } = useBusinessName();
+  usePageTitle(name ? `${t('Log in')} · ${name}` : t('Log in'));
   const { session, setSession } = useSession();
   const navigate = useNavigate();
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
+  const location = useLocation();
+  const [login, setLogin] = useState('');
   const [password, setPassword] = useState('');
   const { submit, error, busy } = useSubmit(async () => {
-    setSession(await api<SessionInfo>('/v1/auth/signup', { method: 'POST', body: { name, email, password } }));
-    navigate('/onboarding', { replace: true, viewTransition: true });
+    const s = await api<SessionInfo>('/v1/auth/login', { method: 'POST', body: { business: BUSINESS, login, password } });
+    setSession(s);
+    const from = (location.state as { from?: string } | null)?.from;
+    navigate(from ?? '/', { replace: true, viewTransition: true });
   });
+  if (missing) return <NoSuchBusiness />;
   if (session) return <Navigate to="/" replace />;
 
   return (
-    <AuthLayout art={{ kicker: t('Get started'), title: t('E-invoicing for Belize, without the paperwork.'), text: t('Create your account, add your business, install your BTS certificate. You can issue your first invoice in minutes.') }}>
+    <AuthLayout art={{ kicker: t('Electronic tax documents'), title: name ?? t('Issue it. Sign it. Get it authorized.'), text: t('Sign in with the email or username your administrator gave you.') }}>
       <form className="card auth-card stack" onSubmit={submit}>
         <div>
-          <span className="kicker">{t('Step 1 · Account')}</span>
-          <h1>{t('Create your account')}</h1>
+          <span className="kicker">{name ?? '…'}</span>
+          <h1>{t('Log in')}</h1>
         </div>
-        <Field label={t('Your name')}><input autoComplete="name" required value={name} onChange={(e) => setName(e.target.value)} /></Field>
-        <Field label={t('Email')}><input type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
-        <Field label={t('Password')} hint={t('At least 10 characters.')}><input type="password" autoComplete="new-password" required minLength={10} value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
+        <Field label={t('Email or username')}><input autoComplete="username" autoCapitalize="none" spellCheck={false} required value={login} onChange={(e) => setLogin(e.target.value)} /></Field>
+        <Field label={t('Password')}><input type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
+        <p className="small right"><Link to="/forgot-password" viewTransition>{t('Forgot your password?')}</Link></p>
         <ErrorText error={error} />
-        <button type="submit" className="big" disabled={busy}>{busy ? t('Creating…') : t('Create account')}<span className="chip" aria-hidden="true">→</span></button>
-        <p className="small">{t('Already have an account?')} <Link to="/login" viewTransition>{t('Log in')}</Link></p>
+        <button type="submit" className="big" disabled={busy}>{busy ? t('Logging in…') : t('Log in')}<span className="chip" aria-hidden="true">→</span></button>
+        <p className="small muted">{t('Not this business?')} <a href="/?choose=1">{t('Find yours')}</a></p>
       </form>
     </AuthLayout>
   );
@@ -108,18 +103,19 @@ export function Signup() {
 
 export function ForgotPassword() {
   const t = useT();
+  const { name } = useBusinessName();
   usePageTitle(t('Reset your password'));
   const [email, setEmail] = useState('');
   const [sent, setSent] = useState(false);
   const { submit, error, busy } = useSubmit(async () => {
-    await api('/v1/auth/password/forgot', { method: 'POST', body: { email } });
+    await api('/v1/auth/password/forgot', { method: 'POST', body: { business: BUSINESS, email } });
     setSent(true);
   });
   return (
-    <AuthLayout art={{ kicker: t('Account'), title: t('Locked out? It happens.'), text: t('We email you a link to choose a new password. It works once, for one hour.') }}>
+    <AuthLayout art={{ kicker: name ?? t('Account'), title: t('Locked out? It happens.'), text: t('We email you a link to choose a new password. It works once, for one hour. No email on your account? Ask your administrator to reset it.') }}>
       <div className="card auth-card stack">
         <div>
-          <span className="kicker">{t('Account')}</span>
+          <span className="kicker">{name ?? t('Account')}</span>
           <h1>{t('Reset your password')}</h1>
         </div>
         {sent ? (
@@ -137,107 +133,88 @@ export function ForgotPassword() {
   );
 }
 
+interface LinkInfo {
+  purpose: 'reset' | 'welcome';
+  name: string;
+  login: string | null;
+  business: { slug: string; name: string };
+}
+
+/** From an emailed or shared link: a welcome (new account) or a reset. */
 export function ResetPassword() {
   const t = useT();
-  usePageTitle(t('Choose a new password'));
   const { setSession } = useSession();
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const token = params.get('token') ?? '';
+  const [info, setInfo] = useState<LinkInfo | null>(null);
+  const [linkError, setLinkError] = useState<unknown>(null);
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
+  useEffect(() => {
+    if (!token) return setLinkError(new ApiError(400, 'invalid_token', ''));
+    void api<LinkInfo>(`/v1/auth/password/link/${encodeURIComponent(token)}`).then(setInfo).catch(setLinkError);
+  }, [token]);
+  const welcome = info?.purpose === 'welcome';
+  usePageTitle(welcome ? t('Welcome') : t('Choose a new password'));
   const { submit, error, busy } = useSubmit(async () => {
     if (password !== confirm) throw new Error(t('The two passwords do not match'));
-    const s = await api<SessionInfo>('/v1/auth/password/reset', { method: 'POST', body: { token, password } });
-    setSession(s);
-    navigate(s.currentBusinessId ? '/' : '/onboarding', { replace: true, viewTransition: true });
+    setSession(await api<SessionInfo>('/v1/auth/password/reset', { method: 'POST', body: { token, password } }));
+    navigate('/', { replace: true, viewTransition: true });
   });
   return (
-    <AuthLayout art={{ kicker: t('Account'), title: t('A fresh start.'), text: t('Choose a new password. You will be signed out on every other device.') }}>
+    <AuthLayout art={{ kicker: info?.business.name ?? t('Account'), title: welcome ? t('Welcome to the team.') : t('A fresh start.'), text: welcome ? t('Choose your password, then you are in.') : t('Choose a new password. You will be signed out on every other device.') }}>
       <form className="card auth-card stack" onSubmit={submit}>
         <div>
-          <span className="kicker">{t('Account')}</span>
-          <h1>{t('Choose a new password')}</h1>
+          <span className="kicker">{info?.business.name ?? t('Account')}</span>
+          <h1>{welcome ? t('Welcome, {name}', { name: info!.name }) : t('Choose a new password')}</h1>
+          {info?.login && <p className="muted">{t('You sign in as {login}.', { login: info.login })}</p>}
         </div>
-        {!token && <div className="banner bad"><div>{t('This link is incomplete. Open the link from the email again.')}</div></div>}
-        <Field label={t('New password')} hint={t('At least 10 characters.')}><input type="password" autoComplete="new-password" required minLength={10} autoFocus value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
-        <Field label={t('Repeat the new password')}><input type="password" autoComplete="new-password" required value={confirm} onChange={(e) => setConfirm(e.target.value)} /></Field>
-        <ErrorText error={error} />
-        <button type="submit" className="big" disabled={busy || !token}>{busy ? t('Saving…') : t('Save and log in')}<span className="chip" aria-hidden="true">→</span></button>
-        <p className="small"><Link to="/forgot-password" viewTransition>{t('Ask for a new link')}</Link></p>
+        {linkError ? (
+          <>
+            <ErrorText error={linkError} />
+            <p className="small"><Link to="/forgot-password" viewTransition>{t('Ask for a new link')}</Link></p>
+          </>
+        ) : (
+          <>
+            <Field label={t('New password')} hint={t('At least 10 characters.')}><input type="password" autoComplete="new-password" required minLength={10} autoFocus value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
+            <Field label={t('Repeat the new password')}><input type="password" autoComplete="new-password" required value={confirm} onChange={(e) => setConfirm(e.target.value)} /></Field>
+            <ErrorText error={error} />
+            <button type="submit" className="big" disabled={busy || !info}>{busy ? t('Saving…') : t('Save and log in')}<span className="chip" aria-hidden="true">→</span></button>
+          </>
+        )}
       </form>
     </AuthLayout>
   );
 }
 
-interface InvitationInfo {
-  businessName: string;
-  invitedByName: string;
-  email: string;
-  role: 'owner' | 'member';
-  accountExists: boolean;
-}
-
-export function AcceptInvite() {
+/** Signed in with a temporary password an administrator set: choose your own before anything else. */
+export function ChangePasswordRequired() {
   const t = useT();
-  usePageTitle(t('Join the team'));
-  const { session, setSession, logout } = useSession();
-  const navigate = useNavigate();
-  const [params] = useSearchParams();
-  const token = params.get('token') ?? '';
-  const [info, setInfo] = useState<InvitationInfo | null>(null);
-  const [loadError, setLoadError] = useState<unknown>(null);
-  const [name, setName] = useState('');
-  const [password, setPassword] = useState('');
-  useEffect(() => {
-    if (!token) return setLoadError(new ApiError(404, 'invalid_token', 'This invitation is invalid, already used or expired. Ask for a new one.'));
-    void api<InvitationInfo>(`/v1/auth/invitations/${encodeURIComponent(token)}`).then(setInfo).catch(setLoadError);
-  }, [token]);
+  usePageTitle(t('Choose your password'));
+  const { session, refresh, logout } = useSession();
+  const [current, setCurrent] = useState('');
+  const [next, setNext] = useState('');
+  const [confirm, setConfirm] = useState('');
   const { submit, error, busy } = useSubmit(async () => {
-    const s = await api<SessionInfo>('/v1/auth/invitations/accept', { method: 'POST', body: { token, ...(!session && { name, password }) } });
-    setSession(s);
-    navigate('/', { replace: true, viewTransition: true });
+    if (next !== confirm) throw new Error(t('The two passwords do not match'));
+    await api('/v1/auth/password/change', { method: 'POST', body: { currentPassword: current, newPassword: next } });
+    await refresh();
   });
-
-  const role = info?.role === 'owner' ? t('an owner') : t('a team member');
-  const wrongAccount = session && info && session.user.email !== info.email;
   return (
-    <AuthLayout art={{ kicker: t('Invitation'), title: info ? t('Join {business}', { business: info.businessName }) : t('Join the team'), text: t('Issue invoices and receipts together, each with your own login.') }}>
-      <div className="card auth-card stack">
+    <AuthLayout art={{ kicker: session?.business.tradeName ?? session?.business.legalName ?? '', title: t('Make it yours.'), text: t('Your administrator gave you a temporary password. Choose your own to continue; only you will know it.') }}>
+      <form className="card auth-card stack" onSubmit={submit}>
         <div>
-          <span className="kicker">{t('Invitation')}</span>
-          <h1>{info ? t('Join {business}', { business: info.businessName }) : t('Join the team')}</h1>
+          <span className="kicker">{session?.user.name}</span>
+          <h1>{t('Choose your password')}</h1>
         </div>
-        {loadError ? <ErrorText error={loadError} /> : !info ? <div className="skeleton" /> : (
-          <>
-            <p>{t('{name} invited {email} to join as {role}.', { name: info.invitedByName, email: info.email, role })}</p>
-            {wrongAccount ? (
-              <>
-                <div className="banner warn"><div>{t('You are logged in as {email}. Log out, then open the link again.', { email: session.user.email })}</div></div>
-                <button className="secondary" onClick={() => void logout()}>{t('Log out')}</button>
-              </>
-            ) : session ? (
-              <form className="stack" onSubmit={submit}>
-                <ErrorText error={error} />
-                <button type="submit" className="big" disabled={busy}>{busy ? t('Joining…') : t('Accept and join')}<span className="chip" aria-hidden="true">→</span></button>
-              </form>
-            ) : info.accountExists ? (
-              <>
-                <p className="muted">{t('You already have an account. Log in as {email} to accept.', { email: info.email })}</p>
-                <Link className="button big" to="/login" state={{ from: `/invite?token=${token}` }}>{t('Log in')}<span className="chip" aria-hidden="true">→</span></Link>
-              </>
-            ) : (
-              <form className="stack" onSubmit={submit}>
-                <Field label={t('Email')}><input value={info.email} disabled /></Field>
-                <Field label={t('Your name')}><input autoComplete="name" required autoFocus value={name} onChange={(e) => setName(e.target.value)} /></Field>
-                <Field label={t('Choose a password')} hint={t('At least 10 characters.')}><input type="password" autoComplete="new-password" required minLength={10} value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
-                <ErrorText error={error} />
-                <button type="submit" className="big" disabled={busy}>{busy ? t('Joining…') : t('Create account and join')}<span className="chip" aria-hidden="true">→</span></button>
-              </form>
-            )}
-          </>
-        )}
-      </div>
+        <Field label={t('Temporary password')}><input type="password" autoComplete="current-password" required autoFocus value={current} onChange={(e) => setCurrent(e.target.value)} /></Field>
+        <Field label={t('New password')} hint={t('At least 10 characters.')}><input type="password" autoComplete="new-password" required minLength={10} value={next} onChange={(e) => setNext(e.target.value)} /></Field>
+        <Field label={t('Repeat the new password')}><input type="password" autoComplete="new-password" required value={confirm} onChange={(e) => setConfirm(e.target.value)} /></Field>
+        <ErrorText error={error} />
+        <button type="submit" className="big" disabled={busy}>{busy ? t('Saving…') : t('Save and continue')}<span className="chip" aria-hidden="true">→</span></button>
+        <button type="button" className="link" onClick={() => void logout()}>{t('Log out')}</button>
+      </form>
     </AuthLayout>
   );
 }

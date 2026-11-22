@@ -2,6 +2,7 @@ import { type FormEvent, useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import { api, type Customer, type Page } from '../api';
 import { useT } from '../i18n';
+import { useSession } from '../session';
 import { useToast } from '../toast';
 import { DISTRICTS, ErrorText, Field, Modal, useDebounced, usePageTitle } from '../ui';
 
@@ -77,6 +78,8 @@ export function Customers() {
   const t = useT();
   usePageTitle(t('Customers'));
   const toast = useToast();
+  const { can } = useSession();
+  const manage = can('catalog.manage');
   const [q, setQ] = useState('');
   const query = useDebounced(q, 250);
   const [list, setList] = useState<Customer[] | null>(null);
@@ -117,7 +120,7 @@ export function Customers() {
       <div className="row">
         <div><span className="kicker">{t('Directory')}</span><h1>{t('Customers')}</h1></div>
         <span className="spacer" />
-        <button onClick={() => setEditing('new')}>{t('Add customer')}</button>
+        {manage && <button onClick={() => setEditing('new')}>{t('Add customer')}</button>}
       </div>
       <input type="search" placeholder={t('Search by name, TIN, phone or email')} value={q} onChange={(e) => setQ(e.target.value)} aria-label={t('Search customers')} />
       <ErrorText error={error} />
@@ -135,8 +138,8 @@ export function Customers() {
                     <td data-label={t('Contact')}>{[c.contact.telephone, c.contact.email].filter(Boolean).join(' · ') || '—'}</td>
                     <td className="right actions">
                       <Link to={`/documents?customerId=${c.id}`} viewTransition>{t('Documents')}</Link>
-                      <button className="link" onClick={() => setEditing(c)}>{t('Edit')}</button>
-                      <button className="link" onClick={() => setArchiving(c)}>{t('Archive')}</button>
+                      {manage && <button className="link" onClick={() => setEditing(c)}>{t('Edit')}</button>}
+                      {manage && <button className="link" onClick={() => setArchiving(c)}>{t('Archive')}</button>}
                     </td>
                   </tr>
                 ))}

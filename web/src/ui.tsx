@@ -1,6 +1,7 @@
 /** Small shared pieces: formatting, labels, status badges, fields, modal, combobox. */
 
 import { type ReactNode, useEffect, useId, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { DocStatus } from './api';
 import { errorMessage, type T, useT } from './i18n';
 
@@ -161,13 +162,15 @@ export function Modal(props: { title: string; children: ReactNode; onClose: () =
       if (previous?.isConnected) previous.focus();
     };
   }, [previous]);
-  return (
+  // Rendered at the end of <body>, above everything (pages animate, which would otherwise trap it under the top bar).
+  return createPortal(
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && props.onClose()}>
       <div ref={ref} className={`card modal stack ${props.wide ? 'wide' : ''}`} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}>
         <h2 id={titleId}>{props.title}</h2>
         {props.children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -311,31 +314,7 @@ export function Combobox<T extends { id: string }>(props: {
   );
 }
 
-/** JSON in localStorage, ignoring blocked or corrupt storage. */
-export const store = {
-  get<T>(key: string): T | null {
-    try {
-      const v = localStorage.getItem(key);
-      return v ? (JSON.parse(v) as T) : null;
-    } catch {
-      return null;
-    }
-  },
-  set(key: string, value: unknown) {
-    try {
-      localStorage.setItem(key, JSON.stringify(value));
-    } catch {
-      /* storage full or blocked */
-    }
-  },
-  remove(key: string) {
-    try {
-      localStorage.removeItem(key);
-    } catch {
-      /* blocked */
-    }
-  },
-};
+export { store } from './storage';
 
 /** Belize phone numbers to the international form WhatsApp wants: "+501 622-1234" / "622 1234" -> "5016221234". */
 export function whatsappNumber(phone: string | null | undefined): string | null {

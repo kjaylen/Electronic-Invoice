@@ -8,7 +8,7 @@
  * Without any of them configured, routes that need email answer 503.
  */
 
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import nodemailer from 'nodemailer';
 
@@ -51,7 +51,10 @@ export function outboxMailer(dir: string, from: string): Mailer {
     async send(m) {
       const info = await transport.sendMail({ from, ...m });
       const name = `${new Date().toISOString().replace(/[:.]/g, '-')}-${m.to.replace(/[^a-z0-9@.-]/gi, '_')}.eml`;
-      writeFileSync(join(dir, name), info.message as Buffer);
+      // Write then rename, so anyone watching the folder never reads a half-written message.
+      const tmp = join(dir, `.${name}.tmp`);
+      writeFileSync(tmp, info.message as Buffer);
+      renameSync(tmp, join(dir, name));
     },
   };
 }

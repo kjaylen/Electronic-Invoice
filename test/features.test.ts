@@ -1,23 +1,20 @@
 /**
- * Web app features: editing the catalog, document search, password reset,
- * teammates, sending documents (email, share links) and reports.
+ * Web app features: editing the catalog, document search, sending documents
+ * (email, share links) and reports. Accounts and passwords: accounts.test.ts.
  */
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
+import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../src/api/app.ts';
 import { resetLoginAttempts } from '../src/api/auth.ts';
 import { csvCell } from '../src/api/reports.ts';
 import { createApiKey } from '../src/db/apikeys.ts';
-import { addMembership, createUser } from '../src/db/users.ts';
 import { SUBMIT_PATHS } from '../src/engine/transport.ts';
 import { memoryMailer } from '../src/mail/mailer.ts';
 import { applicationResponse } from './fake-bts.ts';
 import { AUTHORIZED, setupPipeline, type PipelineFixture } from './pipeline-setup.ts';
 
-const CSRF = { 'x-requested-with': 'etd-web' };
-const PASSWORD = 'correct horse battery';
 const PUBLIC_URL = 'https://app.example.test';
 
 interface Ctx {
@@ -47,26 +44,6 @@ async function withApp(fn: (c: Ctx) => Promise<void>, options: { mail?: boolean;
   }
 }
 
-function cookieFrom(res: LightMyRequestResponse): string {
-  const m = /etd_session=([^;]*)/.exec(String(res.headers['set-cookie'] ?? ''));
-  assert.ok(m, `session cookie set: ${res.body}`);
-  return `etd_session=${m[1]}`;
-}
-
-/** A person with a session, as owner or member of tenant A. */
-async function person(c: Ctx, email: string, role: 'owner' | 'member' = 'owner'): Promise<{ cookie: string; id: string }> {
-  const user = await createUser(c.f.db, { email, name: email.split('@')[0]!, password: PASSWORD });
-  await addMembership(c.f.db, user.id, c.f.tenantA, role);
-  const res = await c.app.inject({ method: 'POST', url: '/v1/auth/login', headers: CSRF, payload: { email, password: PASSWORD } });
-  assert.equal(res.statusCode, 200, res.body);
-  return { cookie: cookieFrom(res), id: user.id };
-}
-
-const linkToken = (text: string, path: string) => {
-  const m = new RegExp(`${PUBLIC_URL}${path}\\?token=([A-Za-z0-9_-]{43})`).exec(text);
-  assert.ok(m, `link to ${path} in: ${text}`);
-  return m[1]!;
-};
 
 async function issue(c: Ctx, body: Record<string, unknown>) {
   const res = await c.app.inject({ method: 'POST', url: '/v1/documents', headers: c.as(c.key), payload: { payment: { meansCode: '10', terms: 'Paid in cash' }, ...body } });
@@ -210,153 +187,6 @@ test('share links: the customer opens the PDF without logging in; cancelled docu
     assert.match(after.body, /no longer valid/);
     assert.equal((await c.app.inject({ method: 'POST', url: `/v1/documents/${doc.id}/share`, headers: c.as(c.key) })).statusCode, 409);
   }));
-
-// ---------- passwords ----------
-
-test('password reset by email: one-time link, signs out old sessions, no account enumeration', () =>
-  withApp(async (c) => {
-    const owner = await person(c, 'reset@shop.example');
-    const forgot = (email: string) => c.app.inject({ method: 'POST', url: '/v1/auth/password/forgot', headers: CSRF, payload: { email } });
-
-    assert.equal((await forgot('nobody@shop.example')).statusCode, 204, 'same answer for unknown emails');
-    assert.equal((await forgot('RESET@shop.example')).statusCode, 204);
-    await new Promise((r) => setTimeout(r, 50)); // the email is sent in the background
-    assert.equal(c.mail.sent.length, 1, 'only the real account gets an email');
-    const token = linkToken(c.mail.sent[0]!.text, '/reset-password');
-
-    const weak = await c.app.inject({ method: 'POST', url: '/v1/auth/password/reset', headers: CSRF, payload: { token, password: 'short' } });
-    assert.equal(weak.statusCode, 422);
-    const ok = await c.app.inject({ method: 'POST', url: '/v1/auth/password/reset', headers: CSRF, payload: { token, password: 'a brand new password' } });
-    assert.equal(ok.statusCode, 200, ok.body);
-    assert.equal(ok.json().currentBusinessId, c.f.tenantA, 'signed straight back in');
-    const fresh = cookieFrom(ok);
-
-    assert.equal((await c.app.inject({ method: 'GET', url: '/v1/auth/session', headers: { cookie: owner.cookie } })).statusCode, 401, 'old sessions are signed out');
-    assert.equal((await c.app.inject({ method: 'GET', url: '/v1/auth/session', headers: { cookie: fresh } })).statusCode, 200);
-    const reuse = await c.app.inject({ method: 'POST', url: '/v1/auth/password/reset', headers: CSRF, payload: { token, password: 'another new password' } });
-    assert.equal(reuse.statusCode, 400, 'the link works once');
-    const login = await c.app.inject({ method: 'POST', url: '/v1/auth/login', headers: CSRF, payload: { email: 'reset@shop.example', password: 'a brand new password' } });
-    assert.equal(login.statusCode, 200);
-
-    // A second request replaces the first link.
-    await forgot('reset@shop.example');
-    await forgot('reset@shop.example');
-    await new Promise((r) => setTimeout(r, 50));
-    const [older, newer] = c.mail.sent.slice(-2).map((m) => linkToken(m.text, '/reset-password'));
-    assert.equal((await c.app.inject({ method: 'POST', url: '/v1/auth/password/reset', headers: CSRF, payload: { token: older, password: 'x'.repeat(12) } })).statusCode, 400);
-    assert.equal((await c.app.inject({ method: 'POST', url: '/v1/auth/password/reset', headers: CSRF, payload: { token: newer, password: 'x'.repeat(12) } })).statusCode, 200);
-  }));
-
-test('change password: needs the current one, keeps this session, signs out others', () =>
-  withApp(async (c) => {
-    const a = await person(c, 'change@shop.example');
-    const other = cookieFrom(await c.app.inject({ method: 'POST', url: '/v1/auth/login', headers: CSRF, payload: { email: 'change@shop.example', password: PASSWORD } }));
-    const change = (currentPassword: string) => c.app.inject({ method: 'POST', url: '/v1/auth/password/change', headers: { ...CSRF, cookie: a.cookie }, payload: { currentPassword, newPassword: 'my new password!' } });
-    assert.equal((await change('wrong password')).statusCode, 422);
-    assert.equal((await change(PASSWORD)).statusCode, 204);
-    assert.equal((await c.app.inject({ method: 'GET', url: '/v1/auth/session', headers: { cookie: a.cookie } })).statusCode, 200);
-    assert.equal((await c.app.inject({ method: 'GET', url: '/v1/auth/session', headers: { cookie: other } })).statusCode, 401);
-  }));
-
-test('forgot password without email or PUBLIC_URL configured answers 503', async () => {
-  await withApp(async (c) => {
-    assert.equal((await c.app.inject({ method: 'POST', url: '/v1/auth/password/forgot', headers: CSRF, payload: { email: 'a@b.example' } })).statusCode, 503);
-  }, { mail: false });
-  await withApp(async (c) => {
-    assert.equal((await c.app.inject({ method: 'POST', url: '/v1/auth/password/forgot', headers: CSRF, payload: { email: 'a@b.example' } })).statusCode, 503);
-  }, { publicUrl: false });
-});
-
-// ---------- team ----------
-
-test('invite a teammate: new account from the link, then roles and removal', () =>
-  withApp(async (c) => {
-    const owner = await person(c, 'owner@shop.example');
-    const asOwner = { ...CSRF, cookie: owner.cookie };
-    const invite = await c.app.inject({ method: 'POST', url: '/v1/team/invitations', headers: asOwner, payload: { email: 'Cashier@Shop.example', role: 'member' } });
-    assert.equal(invite.statusCode, 201, invite.body);
-    assert.equal(invite.json().emailSent, true);
-    const token = linkToken(c.mail.sent[0]!.text, '/invite');
-    assert.equal(new URL(invite.json().inviteUrl).searchParams.get('token'), token, 'the owner also gets the link to share another way');
-    assert.equal(c.mail.sent[0]!.to, 'cashier@shop.example');
-
-    const info = await c.app.inject({ method: 'GET', url: `/v1/auth/invitations/${token}`, headers: CSRF });
-    assert.equal(info.statusCode, 200);
-    assert.equal(info.json().accountExists, false);
-    assert.equal(info.json().role, 'member');
-
-    const accepted = await c.app.inject({ method: 'POST', url: '/v1/auth/invitations/accept', headers: CSRF, payload: { token, name: 'Carla Cashier', password: PASSWORD } });
-    assert.equal(accepted.statusCode, 201, accepted.body);
-    assert.equal(accepted.json().currentBusinessId, c.f.tenantA);
-    const cashier = cookieFrom(accepted);
-    assert.equal((await c.app.inject({ method: 'POST', url: '/v1/auth/invitations/accept', headers: CSRF, payload: { token, name: 'X', password: PASSWORD } })).statusCode, 404, 'one use');
-
-    // Members can issue but not manage the team.
-    const asCashier = { ...CSRF, cookie: cashier };
-    assert.equal((await c.app.inject({ method: 'GET', url: '/v1/me', headers: asCashier })).statusCode, 200);
-    assert.equal((await c.app.inject({ method: 'POST', url: '/v1/team/invitations', headers: asCashier, payload: { email: 'x@y.example', role: 'owner' } })).statusCode, 403);
-    const team = (await c.app.inject({ method: 'GET', url: '/v1/team', headers: asCashier })).json();
-    assert.equal(team.members.length, 2);
-    assert.deepEqual(team.invitations, [], 'members do not see invitations');
-
-    const cashierId = team.members.find((m: { email: string }) => m.email === 'cashier@shop.example').userId;
-    assert.equal((await c.app.inject({ method: 'PATCH', url: `/v1/team/members/${owner.id}`, headers: asOwner, payload: { role: 'member' } })).statusCode, 409, 'the last owner stays an owner');
-    assert.equal((await c.app.inject({ method: 'PATCH', url: `/v1/team/members/${cashierId}`, headers: asOwner, payload: { role: 'owner' } })).statusCode, 200);
-    assert.equal((await c.app.inject({ method: 'PATCH', url: `/v1/team/members/${owner.id}`, headers: asOwner, payload: { role: 'member' } })).statusCode, 200, 'fine once there is another owner');
-    assert.equal((await c.app.inject({ method: 'DELETE', url: `/v1/team/members/${cashierId}`, headers: { ...CSRF, cookie: cashier } })).statusCode, 409, 'cannot leave as the last owner');
-
-    // The (now) owner removes the original account; it loses access at once.
-    assert.equal((await c.app.inject({ method: 'DELETE', url: `/v1/team/members/${owner.id}`, headers: asCashier })).statusCode, 204);
-    assert.equal((await c.app.inject({ method: 'GET', url: '/v1/me', headers: asOwner })).statusCode, 409);
-
-    // API keys cannot manage people.
-    assert.equal((await c.app.inject({ method: 'GET', url: '/v1/team', headers: c.as(c.key) })).statusCode, 403);
-  }));
-
-test('invitations for existing accounts: must log in as that email; revoked links stop working', () =>
-  withApp(async (c) => {
-    const owner = await person(c, 'boss@shop.example');
-    const asOwner = { ...CSRF, cookie: owner.cookie };
-    await createUser(c.f.db, { email: 'existing@else.example', name: 'Existing', password: PASSWORD });
-    const stranger = await createUser(c.f.db, { email: 'stranger@else.example', name: 'Stranger', password: PASSWORD });
-    void stranger;
-
-    await c.app.inject({ method: 'POST', url: '/v1/team/invitations', headers: asOwner, payload: { email: 'existing@else.example', role: 'owner' } });
-    const token = linkToken(c.mail.sent.at(-1)!.text, '/invite');
-    const anon = await c.app.inject({ method: 'POST', url: '/v1/auth/invitations/accept', headers: CSRF, payload: { token } });
-    assert.equal(anon.statusCode, 409);
-    assert.equal(anon.json().error.code, 'login_required');
-
-    const strangerCookie = cookieFrom(await c.app.inject({ method: 'POST', url: '/v1/auth/login', headers: CSRF, payload: { email: 'stranger@else.example', password: PASSWORD } }));
-    const wrong = await c.app.inject({ method: 'POST', url: '/v1/auth/invitations/accept', headers: { ...CSRF, cookie: strangerCookie }, payload: { token } });
-    assert.equal(wrong.statusCode, 403, 'a forwarded link cannot be used by someone else');
-
-    const existingCookie = cookieFrom(await c.app.inject({ method: 'POST', url: '/v1/auth/login', headers: CSRF, payload: { email: 'existing@else.example', password: PASSWORD } }));
-    const ok = await c.app.inject({ method: 'POST', url: '/v1/auth/invitations/accept', headers: { ...CSRF, cookie: existingCookie }, payload: { token } });
-    assert.equal(ok.statusCode, 200, ok.body);
-    assert.equal(ok.json().businesses.find((b: { id: string }) => b.id === c.f.tenantA).role, 'owner');
-
-    // Already on the team.
-    assert.equal((await c.app.inject({ method: 'POST', url: '/v1/team/invitations', headers: asOwner, payload: { email: 'existing@else.example', role: 'member' } })).statusCode, 422);
-
-    // Revoke.
-    const inv = (await c.app.inject({ method: 'POST', url: '/v1/team/invitations', headers: asOwner, payload: { email: 'later@else.example', role: 'member' } })).json();
-    const laterToken = new URL(inv.inviteUrl).searchParams.get('token')!;
-    assert.equal((await c.app.inject({ method: 'GET', url: '/v1/team', headers: asOwner })).json().invitations.length, 1);
-    assert.equal((await c.app.inject({ method: 'DELETE', url: `/v1/team/invitations/${inv.invitation.id}`, headers: asOwner })).statusCode, 204);
-    assert.equal((await c.app.inject({ method: 'GET', url: `/v1/auth/invitations/${laterToken}`, headers: CSRF })).statusCode, 404);
-  }));
-
-test('invitations still work without email: the owner gets a link to share', () =>
-  withApp(async (c) => {
-    const owner = await person(c, 'nomail@shop.example');
-    const res = await c.app.inject({ method: 'POST', url: '/v1/team/invitations', headers: { ...CSRF, cookie: owner.cookie }, payload: { email: 'friend@shop.example', role: 'member' } });
-    assert.equal(res.statusCode, 201);
-    assert.equal(res.json().emailSent, false);
-    assert.match(res.json().inviteUrl, /\/invite\?token=/);
-  }, { mail: false }));
-
-// ---------- reports ----------
 
 test('reports: totals and GST by rate, credit notes subtract, rejected documents do not count, CSV', () =>
   withApp(async (c) => {

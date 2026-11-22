@@ -8,7 +8,8 @@ import { addCertificate } from '../db/tenants.ts';
 import type { PipelineDeps } from '../pipeline/issue.ts';
 import { BELIZE_DISTRICTS, type Customer, type DistrictCode } from '../engine/ubl.ts';
 import { certificateSummary } from './admin.ts';
-import { requireOwner } from './app.ts';
+import { audit } from '../db/audit.ts';
+import { can, requirePermission, requirePersonWith } from './permissions.ts';
 import { ApiError, notFound } from './errors.ts';
 import { certificateSchema, customerSchema, itemSchema, listQuery, uuid } from './schemas.ts';
 
@@ -181,8 +182,9 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: PipelineDeps) 
 
   // A business can install or renew its own certificate (owners only).
   app.put<{ Body: { certificatePem: string; privateKeyPem: string; passphrase?: string } }>('/certificate', { schema: { body: certificateSchema } }, async (request) => {
-    requireOwner(request);
+    requirePermission(request, 'business.manage');
     const id = await addCertificate(db, deps.keys, request.tenantId, request.body);
+    await audit(db, { tenantId: request.tenantId, userId: request.userId || null, action: 'certificate.installed', ip: request.ip });
     return certificateSummary(deps, request.tenantId, id);
   });
 
@@ -191,7 +193,7 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: PipelineDeps) 
     '/certificate/pfx',
     { schema: { body: { type: 'object', required: ['pfxBase64', 'password'], additionalProperties: false, properties: { pfxBase64: { type: 'string', minLength: 100, maxLength: 200_000 }, password: { type: 'string', maxLength: 500 } } } } },
     async (request) => {
-      requireOwner(request);
+      requirePermission(request, 'business.manage');
       let pem;
       try {
         pem = pfxToPem(Buffer.from(request.body.pfxBase64, 'base64'), request.body.password);
@@ -200,14 +202,13 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: PipelineDeps) 
         throw e;
       }
       const id = await addCertificate(db, deps.keys, request.tenantId, pem);
+      await audit(db, { tenantId: request.tenantId, userId: request.userId || null, action: 'certificate.installed', ip: request.ip });
       return certificateSummary(deps, request.tenantId, id);
     },
   );
 
-  // API keys for the business's own software (POS, accounting connectors). Owners, signed in, only.
-  const requireOwnerSession = (request: import('fastify').FastifyRequest) => {
-    if (request.principal !== 'owner') throw new ApiError(403, 'forbidden', 'Only an owner, signed in to the web app, can manage API keys');
-  };
+  // API keys for the business's own software (POS, accounting connectors). Owners and admins, signed in.
+  const requireOwnerSession = (request: import('fastify').FastifyRequest) => requirePersonWith(request, 'apikeys.manage');
   app.get('/api-keys', async (request) => {
     requireOwnerSession(request);
     const rows = (await db.query<{ id: string; name: string; prefix: string; created_at: string | Date; last_used_at: string | Date | null; revoked_at: string | Date | null }>(
@@ -222,16 +223,20 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: PipelineDeps) 
     async (request, reply) => {
       requireOwnerSession(request);
       const key = await createApiKey(db, request.tenantId, request.body.name);
+      await audit(db, { tenantId: request.tenantId, userId: request.userId, action: 'apikey.created', target: request.body.name, ip: request.ip });
       return reply.code(201).send({ id: key.id, name: request.body.name, prefix: key.prefix, key: key.key });
     },
   );
   app.delete<{ Params: { id: string } }>('/api-keys/:id', { schema: { params: { type: 'object', required: ['id'], properties: { id: uuid } } } }, async (request, reply) => {
     requireOwnerSession(request);
     if (!(await revokeApiKey(db, request.tenantId, request.params.id))) throw notFound('API key');
+    await audit(db, { tenantId: request.tenantId, userId: request.userId, action: 'apikey.revoked', target: request.params.id, ip: request.ip });
     return reply.code(204).send();
   });
 
+  // Saving a new customer is part of issuing (cashiers do it at the counter); editing and archiving are catalog management.
   app.post<{ Body: CustomerBody }>('/customers', { schema: { body: { ...customerSchema, required: ['name'] } } }, async (request, reply) => {
+    if (!can(request.principal, 'catalog.manage')) requirePermission(request, 'documents.issue');
     const b = request.body;
     const id = randomUUID();
     await db.query(
@@ -274,6 +279,7 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: PipelineDeps) 
     '/customers/:id',
     { schema: { params: { type: 'object', required: ['id'], properties: { id: uuid } }, body: { ...customerSchema, required: ['name'] } } },
     async (request) => {
+      requirePermission(request, 'catalog.manage');
       const b = request.body;
       const r = await db.query(
         `update customers set name = $3, tin = $4, other_id_scheme = $5, other_id_value = $6, street = $7, city = $8, district_code = $9, telephone = $10, email = $11
@@ -288,6 +294,7 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: PipelineDeps) 
 
   // Archive (hide from lists and search). Issued documents still reference the customer.
   app.delete<{ Params: { id: string } }>('/customers/:id', { schema: { params: { type: 'object', required: ['id'], properties: { id: uuid } } } }, async (request, reply) => {
+    requirePermission(request, 'catalog.manage');
     const r = await db.query('update customers set archived_at = coalesce(archived_at, now()) where id = $1 and tenant_id = $2 returning id', [request.params.id, request.tenantId]);
     if (!r.rows.length) throw notFound('Customer');
     return reply.code(204).send();
@@ -297,6 +304,7 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: PipelineDeps) 
     '/items',
     { schema: { body: itemSchema } },
     async (request, reply) => {
+      requirePermission(request, 'catalog.manage');
       const b = request.body;
       if (b.gstCategory === 'E' && !b.exemptionReasonCode) throw new ApiError(422, 'invalid_document', 'An exempt item needs an exemptionReasonCode');
       const id = randomUUID();
@@ -314,6 +322,7 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: PipelineDeps) 
     '/items/:id',
     { schema: { params: { type: 'object', required: ['id'], properties: { id: uuid } }, body: itemSchema } },
     async (request) => {
+      requirePermission(request, 'catalog.manage');
       const b = request.body;
       if (b.gstCategory === 'E' && !b.exemptionReasonCode) throw new ApiError(422, 'invalid_document', 'An exempt item needs an exemptionReasonCode');
       const r = await withBarcodeCheck(() => db.query(
@@ -329,6 +338,7 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: PipelineDeps) 
 
   // Archive. Frees the barcode for another item.
   app.delete<{ Params: { id: string } }>('/items/:id', { schema: { params: { type: 'object', required: ['id'], properties: { id: uuid } } } }, async (request, reply) => {
+    requirePermission(request, 'catalog.manage');
     const r = await db.query('update items set archived_at = coalesce(archived_at, now()), barcode = null where id = $1 and tenant_id = $2 returning id', [request.params.id, request.tenantId]);
     if (!r.rows.length) throw notFound('Item');
     return reply.code(204).send();

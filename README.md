@@ -114,12 +114,12 @@ Local database: `docker compose up -d db`, then `DATABASE_URL=postgres://einvoic
 | `WEB_ROOT` | Built web app to serve; default `web/dist` when it exists |
 | `COOKIE_SECURE` | `false` only for local plain-HTTP development; default `true` |
 | `ALLOW_SIGNUP` | `false` to close self-service sign-up |
-| `PUBLIC_URL` | Public address of the web app, e.g. `https://app.example.bz`. Links in emails and share links are built from it, never from the request's Host header. Without it, password reset, invitation links and share links are off |
-| `SMTP_URL`, `MAIL_FROM` | Outgoing mail (password resets, invitations, documents), e.g. `smtps://user:pass@smtp.example.com:465` |
+| `PUBLIC_URL` | Public address of the web app, e.g. `https://app.example.bz`. Links in emails and share links are built from it, never from the request's Host header. Without it, password reset, welcome links and share links are off |
+| `SMTP_URL`, `MAIL_FROM` | Outgoing mail (password resets, welcome links, documents), e.g. `smtps://user:pass@smtp.example.com:465` |
 | `MAIL_OUTBOX_DIR` | Instead of SMTP, write each email as an `.eml` file here (development and the demo) |
 
 **Conventions:**
-- **Authentication:** `Authorization: Bearer <key>`. Tenant routes take an API key (`etd_<prefix>_<secret>`); admin routes take the admin token. The business is always taken from the key, never from the URL or the body.
+- **Authentication:** `Authorization: Bearer <key>`. Tenant routes take an API key (`etd_<prefix>_<secret>`) or a signed-in person's session cookie; admin routes take the admin token. The business is always taken from the key or the account (which belongs to one business), never from the URL or the body. What a person may do depends on their role (`src/api/permissions.ts`).
 - **Money and quantities:** decimal strings (`"24.99"`); JSON numbers are refused.
 - **Errors:** always `{ "error": { "code", "message", "details"? } }`. A malformed request is 400. A document BTS would refuse is 422, with the rule and BTS code in the message. A wrong state is 409, a missing record is 404, and a bad or missing key is 401.
 - **Issuing:** `POST /v1/documents` answers **201 whenever a document was created**, whatever BTS decided. Check `status`: `authorized`, `authorized_with_alert`, `rejected` (with `conditions`), `contingency_pending` or `pending`.
@@ -133,6 +133,7 @@ Local database: `docker compose up -d db`, then `DATABASE_URL=postgres://einvoic
 | `POST /v1/admin/tenants/:id/api-keys` | Create an API key; the secret is shown once |
 | `DELETE /v1/admin/tenants/:id/api-keys/:keyId` | Revoke a key |
 | `GET /v1/me` | The business, its certificate (days left) and contingency state |
+| `GET/PUT /v1/business` | The business's details and address (slug). Owners and admins edit; only owners change the address |
 | `PUT /v1/certificate` | Renew the business's own certificate |
 | `POST/GET /v1/customers`, `GET/PUT/DELETE /v1/customers/:id` | Saved customers; list supports `q` (name, TIN, phone, email), `limit`, `cursor`. `PUT` replaces every field; `DELETE` archives |
 | `POST/GET /v1/items`, `GET/PUT/DELETE /v1/items/:id` | Catalog items, with optional `barcode` and `favorite`. List supports `q`, `favorite=true`, and `code` (exact barcode or your own code). `DELETE` archives and frees the barcode |
@@ -170,9 +171,25 @@ Issuing body:
 - **Lines:** a line references a catalog item with `itemId`, or gives its fields in full. Item fields can be overridden per line.
 - **Credit and debit notes:** add `"reference": { "documentId": "…", "reason": "…" }`.
 
-Authentication also accepts the web app's session cookie (see "Web app"). The routes for owners are `POST /v1/certificate/pfx`, which installs a `.pfx` certificate, and `GET/POST/DELETE /v1/api-keys`, which manage the business's own API keys. `POST /v1/documents/preview` returns totals without issuing anything.
+`POST /v1/certificate/pfx` installs a `.pfx` certificate (owners and admins). `POST /v1/documents/preview` returns totals without issuing anything.
 
-Web app only (session cookie): `GET /v1/team`, `POST/DELETE /v1/team/invitations`, `PATCH/DELETE /v1/team/members/:userId`, and under `/v1/auth`: `password/change`, `password/forgot` (always 204, so it cannot reveal who has an account), `password/reset`, `invitations/:token` and `invitations/accept`.
+**People and sign-in (web app, session cookie only; API keys never manage people):**
+
+| Method and path | What it does |
+|---|---|
+| `POST /v1/auth/signup` | Create a business (test environment) and its first owner |
+| `POST /v1/auth/login` | `{ business: slug, login: email or username, password }` |
+| `GET /v1/auth/session` | The account, its business and its permissions |
+| `POST /v1/auth/password/forgot` | `{ business, email }`; always 204, so it cannot reveal who has an account |
+| `GET /v1/auth/password/link/:token`, `POST /v1/auth/password/reset` | Who a reset or welcome link is for; set the password and sign in |
+| `POST /v1/auth/password/change`, `POST /v1/auth/logout` | |
+| `GET /v1/auth/business/:slug`, `GET /v1/auth/slug` | A business's public name (for its login page); is an address free |
+| `GET/POST /v1/users`, `PATCH /v1/users/:id` | The business's accounts: create with a temporary password or an emailed welcome link; name, email, username, role |
+| `POST /v1/users/:id/disable`, `/enable`, `/password`, `/sign-out` | Deactivate (signs them out), reactivate, set a temporary password or send a link, end all sessions |
+| `GET/POST/DELETE /v1/api-keys` | The business's API keys |
+| `GET /v1/audit` | The activity log |
+
+Each business has its own session cookie (`etd_s_<slug>`), so one browser can be signed in to several. Requests name the business with the `X-Business` header, or `?b=<slug>` on plain links such as PDF downloads.
 
 **Not built yet:** rate limiting per API key, and OpenAPI docs.
 
@@ -180,17 +197,34 @@ Web app only (session cookie): `GET /v1/team`, `POST/DELETE /v1/team/invitations
 
 A React + TypeScript app (Vite) served by the API server from `web/dist`. It's built for business owners and staff, not developers.
 
-- **Accounts:**
-  - Email and password. Passwords are hashed with scrypt; only a hash of each session token is stored.
-  - Sessions live in httpOnly, SameSite=Lax cookies. Every change sent with a cookie also needs `X-Requested-With: etd-web`, which blocks CSRF.
-  - Logins are rate-limited per email and IP, and unknown emails take as long as wrong passwords.
-  - Roles per business: **owner** (certificate, API keys, team) and **member** (issuing, sending, catalog). A business always keeps at least one owner.
-  - **Teammates:** owners invite by email. The link works once, for 7 days, and only for that email address; the owner also gets the link to share another way (WhatsApp, in person). New people create their account from the link, even when self-service sign-up is closed.
-  - **Passwords:** forgotten passwords are reset by an emailed one-time link (one hour). Changing or resetting a password signs out every other session.
-- **Onboarding:**
-  1. Account.
-  2. Business. Self-service businesses start in the BTS **test** environment; moving to production is an admin step.
-  3. The BTS certificate, uploaded as a `.pfx`/`.p12` file with its password and converted to PEM on the server with node-forge.
+- **Each business is its own instance:**
+  - Its own address: `app.example.bz/<slug>` (suggested from the name when the business is created; owners can change it). The start page (`/`) finds a business by its address and remembers the ones used on the device.
+  - Its own accounts. A person working for two businesses has two separate logins, and can be signed in to both in one browser.
+  - Its own records, settings, certificate, API keys and activity log.
+- **Accounts, managed by the business:**
+  - Owners and admins create accounts directly: with an email, a username (for staff without email, e.g. `till1`), or both.
+  - The new person gets either a temporary password, which they must replace at first sign-in, or an emailed welcome link (7 days). The link is also shown to share by WhatsApp.
+  - Owners and admins edit names, sign-ins and roles, reset passwords (temporary or by link), sign people out everywhere, and deactivate or reactivate accounts. Deactivating signs them out at once. Accounts are never deleted, so the record of who issued or cancelled what stays complete.
+  - People sign in with their email or username. Forgotten passwords are reset by an emailed one-time link (one hour). Changing or resetting a password signs out every other session.
+- **Roles** (fixed, the same in every business):
+
+  | Role | May |
+  |---|---|
+  | Owner | everything, including managing owners and admins |
+  | Admin | everything except managing owners and admins |
+  | Manager | issue all documents including credit and debit notes, cancel, send, manage customers and items, reports |
+  | Cashier | issue and send invoices and receipts; add a customer while selling |
+  | Accountant | read documents and reports; download records |
+
+  The server enforces them; the screens only show what a role may use. Nobody changes their own role or deactivates themselves, and a business always keeps an active owner.
+- **Activity log:** sign-ins (and failed ones), account changes with before and after, business details, the certificate, API keys and cancellations, with who, when and from where. It cannot be edited or deleted. Each document also records who issued it.
+- **Security:**
+  - Passwords are hashed with scrypt; only a hash of each session token and each password link is stored.
+  - Sessions live in httpOnly, SameSite=Lax cookies, one per business. Every change sent with a cookie also needs `X-Requested-With: etd-web`, which blocks CSRF.
+  - Failed sign-ins are rate-limited per account and per IP (successful ones never count), and unknown accounts take as long as wrong passwords.
+- **Creating a business:**
+  1. The business, its address, and the owner account, in one form. Self-service businesses start in the BTS **test** environment; moving to production is an admin step.
+  2. The BTS certificate, uploaded as a `.pfx`/`.p12` file with its password and converted to PEM on the server with node-forge.
 - **Screens:**
   - **Overview:** today's sales (credit notes subtracted), documents needing attention, certificate warnings. It refreshes while documents are still waiting for BTS.
   - **Counter** (tax receipts at speed):
@@ -212,7 +246,7 @@ A React + TypeScript app (Vite) served by the API server from `web/dist`. It's b
   - **Documents:** search by number, customer name or TIN; filters for dates, type, status and customer, kept in the address bar; CSV download.
   - **Customers and items:** add, edit, archive; customers link to their documents.
   - **Reports:** this month, last month, quarter, year or custom; sales and GST collected, sales per day, GST by rate for the GST return, top customers and items; CSV for each.
-  - **Settings:** business, language, password, certificate, team, API keys.
+  - **Settings:** my account (language, password, sign out everywhere); business (details, address, certificate); users; activity; API keys.
 - **Live status:** a bar under the top menu appears while BTS is unreachable (with the queue count), when it comes back, and when the device is offline.
 - **Spanish:** every screen is in English and Spanish (`web/src/es.ts`). The choice is per device, defaulting to the browser's language. Emails are in English for now.
 - **Installable:** a web app manifest, icons and a service worker that caches the app shell (never API data), so it installs on phones and desktops and opens fast.
@@ -239,10 +273,10 @@ npm run web:build
 npm run demo            # http://localhost:3000
 ```
 
-- **Business and certificate:** register the business with TIN **123456** and upload `test/certs/signer-123456.pfx`, password `test-pfx-password`. This is a throwaway test certificate.
+- **Business and certificate:** on the start page choose "Create a business", use TIN **123456**, and upload `test/certs/signer-123456.pfx`, password `test-pfx-password`. This is a throwaway test certificate. Then add users under Settings → Users.
 - **BTS stand-in:** it authorizes every document.
 - **Outage simulation:** create the file `.demo/bts-down` and new documents go into contingency. Delete it, and the worker sends them within about 15 seconds.
-- **Emails** (password resets, invitations, documents) are written to `.demo/outbox` as `.eml` files; open them with any mail program.
+- **Emails** (password resets, welcome links, documents) are written to `.demo/outbox` as `.eml` files; open them with any mail program.
 
 ### Browser tests
 
@@ -251,7 +285,7 @@ docker compose up -d db
 npm run e2e
 ```
 
-Builds the web app, starts the demo on port 3100 with a fresh `einvoicing_e2e` database, and drives a real browser through sign-up, onboarding, the catalog, a counter sale, an invoice with a restored draft, emailing, search, reports, inviting a teammate, password reset, Spanish, accessibility checks, installability and the phone layout. On Windows it uses the installed Microsoft Edge; elsewhere run `npx playwright install chromium` first (or set `PW_CHANNEL`).
+Builds the web app, starts the demo on port 3100 with a fresh `einvoicing_e2e` database, and drives a real browser through sign-up, onboarding, the catalog, a counter sale, an invoice with a restored draft, emailing, search, reports, adding users (welcome link and temporary password, first sign-in, deactivation, the activity log), password reset, Spanish, accessibility checks, installability and the phone layout. On Windows it uses the installed Microsoft Edge; elsewhere run `npx playwright install chromium` first (or set `PW_CHANNEL`).
 
 ## Printed copy (`src/render`, manual 3.4 and 3.5)
 
@@ -318,6 +352,7 @@ These were placeholders in the spec and are now confirmed against the manual:
 
 - **Web app, next:**
   - An admin console for moving businesses to production.
+  - Optional two-step sign-in for owners and admins.
   - Emails in Spanish.
   - Login rate limits and email limits shared across instances (they are per process today).
 - **API hardening:**

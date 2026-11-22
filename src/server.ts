@@ -62,7 +62,7 @@ const app = await buildApp({
 });
 if (applied.length) app.log.info({ applied }, 'database migrations applied');
 if (!mailer) app.log.warn('No SMTP_URL or MAIL_OUTBOX_DIR: password reset and emailing documents are off');
-if (!env.PUBLIC_URL) app.log.warn('No PUBLIC_URL: password reset, invitations and share links are off');
+if (!env.PUBLIC_URL) app.log.warn('No PUBLIC_URL: password reset, welcome links and share links are off');
 
 const intervalMs = Number(env.WORKER_INTERVAL_MS ?? 60_000);
 const worker = intervalMs > 0

@@ -4,19 +4,23 @@ import { BrowserRouter, Navigate, NavLink, Outlet, Route, Routes, useLocation, u
 import '@fontsource-variable/inter-tight';
 import '@fontsource-variable/geist-mono';
 import './styles.css';
+import type { Permission } from './api';
 import { Brand } from './art';
+import { BUSINESS } from './business';
 import { ErrorBoundary } from './ErrorBoundary';
 import { I18nProvider, LanguageToggle, useI18n } from './i18n';
+import { ROLE_LABEL } from './permissions';
 import { SessionProvider, useSession } from './session';
 import { ToastProvider } from './toast';
 
 // Each page is its own chunk, loaded when first visited.
 const page = <K extends string>(load: () => Promise<Record<K, React.ComponentType>>, name: K) => lazy(() => load().then((m) => ({ default: m[name] })));
+const Start = page(() => import('./pages/Start'), 'Start');
+const CreateBusiness = page(() => import('./pages/Start'), 'CreateBusiness');
 const Login = page(() => import('./pages/Auth'), 'Login');
-const Signup = page(() => import('./pages/Auth'), 'Signup');
 const ForgotPassword = page(() => import('./pages/Auth'), 'ForgotPassword');
 const ResetPassword = page(() => import('./pages/Auth'), 'ResetPassword');
-const AcceptInvite = page(() => import('./pages/Auth'), 'AcceptInvite');
+const ChangePasswordRequired = page(() => import('./pages/Auth'), 'ChangePasswordRequired');
 const Onboarding = page(() => import('./pages/Onboarding'), 'Onboarding');
 const Dashboard = page(() => import('./pages/Dashboard'), 'Dashboard');
 const Counter = page(() => import('./pages/Counter'), 'Counter');
@@ -54,7 +58,7 @@ function useOnline() {
 }
 
 function Layout() {
-  const { session, me, logout, switchBusiness } = useSession();
+  const { session, me, logout, can } = useSession();
   const { t } = useI18n();
   const navigate = useNavigate();
   const location = useLocation();
@@ -79,16 +83,17 @@ function Layout() {
     return () => clearTimeout(timer);
   }, [location.pathname]);
 
-  const links: Array<[string, string]> = [
+  const links: Array<[string, string, Permission?]> = [
     ['/', t('Overview')],
-    ['/counter', t('Counter')],
-    ['/documents/new?type=01', t('New invoice')],
+    ['/counter', t('Counter'), 'documents.issue'],
+    ['/documents/new?type=01', t('New invoice'), 'documents.issue'],
     ['/documents', t('Documents')],
     ['/customers', t('Customers')],
     ['/items', t('Items')],
-    ['/reports', t('Reports')],
+    ['/reports', t('Reports'), 'reports.view'],
     ['/settings', t('Settings')],
   ];
+  const user = session!.user;
   return (
     <div className="shell">
       <a className="skip-link" href="#main">{t('Skip to content')}</a>
@@ -96,7 +101,7 @@ function Layout() {
         <NavLink to="/" className="brand" onClick={close} viewTransition aria-label="eInvoicing"><Brand /></NavLink>
         <button className="menu-button secondary" aria-expanded={open} aria-controls="main-nav" onClick={() => setOpen(!open)}>{open ? t('Close') : t('Menu')}</button>
         <nav id="main-nav" className={open ? 'open' : ''} aria-label={t('Main')}>
-          {links.map(([to, label]) => {
+          {links.filter(([, , p]) => !p || can(p)).map(([to, label]) => {
             const [path] = to.split('?');
             return (
               <NavLink
@@ -114,15 +119,10 @@ function Layout() {
         </nav>
         <span className="spacer" />
         <div className={`row account ${open ? 'open' : ''}`}>
-          {session && session.businesses.length > 1 ? (
-            <select aria-label={t('Business')} value={session.currentBusinessId ?? ''} onChange={(e) => void switchBusiness(e.target.value).then(() => navigate('/', { viewTransition: true }))}>
-              {session.businesses.map((b) => <option key={b.id} value={b.id}>{b.tradeName ?? b.legalName}</option>)}
-            </select>
-          ) : (
-            <span className="who">{me?.tradeName ?? me?.legalName}</span>
-          )}
-          {me?.environment === 'test' && <span className="badge test" title={t('Documents sent to the BTS test environment have no fiscal value')}>{t('Test')}</span>}
+          <span className="who" title={`${user.name} · ${t(ROLE_LABEL[user.role])}`}>{me?.tradeName ?? me?.legalName ?? session!.business.tradeName ?? session!.business.legalName}</span>
+          {session!.business.environment === 'test' && <span className="badge test" title={t('Documents sent to the BTS test environment have no fiscal value')}>{t('Test')}</span>}
           <LanguageToggle />
+          <a className="button secondary switch" href="/?choose=1" title={t('Switch business')}>{t('Switch')}</a>
           <button className="secondary" onClick={() => void logout().then(() => navigate('/login', { viewTransition: true }))}>{t('Log out')}</button>
         </div>
       </header>
@@ -151,17 +151,23 @@ function Layout() {
   );
 }
 
-/** Routes for signed-in people with a business; otherwise send them where they need to go. */
-function RequireBusiness() {
+/** The business's pages, for someone signed in to it. */
+function RequireSession() {
   const { loading, session } = useSession();
   const location = useLocation();
   if (loading) return <main><PageSkeleton /></main>;
   if (!session) return <Navigate to="/login" replace state={{ from: location.pathname + location.search }} />;
-  if (!session.currentBusinessId) return <Navigate to="/onboarding" replace />;
+  if (session.user.mustChangePassword) return <Suspense fallback={<main><PageSkeleton /></main>}><ChangePasswordRequired /></Suspense>;
   return <Layout />;
 }
 
-/** Pages outside the signed-in layout (sign-in, onboarding). */
+/** A page with a permission requirement: others go to the overview. */
+function Allowed({ permission, children }: { permission: Permission; children: React.ReactNode }) {
+  const { can } = useSession();
+  return can(permission) ? <>{children}</> : <Navigate to="/" replace />;
+}
+
+/** Pages outside the signed-in layout (sign-in, setup, the start page). */
 function Bare() {
   return (
     <ErrorBoundary>
@@ -172,27 +178,39 @@ function Bare() {
   );
 }
 
-function App() {
+/** One business's instance, at /<slug>/... */
+function BusinessApp() {
   return (
     <Routes>
       <Route element={<Bare />}>
         <Route path="/login" element={<Login />} />
-        <Route path="/signup" element={<Signup />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/reset-password" element={<ResetPassword />} />
-        <Route path="/invite" element={<AcceptInvite />} />
-        <Route path="/onboarding" element={<Onboarding />} />
+        <Route path="/setup" element={<Onboarding />} />
       </Route>
-      <Route element={<RequireBusiness />}>
+      <Route element={<RequireSession />}>
         <Route index element={<Dashboard />} />
-        <Route path="/counter" element={<Counter />} />
+        <Route path="/counter" element={<Allowed permission="documents.issue"><Counter /></Allowed>} />
         <Route path="/documents" element={<Documents />} />
         <Route path="/documents/new" element={<NewDocument />} />
         <Route path="/documents/:id" element={<DocumentDetail />} />
         <Route path="/customers" element={<Customers />} />
         <Route path="/items" element={<Items />} />
-        <Route path="/reports" element={<Reports />} />
+        <Route path="/reports" element={<Allowed permission="reports.view"><Reports /></Allowed>} />
         <Route path="/settings" element={<Settings />} />
+      </Route>
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
+  );
+}
+
+/** The start page: find your business, or create one. */
+function PublicApp() {
+  return (
+    <Routes>
+      <Route element={<Bare />}>
+        <Route index element={<Start />} />
+        <Route path="/signup" element={<CreateBusiness />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
@@ -201,11 +219,11 @@ function App() {
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <BrowserRouter>
+    <BrowserRouter {...(BUSINESS && { basename: `/${BUSINESS}` })}>
       <I18nProvider>
         <ToastProvider>
           <SessionProvider>
-            <App />
+            {BUSINESS ? <BusinessApp /> : <PublicApp />}
           </SessionProvider>
         </ToastProvider>
       </I18nProvider>

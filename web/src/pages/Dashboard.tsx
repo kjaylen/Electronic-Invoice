@@ -48,7 +48,7 @@ export function usePollWhile(active: boolean, load: () => void, everyMs = 5000) 
 export function Dashboard() {
   const t = useT();
   usePageTitle(t('Overview'));
-  const { me, role } = useSession();
+  const { me, can } = useSession();
   const [recent, setRecent] = useState<DocumentInfo[] | null>(null);
   const [attention, setAttention] = useState<DocumentInfo[]>([]);
   const today = belizeToday();
@@ -78,20 +78,22 @@ export function Dashboard() {
         <span className="kicker">{t('Overview')} · TIN {me.tin}</span>
         <h1>{me.tradeName ?? me.legalName}</h1>
         <p className="muted">{greeting}. {counted.length ? (counted.length === 1 ? t('1 document issued today.') : t('{n} documents issued today.', { n: counted.length })) : t('Ready when you are.')}</p>
-        <div className="row" style={{ marginTop: '1rem' }}>
-          <Link className="button big lime" to="/counter" viewTransition>{t('Quick sale')}<span className="chip" aria-hidden="true">→</span></Link>
-          <Link className="button secondary on-dark" to="/documents/new?type=01" viewTransition>{t('New invoice')}</Link>
-        </div>
+        {can('documents.issue') && (
+          <div className="row" style={{ marginTop: '1rem' }}>
+            <Link className="button big lime" to="/counter" viewTransition>{t('Quick sale')}<span className="chip" aria-hidden="true">→</span></Link>
+            <Link className="button secondary on-dark" to="/documents/new?type=01" viewTransition>{t('New invoice')}</Link>
+          </div>
+        )}
       </section>
 
       {me.environment === 'test' && (
         <div className="banner info"><div><strong>{t('Test environment')}</strong>{t('Documents go to the BTS test system and have no fiscal value.')}</div></div>
       )}
       {!me.certificate && (
-        <div className="banner bad"><div><strong>{t('Install your BTS certificate to start issuing.')}</strong>{role === 'owner' ? <Link to="/settings">{t('Go to settings')}</Link> : t('Ask an owner of this business to install it.')}</div></div>
+        <div className="banner bad"><div><strong>{t('Install your BTS certificate to start issuing.')}</strong>{can('business.manage') ? <Link to="/settings?tab=business">{t('Go to settings')}</Link> : t('Ask an owner or admin of this business to install it.')}</div></div>
       )}
       {me.certificate && me.certificate.daysLeft < 30 && (
-        <div className="banner warn"><div><strong>{t('Your BTS certificate expires in {n} days.', { n: me.certificate.daysLeft })}</strong>{t('Renew it in the BTS portal, then install it in settings.')} <Link to="/settings">{t('Settings')}</Link></div></div>
+        <div className="banner warn"><div><strong>{t('Your BTS certificate expires in {n} days.', { n: me.certificate.daysLeft })}</strong>{t('Renew it in the BTS portal, then install it in settings.')} <Link to="/settings?tab=business">{t('Settings')}</Link></div></div>
       )}
 
       <div className="grid">

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router';
-import { api, type Customer, type DocumentInfo, type Page } from '../api';
+import { api, type Customer, type DocumentInfo, link, type Page } from '../api';
+import { useSession } from '../session';
 import { useT } from '../i18n';
 import { belizeDate, belizeToday, Field, Segmented, useDebounced, usePageTitle } from '../ui';
 import { DocumentTable, usePollWhile } from './Dashboard';
@@ -11,6 +12,7 @@ const PAGE = 25;
 export function Documents() {
   const t = useT();
   usePageTitle(t('Documents'));
+  const { can } = useSession();
   const [params, setParams] = useSearchParams();
   const status = params.get('status') ?? '';
   const type = params.get('type') ?? '';
@@ -77,7 +79,7 @@ export function Documents() {
       <div className="row">
         <div><span className="kicker">{t('Records')}</span><h1>{t('Documents')}</h1></div>
         <span className="spacer" />
-        <a className="button secondary" href={`/v1/reports/documents?from=${from || belizeDate(-365)}&to=${to || belizeToday()}`} download>{t('Download CSV')}</a>
+        {can('reports.view') && <a className="button secondary" href={link(`/v1/reports/documents?from=${from || belizeDate(-365)}&to=${to || belizeToday()}`)} download>{t('Download CSV')}</a>}
       </div>
       <div className="card stack filters">
         <div className="form-grid">

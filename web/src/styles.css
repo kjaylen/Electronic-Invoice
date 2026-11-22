@@ -490,3 +490,41 @@ button.link.on-dark { color: rgba(251, 248, 241, 0.78); }
 .chart-tip .muted { color: rgba(251, 248, 241, 0.65); }
 .chart-axis { display: flex; gap: 2px; margin-top: 0.35rem; }
 .chart-axis span { flex: 1; min-width: 0; font-family: var(--mono); font-size: 0.66rem; color: var(--muted); white-space: nowrap; overflow: visible; }
+
+/* ---------- business instance: start page, addresses ---------- */
+.recent { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.5rem; }
+.recent li { display: flex; align-items: center; gap: 0.5rem; }
+.recent-link {
+  flex: 1; display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; padding: 0.8rem 1rem; border: 1px solid var(--hairline);
+  border-radius: var(--radius-lg); background: var(--sheet-2); color: var(--ink); text-decoration: none; transition: border-color 160ms var(--ease), transform 160ms var(--ease);
+}
+.recent-link:hover { border-color: var(--brand); color: var(--ink); transform: translateY(-1px); }
+.slug-input { display: flex; align-items: center; gap: 0; border: 1px solid var(--hairline-strong); border-radius: var(--radius); background: var(--sheet); padding-left: 0.7rem; }
+.slug-input:focus-within { border-color: var(--brand); box-shadow: 0 0 0 4px rgba(109, 45, 147, 0.14); }
+.slug-input span { white-space: nowrap; font-size: 0.85rem; text-transform: none; letter-spacing: 0; }
+.slug-input input { border: none; box-shadow: none !important; background: transparent; padding-left: 0.1rem; min-width: 0; }
+.topbar .switch { font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.06em; padding: 0.4rem 0.65rem; text-decoration: none; }
+
+/* ---------- settings: accounts and activity ---------- */
+dl.facts { display: grid; grid-template-columns: max-content 1fr; gap: 0.35rem 1rem; margin: 0; }
+dl.facts > div { display: contents; }
+dl.facts dt { font-family: var(--mono); font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); padding-top: 0.15rem; }
+dl.facts dd { margin: 0; }
+dl.handover { background: var(--sheet-2); border: 1px dashed var(--hairline-strong); border-radius: var(--radius); padding: 0.8rem 1rem; }
+fieldset.plain { border: none; padding: 0; background: none; box-shadow: none; }
+fieldset.plain:disabled input, fieldset.plain:disabled select { background: var(--sheet-2); color: var(--ink-2); }
+.role-pill { display: inline-block; font-family: var(--mono); font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.08em; padding: 0.2rem 0.55rem; border-radius: 999px; border: 1px solid var(--hairline-strong); }
+.role-pill.owner { background: var(--ink); color: var(--sheet); border-color: var(--ink); }
+.role-pill.admin { background: var(--lavender); color: var(--brand-ink); border-color: #dcc3ef; }
+.role-pill.manager { background: var(--lime-soft); color: var(--lime-ink); border-color: #b5ecb9; }
+.role-pill.cashier { background: var(--ochre-soft); color: #6b4206; border-color: #ecd2a3; }
+table.users td .badge { margin-left: 0.4rem; }
+tr.disabled-row td { color: var(--muted); }
+tr.disabled-row td strong { text-decoration: line-through; text-decoration-color: var(--hairline-strong); }
+button.link.danger-link { color: var(--coral-ink); }
+.roles-help dl { margin-top: 0.75rem; }
+ol.activity { list-style: none; margin: 0; padding: 0; }
+ol.activity li { display: grid; grid-template-columns: 11.5rem minmax(0, 1fr) auto; gap: 0.75rem; padding: 0.6rem 0; border-bottom: 1px solid var(--hairline); animation: rise 300ms var(--ease-out) both; }
+ol.activity li:last-child { border-bottom: none; }
+ol.activity li.warn strong { color: var(--coral-ink); }
+@media (max-width: 760px) { ol.activity li { grid-template-columns: 1fr; gap: 0.15rem; } ol.activity .ip { display: none; } }

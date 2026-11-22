@@ -3,14 +3,16 @@
  *
  *   /health                         liveness and database check, no auth
  *   /v1/admin/...                   onboarding, Bearer <ADMIN_TOKEN>
- *   /v1/auth/...                    accounts and sessions for people (web app)
+ *   /v1/auth/...                    signing in to a business (web app)
  *   /v1/...                         everything else: Bearer <tenant API key>, or a session cookie
+ *                                   (the business named by X-Business or ?b=<slug>)
  *   /d/:token                       a shared document's printed copy, no auth (the token is the permission)
  *   /*                              the web app (static files), when webRoot is set
  *
- * The tenant always comes from the API key or the session's current business,
- * never from the URL or body, so one business can never address another's
- * data. Money and quantities are decimal strings in and out ("24.99").
+ * The tenant always comes from the API key or the signed-in account (which
+ * belongs to exactly one business), never from the URL or body, so one
+ * business can never address another's data. What a person may do depends on
+ * their role (see permissions.ts). Money and quantities are decimal strings in and out ("24.99").
  */
 
 import { existsSync } from 'node:fs';
@@ -23,14 +25,16 @@ import { type Mailer, noMailer } from '../mail/mailer.ts';
 import type { PipelineDeps } from '../pipeline/issue.ts';
 import { registerAdminRoutes } from './admin.ts';
 import { registerAuthRoutes, requireCsrfHeader, sessionFromRequest } from './auth.ts';
+import { registerBusinessRoutes } from './business.ts';
 import { registerCatalogRoutes } from './catalog.ts';
 import type { ServerContext } from './context.ts';
 import { registerDocumentRoutes, registerPublicDocumentRoutes } from './documents.ts';
 import { ApiError, errorHandler } from './errors.ts';
+import type { Role } from './permissions.ts';
 import { registerReportRoutes } from './reports.ts';
-import { registerTeamRoutes } from './team.ts';
+import { registerUserRoutes } from './users.ts';
 
-export type Principal = 'api' | 'owner' | 'member';
+export type Principal = 'api' | Role;
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -69,11 +73,6 @@ function constantTimeEquals(a: string, b: string): boolean {
   const x = Buffer.from(a);
   const y = Buffer.from(b);
   return x.length === y.length && timingSafeEqual(x, y);
-}
-
-/** Owner-only actions: certificates, API keys. API keys count as owner-level (they are created by owners). */
-export function requireOwner(request: FastifyRequest) {
-  if (request.principal === 'member') throw new ApiError(403, 'forbidden', 'Only an owner of this business can do this');
 }
 
 const CSP = [
@@ -152,14 +151,21 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       const session = await sessionFromRequest(deps, request);
       if (!session) throw new ApiError(401, 'unauthorized', 'Missing or invalid API key or session');
       requireCsrfHeader(request);
-      if (!session.currentTenantId || !session.role) throw new ApiError(409, 'no_business', 'Create or choose a business first');
-      request.tenantId = session.currentTenantId;
-      request.principal = session.role;
+      // A temporary password set by an administrator must be replaced before anything else.
+      if (session.user.mustChangePassword) throw new ApiError(403, 'password_change_required', 'Choose a new password first');
+      request.tenantId = session.business.id;
+      request.principal = session.user.role;
       request.userId = session.user.id;
+    });
+    // "?b=<slug>" names the business on plain links (PDFs, downloads); it is not part of any route's own query.
+    tenant.addHook('preValidation', async (request) => {
+      const q = request.query as Record<string, unknown> | undefined;
+      if (q && 'b' in q) delete q.b;
     });
     registerCatalogRoutes(tenant, deps);
     registerDocumentRoutes(tenant, deps, ctx);
-    registerTeamRoutes(tenant, deps, ctx);
+    registerUserRoutes(tenant, deps, ctx);
+    registerBusinessRoutes(tenant, deps, ctx);
     registerReportRoutes(tenant, deps);
   }, { prefix: '/v1' });
 

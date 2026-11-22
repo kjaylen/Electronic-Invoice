@@ -3,14 +3,14 @@
 import { expect, test } from '@playwright/test';
 
 test('phone layout: every page fits the screen and the menu opens', async ({ page }) => {
-  await page.goto('/login');
-  await page.getByLabel('Email').fill('rosa@cornerstore.test');
+  await page.goto('/corner-store/login');
+  await page.getByLabel('Email or username').fill('rosa@cornerstore.test');
   await page.getByLabel(/^Password/).fill('my brand new password');
   await page.getByRole('button', { name: /^Log in/ }).click();
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Corner Store');
 
   for (const path of ['/', '/counter', '/documents', '/documents/new?type=01', '/customers', '/items', '/reports', '/settings']) {
-    await page.goto(path);
+    await page.goto(`/corner-store${path === '/' ? '' : path}`);
     await expect(page.locator('h1')).toBeVisible();
     const [scroll, width] = await page.evaluate(() => [document.documentElement.scrollWidth, window.innerWidth]);
     expect(scroll, `${path} scrolls sideways`).toBeLessThanOrEqual(width);

@@ -1,6 +1,7 @@
 import { type FormEvent, useEffect, useState } from 'react';
 import { api, type Item, type Page } from '../api';
 import { useT } from '../i18n';
+import { useSession } from '../session';
 import { useToast } from '../toast';
 import { ErrorText, Field, GST_CATEGORIES, Modal, money, UNITS, unitName, useDebounced, usePageTitle } from '../ui';
 
@@ -83,6 +84,8 @@ export function Items() {
   const t = useT();
   usePageTitle(t('Items'));
   const toast = useToast();
+  const { can } = useSession();
+  const manage = can('catalog.manage');
   const [q, setQ] = useState('');
   const query = useDebounced(q, 250);
   const [list, setList] = useState<Item[] | null>(null);
@@ -131,7 +134,7 @@ export function Items() {
       <div className="row">
         <div><span className="kicker">{t('Catalog')}</span><h1>{t('Items')}</h1></div>
         <span className="spacer" />
-        <button onClick={() => setEditing('new')}>{t('Add item')}</button>
+        {manage && <button onClick={() => setEditing('new')}>{t('Add item')}</button>}
       </div>
       <p className="muted">{t('Products and services you sell often. Star an item to make it a quick button at the counter.')}</p>
       <input type="search" placeholder={t('Search by name, code or barcode')} value={q} onChange={(e) => setQ(e.target.value)} aria-label={t('Search items')} />
@@ -145,7 +148,7 @@ export function Items() {
                 {list.map((it) => (
                   <tr key={it.id}>
                     <td className="star-cell">
-                      <button className={`star ${it.favorite ? 'on' : ''}`} aria-pressed={it.favorite} aria-label={t('Quick button for {name}', { name: it.name })} onClick={() => void toggleFavorite(it)}>★</button>
+                      <button className={`star ${it.favorite ? 'on' : ''}`} aria-pressed={it.favorite} aria-label={t('Quick button for {name}', { name: it.name })} disabled={!manage} onClick={() => void toggleFavorite(it)}>★</button>
                     </td>
                     <td data-label={t('Item')}><strong>{it.name}</strong>{it.description !== it.name && <div className="small muted">{it.description}</div>}</td>
                     <td data-label={t('Code')} className="mono">{[it.sellerCode, it.barcode].filter(Boolean).join(' · ') || '—'}</td>
@@ -153,8 +156,8 @@ export function Items() {
                     <td data-label={t('Price')} className="right">{money(it.unitPrice)}</td>
                     <td data-label="GST">{t(GST_CATEGORIES.find(([c]) => c === it.gstCategory)?.[1] ?? '')}</td>
                     <td className="right actions">
-                      <button className="link" onClick={() => setEditing(it)}>{t('Edit')}</button>
-                      <button className="link" onClick={() => setArchiving(it)}>{t('Archive')}</button>
+                      {manage && <button className="link" onClick={() => setEditing(it)}>{t('Edit')}</button>}
+                      {manage && <button className="link" onClick={() => setArchiving(it)}>{t('Archive')}</button>}
                     </td>
                   </tr>
                 ))}

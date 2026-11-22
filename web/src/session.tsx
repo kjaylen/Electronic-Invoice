@@ -1,7 +1,8 @@
-/** Who is signed in, and which business they are working in. Keeps the business status (BTS outage, queue) fresh. */
+/** Who is signed in to this business, what they may do, and the business's status (BTS outage, queue). */
 
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { api, ApiError, type Me, type SessionInfo, UNAUTHORIZED_EVENT } from './api';
+import { api, ApiError, type Me, type Permission, type SessionInfo, UNAUTHORIZED_EVENT } from './api';
+import { BUSINESS, rememberBusiness } from './business';
 import { useT } from './i18n';
 import { useToast } from './toast';
 
@@ -9,13 +10,12 @@ interface SessionState {
   loading: boolean;
   session: SessionInfo | null;
   me: Me | null;
-  /** The person's role in the current business. */
-  role: 'owner' | 'member' | null;
+  role: SessionInfo['user']['role'] | null;
+  can: (p: Permission) => boolean;
   refresh: () => Promise<void>;
   refreshMe: () => Promise<void>;
   setSession: (s: SessionInfo | null) => void;
   logout: () => Promise<void>;
-  switchBusiness: (id: string) => Promise<void>;
 }
 
 const Ctx = createContext<SessionState | null>(null);
@@ -24,24 +24,30 @@ const POLL_MS = 30_000;
 export function SessionProvider({ children }: { children: ReactNode }) {
   const t = useT();
   const toast = useToast();
-  const [loading, setLoading] = useState(true);
-  const [session, setSession] = useState<SessionInfo | null>(null);
+  const [loading, setLoading] = useState(Boolean(BUSINESS));
+  const [session, setSessionState] = useState<SessionInfo | null>(null);
   const [me, setMe] = useState<Me | null>(null);
   const wasDown = useRef(false);
 
+  const accept = useCallback((s: SessionInfo | null) => {
+    setSessionState(s);
+    if (s) rememberBusiness({ slug: s.business.slug, name: s.business.tradeName ?? s.business.legalName });
+  }, []);
+
   const refresh = useCallback(async () => {
+    if (!BUSINESS) return setLoading(false);
     try {
       const s = await api<SessionInfo>('/v1/auth/session');
-      setSession(s);
-      setMe(s.currentBusinessId ? await api<Me>('/v1/me') : null);
+      accept(s);
+      setMe(s.user.mustChangePassword ? null : await api<Me>('/v1/me'));
     } catch (e) {
       if (!(e instanceof ApiError && e.status === 401)) console.error(e);
-      setSession(null);
+      setSessionState(null);
       setMe(null);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [accept]);
 
   const refreshMe = useCallback(async () => {
     try {
@@ -55,10 +61,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     void refresh();
   }, [refresh]);
 
-  // Signed out elsewhere or the session expired: drop to the login page.
+  // Signed out elsewhere, deactivated, or the session expired: back to the login page.
   useEffect(() => {
     const onUnauthorized = () => {
-      setSession(null);
+      setSessionState(null);
       setMe(null);
     };
     window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
@@ -66,9 +72,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // Keep the outage banner and queue count live while the tab is visible.
-  const businessId = session?.currentBusinessId;
+  const signedIn = Boolean(session && !session.user.mustChangePassword);
   useEffect(() => {
-    if (!businessId) return;
+    if (!signedIn) return;
     const tick = () => document.visibilityState === 'visible' && void refreshMe();
     const timer = setInterval(tick, POLL_MS);
     document.addEventListener('visibilitychange', tick);
@@ -76,7 +82,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       clearInterval(timer);
       document.removeEventListener('visibilitychange', tick);
     };
-  }, [businessId, refreshMe]);
+  }, [signedIn, refreshMe]);
 
   // Tell people when BTS comes back and the queue has been sent.
   useEffect(() => {
@@ -86,26 +92,23 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     wasDown.current = down;
   }, [me, t, toast]);
 
-  const role = session?.businesses.find((b) => b.id === session.currentBusinessId)?.role ?? null;
+  const permissions = new Set(session?.permissions ?? []);
   const value: SessionState = {
     loading,
     session,
     me,
-    role,
+    role: session?.user.role ?? null,
+    can: (p) => permissions.has(p),
     refresh,
     refreshMe,
     setSession: (s) => {
-      setSession(s);
+      accept(s);
       void refresh();
     },
     logout: async () => {
       await api('/v1/auth/logout', { method: 'POST' }).catch(() => {});
-      setSession(null);
+      setSessionState(null);
       setMe(null);
-    },
-    switchBusiness: async (id) => {
-      await api('/v1/auth/switch', { method: 'POST', body: { businessId: id } });
-      await refresh();
     },
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

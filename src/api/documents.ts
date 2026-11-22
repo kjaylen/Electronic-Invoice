@@ -22,7 +22,9 @@ import { readEtdForPrint } from '../render/view.ts';
 import { toBigInt } from '../db/database.ts';
 import { simpleHtml } from '../mail/mailer.ts';
 import { type CustomerBody, customerFromRow, likePattern, loadCustomer, loadItems, nextCursor, parsePage } from './catalog.ts';
+import { audit } from '../db/audit.ts';
 import { publicLink, requireMail, type ServerContext } from './context.ts';
+import { can, requirePermission } from './permissions.ts';
 import { ApiError, notFound } from './errors.ts';
 import { date as dateSchema, issueSchema, listQuery, uuid } from './schemas.ts';
 
@@ -65,6 +67,7 @@ const DOC_COLUMNS = `d.id, d.etdui, d.etd_type, d.series_number, d.serial, d.iss
   d.oper_mode, d.reception_env, d.customer_id, d.customer_snapshot, d.referenced_etdui, d.line_count, d.line_extension_cents, d.gst_cents,
   d.tax_cents, d.tax_inclusive_cents, d.payable_cents, d.status, d.status_detail, d.protocol_number, d.supersedes_document_id,
   d.created_at, d.settled_at,
+  (select u.name from users u where u.id = d.issued_by) as issued_by_name,
   (select s.id from documents s where s.supersedes_document_id = d.id and s.tenant_id = d.tenant_id limit 1) as superseded_by_id`;
 
 interface DocRow {
@@ -91,6 +94,7 @@ interface DocRow {
   protocol_number: string | null;
   supersedes_document_id: string | null;
   superseded_by_id: string | null;
+  issued_by_name: string | null;
   created_at: string | Date;
   settled_at: string | Date | null;
 }
@@ -129,6 +133,7 @@ function documentJson(r: DocRow) {
     ...(detail.resolution && { resolution: detail.resolution }),
     supersedes: r.supersedes_document_id,
     supersededBy: r.superseded_by_id,
+    issuedBy: r.issued_by_name,
     createdAt: new Date(r.created_at).toISOString(),
     settledAt: r.settled_at ? new Date(r.settled_at).toISOString() : null,
     links: { self: `/v1/documents/${r.id}`, xml: `/v1/documents/${r.id}/xml`, pdf: `/v1/documents/${r.id}/pdf` },
@@ -291,7 +296,11 @@ export function registerPublicDocumentRoutes(app: FastifyInstance, deps: Pipelin
 export function registerDocumentRoutes(app: FastifyInstance, deps: PipelineDeps, ctx: ServerContext) {
   const { db } = deps;
 
+  /** Invoices and receipts need documents.issue; credit and debit notes need documents.adjust. */
+  const requireIssue = (request: FastifyRequest, type: string) => requirePermission(request, type === '03' || type === '04' ? 'documents.adjust' : 'documents.issue');
+
   app.post<{ Body: IssueBody }>('/documents', { schema: { body: issueSchema } }, async (request, reply) => {
+    requireIssue(request, request.body.type);
     const tenantId = request.tenantId;
     const key = request.headers['idempotency-key'];
     if (Array.isArray(key)) throw new ApiError(400, 'invalid_request', 'Send one Idempotency-Key header');
@@ -320,6 +329,8 @@ export function registerDocumentRoutes(app: FastifyInstance, deps: PipelineDeps,
     try {
       const result = await issueDocument(deps, tenantId, await toIssueRequest(deps, tenantId, request.body));
       documentId = result.documentId;
+      // Who issued it (not part of the signed record). Also on the contingency reissue, if there was one.
+      if (request.userId) await db.query('update documents set issued_by = $3 where tenant_id = $1 and (id = $2 or supersedes_document_id = $2)', [tenantId, result.documentId, request.userId]);
       const body = documentJson(await loadDocument(deps, tenantId, result.documentId));
       if (key) {
         await db.query(
@@ -338,6 +349,7 @@ export function registerDocumentRoutes(app: FastifyInstance, deps: PipelineDeps,
 
   // Totals for a draft, without issuing anything: the web app calls this as the user types.
   app.post<{ Body: IssueBody }>('/documents/preview', { schema: { body: issueSchema } }, async (request) => {
+    if (!can(request.principal, 'documents.issue')) requirePermission(request, 'documents.adjust');
     const req = await toIssueRequest(deps, request.tenantId, request.body);
     const t = calculateDocument(
       {
@@ -454,6 +466,7 @@ export function registerDocumentRoutes(app: FastifyInstance, deps: PipelineDeps,
       },
     },
     async (request) => {
+      requirePermission(request, 'documents.send');
       requireMail(ctx);
       const copy = await printedCopy(deps, request.tenantId, request.params.id);
       if (!emailAllowed(request.tenantId)) throw new ApiError(429, 'too_many_emails', 'Too many emails sent in the last hour; try again later');
@@ -502,6 +515,7 @@ export function registerDocumentRoutes(app: FastifyInstance, deps: PipelineDeps,
 
   // A link the customer can open to get the PDF (for WhatsApp, SMS, or anywhere else).
   app.post<{ Params: { id: string } }>('/documents/:id/share', { schema: { params: idParams } }, async (request, reply) => {
+    requirePermission(request, 'documents.send');
     const row = (await db.query<{ status: string }>('select status from documents where id = $1 and tenant_id = $2', [request.params.id, request.tenantId])).rows[0];
     if (!row) throw notFound('Document');
     if (!PRINTABLE.includes(row.status)) throw new ApiError(409, 'not_printable', 'Only a valid document can be shared');
@@ -566,8 +580,10 @@ export function registerDocumentRoutes(app: FastifyInstance, deps: PipelineDeps,
     '/documents/:id/cancel',
     { schema: { params: idParams, body: { type: 'object', required: ['reason'], additionalProperties: false, properties: { reason: { type: 'string', minLength: 1, maxLength: 500 } } } } },
     async (request, reply) => {
-      await loadDocument(deps, request.tenantId, request.params.id); // 404 for another tenant's document
+      requirePermission(request, 'documents.cancel');
+      const original = await loadDocument(deps, request.tenantId, request.params.id); // 404 for another tenant's document
       const result = await cancelDocument(deps, request.tenantId, request.params.id, request.body.reason);
+      await audit(db, { tenantId: request.tenantId, userId: request.userId || null, action: 'document.cancelled', target: `${original.etd_type}-${String(original.series_number).padStart(3, '0')}-${String(original.serial).padStart(9, '0')}`, details: { reason: request.body.reason, result: result.status }, ip: request.ip });
       const document = documentJson(await loadDocument(deps, request.tenantId, request.params.id));
       return reply.code(result.status === 'pending' ? 202 : 200).send({
         cancellation: { eventId: result.eventId, etdui: result.eventEtdui, status: result.status, conditions: result.conditions, protocolNumber: result.protocolNumber ?? null },

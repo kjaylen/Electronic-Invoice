@@ -7,7 +7,7 @@
 
 import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
-import { api, type DocumentDetailInfo, type DocumentInfo, type Item, type Page } from '../api';
+import { api, type DocumentDetailInfo, type DocumentInfo, type Item, link, type Page } from '../api';
 import { useT } from '../i18n';
 import { printPdf } from '../print';
 import { useSession } from '../session';
@@ -52,7 +52,7 @@ export function Counter() {
   usePageTitle(t('Counter'));
   const toast = useToast();
   const { me, session } = useSession();
-  const storageKey = `etd.counter.${session?.currentBusinessId}`;
+  const storageKey = `etd.counter.${session?.business.id}.${session?.user.id}`;
   const [sale, setSale] = useState<Sale>(() => {
     const saved = store.get<Sale>(storageKey);
     if (saved?.lines) key = Math.max(key, ...saved.lines.map((l) => l.key), 0);
@@ -168,7 +168,7 @@ export function Counter() {
       setLast({ doc, change: change !== null ? fromCents(change) : null });
       setSale(newSale());
       if (doc.status === 'rejected') toast(t('Rejected by BTS'), 'bad');
-      else if (autoPrint) printPdf(`/v1/documents/${doc.id}/pdf?format=receipt&widthMm=80`);
+      else if (autoPrint) printPdf(link(`/v1/documents/${doc.id}/pdf?format=receipt&widthMm=80`));
       focusSearch();
     } catch (err) {
       setError(err);
@@ -264,7 +264,7 @@ export function Counter() {
               </div>
               <div className="row">
                 {['authorized', 'authorized_with_alert', 'contingency_pending'].includes(last.doc.status) && (
-                  <button type="button" onClick={() => printPdf(`/v1/documents/${last.doc.id}/pdf?format=receipt&widthMm=80`)}>{t('Print receipt')}</button>
+                  <button type="button" onClick={() => printPdf(link(`/v1/documents/${last.doc.id}/pdf?format=receipt&widthMm=80`))}>{t('Print receipt')}</button>
                 )}
                 <Link className="button secondary" to={`/documents/${last.doc.id}`} viewTransition>{t('Open or send')}</Link>
               </div>

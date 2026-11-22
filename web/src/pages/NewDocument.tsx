@@ -1,5 +1,5 @@
 import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router';
+import { Navigate, useNavigate, useSearchParams } from 'react-router';
 import { api, type Customer, type DocumentDetailInfo, type DocumentInfo, type Item, type Page } from '../api';
 import { useT } from '../i18n';
 import { useSession } from '../session';
@@ -48,7 +48,7 @@ export const searchItems = (q: string, limit = 8) => api<Page<Item>>(`/v1/items?
 export function NewDocument() {
   const t = useT();
   const toast = useToast();
-  const { me, session } = useSession();
+  const { me, session, can } = useSession();
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const initialType = (['01', '02', '03', '04'].includes(params.get('type') ?? '') ? params.get('type') : '01') as DocType;
@@ -77,7 +77,7 @@ export function NewDocument() {
   const lineInputs = useRef(new Map<number, HTMLInputElement>());
   const focusLine = useRef<number | null>(null);
 
-  const draftKey = `etd.draft.${session?.currentBusinessId}.${type}${refId ? `.ref.${refId}` : ''}`;
+  const draftKey = `etd.draft.${session?.business.id}.${session?.user.id}.${type}${refId ? `.ref.${refId}` : ''}`;
 
   useEffect(() => setType(initialType), [initialType]);
 
@@ -106,7 +106,7 @@ export function NewDocument() {
   const draftState = JSON.stringify({ customerMode, customer, newCustomer, receiptTin, lines, meansCode, dueDate, terms, note, reason, idempotencyKey });
   const debouncedDraft = useDebounced(draftState, 500);
   useEffect(() => {
-    if (!session?.currentBusinessId || !dirty) return;
+    if (!session || !dirty) return;
     store.set(draftKey, { ...JSON.parse(debouncedDraft), savedAt: new Date().toISOString() });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debouncedDraft]);
@@ -267,6 +267,7 @@ export function NewDocument() {
   };
 
   const typeName = t(TYPE_NAMES[type]!);
+  if (!can(isNote ? 'documents.adjust' : 'documents.issue')) return <Navigate to="/" replace />;
   return (
     <form className="stack" onSubmit={submit} onKeyDown={(e) => {
       // Ctrl+Enter (Cmd+Enter on a Mac) issues from anywhere in the form.

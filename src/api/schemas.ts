@@ -50,6 +50,7 @@ export const tenantSchema = {
     address: addressSchema,
     contact: { ...contactSchema, required: ['telephone', 'email'] },
     environment: { type: 'string', enum: ['test', 'production'] },
+    slug: { type: 'string', minLength: 3, maxLength: 40 },
   },
 } as const;
 

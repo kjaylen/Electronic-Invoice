@@ -15,6 +15,8 @@ export class ApiError extends Error {
   }
 }
 
+import { BUSINESS } from './business';
+
 /** Fired when a signed-in call answers 401 (session expired or signed out elsewhere). */
 export const UNAUTHORIZED_EVENT = 'etd:unauthorized';
 
@@ -26,6 +28,8 @@ export async function api<T = unknown>(path: string, options: { method?: string;
       credentials: 'same-origin',
       headers: {
         'X-Requested-With': 'etd-web',
+        // Which business this call is for: each business has its own sign-in cookie.
+        ...(BUSINESS && { 'X-Business': BUSINESS }),
         ...(options.body !== undefined && { 'Content-Type': 'application/json' }),
         ...options.headers,
       },
@@ -52,23 +56,38 @@ export async function api<T = unknown>(path: string, options: { method?: string;
   return data as T;
 }
 
+/** A plain link to the API (PDF, XML, CSV), naming the business since links cannot carry headers. */
+export function link(path: string): string {
+  if (!BUSINESS) return path;
+  return `${path}${path.includes('?') ? '&' : '?'}b=${encodeURIComponent(BUSINESS)}`;
+}
+
+/** An error code that means "sign in again", not "something broke". */
+export const isSignedOut = (e: unknown) => e instanceof ApiError && e.status === 401;
+
 // ---------- shapes returned by the API ----------
 
-export type Role = 'owner' | 'member';
+export type Role = 'owner' | 'admin' | 'manager' | 'cashier' | 'accountant';
+export type Permission =
+  | 'documents.issue' | 'documents.adjust' | 'documents.cancel' | 'documents.send' | 'catalog.manage'
+  | 'reports.view' | 'business.manage' | 'users.manage' | 'apikeys.manage' | 'audit.view';
 
-export interface Business {
+export interface Account {
   id: string;
-  legalName: string;
-  tradeName: string | null;
-  environment: 'test' | 'production';
+  name: string;
+  email: string | null;
+  username: string | null;
   role: Role;
+  status: 'active' | 'disabled';
+  mustChangePassword: boolean;
+  lastLoginAt: string | null;
+  createdAt: string;
 }
 
 export interface SessionInfo {
-  user: { id: string; email: string; name: string };
-  businesses: Business[];
-  currentBusinessId: string | null;
-  role?: Role | null;
+  user: Account;
+  business: { id: string; slug: string; legalName: string; tradeName: string | null; environment: 'test' | 'production' };
+  permissions: Permission[];
 }
 
 export interface Me {
@@ -133,6 +152,7 @@ export interface DocumentInfo {
   problem?: { kind: string; reason: string | null };
   supersedes: string | null;
   supersededBy: string | null;
+  issuedBy?: string | null;
   createdAt: string;
 }
 
@@ -158,20 +178,30 @@ export interface Page<T> {
   nextCursor: string | null;
 }
 
-export interface TeamMember {
-  userId: string;
-  name: string;
-  email: string;
-  role: Role;
-  joinedAt: string;
+export interface ManagedAccount extends Account {
+  activeSessions: number;
+  manageable: boolean;
 }
 
-export interface Invitation {
+export interface AuditEvent {
+  id: number;
+  at: string;
+  action: string;
+  target: string | null;
+  details: Record<string, unknown> | null;
+  ip: string | null;
+  user: { id: string; name: string } | null;
+}
+
+export interface BusinessProfile {
   id: string;
-  email: string;
-  role: Role;
-  createdAt: string;
-  expiresAt: string;
+  slug: string;
+  legalName: string;
+  tradeName: string | null;
+  tin: string;
+  address: { street: string; additionalStreet?: string; city: string; districtCode: string };
+  contact: { telephone: string; email: string };
+  environment: 'test' | 'production';
 }
 
 export interface Summary {

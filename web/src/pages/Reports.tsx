@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { api, type Summary } from '../api';
+import { api, link, type Summary } from '../api';
 import { useI18n, useT } from '../i18n';
 import { belizeToday, ErrorText, Field, fromCents, money, Segmented, toCents, usePageTitle } from '../ui';
 
@@ -130,7 +130,7 @@ export function Reports() {
       <div className="row">
         <div><span className="kicker">{t('Insights')}</span><h1>{t('Reports')}</h1></div>
         <span className="spacer" />
-        <a className="button secondary" href={`/v1/reports/documents?${qs}`} download>{t('All documents (CSV)')}</a>
+        <a className="button secondary" href={link(`/v1/reports/documents?${qs}`)} download>{t('All documents (CSV)')}</a>
       </div>
       <div className="card row filters">
         <Segmented
@@ -171,7 +171,7 @@ export function Reports() {
                 <p className="small muted">{t('For your GST return. Credit notes are subtracted; rejected and cancelled documents are left out. Check with your accountant before filing.')}</p>
               </div>
               <span className="spacer" />
-              <a className="button secondary" href={`/v1/reports/summary?${qs}&format=csv`} download>CSV</a>
+              <a className="button secondary" href={link(`/v1/reports/summary?${qs}&format=csv`)} download>CSV</a>
             </div>
             <div className="table-wrap">
               <table className="responsive">
@@ -188,7 +188,7 @@ export function Reports() {
 
           <div className="grid two">
             <section className="card">
-              <div className="row"><h2>{t('Top customers')}</h2><span className="spacer" /><a className="button secondary" href={`/v1/reports/customers?${qs}&format=csv`} download>CSV</a></div>
+              <div className="row"><h2>{t('Top customers')}</h2><span className="spacer" /><a className="button secondary" href={link(`/v1/reports/customers?${qs}&format=csv`)} download>CSV</a></div>
               {customers.length === 0 ? <div className="empty">{t('No sales in this period.')}</div> : (
                 <div className="table-wrap">
                   <table className="responsive">
@@ -203,7 +203,7 @@ export function Reports() {
               )}
             </section>
             <section className="card">
-              <div className="row"><h2>{t('Top items')}</h2><span className="spacer" /><a className="button secondary" href={`/v1/reports/items?${qs}&format=csv`} download>CSV</a></div>
+              <div className="row"><h2>{t('Top items')}</h2><span className="spacer" /><a className="button secondary" href={link(`/v1/reports/items?${qs}&format=csv`)} download>CSV</a></div>
               {items.length === 0 ? <div className="empty">{t('No sales in this period.')}</div> : (
                 <div className="table-wrap">
                   <table className="responsive">

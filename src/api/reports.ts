@@ -13,6 +13,7 @@ import { formatCents } from '../engine/decimal.ts';
 import { ETD_TYPE_NAMES, type IssuedEtdType } from '../engine/ubl.ts';
 import type { PipelineDeps } from '../pipeline/issue.ts';
 import { ApiError } from './errors.ts';
+import { requirePermission } from './permissions.ts';
 import { date } from './schemas.ts';
 
 export const COUNTED_STATUSES = ['authorized', 'authorized_with_alert', 'contingency_pending'];
@@ -60,6 +61,7 @@ export function registerReportRoutes(app: FastifyInstance, deps: PipelineDeps) {
 
   app.get<PeriodQuery>('/reports/summary', { schema: { querystring: periodQuery } }, async (request, reply) => {
     const q = request.query;
+    requirePermission(request, 'reports.view');
     checkPeriod(q);
     const p = args(request.tenantId, q);
     const byType = (await db.query<{ etd_type: IssuedEtdType; n: number; net: string; gst: string; tax: string; total: string }>(
@@ -97,6 +99,7 @@ export function registerReportRoutes(app: FastifyInstance, deps: PipelineDeps) {
 
   app.get<PeriodQuery>('/reports/customers', { schema: { querystring: periodQuery } }, async (request, reply) => {
     const q = request.query;
+    requirePermission(request, 'reports.view');
     checkPeriod(q);
     const rows = (await db.query<{ name: string; tin: string | null; n: number; net: string; gst: string; total: string }>(
       `select coalesce(nullif(d.customer_snapshot->>'name', ''), 'Walk-in customers') as name, d.customer_snapshot->>'tin' as tin, count(*)::int as n,
@@ -112,6 +115,7 @@ export function registerReportRoutes(app: FastifyInstance, deps: PipelineDeps) {
 
   app.get<PeriodQuery>('/reports/items', { schema: { querystring: periodQuery } }, async (request, reply) => {
     const q = request.query;
+    requirePermission(request, 'reports.view');
     checkPeriod(q);
     const rows = (await db.query<{ description: string; unit_code: string; quantity: string; net: string; gst: string; total: string }>(
       `select l.description, l.unit_code, ${signed('l.quantity')}::text as quantity,
@@ -130,6 +134,7 @@ export function registerReportRoutes(app: FastifyInstance, deps: PipelineDeps) {
   // Every document in the period, whatever its status, for bookkeeping.
   app.get<PeriodQuery>('/reports/documents', { schema: { querystring: periodQuery } }, async (request, reply) => {
     const q = request.query;
+    requirePermission(request, 'reports.view');
     checkPeriod(q);
     const rows = (await db.query<{ issue_date: string; issue_time: string; etd_type: IssuedEtdType; series_number: number; serial: string; etdui: string; name: string | null; tin: string | null; net: string; gst: string; tax: string; total: string; status: string; protocol_number: string | null; referenced_etdui: string | null }>(
       `select d.issue_date::text as issue_date, d.issue_time::text as issue_time, d.etd_type, d.series_number, d.serial::text as serial, d.etdui,

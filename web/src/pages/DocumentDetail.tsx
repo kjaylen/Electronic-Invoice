@@ -1,6 +1,6 @@
 import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router';
-import { api, type DocumentDetailInfo, type DocumentInfo } from '../api';
+import { api, type DocumentDetailInfo, type DocumentInfo, link } from '../api';
 import { type T, useT } from '../i18n';
 import { printPdf } from '../print';
 import { useSession } from '../session';
@@ -37,7 +37,7 @@ export function DocumentDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
-  const { me } = useSession();
+  const { me, can } = useSession();
   const [doc, setDoc] = useState<DocumentDetailInfo | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [cancelling, setCancelling] = useState(false);
@@ -86,7 +86,7 @@ export function DocumentDetail() {
   const printable = ['authorized', 'authorized_with_alert', 'contingency_pending'].includes(doc.status);
   const explain = EXPLAIN[doc.status];
   const justIssued = (location.state as { justIssued?: boolean } | null)?.justIssued;
-  const canNote = (doc.status === 'authorized' || doc.status === 'authorized_with_alert') && (doc.type === '01' || doc.type === '02');
+  const canNote = can('documents.adjust') && (doc.status === 'authorized' || doc.status === 'authorized_with_alert') && (doc.type === '01' || doc.type === '02');
   const business = me?.tradeName ?? me?.legalName ?? '';
   const typeName = t(TYPE_NAMES[doc.type] ?? doc.typeName);
 
@@ -153,7 +153,7 @@ export function DocumentDetail() {
         <div>
           <span className="kicker"><Link to="/documents" viewTransition style={{ color: 'inherit' }}>{t('Documents')}</Link> / {doc.series}-{doc.number}</span>
           <h1>{typeName} <span className="num muted" style={{ fontWeight: 400 }}>{doc.series}-{doc.number}</span></h1>
-          <p className="muted">{doc.issueDate} {doc.issueTime} · {customerLabel(t, doc)}</p>
+          <p className="muted">{doc.issueDate} {doc.issueTime} · {customerLabel(t, doc)}{doc.issuedBy && <> · {t('issued by {name}', { name: doc.issuedBy })}</>}</p>
         </div>
         <span className="spacer" />
         <StatusBadge status={doc.status} />
@@ -178,20 +178,20 @@ export function DocumentDetail() {
       <div className="row actions-bar">
         {printable && (
           <>
-            <button onClick={() => printPdf(`/v1/documents/${doc.id}/pdf`)}>{t('Print')}<span className="chip" aria-hidden="true">⎙</span></button>
-            {(doc.type === '01' || doc.type === '02') && <button className="secondary" onClick={() => printPdf(`/v1/documents/${doc.id}/pdf?format=receipt&widthMm=80`)}>{t('Print receipt')}</button>}
-            <a className="button secondary" href={`/v1/documents/${doc.id}/pdf`} target="_blank" rel="noreferrer">{t('Open PDF')}</a>
+            <button onClick={() => printPdf(link(`/v1/documents/${doc.id}/pdf`))}>{t('Print')}<span className="chip" aria-hidden="true">⎙</span></button>
+            {(doc.type === '01' || doc.type === '02') && <button className="secondary" onClick={() => printPdf(link(`/v1/documents/${doc.id}/pdf?format=receipt&widthMm=80`))}>{t('Print receipt')}</button>}
+            <a className="button secondary" href={link(`/v1/documents/${doc.id}/pdf`)} target="_blank" rel="noreferrer">{t('Open PDF')}</a>
           </>
         )}
-        <a className="button secondary" href={`/v1/documents/${doc.id}/xml`}>{t('Download XML')}</a>
+        <a className="button secondary" href={link(`/v1/documents/${doc.id}/xml`)}>{t('Download XML')}</a>
         <span className="spacer" />
-        {(doc.type === '01' || doc.type === '02') && <button className="secondary" onClick={() => navigate(`/documents/new?type=${doc.type}&from=${doc.id}`, { viewTransition: true })}>{t('Issue again')}</button>}
+        {can('documents.issue') && (doc.type === '01' || doc.type === '02') && <button className="secondary" onClick={() => navigate(`/documents/new?type=${doc.type}&from=${doc.id}`, { viewTransition: true })}>{t('Issue again')}</button>}
         {canNote && <button className="secondary" onClick={() => navigate(`/documents/new?type=04&ref=${doc.id}`, { viewTransition: true })}>{t('Credit note')}</button>}
         {canNote && doc.type === '01' && <button className="secondary" onClick={() => navigate(`/documents/new?type=03&ref=${doc.id}`, { viewTransition: true })}>{t('Debit note')}</button>}
-        {(doc.status === 'authorized' || doc.status === 'authorized_with_alert') && <button className="danger" onClick={() => setCancelling(true)}>{t('Cancel document')}</button>}
+        {can('documents.cancel') && (doc.status === 'authorized' || doc.status === 'authorized_with_alert') && <button className="danger" onClick={() => setCancelling(true)}>{t('Cancel document')}</button>}
       </div>
 
-      {printable && (
+      {printable && can('documents.send') && (
         <section className="card send">
           <div>
             <h2>{t('Send to the customer')}</h2>
@@ -256,7 +256,7 @@ export function DocumentDetail() {
         </section>
       </div>
 
-      {printable && <iframe className="pdf-frame" title={t('Printed copy')} src={`/v1/documents/${doc.id}/pdf`} loading="lazy" />}
+      {printable && <iframe className="pdf-frame" title={t('Printed copy')} src={link(`/v1/documents/${doc.id}/pdf`)} loading="lazy" />}
 
       {emailing && <EmailModal doc={doc} onClose={() => setEmailing(false)} onSent={(to) => { setEmailing(false); toast(t('Sent to {to}', { to })); void loadMessages(); }} />}
 
