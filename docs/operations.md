@@ -114,14 +114,27 @@ deployments). To move to object storage behind a CDN:
    photos go to the bucket; buyers' browsers are redirected to the CDN.
 3. `npm run move-photos` moves the existing ones (safe to stop and re-run).
 
-## 6. Staff accounts
+## 6. Store domains, payments, integrations
+
+- **Store domains.** Businesses point a CNAME at `STORE_DOMAIN_TARGET` and verify with a TXT record. Serve that host through a proxy with on-demand TLS, asking the app before issuing a certificate. With Caddy:
+
+  ```
+  { on_demand_tls { ask http://app:3000/v1/domains/check } }
+  https:// { tls { on_demand }  reverse_proxy app:3000 }
+  ```
+
+- **PayPal.** Each business connects its own PayPal app (client id and secret, encrypted at rest). Nothing to set up on the platform. Pending payments are reconciled every housekeeping run.
+- **QuickBooks Online.** Create one app at developer.intuit.com, set `QBO_CLIENT_ID`, `QBO_CLIENT_SECRET`, `QBO_ENVIRONMENT=production` and register `<PUBLIC_URL>/v1/integrations/quickbooks/callback`. Syncs run every minute from the worker's process; failures retry with backoff and are listed in each business's Settings → Integrations.
+- **Webhooks** go out every 5 seconds from the worker's process. A failing endpoint is switched off after 20 failures in a row; the business switches it back on.
+
+## 7. Staff accounts
 
 Staff sign in to `/admin` with two-step sign-in, always: the first sign-in sets
 up the authenticator app and shows ten recovery codes. Manage staff from the
 command line: `npm run platform-admin -- add|reset|reset-2fa|disable|enable|list`.
 A lost phone: `reset-2fa` (they set it up again at the next sign-in).
 
-## 7. When something goes wrong
+## 8. When something goes wrong
 
 **BTS is down.** Nothing to do: businesses keep issuing in contingency mode
 (documents say "Pending of BTS authorization"), owners are emailed, and the

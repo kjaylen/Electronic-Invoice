@@ -125,6 +125,11 @@ Local database: `docker compose up -d db`, then `DATABASE_URL=postgres://einvoic
 | `HOUSEKEEPING_INTERVAL_MS` | Default `300000`: notification emails to businesses, operations alerts, clean-up. `0` turns it off in this process |
 | `ALERT_WEBHOOK_URL`, `DEPLOY_ENVIRONMENT` | Operations alerts (worker stopped, documents stuck, contingency queue, expired certificates) posted as JSON `{text}` to Slack/Teams/Discord, labelled with the environment |
 | `METRICS_TOKEN` | Enables `GET /metrics` (Prometheus) for a bearer token of 32+ characters |
+| `PLATFORM_BILLING_TENANT`, `PLATFORM_PAYMENT_INSTRUCTIONS` | The platform's own business (its address), which issues subscribers' e-invoices; how subscribers pay |
+| `QBO_CLIENT_ID`, `QBO_CLIENT_SECRET`, `QBO_ENVIRONMENT` | The platform's Intuit app, for the QuickBooks Online integration |
+| `STORE_DOMAIN_TARGET` | The host businesses point their store domains at (CNAME) |
+| `API_RATE_LIMIT_PER_MINUTE`, `WEBHOOK_INTERVAL_MS`, `INTEGRATION_SYNC_INTERVAL_MS` | API key limit (600); how often webhooks (5 s) and QuickBooks (60 s) are sent, from the worker's process |
+| `LEGAL_NAME`, `CONTACT_EMAIL` | Who runs the service, on the pricing, terms and privacy pages |
 | `S3_BUCKET`, `S3_ENDPOINT`, `S3_REGION`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_PUBLIC_URL`, `S3_FORCE_PATH_STYLE` | Product photos in S3-compatible storage (S3, R2, Spaces, MinIO) behind a CDN; without them photos stay in the database |
 
 **Conventions:**
@@ -309,7 +314,7 @@ npm run e2e
 
 Builds the web app, starts the demo on port 3100 with a fresh `einvoicing_e2e` database, and drives a real browser through sign-up, onboarding, the catalog, a counter sale, an invoice with a restored draft, emailing, search, reports, adding users (welcome link and temporary password, first sign-in, deactivation, the activity log), password reset, Spanish, accessibility checks, installability, the online store (a product with sizes and a photo, opening the store, a buyer's order, paid becoming a BTS receipt), the platform console moving the business to production, and the phone layout, storefront included. On Windows it uses the installed Microsoft Edge; elsewhere run `npx playwright install chromium` first (or set `PW_CHANNEL`).
 
-## Online store (`src/commerce`, phase 1)
+## Online store (`src/commerce`)
 
 Every business can open an online store at `app.example.bz/<slug>/shop`. Its defining feature: **a paid order becomes a BTS-authorized document**, a tax receipt, or a tax invoice when the buyer gives a TIN.
 
@@ -317,7 +322,8 @@ Every business can open an online store at `app.example.bz/<slug>/shop`. Its def
 - **Storefront:** product grid, search, product pages with option pickers and stock hints ("Only 3 left"), a cart kept on the buyer's device, and checkout. Prices are shown with GST included. Every total comes from the same engine calculation that produces the e-invoice, so the quote, the order and the receipt agree to the cent.
 - **Checkout:**
   - delivery to the zones the business sets (each with a fee before GST, which becomes a standard-rated line on the receipt) or pickup
-  - payment by bank transfer (the bank details are shown after ordering, with the order number as reference), cash on delivery, or at pickup
+  - payment online (card or PayPal, through the business's own PayPal account; a test gateway in the BTS test environment), by bank transfer (the bank details are shown after ordering, with the order number as reference), cash on delivery, or at pickup. A confirmed online payment marks the order paid and issues and emails the receipt by itself; a declined one can be retried from the order page; a reconciliation run settles payments buyers never came back from. PayPal charges US dollars at the fixed BZ$2 = US$1; the receipt stays in BZ$
+  - discount codes (percent, BZ$ off with GST, free delivery; dates, minimum order, use limits), shown on the receipt as an allowance on each line before GST; refunds take each unit's exact share
   - an optional TIN and business name, for a tax invoice
   - stock is reserved in the same database transaction that creates the order, so the last item cannot be sold twice
 - **Orders:** numbered per business (#1001 and up). The buyer gets an emailed confirmation and a private order page (an unguessable link) that shows progress and, once paid, the receipt PDF. The business is emailed about each new order.
@@ -334,8 +340,12 @@ Every business can open an online store at `app.example.bz/<slug>/shop`. Its def
 | `GET /v1/store/:slug`, `/products`, `/products/:handle`, `/images/:id` | The public storefront (no sign-in; only while the store is open and for products on sale) |
 | `POST /v1/store/:slug/quote`, `POST /v1/store/:slug/orders` | Price a cart; place an order (rate-limited per IP) |
 | `GET /v1/store/:slug/orders/:number?t=`, `.../document?t=` | The buyer's order page and receipt PDF (the token from the order link) |
+| `POST /v1/store/:slug/orders/:number/pay?t=`, `.../payments/:id/confirm?t=` | Start or retry an online payment; back from the provider, confirm it |
+| `GET/POST /v1/discounts`, `PATCH /v1/discounts/:id` | Discount codes |
+| `GET /v1/payment-accounts`, `PUT/DELETE /v1/payment-accounts/paypal` | Connect PayPal (credentials checked with PayPal, stored encrypted) |
+| `GET/POST /v1/store-domains`, `POST .../:domain/verify`, `DELETE .../:domain` | The store on the business's own domain (CNAME to `STORE_DOMAIN_TARGET` plus a TXT record to verify); `GET /v1/domains/check?domain=` answers an on-demand TLS proxy |
 
-**Phase 2 (next):** card payments through a Belizean gateway and PayPal, discount codes, custom domains. **Phase 3:** theme editor, search-engine friendly pages, social catalogs, abandoned-cart reminders, customer accounts, one stock count for the counter and the store.
+**Next:** a Belizean card gateway alongside PayPal. **Later:** theme editor, search-engine friendly pages, social catalogs, abandoned-cart reminders, customer accounts, one stock count for the counter and the store.
 
 ## Platform console (`/admin`)
 
@@ -364,6 +374,27 @@ For the team that runs this service, not for businesses. Staff move a business f
 
 To confirm with BTS: whether production numbering should restart at 1 (what this does) and whether production needs a different certificate (the console lets staff choose).
 
+## Plans and billing (`src/billing`)
+
+The platform charges businesses by plan: **Starter** (free: 30 production documents a month, 2 accounts), **Business** (BZ$49 a month + GST: 1,000 documents, 10 accounts, the online store, API keys) and **Pro** (BZ$129: no limits, webhooks, integrations). Documents in the BTS test environment never count. Prices and limits live in `src/billing/plans.ts`.
+
+- New businesses get a 30-day Business trial. A daily run ends trials, invoices each month in advance (due in 14 days), applies scheduled downgrades, marks unpaid subscriptions past due and, 14 days later, pauses issuing. Credit notes, reading, printing and exporting are never blocked.
+- The platform's invoices are real BTS e-invoices, issued by the platform's own business on the platform (`PLATFORM_BILLING_TENANT`) and emailed with the PDF; businesses are reminded when a trial ends, an invoice is overdue or issuing pauses.
+- **Settings → Plan** shows the plan, usage, plans to choose from (owners change it), invoices and how to pay (`PLATFORM_PAYMENT_INSTRUCTIONS`). **Console → Billing** shows monthly revenue and open invoices; staff record payments, void invoices, issue missing e-invoices, set plans and give trials.
+
+| Method and path | What it does |
+|---|---|
+| `GET /v1/billing`, `PUT /v1/billing/plan`, `GET /v1/billing/invoices/:id/pdf` | The business's plan, changing it, an invoice's PDF |
+| `GET /v1/platform/billing`, `POST /v1/platform/invoices/:id/paid\|void\|issue`, `PUT /v1/platform/tenants/:id/subscription` | The console's billing |
+
+A plan limit answers **402** with `plan_limit`, `plan_feature` or `billing_suspended`.
+
+## Public API, webhooks and integrations
+
+- **Reference:** `/docs` renders the OpenAPI 3.1 description at `/v1/openapi.json`, built from the routes' own schemas, with guides and curl examples. API keys are limited to 600 requests a minute (`API_RATE_LIMIT_PER_MINUTE`), with `X-RateLimit-*` headers.
+- **Webhooks** (Pro): database triggers record every document and order change in an outbox; the dispatcher signs each delivery (`X-EInvoicing-Signature: t=…,v1=<HMAC-SHA256>`), retries for about a day, and switches off an endpoint after 20 failures in a row. Endpoints must be https and public (checked on the address actually used). Events: `document.authorized`, `document.rejected`, `document.cancelled`, `document.issued_offline`, `order.placed`, `order.paid`, `order.fulfilled`, `order.cancelled`, `order.refunded`. Manage them in Settings → Developers or with `GET/POST /v1/webhooks`, `PATCH/DELETE /v1/webhooks/:id`, `.../rotate-secret`, `.../test`, `.../deliveries`.
+- **QuickBooks Online** (Pro; `src/integrations/quickbooks.ts`): connect with Intuit OAuth in Settings → Integrations; authorized documents are sent within a minute as Invoices, SalesReceipts and CreditMemos (document number, ETDUI and authorization in the note), cancelled ones are voided, and GST is booked once the business maps its QuickBooks tax codes. Needs the platform's Intuit app: `QBO_CLIENT_ID`, `QBO_CLIENT_SECRET`, `QBO_ENVIRONMENT`, and the redirect URI `<PUBLIC_URL>/v1/integrations/quickbooks/callback` registered with Intuit.
+
 ## Operations (`docs/operations.md`, `docs/staging.md`)
 
 - **Deploying:** `Dockerfile` (server and web app in one image, health check included), `deploy/docker-compose.prod.yml` (app, PostgreSQL, nightly backups) and `deploy/env.example` (every setting, commented). App servers are stateless; run the worker and housekeeping in one of them.
@@ -373,6 +404,8 @@ To confirm with BTS: whether production numbering should restart at 1 (what this
 - **Backups:** managed PostgreSQL point-in-time recovery, plus `npm run backup` nightly dumps kept off-site; a monthly restore drill. The key-encryption key is backed up separately.
 - **Keys:** stored secrets name the key that encrypted them; `npm run rotate-keys` moves them to a new key. A cloud KMS plugs in behind the same `KeyProtector` interface.
 - **Photos:** S3-compatible object storage behind a CDN (SigV4, no SDK), `npm run move-photos` for existing ones.
+- **Security:** `SECURITY.md` (reporting, what protects the service); HSTS and a strict CSP; `npm audit`, Dependabot and CodeQL on GitHub.
+- **Public pages:** `/pricing`, `/terms`, `/privacy` (who runs the service from `LEGAL_NAME` and `CONTACT_EMAIL`). Have the terms and privacy policy reviewed by a lawyer before launch.
 
 ## Printed copy (`src/render`, manual 3.4 and 3.5)
 
