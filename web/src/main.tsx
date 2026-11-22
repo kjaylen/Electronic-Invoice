@@ -49,6 +49,13 @@ const ShopTestPayment = page(() => import('./pages/Shop'), 'ShopTestPayment');
 const Reports = page(() => import('./pages/Reports'), 'Reports');
 const Receivables = page(() => import('./pages/Receivables'), 'Receivables');
 const PayInvoice = page(() => import('./pages/Pay'), 'PayInvoice');
+const Quotes = page(() => import('./pages/Quotes'), 'Quotes');
+const QuoteDetail = page(() => import('./pages/Quotes'), 'QuoteDetail');
+const RecurringList = page(() => import('./pages/Quotes'), 'RecurringList');
+const RecurringDetail = page(() => import('./pages/Quotes'), 'RecurringDetail');
+const QuoteView = page(() => import('./pages/QuoteView'), 'QuoteView');
+const QuoteEditor = page(() => import('./pages/NewDocument'), 'QuoteEditor');
+const RecurringEditor = page(() => import('./pages/NewDocument'), 'RecurringEditor');
 const Settings = page(() => import('./pages/Settings'), 'Settings');
 
 function PageSkeleton() {
@@ -128,10 +135,12 @@ function Layout() {
       { to: '/', label: t('Overview'), icon: Icons.overview },
       { to: '/counter', label: t('Counter'), icon: Icons.counter, permission: 'documents.issue' },
       { to: '/documents/new?type=01', label: t('New invoice'), icon: Icons.invoice, permission: 'documents.issue' },
+      { to: '/quotes', label: t('Quotes'), icon: Icons.quote, permission: 'documents.issue' },
       { to: '/orders', label: t('Orders'), icon: Icons.orders, badge: ordersToDo },
     ]],
     [t('Records'), [
       { to: '/documents', label: t('Documents'), icon: Icons.documents },
+      { to: '/recurring', label: t('Recurring'), icon: Icons.repeat, permission: 'documents.issue' },
       { to: '/receivables', label: t('Getting paid'), icon: Icons.wallet, permission: 'payments.record' },
       { to: '/customers', label: t('Customers'), icon: Icons.customers },
       { to: '/products', label: t('Products'), icon: Icons.products },
@@ -316,6 +325,14 @@ function BusinessApp() {
         <Route path="/items" element={<Navigate to="/products?tab=items" replace />} />
         <Route path="/reports" element={<Allowed permission="reports.view"><Reports /></Allowed>} />
         <Route path="/receivables" element={<Allowed permission="payments.record"><Receivables /></Allowed>} />
+        <Route path="/quotes" element={<Allowed permission="documents.issue"><Quotes /></Allowed>} />
+        <Route path="/quotes/new" element={<QuoteEditor />} />
+        <Route path="/quotes/:id" element={<Allowed permission="documents.issue"><QuoteDetail /></Allowed>} />
+        <Route path="/quotes/:id/edit" element={<QuoteEditor />} />
+        <Route path="/recurring" element={<Allowed permission="documents.issue"><RecurringList /></Allowed>} />
+        <Route path="/recurring/new" element={<RecurringEditor />} />
+        <Route path="/recurring/:id" element={<Allowed permission="documents.issue"><RecurringDetail /></Allowed>} />
+        <Route path="/recurring/:id/edit" element={<RecurringEditor />} />
         <Route path="/settings" element={<Settings />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
@@ -351,6 +368,8 @@ function PublicApp() {
         <Route path="/signup" element={<CreateBusiness />} />
         {/* A customer paying an invoice from its email. */}
         <Route path="/pay/:token" element={<PayInvoice />} />
+        {/* A customer looking at a quote, to accept or decline it. */}
+        <Route path="/q/:token" element={<QuoteView />} />
         {/* Our own staff: move businesses to BTS production. */}
         <Route path="/admin/*" element={<PlatformConsole />} />
       </Route>

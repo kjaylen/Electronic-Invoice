@@ -16,7 +16,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { formatCents } from '../engine/decimal.ts';
 import { calculateDocument, type LineInput } from '../engine/calc.ts';
 import { BELIZE_DISTRICTS, type Customer, type DocumentReference, ETD_TYPE_NAMES, type IssuedEtdType } from '../engine/ubl.ts';
-import { cancelDocument, issueDocument, type IssueRequest, type PipelineDeps } from '../pipeline/issue.ts';
+import { cancelDocument, issueDocument, type IssueRequest, type IssueResult, type PipelineDeps } from '../pipeline/issue.ts';
 import { renderReceipt, renderSheet } from '../render/pdf.ts';
 import QRCode from 'qrcode';
 import { qrUrl, readEtdForPrint } from '../render/view.ts';
@@ -142,7 +142,7 @@ async function loadDocument(deps: PipelineDeps, tenantId: string, id: string): P
 }
 
 /** Turn the API body into a pipeline request: resolve the saved customer, catalog items and referenced document. */
-async function toIssueRequest(deps: PipelineDeps, tenantId: string, body: IssueBody): Promise<IssueRequest> {
+export async function toIssueRequest(deps: PipelineDeps, tenantId: string, body: IssueBody): Promise<IssueRequest> {
   if (body.customerId && body.customer) throw new ApiError(422, 'invalid_document', 'Give customerId or customer, not both');
   let customer: Customer | undefined;
   if (body.customerId) {
@@ -212,6 +212,41 @@ async function toIssueRequest(deps: PipelineDeps, tenantId: string, body: IssueB
     ...(body.prepaidAmount && { prepaidAmount: body.prepaidAmount }),
     ...(body.payableRoundingAmount && { payableRoundingAmount: body.payableRoundingAmount }),
   };
+}
+
+/**
+ * Issue a document from a POST /v1/documents body: counts against the plan
+ * (credit notes never do), checks the customer's credit limit, signs and
+ * sends it to BTS. Quotes and recurring invoices issue through here too.
+ */
+export async function issueFromBody(deps: PipelineDeps, tenantId: string, body: IssueBody, userId: string | null): Promise<IssueResult> {
+  const issueRequest = await toIssueRequest(deps, tenantId, body);
+  if (issueRequest.etdType !== '04') await assertCanIssue(deps.db, tenantId);
+  await checkCreditLimit(deps, tenantId, issueRequest);
+  const result = await issueDocument(deps, tenantId, issueRequest);
+  // Who issued it (not part of the signed record). Also on the contingency reissue, if there was one.
+  if (userId) await deps.db.query('update documents set issued_by = $3 where tenant_id = $1 and (id = $2 or supersedes_document_id = $2)', [tenantId, result.documentId, userId]);
+  return result;
+}
+
+/**
+ * A body with every line written out (description, unit, price, GST) from
+ * the catalog: what a quote or a recurring invoice keeps, so a later price
+ * change in the catalog does not change what was offered.
+ */
+export async function resolveBody(deps: PipelineDeps, tenantId: string, body: IssueBody): Promise<{ body: IssueBody; totals: { subtotal: bigint; gst: bigint; total: bigint } }> {
+  const req = await toIssueRequest(deps, tenantId, body);
+  const lines = body.lines.map((l, i) => {
+    const r = req.lines[i]!;
+    return {
+      ...l,
+      description: r.description, unitCode: r.unitCode, unitPrice: r.unitPrice, gstCategory: r.gstCategory,
+      ...(r.itemName && { itemName: r.itemName }), ...(r.sellerItemCode && { sellerItemCode: r.sellerItemCode }),
+      ...(r.exemptionReasonCode && { exemptionReasonCode: r.exemptionReasonCode }),
+    };
+  });
+  const t = calculateDocument({ lines: req.lines }, deps.tax);
+  return { body: { ...body, lines }, totals: { subtotal: t.lineExtensionAmount, gst: t.gstAmount, total: t.taxInclusiveAmount } };
 }
 
 // ---------- what is left to credit ----------
@@ -445,17 +480,11 @@ export function registerDocumentRoutes(app: FastifyInstance, deps: PipelineDeps,
 
     let documentId: string | undefined;
     try {
-      const issueRequest = await toIssueRequest(deps, tenantId, request.body);
-      // Credit notes are always allowed (they reduce what the customer owes); the rest count against the plan.
-      if (issueRequest.etdType !== '04') await assertCanIssue(db, tenantId);
-      await checkCreditLimit(deps, tenantId, issueRequest);
-      const result = await issueDocument(deps, tenantId, issueRequest);
+      const result = await issueFromBody(deps, tenantId, request.body, request.userId || null);
       documentId = result.documentId;
-      // Who issued it (not part of the signed record). Also on the contingency reissue, if there was one.
-      if (request.userId) await db.query('update documents set issued_by = $3 where tenant_id = $1 and (id = $2 or supersedes_document_id = $2)', [tenantId, result.documentId, request.userId]);
       // Paid on the spot: record it, once the invoice has legal value (a rejected one is never owed).
       const paid = request.body.paid;
-      if (paid && (issueRequest.etdType === '01' || issueRequest.etdType === '03') && can(request.principal, 'payments.record')) {
+      if (paid && (request.body.type === '01' || request.body.type === '03') && can(request.principal, 'payments.record')) {
         const open = await receivable(db, tenantId, result.documentId);
         if (open && open.balanceCents > 0n) {
           await recordPayment(db, tenantId, result.documentId, { amountCents: open.balanceCents, method: paid.method, reference: paid.reference ?? null, paidOn: open.issueDate }, request.userId || null);

@@ -50,6 +50,8 @@ import { buildOpenApi, routeCollector } from './openapi.ts';
 import { type GatewayExtras, gatewayOptions, registerPaymentAccountRoutes, registerPaymentCallbacks } from './payments.ts';
 import { registerPayRoutes, registerReceivableRoutes } from './receivables.ts';
 import { registerBillPayBankRoutes, registerBillPaySettingsRoutes } from './billpay.ts';
+import { registerPublicQuoteRoutes, registerQuoteRoutes } from './quotes.ts';
+import { registerRecurringRoutes } from './recurring.ts';
 import { registerDiscountRoutes } from './discounts.ts';
 import { domainCache } from '../commerce/domains.ts';
 import { registerIntegrationCallback, registerIntegrationRoutes } from './integrations.ts';
@@ -283,6 +285,8 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     registerIntegrationRoutes(tenant, deps, quickbooks);
     registerReceivableRoutes(tenant, deps, ctx, { ...(options.ekyash && { ekyash: options.ekyash }) });
     registerBillPaySettingsRoutes(tenant, deps, ctx);
+    registerQuoteRoutes(tenant, deps, ctx, { ...(options.ekyash && { ekyash: options.ekyash }) });
+    registerRecurringRoutes(tenant, deps, ctx, { ...(options.ekyash && { ekyash: options.ekyash }) });
   }, { prefix: '/v1' });
 
   registerPublicDocumentRoutes(app, deps);
@@ -313,6 +317,8 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     gatewayOptions: gatewayOptions(deps, slugOfTenant, paymentExtras),
     ...(options.ekyash && { ekyash: options.ekyash }),
   }), { prefix: '/v1/pay' });
+  // A customer looking at a quote, accepting or declining it (the link's token is the permission).
+  await app.register(async (q) => registerPublicQuoteRoutes(q, deps, ctx), { prefix: '/v1/quote' });
   // Belize Bank asking about and posting bill payments (bearer token per business).
   await app.register(async (bank) => registerBillPayBankRoutes(bank, deps), { prefix: '/v1/billpay' });
   // What payment providers tell us (only ever a prompt to ask them).

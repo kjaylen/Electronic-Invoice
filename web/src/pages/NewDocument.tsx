@@ -1,11 +1,11 @@
 import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { Navigate, useNavigate, useSearchParams } from 'react-router';
+import { Navigate, useNavigate, useParams, useSearchParams } from 'react-router';
 import { api, type BusinessProfile, type Customer, type DocumentDetailInfo, type DocumentInfo, type Item, type Page } from '../api';
 import { DocumentPaper, type PaperParty, type PaperView } from '../paper';
 import { useT } from '../i18n';
 import { useSession } from '../session';
 import { useToast } from '../toast';
-import { belizeDate, Combobox, DISTRICTS, ErrorText, Field, GST_CATEGORIES, Modal, money, PAYMENT_MEANS, Segmented, store, toCents, TYPE_NAMES, UNITS, useDebounced, usePageTitle } from '../ui';
+import { belizeDate, belizeToday, Combobox, DISTRICTS, ErrorText, Field, GST_CATEGORIES, Modal, money, PAYMENT_MEANS, Segmented, store, toCents, TYPE_NAMES, UNITS, useDebounced, usePageTitle } from '../ui';
 
 type DocType = '01' | '02' | '03' | '04';
 
@@ -39,6 +39,33 @@ interface Draft {
 }
 
 let lineKey = 0;
+
+/** What a saved quote or recurring invoice holds (the issue body it will use). */
+interface TemplateDocument {
+  type: DocType;
+  customerId?: string;
+  customer?: { name?: string; tin?: string; address?: { street: string; city: string; districtCode: string }; contact?: { telephone?: string; email?: string } };
+  lines: Array<{ itemId?: string; description?: string; quantity: string; unitCode?: string; unitPrice?: string; gstCategory?: 'S' | 'Z' | 'E'; exemptionReasonCode?: string; allowanceCharges?: Array<{ percent?: string }> }>;
+  payment?: { meansCode?: string; terms?: string };
+  note?: string;
+}
+
+interface TemplateDetail {
+  id: string;
+  document: TemplateDocument;
+  dueDays: number;
+  number?: string;
+  validUntil?: string;
+  name?: string;
+  frequency?: 'weekly' | 'monthly' | 'yearly';
+  intervalCount?: number;
+  nextDate?: string | null;
+  endDate?: string | null;
+  remaining?: number | null;
+  autoSend?: boolean;
+}
+
+export type FormMode = 'issue' | 'quote' | 'recurring';
 const emptyLine = (): Line => ({ key: ++lineKey, description: '', quantity: '1', unitCode: 'H87', unitPrice: '', gstCategory: 'S', exemptionReasonCode: '', discountPercent: '' });
 const DECIMAL = /^\d+(\.\d{1,6})?$/;
 /** The payment means on the invoice → how the payment is recorded. */
@@ -48,18 +75,21 @@ const EMPTY_CUSTOMER: NewCustomer = { name: '', tin: '', street: '', city: '', d
 
 export const searchItems = (q: string, limit = 8) => api<Page<Item>>(`/v1/items?limit=${limit}&q=${encodeURIComponent(q)}`).then((r) => r.data);
 
-export function NewDocument() {
+/** The form for a tax document; also for a quote or a recurring invoice (what they will issue). */
+export function NewDocument({ mode = 'issue' }: { mode?: FormMode } = {}) {
   const t = useT();
   const toast = useToast();
   const { me, session, can } = useSession();
   const navigate = useNavigate();
   const [params] = useSearchParams();
-  const initialType = (['01', '02', '03', '04'].includes(params.get('type') ?? '') ? params.get('type') : '01') as DocType;
+  const { id: editId } = useParams();
+  const template = mode !== 'issue';
+  const initialType = (template ? (mode === 'quote' && params.get('type') === '02' ? '02' : '01') : ['01', '02', '03', '04'].includes(params.get('type') ?? '') ? params.get('type') : '01') as DocType;
   const refId = params.get('ref');
   const fromId = params.get('from');
 
   const [type, setType] = useState<DocType>(initialType);
-  usePageTitle(t('New {type}', { type: t(TYPE_NAMES[type]!).toLowerCase() }));
+  usePageTitle(mode === 'quote' ? (editId ? t('Edit quote') : t('New quote')) : mode === 'recurring' ? (editId ? t('Edit recurring invoice') : t('New recurring invoice')) : t('New {type}', { type: t(TYPE_NAMES[type]!).toLowerCase() }));
   const [reference, setReference] = useState<DocumentDetailInfo | null>(null);
   const [reason, setReason] = useState('');
   const [customerMode, setCustomerMode] = useState<'saved' | 'new' | 'walkin'>(initialType === '02' ? 'walkin' : 'saved');
@@ -72,6 +102,18 @@ export function NewDocument() {
   const [terms, setTerms] = useState(initialType === '02' ? '' : 'Net 30');
   // Tax invoices and debit notes paid on the spot: recorded as paid when issued.
   const [paidNow, setPaidNow] = useState(false);
+  // Quotes and recurring invoices: when payment falls due after the invoice, and their own settings.
+  const [dueDays, setDueDays] = useState('30');
+  const [validUntil, setValidUntil] = useState(belizeDate(30));
+  const [loadedNumber, setLoadedNumber] = useState<string | null>(null);
+  const [scheduleName, setScheduleName] = useState('');
+  const [frequency, setFrequency] = useState<'weekly' | 'monthly' | 'yearly'>('monthly');
+  const [intervalCount, setIntervalCount] = useState('1');
+  const [startDate, setStartDate] = useState(belizeToday());
+  const [endMode, setEndMode] = useState<'never' | 'count' | 'date'>('never');
+  const [endCount, setEndCount] = useState('12');
+  const [endDate, setEndDate] = useState('');
+  const [autoSend, setAutoSend] = useState(true);
   const [note, setNote] = useState('');
   const [preview, setPreview] = useState<{ totals: DocumentInfo['totals']; lines: Array<{ net: string; tax: string; total: string }> } | null>(null);
   const [showPaper, setShowPaper] = useState(false);
@@ -84,7 +126,7 @@ export function NewDocument() {
   const lineInputs = useRef(new Map<number, HTMLInputElement>());
   const focusLine = useRef<number | null>(null);
 
-  const draftKey = `etd.draft.${session?.business.id}.${session?.user.id}.${type}${refId ? `.ref.${refId}` : ''}`;
+  const draftKey = `etd.draft.${session?.business.id}.${session?.user.id}.${template ? `${mode}${editId ? `.${editId}` : ''}.` : ''}${type}${refId ? `.ref.${refId}` : ''}`;
 
   useEffect(() => {
     setType(initialType);
@@ -92,7 +134,7 @@ export function NewDocument() {
 
   // Restore an unfinished draft for this business and document type (kept on this device).
   useEffect(() => {
-    if (fromId) return;
+    if (fromId || editId) return;
     const d = store.get<Draft>(draftKey);
     if (!d || !d.lines?.length) return;
     lineKey = Math.max(lineKey, ...d.lines.map((l) => l.key));
@@ -157,6 +199,48 @@ export function NewDocument() {
       }
     });
   }, [refId, initialType, t]);
+
+  // Editing a quote or recurring invoice: start from what it holds.
+  useEffect(() => {
+    if (!template || !editId) return;
+    void api<TemplateDetail>(mode === 'quote' ? `/v1/quotes/${editId}` : `/v1/recurring/${editId}`).then((d) => {
+      const doc = d.document;
+      setType(doc.type);
+      setLines(doc.lines.map((l) => ({
+        key: ++lineKey, ...(l.itemId && { itemId: l.itemId }), description: l.description ?? '', quantity: l.quantity, unitCode: l.unitCode ?? 'H87', unitPrice: l.unitPrice ?? '',
+        gstCategory: l.gstCategory ?? 'S', exemptionReasonCode: l.exemptionReasonCode ?? '', discountPercent: l.allowanceCharges?.[0]?.percent ?? '',
+      })));
+      if (doc.customerId) {
+        void api<Customer>(`/v1/customers/${doc.customerId}`).then((c) => {
+          setCustomer(c);
+          setCustomerMode('saved');
+        });
+      } else if (doc.customer?.name) {
+        const c = doc.customer;
+        setCustomerMode('new');
+        setNewCustomer({ name: c.name ?? '', tin: c.tin ?? '', street: c.address?.street ?? '', city: c.address?.city ?? '', districtCode: c.address?.districtCode ?? '1', telephone: c.contact?.telephone ?? '', email: c.contact?.email ?? '', save: false });
+      } else if (doc.customer?.tin) {
+        setCustomerMode('walkin');
+        setReceiptTin(doc.customer.tin);
+      }
+      setMeansCode(doc.payment?.meansCode ?? '30');
+      setTerms(doc.payment?.terms ?? '');
+      setNote(doc.note ?? '');
+      setDueDays(String(d.dueDays));
+      if (d.number) setLoadedNumber(d.number);
+      if (d.validUntil) setValidUntil(d.validUntil);
+      if (mode === 'recurring') {
+        setScheduleName(d.name ?? '');
+        setFrequency(d.frequency ?? 'monthly');
+        setIntervalCount(String(d.intervalCount ?? 1));
+        setStartDate(d.nextDate ?? belizeToday());
+        setEndMode(d.remaining !== null && d.remaining !== undefined ? 'count' : d.endDate ? 'date' : 'never');
+        if (d.remaining) setEndCount(String(d.remaining));
+        if (d.endDate) setEndDate(d.endDate);
+        setAutoSend(d.autoSend ?? true);
+      }
+    }).catch(setError);
+  }, [template, editId, mode]);
 
   // "Issue again": same customer and lines as an earlier document.
   useEffect(() => {
@@ -282,8 +366,9 @@ export function NewDocument() {
     if (customerMode === 'new' && (!newCustomer.name.trim() || (needsCustomer && (!newCustomer.street || !newCustomer.city)))) return false;
     if (isNote && (!reference || !reason.trim())) return false;
     if (overCredit) return false;
-    return Boolean(me?.certificate);
-  }, [ready.length, lines.length, needsCustomer, customerMode, customer, newCustomer, isNote, reference, reason, me, overCredit]);
+    if (mode === 'recurring' && (!scheduleName.trim() || (endMode === 'date' && !endDate))) return false;
+    return template || Boolean(me?.certificate);
+  }, [ready.length, lines.length, needsCustomer, customerMode, customer, newCustomer, isNote, reference, reason, me, overCredit, template, mode, scheduleName, endMode, endDate]);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -311,6 +396,25 @@ export function NewDocument() {
         } else {
           customerPart = { customer: inline };
         }
+      }
+      if (template) {
+        // A quote or recurring invoice keeps what it will issue; the due date is set on issuing.
+        const document = { type, ...customerPart, lines: linesBody, payment: { meansCode, ...(terms.trim() && { terms: terms.trim() }) }, ...(note.trim() && { note: note.trim() }) };
+        const due = Math.max(0, Math.min(365, Number(dueDays) || 0));
+        let saved: { id: string };
+        if (mode === 'quote') {
+          saved = await api<{ id: string }>(editId ? `/v1/quotes/${editId}` : '/v1/quotes', { method: editId ? 'PUT' : 'POST', body: { document, validUntil, dueDays: due } });
+        } else {
+          const schedule = {
+            name: scheduleName.trim(), document, frequency, intervalCount: Math.max(1, Math.min(12, Number(intervalCount) || 1)), dueDays: due, autoSend,
+            endDate: endMode === 'date' ? endDate : null, count: endMode === 'count' ? Math.max(1, Number(endCount) || 1) : null,
+          };
+          saved = await api<{ id: string }>(editId ? `/v1/recurring/${editId}` : '/v1/recurring', { method: editId ? 'PUT' : 'POST', body: editId ? { ...schedule, nextDate: startDate } : { ...schedule, startDate } });
+        }
+        store.remove(draftKey);
+        toast(t('Saved'));
+        navigate(mode === 'quote' ? `/quotes/${saved.id}` : `/recurring/${saved.id}`, { viewTransition: true });
+        return;
       }
       const payment = type === '02'
         ? { meansCode, terms: terms || `Paid by ${PAYMENT_MEANS.find(([c]) => c === meansCode)?.[1].toLowerCase()}` }
@@ -340,19 +444,24 @@ export function NewDocument() {
 
   const typeName = t(TYPE_NAMES[type]!);
   if (!can(isNote ? 'documents.adjust' : 'documents.issue')) return <Navigate to="/" replace />;
+  const heading = mode === 'quote'
+    ? { kicker: t('Quote'), title: editId ? t('Edit quote {n}', { n: loadedNumber ?? '' }) : t('New quote') }
+    : mode === 'recurring'
+      ? { kicker: t('Recurring invoice'), title: editId ? t('Edit recurring invoice') : t('New recurring invoice') }
+      : { kicker: t('Issue'), title: t('New {type}', { type: typeName.toLowerCase() }) };
   return (
     <form className="stack" onSubmit={submit} onKeyDown={(e) => {
       // Ctrl+Enter (Cmd+Enter on a Mac) issues from anywhere in the form.
       if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) void submit(e);
     }}>
       <div className="row">
-        <div><span className="kicker">{t('Issue')}</span><h1>{t('New {type}', { type: typeName.toLowerCase() })}</h1></div>
+        <div><span className="kicker">{heading.kicker}</span><h1>{heading.title}</h1></div>
         <span className="spacer" />
-        {!isNote && (
+        {!isNote && mode !== 'recurring' && (
           <Segmented
             label={t('Document type')}
             value={type}
-            options={[['01', t('Tax invoice')], ['02', t('Tax receipt')]]}
+            options={mode === 'quote' ? [['01', t('For a tax invoice')], ['02', t('For a tax receipt')]] : [['01', t('Tax invoice')], ['02', t('Tax receipt')]]}
             onChange={(v) => {
               setType(v);
               setCustomerMode(v === '02' ? 'walkin' : 'saved');
@@ -372,8 +481,37 @@ export function NewDocument() {
           </div>
         </div>
       )}
-      {!me?.certificate && <div className="banner bad"><div><strong>{t('Install your BTS certificate in Settings before issuing.')}</strong></div></div>}
-      {me?.contingency.active && <div className="banner warn"><div><strong>{t('BTS cannot be reached.')}</strong>{t('This document will be issued as "Pending of BTS authorization" and sent automatically when BTS is back.')}</div></div>}
+      {!template && !me?.certificate && <div className="banner bad"><div><strong>{t('Install your BTS certificate in Settings before issuing.')}</strong></div></div>}
+      {mode === 'recurring' && (
+        <fieldset className="stack">
+          <legend>{t('Schedule')}</legend>
+          <Field label={t('Name')} hint={t('For you, e.g. "Monthly retainer, Hotel San Ignacio".')}><input required maxLength={120} value={scheduleName} onChange={(e) => setScheduleName(e.target.value)} /></Field>
+          <div className="form-grid">
+            <Field label={t('Repeat every')}>
+              <div className="row nowrap">
+                <input inputMode="numeric" style={{ maxWidth: '4.5rem' }} value={intervalCount} onChange={(e) => setIntervalCount(e.target.value.replace(/\D/g, '').slice(0, 2))} aria-label={t('How many')} />
+                <select value={frequency} onChange={(e) => setFrequency(e.target.value as typeof frequency)} aria-label={t('Period')}>
+                  <option value="weekly">{t('week(s)')}</option>
+                  <option value="monthly">{t('month(s)')}</option>
+                  <option value="yearly">{t('year(s)')}</option>
+                </select>
+              </div>
+            </Field>
+            <Field label={editId ? t('Next invoice on') : t('First invoice on')}><input type="date" required min={belizeToday()} value={startDate} onChange={(e) => setStartDate(e.target.value)} /></Field>
+            <Field label={t('Ends')}>
+              <select value={endMode} onChange={(e) => setEndMode(e.target.value as typeof endMode)}>
+                <option value="never">{t('Never (until you stop it)')}</option>
+                <option value="count">{t('After a number of invoices')}</option>
+                <option value="date">{t('On a date')}</option>
+              </select>
+            </Field>
+            {endMode === 'count' && <Field label={t('Invoices left')}><input inputMode="numeric" value={endCount} onChange={(e) => setEndCount(e.target.value.replace(/\D/g, '').slice(0, 3))} /></Field>}
+            {endMode === 'date' && <Field label={t('Last invoice on or before')}><input type="date" required min={startDate} value={endDate} onChange={(e) => setEndDate(e.target.value)} /></Field>}
+          </div>
+          <label className="row small"><input type="checkbox" checked={autoSend} onChange={(e) => setAutoSend(e.target.checked)} /> {t('Email each invoice to the customer, with a link to pay')}</label>
+        </fieldset>
+      )}
+      {!template && me?.contingency.active && <div className="banner warn"><div><strong>{t('BTS cannot be reached.')}</strong>{t('This document will be issued as "Pending of BTS authorization" and sent automatically when BTS is back.')}</div></div>}
 
       {isNote && (
         <fieldset className="stack">
@@ -503,15 +641,17 @@ export function NewDocument() {
               {PAYMENT_MEANS.map(([code, name]) => <option key={code} value={code}>{t(name)}</option>)}
             </select>
           </Field>
-          {type !== '02' && <Field label={t('Due date')}><input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} /></Field>}
-          {(type === '01' || type === '03') && can('payments.record') && (
+          {!template && type !== '02' && <Field label={t('Due date')}><input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} /></Field>}
+          {template && type === '01' && <Field label={t('Payment due (days after the invoice)')}><input inputMode="numeric" value={dueDays} onChange={(e) => setDueDays(e.target.value.replace(/\D/g, '').slice(0, 3))} /></Field>}
+          {mode === 'quote' && <Field label={t('Quote valid until')}><input type="date" required min={belizeToday()} value={validUntil} onChange={(e) => setValidUntil(e.target.value)} /></Field>}
+          {!template && (type === '01' || type === '03') && can('payments.record') && (
             <label className="row small"><input type="checkbox" checked={paidNow} onChange={(e) => setPaidNow(e.target.checked)} /> {t('Already paid in full (record the payment now)')}</label>
           )}
           <Field label={t('Terms')} hint={type === '02' ? t('Optional.') : undefined}><input value={terms} onChange={(e) => setTerms(e.target.value)} /></Field>
           <Field label={t('Note')} hint={t('Optional; printed on the document.')}><textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} /></Field>
         </fieldset>
         <div className="card totals ticket stack">
-          <span className="kicker" style={{ color: 'var(--lime)' }}>{typeName} · BZD</span>
+          <span className="kicker" style={{ color: 'var(--lime)' }}>{mode === 'quote' ? t('Quote') : mode === 'recurring' ? t('Each invoice') : typeName} · BZD</span>
           <div><span>{t('Subtotal')}</span><span>{money(preview?.totals.lineExtension ?? '0.00')}</span></div>
           <div><span>GST</span><span>{money(preview?.totals.gst ?? '0.00')}</span></div>
           {preview && preview.totals.tax !== preview.totals.gst && (
@@ -519,9 +659,18 @@ export function NewDocument() {
           )}
           <div className="grand"><span>{t('Total')}</span><span aria-live="polite">{money(preview?.totals.taxInclusive ?? '0.00')}</span></div>
           <ErrorText error={error} />
-          <button type="button" className="secondary paper-preview-button" disabled={ready.length === 0} onClick={openPaper}>{t('Preview the document')}</button>
-          <button type="submit" className="big lime" disabled={!canIssue || busy}>{busy ? t('Signing and sending…') : t('Issue {type}', { type: typeName.toLowerCase() })}<span className="chip" aria-hidden="true">→</span></button>
-          <p className="small muted">{t('Issuing signs the document and sends it to BTS for authorization.')} <kbd>Ctrl</kbd>+<kbd>Enter</kbd></p>
+          {!template && <button type="button" className="secondary paper-preview-button" disabled={ready.length === 0} onClick={openPaper}>{t('Preview the document')}</button>}
+          {template ? (
+            <>
+              <button type="submit" className="big lime" disabled={!canIssue || busy}>{busy ? t('Saving…') : mode === 'quote' ? (editId ? t('Save quote') : t('Create quote')) : t('Save schedule')}<span className="chip" aria-hidden="true">→</span></button>
+              <p className="small muted">{mode === 'quote' ? t('A quote is not a tax document. Send it from the next page; the customer can accept it online.') : t('Each invoice is signed and sent to BTS on its date, then emailed to the customer if you chose to.')}</p>
+            </>
+          ) : (
+            <>
+              <button type="submit" className="big lime" disabled={!canIssue || busy}>{busy ? t('Signing and sending…') : t('Issue {type}', { type: typeName.toLowerCase() })}<span className="chip" aria-hidden="true">→</span></button>
+              <p className="small muted">{t('Issuing signs the document and sends it to BTS for authorization.')} <kbd>Ctrl</kbd>+<kbd>Enter</kbd></p>
+            </>
+          )}
         </div>
       </div>
       {showPaper && (
@@ -534,4 +683,14 @@ export function NewDocument() {
       )}
     </form>
   );
+}
+
+/** The same form, for a quote (new or edited). */
+export function QuoteEditor() {
+  return <NewDocument mode="quote" />;
+}
+
+/** The same form, for a recurring invoice (new or edited). */
+export function RecurringEditor() {
+  return <NewDocument mode="recurring" />;
 }

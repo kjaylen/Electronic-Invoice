@@ -28,6 +28,8 @@ export interface HousekeepingOptions {
   reconcilePayments?: () => Promise<unknown>;
   /** Emails customers about invoices coming due and overdue. */
   reminders?: () => Promise<unknown>;
+  /** Issues recurring invoices that are due. */
+  recurring?: () => Promise<unknown>;
   intervalMs?: number;
   onError?: (step: string, error: unknown) => void;
 }
@@ -56,6 +58,7 @@ export async function runHousekeepingOnce(db: Queryable, options: HousekeepingOp
   if (options.reconcilePayments) await step('payments', options.reconcilePayments);
   // Due dates for invoices issued before they were kept (read from the signed XML).
   await step('due dates', () => backfillDueDates(db));
+  if (options.recurring) await step('recurring invoices', options.recurring);
   if (options.reminders) await step('reminders', options.reminders);
   if (options.mailer) {
     const mailer = options.mailer;

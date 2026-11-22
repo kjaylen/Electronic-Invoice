@@ -149,7 +149,7 @@ export function PayInvoice() {
   );
 }
 
-function PayShell({ children }: { children: React.ReactNode }) {
+export function PayShell({ children }: { children: React.ReactNode }) {
   return (
     <main className="pay-page">
       <header className="row pay-top"><span className="brand"><Brand /></span><span className="spacer" /><LanguageToggle /></header>

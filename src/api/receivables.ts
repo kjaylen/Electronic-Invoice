@@ -112,6 +112,30 @@ async function business(db: Queryable, tenantId: string) {
   return { name: b.name, tin: b.tin, address: [b.street, b.additional_street, b.city, district].filter(Boolean).join(', '), telephone: b.telephone, email: b.email };
 }
 
+/** The business's name and contact details, for documents and emails. */
+export const businessContact = business;
+
+/**
+ * Email an invoice to the customer, with the business's payment instructions
+ * and, when it takes payments online, a link to pay. (A newly issued
+ * recurring invoice, a converted quote.)
+ */
+export async function emailInvoice(deps: PipelineDeps, ctx: ServerContext, tenantId: string, documentId: string, to: string, options: { intro?: string[]; userId?: string | null; ekyash?: { sandboxUrl?: string; liveUrl?: string } } = {}): Promise<string> {
+  const settings = await receivableSettings(deps.db, tenantId);
+  const r = await receivable(deps.db, tenantId, documentId);
+  const provider = ctx.publicUrl && r && r.balanceCents > 0n ? await invoiceProvider(deps.db, tenantId, settings, { ...(options.ekyash && { ekyash: options.ekyash }) }) : null;
+  const payUrl = provider ? (await createShareLink(deps.db, ctx, tenantId, documentId, options.userId ?? null)).payUrl : undefined;
+  const due = r && r.balanceCents > 0n ? [`Amount due: ${money2(r.balance)} by ${longDate(r.dueDate)}.`] : [];
+  // With our own opening lines, the amount due goes with them; otherwise it leads the message.
+  const message = [...(options.intro ? [] : due), settings.instructions.trim()].filter(Boolean).join('\n\n');
+  return sendDocumentEmail(deps, ctx, tenantId, documentId, {
+    to, userId: options.userId ?? null,
+    ...(options.intro && { intro: [...options.intro, ...due] }),
+    ...(message && { message }),
+    ...(payUrl && { payUrl }),
+  });
+}
+
 /** The wording of a reminder, from how far past (or before) the due date it is. */
 export function reminderWording(r: Receivable, businessName: string, days: number): { subject: string; intro: string[] } {
   const what = docLabel(r).toLowerCase();
