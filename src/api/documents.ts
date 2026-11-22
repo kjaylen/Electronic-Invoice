@@ -29,6 +29,7 @@ import { publicLink, requireMail, type ServerContext } from './context.ts';
 import { can, requirePermission } from './permissions.ts';
 import { ApiError, notFound } from './errors.ts';
 import { date as dateSchema, issueSchema, listQuery, uuid } from './schemas.ts';
+import { assertCanIssue } from '../billing/billing.ts';
 
 const PRINTABLE = ['authorized', 'authorized_with_alert', 'contingency_pending'];
 // Emails per business per hour (shared by every server process), so a compromised account cannot send spam at volume.
@@ -403,6 +404,8 @@ export function registerDocumentRoutes(app: FastifyInstance, deps: PipelineDeps,
     let documentId: string | undefined;
     try {
       const issueRequest = await toIssueRequest(deps, tenantId, request.body);
+      // Credit notes are always allowed (they reduce what the customer owes); the rest count against the plan.
+      if (issueRequest.etdType !== '04') await assertCanIssue(db, tenantId);
       await checkCreditLimit(deps, tenantId, issueRequest);
       const result = await issueDocument(deps, tenantId, issueRequest);
       documentId = result.documentId;

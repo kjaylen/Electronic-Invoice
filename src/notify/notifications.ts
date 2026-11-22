@@ -4,6 +4,7 @@
  *   - BTS rejected a document (one email per run listing the new ones)
  *   - BTS became unreachable (contingency started) and when it is back
  *   - the BTS certificate expires in 30, 14, 7 or 1 days (and when it has expired)
+ *   - their plan: the trial ends in 3 days, an invoice is overdue, issuing was paused
  *
  * Each notice is sent once: its key is claimed in notifications_sent before
  * sending, and released again if sending fails, so the next run retries.
@@ -182,6 +183,55 @@ export async function runNotifications(db: Queryable, options: NotifyOptions): P
         'Get the new certificate from BTS, then install it in Settings → Business.',
       ],
       button: { label: 'Install the certificate', path: '/settings?tab=business' },
+    }));
+  }
+  // ---------- the platform plan ----------
+  const trials = (await db.query<{ tenant_id: string; trial_ends_at: Date; plan: string }>(
+    "select tenant_id, trial_ends_at, plan from subscriptions where status = 'trialing' and trial_ends_at > now() and trial_ends_at < now() + interval '3 days'",
+  )).rows;
+  for (const s of trials) {
+    const business = await businessOf(db, s.tenant_id);
+    const day = new Date(s.trial_ends_at).toISOString().slice(0, 10);
+    await once(db, s.tenant_id, [`trial-ending:${s.tenant_id}:${day}`], result, () => send(options, db, business, {
+      subject: 'Your free trial ends soon',
+      heading: 'Your free trial ends soon',
+      paragraphs: [
+        `Your trial ends on ${day}. Your plan then continues as ${s.plan === 'starter' ? 'Starter (free)' : `the ${s.plan[0]!.toUpperCase()}${s.plan.slice(1)} plan, invoiced monthly`}.`,
+        'Choose or change your plan any time in Settings → Plan.',
+      ],
+      button: { label: 'Choose a plan', path: '/settings?tab=plan' },
+    }));
+  }
+  const overdue = (await db.query<{ id: string; tenant_id: string; total_cents: unknown; due_at: Date }>(
+    "select id, tenant_id, total_cents, due_at from billing_invoices where status = 'open' and due_at < now()",
+  )).rows;
+  for (const inv of overdue) {
+    const business = await businessOf(db, inv.tenant_id);
+    const pause = new Date(new Date(inv.due_at).getTime() + 14 * 86_400_000).toISOString().slice(0, 10);
+    await once(db, inv.tenant_id, [`invoice-overdue:${inv.id}`], result, () => send(options, db, business, {
+      subject: 'Your eInvoicing invoice is overdue',
+      heading: 'Your invoice is overdue',
+      paragraphs: [
+        `BZ$${(Number(String(inv.total_cents)) / 100).toFixed(2)} was due on ${new Date(inv.due_at).toISOString().slice(0, 10)}.`,
+        `If it is still unpaid on ${pause}, issuing new documents pauses until it is paid. Your documents always stay available.`,
+      ],
+      button: { label: 'See your plan', path: '/settings?tab=plan' },
+    }));
+  }
+  const suspended = (await db.query<{ tenant_id: string; invoice: string | null }>(
+    `select s.tenant_id, (select i.id from billing_invoices i where i.tenant_id = s.tenant_id and i.status = 'open' order by i.due_at limit 1) as invoice
+     from subscriptions s where s.status = 'suspended'`,
+  )).rows;
+  for (const s of suspended) {
+    const business = await businessOf(db, s.tenant_id);
+    await once(db, s.tenant_id, [`suspended:${s.tenant_id}:${s.invoice ?? 'none'}`], result, () => send(options, db, business, {
+      subject: 'Issuing is paused',
+      heading: 'Issuing is paused',
+      paragraphs: [
+        'An invoice for your eInvoicing plan is more than 14 days overdue, so new documents cannot be issued for now.',
+        'Pay it and issuing resumes as soon as the payment is recorded. Everything you issued stays available to view, print and download.',
+      ],
+      button: { label: 'See your plan', path: '/settings?tab=plan' },
     }));
   }
   return result;

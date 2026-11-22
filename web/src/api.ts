@@ -99,6 +99,7 @@ export interface Me {
   environment: 'test' | 'production';
   certificate: { id: string; tin: string; validFrom: string; validTo: string; daysLeft: number; status: string } | null;
   contingency: { active: boolean; since: string | null; reason: string | null; queued: number };
+  billing?: { plan: 'starter' | 'business' | 'pro'; planName: string; status: 'trialing' | 'active' | 'past_due' | 'suspended'; trialDaysLeft: number | null; overdueInvoices: number; features: Array<'store' | 'api' | 'webhooks' | 'integrations'> };
 }
 
 export interface Customer {

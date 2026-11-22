@@ -38,6 +38,7 @@ import { ApiError, notFound } from './errors.ts';
 import { canManageRole, requirePersonWith, type Role, ROLES } from './permissions.ts';
 import { uuid } from './schemas.ts';
 import { disableTwoFactor } from '../db/twofactor.ts';
+import { assertCanAddUser } from '../billing/billing.ts';
 
 const role = { type: 'string', enum: [...ROLES] } as const;
 const idParams = { type: 'object', required: ['id'], properties: { id: uuid } } as const;
@@ -125,6 +126,7 @@ export function registerUserRoutes(app: FastifyInstance, deps: PipelineDeps, ctx
     },
     async (request, reply) => {
       requirePersonWith(request, 'users.manage');
+      await assertCanAddUser(db, request.tenantId);
       const b = request.body;
       if (!canManageRole(actorRole(request), b.role)) throw new ApiError(403, 'forbidden', `Only an owner can create ${ROLE_NAMES[b.role]}`);
       if (!b.password && !b.email) throw new ApiError(422, 'invalid_account', 'Set a temporary password, or give an email address to send a welcome link');
@@ -189,6 +191,7 @@ export function registerUserRoutes(app: FastifyInstance, deps: PipelineDeps, ctx
       if (status === 'disabled' && target.role === 'owner' && target.status === 'active' && (await activeOwnerCount(db, request.tenantId)) <= 1) {
         throw new ApiError(409, 'last_owner', 'A business needs at least one active owner');
       }
+      if (status === 'active' && target.status !== 'active') await assertCanAddUser(db, request.tenantId);
       await setUserStatus(db, request.tenantId, target.id, status);
       await log(request, status === 'disabled' ? 'user.disabled' : 'user.enabled', target);
       return userJson((await getUser(db, request.tenantId, target.id))!);

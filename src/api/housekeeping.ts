@@ -1,11 +1,13 @@
 /**
- * Housekeeping, every few minutes: email notices to businesses (rejections,
- * outages, certificates), alerts to the operations webhook, and clean-up of
- * expired rate-limit windows and sign-in challenges.
+ * Housekeeping, every few minutes: the platform's billing (trials ending,
+ * monthly invoices, overdue status), email notices to businesses (rejections,
+ * outages, certificates, plan reminders), alerts to the operations webhook,
+ * and clean-up of expired rate-limit windows and sign-in challenges.
  *
  * Every step is safe to run from several processes at once.
  */
 
+import { type BillingContext, type BillingRunResult, runBilling } from '../billing/billing.ts';
 import type { Queryable } from '../db/database.ts';
 import { sweepRateLimits } from '../db/ratelimit.ts';
 import type { Mailer } from '../mail/mailer.ts';
@@ -18,18 +20,21 @@ export interface HousekeepingOptions {
   alertWebhookUrl?: string;
   environment?: string;
   thresholds?: OpsThresholds;
+  /** Runs the platform's billing when given. */
+  billing?: () => Promise<BillingContext>;
   intervalMs?: number;
   onError?: (step: string, error: unknown) => void;
 }
 
 export interface HousekeepingResult {
+  billing: BillingRunResult | null;
   notifications: NotifyResult | null;
   alerts: { fired: string[]; resolved: string[] } | null;
   sweptLimits: number;
 }
 
 export async function runHousekeepingOnce(db: Queryable, options: HousekeepingOptions = {}): Promise<HousekeepingResult> {
-  const result: HousekeepingResult = { notifications: null, alerts: null, sweptLimits: 0 };
+  const result: HousekeepingResult = { billing: null, notifications: null, alerts: null, sweptLimits: 0 };
   const step = async <T>(name: string, fn: () => Promise<T>): Promise<T | null> => {
     try {
       return await fn();
@@ -38,6 +43,10 @@ export async function runHousekeepingOnce(db: Queryable, options: HousekeepingOp
       return null;
     }
   };
+  if (options.billing) {
+    const billing = options.billing;
+    result.billing = await step('billing', async () => runBilling(await billing()));
+  }
   if (options.mailer) {
     const mailer = options.mailer;
     result.notifications = await step('notifications', () => runNotifications(db, { mailer, ...(options.publicUrl && { publicUrl: options.publicUrl }) }));

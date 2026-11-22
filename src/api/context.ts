@@ -14,6 +14,8 @@ export interface ServerContext {
   allowSignup: boolean;
   /** Product photos go here when set; otherwise they stay in the database. */
   objects?: ObjectStore;
+  /** The platform's own billing: the business that issues its invoices (slug), and how subscribers pay. */
+  billing?: { tenantSlug?: string; paymentInstructions?: string };
 }
 
 /** An absolute link into the web app. */

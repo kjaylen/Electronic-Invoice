@@ -19,6 +19,7 @@ import { checkCreditLimit, sendDocumentEmail } from './documents.ts';
 import { notFound } from './errors.ts';
 import { requirePermission } from './permissions.ts';
 import { uuid } from './schemas.ts';
+import { assertCanIssue } from '../billing/billing.ts';
 
 const iso = (v: string | Date | null) => (v ? new Date(v).toISOString() : null);
 
@@ -136,6 +137,7 @@ export function registerOrderRoutes(app: FastifyInstance, deps: PipelineDeps, ct
 
   app.post<{ Params: { id: string } }>('/orders/:id/paid', { schema: { params: idParams } }, async (request) => {
     requirePermission(request, 'documents.issue');
+    await assertCanIssue(db, request.tenantId);
     const { order, document } = await markOrderPaid(deps, request.tenantId, request.params.id, request.userId || null);
     await audit(db, { tenantId: request.tenantId, userId: request.userId || null, action: 'order.paid', target: `#${order.number}`, ip: request.ip });
     // Email the buyer their receipt when it is ready (best effort: the order page always has it too).

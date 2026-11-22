@@ -12,6 +12,9 @@ import { audit } from '../db/audit.ts';
 import { can, requirePermission, requirePersonWith } from './permissions.ts';
 import { ApiError, notFound } from './errors.ts';
 import { certificateSchema, customerSchema, itemSchema, listQuery, uuid } from './schemas.ts';
+import { assertFeature, getSubscription } from '../billing/billing.ts';
+import { PLANS } from '../billing/plans.ts';
+import type { Queryable } from '../db/database.ts';
 
 // ---------- pagination ----------
 
@@ -176,6 +179,7 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: PipelineDeps) 
       tin: t.tin,
       environment: t.environment,
       certificate: await certificateSummary(deps, request.tenantId),
+      billing: await billingBanner(db, request.tenantId),
       contingency: { active: Boolean(period), since: period ? new Date(period.started_at).toISOString() : null, reason: period?.reason ?? null, queued },
     };
   });
@@ -222,6 +226,7 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: PipelineDeps) 
     { schema: { body: { type: 'object', required: ['name'], additionalProperties: false, properties: { name: { type: 'string', minLength: 1, maxLength: 100 } } } } },
     async (request, reply) => {
       requireOwnerSession(request);
+      await assertFeature(db, request.tenantId, 'api');
       const key = await createApiKey(db, request.tenantId, request.body.name);
       await audit(db, { tenantId: request.tenantId, userId: request.userId, action: 'apikey.created', target: request.body.name, ip: request.ip });
       return reply.code(201).send({ id: key.id, name: request.body.name, prefix: key.prefix, key: key.key });
@@ -376,4 +381,18 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: PipelineDeps) 
     if (!item) throw notFound('Item');
     return item;
   });
+}
+
+/** Just enough of the plan for the app's banners and menus. */
+async function billingBanner(db: Queryable, tenantId: string) {
+  const sub = await getSubscription(db, tenantId);
+  const due = (await db.query<{ n: number }>("select count(*)::int as n from billing_invoices where tenant_id = $1 and status = 'open' and due_at < now()", [tenantId])).rows[0]!.n;
+  return {
+    plan: sub.plan,
+    planName: PLANS[sub.plan].name,
+    status: sub.status,
+    trialDaysLeft: sub.status === 'trialing' && sub.trialEndsAt ? Math.max(0, Math.ceil((sub.trialEndsAt.getTime() - Date.now()) / 86_400_000)) : null,
+    overdueInvoices: due,
+    features: PLANS[sub.plan].features,
+  };
 }

@@ -42,6 +42,7 @@ import { registerStorefrontRoutes } from './storefront.ts';
 import { registerUserRoutes } from './users.ts';
 import { counters, metricsText, opsStatus } from '../ops/monitoring.ts';
 import type { ObjectStore } from '../storage/objects.ts';
+import { billingContextFactory, registerBillingRoutes } from './billing.ts';
 
 export type Principal = 'api' | Role;
 
@@ -75,6 +76,8 @@ export interface AppOptions {
   metricsToken?: string;
   /** S3-compatible storage for product photos. Unset: photos are kept in the database. */
   objectStore?: ObjectStore;
+  /** The platform's billing: its own business's address (it issues the invoices) and payment instructions. */
+  billing?: { tenantSlug?: string; paymentInstructions?: string };
 }
 
 function bearer(request: FastifyRequest): string | undefined {
@@ -129,7 +132,9 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     cookieSecure: options.cookieSecure ?? true,
     allowSignup: options.allowSignup ?? true,
     ...(options.objectStore && { objects: options.objectStore }),
+    ...(options.billing && { billing: options.billing }),
   };
+  const billingContext = billingContextFactory(deps, ctx);
 
   app.addHook('onResponse', async (_request, reply) => {
     counters.requests++;
@@ -206,12 +211,13 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     registerProductRoutes(tenant, deps, ctx);
     registerOrderRoutes(tenant, deps, ctx);
     registerReportRoutes(tenant, deps);
+    registerBillingRoutes(tenant, deps, ctx, billingContext);
   }, { prefix: '/v1' });
 
   registerPublicDocumentRoutes(app, deps);
 
   // The platform console, for our own staff.
-  await app.register(async (platform) => registerPlatformRoutes(platform, deps, ctx), { prefix: '/v1/platform' });
+  await app.register(async (platform) => registerPlatformRoutes(platform, deps, ctx, billingContext), { prefix: '/v1/platform' });
 
   // The public storefront: no sign-in, scoped by the business's address.
   await app.register(async (store) => registerStorefrontRoutes(store, deps, ctx), { prefix: '/v1/store' });

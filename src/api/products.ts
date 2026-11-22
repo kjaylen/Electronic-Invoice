@@ -25,6 +25,7 @@ import { requirePermission } from './permissions.ts';
 import { decimal, money, uuid } from './schemas.ts';
 import { photoKey } from '../storage/objects.ts';
 import type { ServerContext } from './context.ts';
+import { assertFeature } from '../billing/billing.ts';
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const MAX_IMAGES = 10;
@@ -442,6 +443,7 @@ export function registerProductRoutes(app: FastifyInstance, deps: PipelineDeps, 
 
   app.put<{ Body: Partial<StoreSettings> }>('/store-settings', { schema: { body: settingsSchema } }, async (request) => {
     requirePermission(request, 'business.manage');
+    if (request.body.enabled) await assertFeature(db, request.tenantId, 'store');
     const before = (await db.query<{ store_settings: Partial<StoreSettings> }>('select store_settings from tenants where id = $1', [request.tenantId])).rows[0]!.store_settings;
     const merged = withDefaults({ ...withDefaults(before), ...request.body } as Partial<StoreSettings>);
     const zones = merged.delivery.zones.map((z) => z.name.trim().toLowerCase());

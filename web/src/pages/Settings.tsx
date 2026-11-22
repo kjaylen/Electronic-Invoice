@@ -12,6 +12,7 @@ import { useSession } from '../session';
 import { useToast } from '../toast';
 import { CodeForm, RecoveryCodes, SetupSteps, type TwoFactorSetupInfo } from '../twofactor';
 import { DISTRICTS, ErrorText, Field, Modal, Segmented, usePageTitle } from '../ui';
+import { PlanTab, UpgradeNotice } from './Billing';
 import { StoreSettingsTab } from './StoreSettings';
 
 function readAsBase64(file: File): Promise<string> {
@@ -667,6 +668,7 @@ function describe(t: T, e: AuditEvent): string {
     'user.two_factor_reset': t('Reset two-step sign-in for {target}', { target }),
     'business.two_factor_required': t('Required two-step sign-in for owners and admins'),
     'business.two_factor_optional': t('Made two-step sign-in optional'),
+    'billing.plan_changed': t('Changed the plan'),
   };
   return texts[e.action] ?? e.action;
 }
@@ -806,16 +808,17 @@ function ApiKeysTab() {
 
 // ---------- the page ----------
 
-type Tab = 'account' | 'business' | 'store' | 'users' | 'activity' | 'keys';
+type Tab = 'account' | 'business' | 'plan' | 'store' | 'users' | 'activity' | 'keys';
 
 export function Settings() {
   const t = useT();
   usePageTitle(t('Settings'));
-  const { session, can } = useSession();
+  const { session, can, me } = useSession();
   const [params, setParams] = useSearchParams();
   const tabs: Array<[Tab, string]> = [
     ['account', t('My account')],
     ['business', t('Business')],
+    ...(can('business.manage') ? [['plan', t('Plan')] as [Tab, string]] : []),
     ...(can('business.manage') ? [['store', t('Online store')] as [Tab, string]] : []),
     ...(can('users.manage') ? [['users', t('Users')] as [Tab, string]] : []),
     ...(can('audit.view') ? [['activity', t('Activity')] as [Tab, string]] : []),
@@ -833,10 +836,11 @@ export function Settings() {
       </div>
       {tab === 'account' && <AccountTab />}
       {tab === 'business' && <BusinessTab />}
-      {tab === 'store' && <StoreSettingsTab />}
+      {tab === 'plan' && <PlanTab />}
+      {tab === 'store' && (me?.billing && !me.billing.features.includes('store') ? <UpgradeNotice feature="store" /> : <StoreSettingsTab />)}
       {tab === 'users' && <UsersTab />}
       {tab === 'activity' && <ActivityTab />}
-      {tab === 'keys' && <ApiKeysTab />}
+      {tab === 'keys' && (me?.billing && !me.billing.features.includes('api') ? <UpgradeNotice feature="api" /> : <ApiKeysTab />)}
     </div>
   );
 }

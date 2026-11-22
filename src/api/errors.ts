@@ -51,6 +51,8 @@ export function toApiError(error: unknown): ApiError {
       const status = code === 'not_found' || code === 'store_closed' ? 404 : code === 'invalid_order' ? 422 : 409;
       return new ApiError(status, code, e.message);
     }
+    case 'BillingError':
+      return new ApiError(402, (e as unknown as { code: string }).code, e.message);
     case 'TwoFactorError':
       return new ApiError(422, (e as unknown as { code: string }).code, e.message);
     case 'KeystoreError':

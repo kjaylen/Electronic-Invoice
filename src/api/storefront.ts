@@ -27,6 +27,8 @@ import { documentSummary, orderJson } from './orders.ts';
 import { uuid } from './schemas.ts';
 import { overLimit } from '../db/ratelimit.ts';
 import { type PhotoRow, sendPhoto } from './products.ts';
+import { getSubscription } from '../billing/billing.ts';
+import { hasFeature } from '../billing/plans.ts';
 
 
 // Limits on placing orders (shared by every server process), so a script cannot flood a store.
@@ -44,7 +46,12 @@ const PAYMENT_TEXT = { bank_transfer: 'Bank transfer', cash_on_delivery: 'Cash o
 
 export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDeps, ctx: ServerContext) {
   const { db } = deps;
-  const store = (request: FastifyRequest<{ Params: { slug: string } }>) => loadStore(db, request.params.slug);
+  // A store on a plan without the online store (after a downgrade) is closed to buyers.
+  const store = async (request: FastifyRequest<{ Params: { slug: string } }>) => {
+    const s = await loadStore(db, request.params.slug);
+    if (!hasFeature((await getSubscription(db, s.tenantId)).plan, 'store')) throw new StoreError('store_closed', 'This store is not open right now');
+    return s;
+  };
 
   app.get<{ Params: { slug: string } }>('/:slug', { schema: { params: { type: 'object', required: ['slug'], properties: slugParams } } }, async (request) => {
     const s = await store(request);

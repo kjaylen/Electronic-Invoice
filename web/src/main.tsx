@@ -221,6 +221,16 @@ function Layout() {
             )}
           </div>
         )}
+        {me?.billing && (me.billing.status === 'suspended' || me.billing.status === 'past_due' || (me.billing.status === 'trialing' && (me.billing.trialDaysLeft ?? 99) <= 7)) && can('business.manage') && (
+          <div className={`statusbar billing-bar ${me.billing.status}`} role="status">
+            <span>
+              {me.billing.status === 'suspended' ? <><strong>{t('Issuing is paused.')}</strong> {t('An invoice for your plan is overdue.')}</>
+                : me.billing.status === 'past_due' ? <><strong>{t('An invoice is overdue.')}</strong> {t('Please pay it to avoid a pause in issuing.')}</>
+                  : <><strong>{me.billing.trialDaysLeft === 1 ? t('Your free trial ends tomorrow.') : t('Your free trial ends in {n} days.', { n: me.billing.trialDaysLeft ?? 0 })}</strong> {t('Choose the plan that fits.')}</>}
+              {' '}<NavLink to="/settings?tab=plan" viewTransition>{t('See your plan')} →</NavLink>
+            </span>
+          </div>
+        )}
         <main id="main" ref={mainRef} tabIndex={-1}>
           {/* Keyed by route, so every page plays its entrance and a crash stays inside one page. */}
           <div className="page stack" key={location.pathname + location.search}>

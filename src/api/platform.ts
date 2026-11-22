@@ -8,6 +8,9 @@
  *   POST /v1/platform/tenants/:id/go-live          move to the BTS production environment (BTS approval reference required)
  *   POST /v1/platform/tenants/:id/back-to-test     undo, only while nothing was issued in production
  *   GET  /v1/platform/audit                        what staff did
+ *   GET  /v1/platform/billing                      subscriptions and invoices: monthly revenue, open and overdue invoices
+ *   POST /v1/platform/invoices/:id/paid | void | issue   record a payment, cancel an invoice, (re)issue its e-invoice
+ *   PUT  /v1/platform/tenants/:id/subscription     staff: set a business's plan or extend its trial
  *
  * Staff sign in with their own accounts (npm run platform-admin), in a cookie
  * of their own ("etd_admin"), with the same CSRF header rule as the web app.
@@ -42,6 +45,10 @@ import { ApiError, notFound } from './errors.ts';
 import { uuid } from './schemas.ts';
 import { atLimit, countHit } from '../db/ratelimit.ts';
 import { beginTwoFactorSetup, confirmTwoFactorSetup, createLoginChallenge, endLoginChallenge, otpauthQr, otpauthUrl, TOTP_ISSUER, twoFactorStatus, useLoginChallenge, verifySecondFactor } from '../db/twofactor.ts';
+import { type BillingContext, type BillingInvoiceRow, billingSummary, getSubscription, invoiceJson, issueInvoiceDocument, markInvoicePaid, refreshStatus } from '../billing/billing.ts';
+import { type PlanCode, PLANS } from '../billing/plans.ts';
+import { toBigInt } from '../db/database.ts';
+import { formatCents, parseCents } from '../engine/decimal.ts';
 
 export const PLATFORM_COOKIE = 'etd_admin';
 
@@ -72,7 +79,7 @@ const iso = (v: string | Date | null) => (v ? new Date(v).toISOString() : null);
 // Failed staff sign-ins, shared by every server process.
 const STAFF_WINDOW_MS = 15 * 60 * 1000;
 
-export function registerPlatformRoutes(app: FastifyInstance, deps: PipelineDeps, ctx: ServerContext) {
+export function registerPlatformRoutes(app: FastifyInstance, deps: PipelineDeps, ctx: ServerContext, billingContext: () => Promise<BillingContext>) {
   const { db } = deps;
   app.decorateRequest('platformAdmin', null);
   const setCookie = (reply: FastifyReply, value: string, maxAge: number) =>
@@ -156,6 +163,85 @@ export function registerPlatformRoutes(app: FastifyInstance, deps: PipelineDeps,
     if (!request.platformAdmin) throw new ApiError(401, 'unauthorized', 'Sign in to the platform console');
     return { admin: request.platformAdmin };
   });
+
+  // ---------- billing ----------
+
+  app.get('/billing', async () => {
+    const subs = (await db.query<{ plan: PlanCode; status: string; n: number }>('select plan, status, count(*)::int as n from subscriptions group by plan, status')).rows;
+    const count = (status: string) => subs.filter((x) => x.status === status).reduce((a, x) => a + x.n, 0);
+    // Monthly recurring revenue: paying plans that are active or behind on payment (before GST).
+    const mrr = subs.filter((x) => x.status !== 'trialing' && x.status !== 'suspended').reduce((a, x) => a + parseCents(PLANS[x.plan].price) * BigInt(x.n), 0n);
+    const invoices = (await db.query<BillingInvoiceRow & { tenant_name: string; tenant_slug: string }>(
+      `select i.*, coalesce(t.trade_name, t.legal_name) as tenant_name, t.slug as tenant_slug from billing_invoices i join tenants t on t.id = i.tenant_id
+       order by (i.status = 'open') desc, i.due_at asc, i.created_at desc limit 300`,
+    )).rows;
+    const now = new Date();
+    const open = invoices.filter((i) => i.status === 'open');
+    return {
+      summary: {
+        mrr: formatCents(mrr),
+        trialing: count('trialing'), active: count('active'), pastDue: count('past_due'), suspended: count('suspended'),
+        byPlan: Object.fromEntries((Object.keys(PLANS) as PlanCode[]).map((p) => [p, subs.filter((x) => x.plan === p && x.status !== 'trialing').reduce((a, x) => a + x.n, 0)])),
+        openAmount: formatCents(open.reduce((a, i) => a + toBigInt(i.total_cents), 0n)),
+        overdueAmount: formatCents(open.filter((i) => new Date(i.due_at) < now).reduce((a, i) => a + toBigInt(i.total_cents), 0n)),
+      },
+      invoices: invoices.map((i) => ({ ...invoiceJson(i, now), tenant: { id: i.tenant_id, name: i.tenant_name, slug: i.tenant_slug } })),
+      billingBusinessConfigured: Boolean(ctx.billing?.tenantSlug),
+    };
+  });
+
+  const invoiceParams = { type: 'object', required: ['id'], properties: { id: uuid } } as const;
+  app.post<{ Params: { id: string }; Body: { reference: string } }>(
+    '/invoices/:id/paid',
+    { schema: { params: invoiceParams, body: { type: 'object', required: ['reference'], additionalProperties: false, properties: { reference: { type: 'string', minLength: 1, maxLength: 200 } } } } },
+    async (request) => {
+      const row = await markInvoicePaid(db, request.params.id, request.body.reference.trim());
+      if (!row) throw new ApiError(409, 'conflict', 'Only an open invoice can be marked paid');
+      await platformAudit(db, { adminId: admin(request).id, tenantId: row.tenant_id, action: 'invoice.paid', details: { invoice: row.id, reference: request.body.reference.trim(), total: formatCents(toBigInt(row.total_cents)) }, ip: request.ip });
+      return invoiceJson(row);
+    },
+  );
+  app.post<{ Params: { id: string }; Body: { reason: string } }>(
+    '/invoices/:id/void',
+    { schema: { params: invoiceParams, body: { type: 'object', required: ['reason'], additionalProperties: false, properties: { reason: { type: 'string', minLength: 1, maxLength: 300 } } } } },
+    async (request) => {
+      const row = (await db.query<BillingInvoiceRow>("update billing_invoices set status = 'void' where id = $1 and status = 'open' returning *", [request.params.id])).rows[0];
+      if (!row) throw new ApiError(409, 'conflict', 'Only an open invoice can be voided');
+      await refreshStatus(db, row.tenant_id);
+      await platformAudit(db, { adminId: admin(request).id, tenantId: row.tenant_id, action: 'invoice.voided', details: { invoice: row.id, reason: request.body.reason }, ip: request.ip });
+      return invoiceJson(row);
+    },
+  );
+  app.post<{ Params: { id: string } }>('/invoices/:id/issue', { schema: { params: invoiceParams } }, async (request) => {
+    const bc = await billingContext();
+    if (!bc.billingTenantId) throw new ApiError(409, 'not_configured', 'Set PLATFORM_BILLING_TENANT to the platform business that issues invoices');
+    const row = await issueInvoiceDocument(bc, request.params.id);
+    await platformAudit(db, { adminId: admin(request).id, tenantId: row.tenant_id, action: 'invoice.issued', details: { invoice: row.id, document: row.document_id }, ip: request.ip });
+    return invoiceJson(row);
+  });
+
+  app.put<{ Params: { id: string }; Body: { plan?: PlanCode; trialEndsAt?: string } }>(
+    '/tenants/:id/subscription',
+    {
+      schema: {
+        params: invoiceParams,
+        body: { type: 'object', additionalProperties: false, minProperties: 1, properties: { plan: { type: 'string', enum: Object.keys(PLANS) }, trialEndsAt: { type: 'string', format: 'date-time' } } },
+      },
+    },
+    async (request) => {
+      const t = (await db.query<{ id: string }>('select id from tenants where id = $1', [request.params.id])).rows[0];
+      if (!t) throw notFound('Business');
+      const before = await getSubscription(db, t.id);
+      if (request.body.trialEndsAt) {
+        const end = new Date(request.body.trialEndsAt);
+        if (Number.isNaN(end.getTime()) || end < new Date()) throw new ApiError(422, 'invalid_request', 'The trial must end in the future');
+        await db.query("update subscriptions set status = 'trialing', trial_ends_at = $2, current_period_start = null, current_period_end = null, updated_at = now() where tenant_id = $1", [t.id, end.toISOString()]);
+      }
+      if (request.body.plan) await db.query('update subscriptions set plan = $2, next_plan = null, updated_at = now() where tenant_id = $1', [t.id, request.body.plan]);
+      await platformAudit(db, { adminId: admin(request).id, tenantId: t.id, action: 'subscription.changed', details: { from: { plan: before.plan, status: before.status }, ...request.body }, ip: request.ip });
+      return billingSummary(db, t.id);
+    },
+  );
 
   // ---------- businesses ----------
 
@@ -253,6 +339,7 @@ export function registerPlatformRoutes(app: FastifyInstance, deps: PipelineDeps,
       admins: owners.map((o) => ({ name: o.name, login: o.email ?? o.username, role: o.role, lastLoginAt: iso(o.last_login_at) })),
       certificate: r.certificate,
       readiness: { ready: r.ready, checks: r.checks },
+      billing: await billingSummary(db, t.id),
       documents: { testAuthorized: r.counts.test_authorized, testRejected: r.counts.test_rejected, production: r.counts.production_documents },
       history: history.map((h) => ({ action: h.action, details: h.details, at: iso(h.at), admin: h.admin })),
     };

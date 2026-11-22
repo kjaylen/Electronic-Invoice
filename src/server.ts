@@ -9,6 +9,8 @@
  *   KEY_ENCRYPTION_KEYS_PREVIOUS  older keys still accepted for reading, comma separated (key rotation)
  *   S3_BUCKET, S3_ENDPOINT, S3_REGION, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY, S3_PUBLIC_URL, S3_FORCE_PATH_STYLE
  *                        product photos in S3-compatible storage behind a CDN (see src/storage/objects.ts)
+ *   PLATFORM_BILLING_TENANT        address (slug) of the platform's own business, which issues subscribers' e-invoices
+ *   PLATFORM_PAYMENT_INSTRUCTIONS  how subscribers pay (bank details), shown on the plan page and invoices
  *   WORKER_INTERVAL_MS   default 60000; 0 disables the worker in this process
  *   HOUSEKEEPING_INTERVAL_MS  default 300000 (notification emails, alerts, clean-up); 0 disables
  *   ALERT_WEBHOOK_URL    post operations alerts here (Slack/Teams/Discord-style JSON with "text")
@@ -32,12 +34,13 @@ import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { buildApp } from './api/app.ts';
+import { billingContextFactory } from './api/billing.ts';
 import { startHousekeeping } from './api/housekeeping.ts';
 import { startWorker } from './api/worker.ts';
 import { objectStoreFromEnv } from './storage/objects.ts';
 import { migrate, pgDatabase } from './db/database.ts';
 import { keyringFromEnv } from './db/keystore.ts';
-import { type Mailer, outboxMailer, smtpMailer } from './mail/mailer.ts';
+import { type Mailer, noMailer, outboxMailer, smtpMailer } from './mail/mailer.ts';
 import { cachingClientProvider } from './pipeline/clients.ts';
 
 const env = process.env;
@@ -67,6 +70,9 @@ const app = await buildApp({
   ...(env.ADMIN_TOKEN && { adminToken: env.ADMIN_TOKEN }),
   ...(env.METRICS_TOKEN && { metricsToken: env.METRICS_TOKEN }),
   ...(objectStore && { objectStore }),
+  ...((env.PLATFORM_BILLING_TENANT || env.PLATFORM_PAYMENT_INSTRUCTIONS) && {
+    billing: { ...(env.PLATFORM_BILLING_TENANT && { tenantSlug: env.PLATFORM_BILLING_TENANT }), ...(env.PLATFORM_PAYMENT_INSTRUCTIONS && { paymentInstructions: env.PLATFORM_PAYMENT_INSTRUCTIONS }) },
+  }),
   ...(webRoot && { webRoot }),
   cookieSecure: env.COOKIE_SECURE !== 'false',
   allowSignup: env.ALLOW_SIGNUP !== 'false',
@@ -85,10 +91,20 @@ const worker = intervalMs > 0
     })
   : undefined;
 
+const billingSettings = { ...(env.PLATFORM_BILLING_TENANT && { tenantSlug: env.PLATFORM_BILLING_TENANT }), ...(env.PLATFORM_PAYMENT_INSTRUCTIONS && { paymentInstructions: env.PLATFORM_PAYMENT_INSTRUCTIONS }) };
+const billing = billingContextFactory(pipeline, {
+  mailer: mailer ?? noMailer,
+  mailConfigured: Boolean(mailer),
+  ...(env.PUBLIC_URL && { publicUrl: env.PUBLIC_URL }),
+  cookieSecure: env.COOKIE_SECURE !== 'false',
+  allowSignup: env.ALLOW_SIGNUP !== 'false',
+  billing: billingSettings,
+});
 const housekeepingMs = Number(env.HOUSEKEEPING_INTERVAL_MS ?? 300_000);
 const housekeeping = housekeepingMs > 0
   ? startHousekeeping(db, {
       intervalMs: housekeepingMs,
+      billing,
       ...(mailer && { mailer }),
       ...(env.PUBLIC_URL && { publicUrl: env.PUBLIC_URL }),
       ...(env.ALERT_WEBHOOK_URL && { alertWebhookUrl: env.ALERT_WEBHOOK_URL }),

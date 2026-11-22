@@ -1,6 +1,6 @@
 /**
  * The platform console at /admin, for our own staff: every business, its
- * readiness for BTS production, going live (and back), and the staff log.
+ * readiness for BTS production, going live (and back), billing, and the staff log.
  */
 
 import { type FormEvent, useCallback, useEffect, useState } from 'react';
@@ -10,7 +10,8 @@ import { BrandMark, FlowField } from '../art';
 import { useT } from '../i18n';
 import { useToast } from '../toast';
 import { CodeForm, RecoveryCodes, SetupSteps, type TwoFactorChallenge } from '../twofactor';
-import { ErrorText, Field, Modal, Segmented, usePageTitle } from '../ui';
+import { type BillingInfo, type BillingInvoice, StatusPill } from './Billing';
+import { ErrorText, Field, Modal, money, Segmented, usePageTitle } from '../ui';
 
 interface StaffAdmin {
   id: string;
@@ -50,6 +51,7 @@ interface TenantDetail {
   readiness: { ready: boolean; checks: Array<{ key: string; ok: boolean; required: boolean; detail: string }> };
   documents: { testAuthorized: number; testRejected: number; production: number };
   history: Array<{ action: string; details: Record<string, unknown> | null; at: string; admin: string | null }>;
+  billing: Omit<BillingInfo, 'plans' | 'paymentInstructions'>;
 }
 
 interface AuditRow {
@@ -76,6 +78,10 @@ const ACTION_LABEL: Record<string, string> = {
   'login.failed': 'Failed staff sign-in',
   'tenant.went_live': 'Moved to production',
   'tenant.back_to_test': 'Moved back to test',
+  'invoice.paid': 'Recorded a payment',
+  'invoice.voided': 'Voided an invoice',
+  'invoice.issued': 'Issued an invoice',
+  'subscription.changed': 'Changed a plan',
 };
 
 function EnvBadge({ env }: { env: 'test' | 'production' }) {
@@ -100,6 +106,7 @@ export function PlatformConsole() {
       <Route element={<ConsoleLayout admin={admin} onSignOut={() => setAdmin(null)} />}>
         <Route index element={<Businesses />} />
         <Route path="businesses/:id" element={<Business />} />
+        <Route path="billing" element={<ConsoleBilling />} />
         <Route path="activity" element={<Activity />} />
       </Route>
       <Route path="*" element={<Navigate to="/admin" replace />} />
@@ -206,6 +213,7 @@ function ConsoleLayout({ admin, onSignOut }: { admin: StaffAdmin; onSignOut: () 
         <Link to="/admin" className="brand"><BrandMark /><span>{t('Platform console')}</span></Link>
         <nav aria-label={t('Console')}>
           <NavLink to="/admin" end>{t('Businesses')}</NavLink>
+          <NavLink to="/admin/billing">{t('Billing')}</NavLink>
           <NavLink to="/admin/activity">{t('Staff log')}</NavLink>
         </nav>
         <span className="spacer" />
@@ -325,6 +333,8 @@ function Business() {
           </div>
         </section>
       )}
+
+      <PlanSection tenantId={d.id} billing={d.billing} onChanged={() => void load()} />
 
       <div className="grid two">
         <section className="card stack">
@@ -457,5 +467,183 @@ function Activity() {
         {next && <button className="secondary" onClick={() => void load(next)}>{t('Load more')}</button>}
       </section>
     </div>
+  );
+}
+
+// ---------- billing ----------
+
+interface ConsoleInvoice extends BillingInvoice {
+  tenant: { id: string; name: string; slug: string };
+}
+
+interface BillingOverview {
+  summary: { mrr: string; trialing: number; active: number; pastDue: number; suspended: number; byPlan: Record<string, number>; openAmount: string; overdueAmount: string };
+  invoices: ConsoleInvoice[];
+  billingBusinessConfigured: boolean;
+}
+
+function InvoiceActions({ invoice, onDone }: { invoice: BillingInvoice; onDone: (message: string) => void }) {
+  const t = useT();
+  const [dialog, setDialog] = useState<'paid' | 'void' | null>(null);
+  const [text, setText] = useState('');
+  const [error, setError] = useState<unknown>(null);
+  const [busy, setBusy] = useState(false);
+  const run = async (fn: () => Promise<unknown>, message: string) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await fn();
+      setDialog(null);
+      setText('');
+      onDone(message);
+    } catch (e) {
+      setError(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (invoice.status !== 'open') return null;
+  return (
+    <>
+      <button className="link" onClick={() => setDialog('paid')}>{t('Mark paid')}</button>
+      {!invoice.documentId && <button className="link" disabled={busy} onClick={() => void run(() => api(`/v1/platform/invoices/${invoice.id}/issue`, { method: 'POST' }), t('E-invoice issued'))}>{t('Issue e-invoice')}</button>}
+      <button className="link danger-link" onClick={() => setDialog('void')}>{t('Void')}</button>
+      <ErrorText error={!dialog ? error : null} />
+      {dialog && (
+        <Modal title={dialog === 'paid' ? t('Record a payment of {amount}', { amount: money(invoice.total) }) : t('Void this invoice?')} onClose={() => setDialog(null)}>
+          <form className="stack" onSubmit={(e) => {
+            e.preventDefault();
+            void (dialog === 'paid'
+              ? run(() => api(`/v1/platform/invoices/${invoice.id}/paid`, { method: 'POST', body: { reference: text } }), t('Payment recorded'))
+              : run(() => api(`/v1/platform/invoices/${invoice.id}/void`, { method: 'POST', body: { reason: text } }), t('Invoice voided')));
+          }}>
+            <Field label={dialog === 'paid' ? t('Payment reference') : t('Reason')} hint={dialog === 'paid' ? t('For example: Belize Bank transfer 8812, received 22 Nov') : undefined}>
+              <input required autoFocus value={text} onChange={(e) => setText(e.target.value)} />
+            </Field>
+            {dialog === 'void' && <p className="small muted">{t('A voided invoice is not owed. If an e-invoice was issued for it, issue a credit note for it from the billing business.')}</p>}
+            <ErrorText error={error} />
+            <div className="row"><span className="spacer" /><button type="button" className="secondary" onClick={() => setDialog(null)}>{t('Cancel')}</button><button type="submit" className={dialog === 'void' ? 'danger' : ''} disabled={busy}>{dialog === 'paid' ? t('Record payment') : t('Void')}</button></div>
+          </form>
+        </Modal>
+      )}
+    </>
+  );
+}
+
+function InvoiceStatus({ i }: { i: BillingInvoice }) {
+  const t = useT();
+  return i.status === 'paid' ? <span className="badge authorized">{t('Paid')}</span> : i.status === 'void' ? <span className="badge cancelled">{t('Void')}</span> : i.overdue ? <span className="badge rejected">{t('Overdue')}</span> : <span className="badge pending">{t('Open')}</span>;
+}
+
+function ConsoleBilling() {
+  const t = useT();
+  const toast = useToast();
+  usePageTitle(t('Billing'));
+  const [data, setData] = useState<BillingOverview | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  const [view, setView] = useState<'open' | 'all'>('open');
+  const load = useCallback(() => api<BillingOverview>('/v1/platform/billing').then(setData).catch(setError), []);
+  useEffect(() => {
+    void load();
+  }, [load]);
+  if (!data) return error ? <ErrorText error={error} /> : <div className="skeleton" style={{ height: '14rem' }} />;
+  const s = data.summary;
+  const rows = view === 'open' ? data.invoices.filter((i) => i.status === 'open') : data.invoices;
+  return (
+    <div className="stack">
+      <div><span className="kicker">{t('Platform console')}</span><h1>{t('Billing')}</h1></div>
+      {!data.billingBusinessConfigured && <div className="banner warn"><div><strong>{t('No billing business set up')}</strong>{t('Invoices are recorded but not issued as e-invoices. Set PLATFORM_BILLING_TENANT to the address of the platform\'s own business.')}</div></div>}
+      <div className="kpis">
+        <div className="card stat"><span className="label">{t('Monthly revenue')}</span><span className="value">{money(s.mrr)}</span><span className="small muted">{t('before GST')}</span></div>
+        <div className="card stat"><span className="label">{t('Paying businesses')}</span><span className="value">{s.active + s.pastDue}</span><span className="small muted">{t('{n} on trial', { n: s.trialing })}</span></div>
+        <div className="card stat"><span className="label">{t('Open invoices')}</span><span className="value">{money(s.openAmount)}</span><span className="small muted">{t('{amount} overdue', { amount: money(s.overdueAmount) })}</span></div>
+        <div className="card stat"><span className="label">{t('Paused')}</span><span className="value">{s.suspended}</span><span className="small muted">{t('{n} past due', { n: s.pastDue })}</span></div>
+      </div>
+      <section className="card stack">
+        <div className="row">
+          <h2>{t('Invoices')}</h2>
+          <span className="spacer" />
+          <Segmented label={t('Invoices')} value={view} onChange={setView} options={[['open', t('Open')], ['all', t('All')]]} />
+        </div>
+        {rows.length === 0 ? <div className="empty">{view === 'open' ? t('Nothing waiting for payment.') : t('No invoices yet.')}</div> : (
+          <div className="table-wrap">
+            <table className="responsive">
+              <thead><tr><th scope="col">{t('Business')}</th><th scope="col">{t('Period')}</th><th scope="col" className="right">{t('Total')}</th><th scope="col">{t('Due')}</th><th scope="col">{t('Status')}</th><th scope="col"><span className="sr-only">{t('Actions')}</span></th></tr></thead>
+              <tbody>
+                {rows.map((i) => (
+                  <tr key={i.id}>
+                    <td data-label={t('Business')}><Link to={`/admin/businesses/${i.tenant.id}`}>{i.tenant.name}</Link><div className="small muted">{i.planName}{!i.documentId && i.status === 'open' && ` · ${t('no e-invoice')}`}</div></td>
+                    <td data-label={t('Period')} className="small">{date(i.periodStart)}</td>
+                    <td data-label={t('Total')} className="right">{money(i.total)}</td>
+                    <td data-label={t('Due')} className="small">{date(i.dueAt)}</td>
+                    <td data-label={t('Status')}><InvoiceStatus i={i} />{i.paidReference && <div className="small muted">{i.paidReference}</div>}</td>
+                    <td className="right actions"><InvoiceActions invoice={i} onDone={(m) => { toast(m); void load(); }} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function PlanSection({ tenantId, billing, onChanged }: { tenantId: string; billing: TenantDetail['billing']; onChanged: () => void }) {
+  const t = useT();
+  const toast = useToast();
+  const [plan, setPlan] = useState(billing.plan);
+  const [trialDays, setTrialDays] = useState('14');
+  const [error, setError] = useState<unknown>(null);
+  const save = async (body: Record<string, unknown>, message: string) => {
+    setError(null);
+    try {
+      await api(`/v1/platform/tenants/${tenantId}/subscription`, { method: 'PUT', body });
+      toast(message);
+      onChanged();
+    } catch (e) {
+      setError(e);
+    }
+  };
+  return (
+    <section className="card stack">
+      <div className="row">
+        <h2>{t('Plan')}: {billing.planName}</h2>
+        <span className="spacer" />
+        <StatusPill status={billing.status} daysLeft={billing.trialDaysLeft} />
+      </div>
+      <p className="small muted">
+        {t('{docs} production documents this month', { docs: billing.usage.documents })}{billing.usage.documentsLimit !== null && ` / ${billing.usage.documentsLimit}`} · {t('{n} accounts', { n: billing.usage.users })}
+        {billing.amountDue !== '0.00' && <> · <strong>{t('{amount} due', { amount: money(billing.amountDue) })}</strong></>}
+      </p>
+      <div className="row">
+        <select aria-label={t('Plan')} value={plan} onChange={(e) => setPlan(e.target.value as typeof plan)} style={{ maxWidth: 180 }}>
+          <option value="starter">Starter</option>
+          <option value="business">Business</option>
+          <option value="pro">Pro</option>
+        </select>
+        <button className="secondary" disabled={plan === billing.plan} onClick={() => void save({ plan }, t('Plan changed'))}>{t('Set plan')}</button>
+        <span className="spacer" />
+        <input aria-label={t('Trial days')} type="number" min={1} max={365} value={trialDays} onChange={(e) => setTrialDays(e.target.value)} style={{ width: '5rem' }} />
+        <button className="secondary" onClick={() => void save({ trialEndsAt: new Date(Date.now() + Number(trialDays) * 86_400_000).toISOString() }, t('Trial extended'))}>{t('Give a trial')}</button>
+      </div>
+      {billing.invoices.length > 0 && (
+        <div className="table-wrap">
+          <table className="responsive">
+            <tbody>
+              {billing.invoices.slice(0, 6).map((i) => (
+                <tr key={i.id}>
+                  <td data-label={t('Period')} className="small">{date(i.periodStart)}</td>
+                  <td data-label={t('Total')} className="right">{money(i.total)}</td>
+                  <td data-label={t('Status')}><InvoiceStatus i={i} /></td>
+                  <td className="right actions"><InvoiceActions invoice={i} onDone={(m) => { toast(m); onChanged(); }} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <ErrorText error={error} />
+    </section>
   );
 }
