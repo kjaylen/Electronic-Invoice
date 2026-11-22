@@ -15,6 +15,7 @@
  *   WEBHOOK_INTERVAL_MS         how often webhooks are sent, from the worker's process (default 5000)
  *   STORE_DOMAIN_TARGET         the host businesses point their store domains at (CNAME), e.g. stores.example.bz
  *   QBO_CLIENT_ID, QBO_CLIENT_SECRET, QBO_ENVIRONMENT   the platform's Intuit app (QuickBooks Online integration); needs PUBLIC_URL
+ *   LEGAL_NAME, CONTACT_EMAIL   who runs the service, shown on the pricing, terms and privacy pages
  *   WORKER_INTERVAL_MS   default 60000; 0 disables the worker in this process
  *   HOUSEKEEPING_INTERVAL_MS  default 300000 (notification emails, alerts, clean-up); 0 disables
  *   ALERT_WEBHOOK_URL    post operations alerts here (Slack/Teams/Discord-style JSON with "text")
@@ -83,6 +84,7 @@ const app = await buildApp({
   ...(env.API_RATE_LIMIT_PER_MINUTE && { apiRateLimitPerMinute: Number(env.API_RATE_LIMIT_PER_MINUTE) }),
   ...(env.STORE_DOMAIN_TARGET && { storeDomainTarget: env.STORE_DOMAIN_TARGET }),
   ...(quickbooksApp && { quickbooks: quickbooksApp }),
+  ...((env.LEGAL_NAME || env.CONTACT_EMAIL) && { site: { ...(env.LEGAL_NAME && { legalName: env.LEGAL_NAME }), ...(env.CONTACT_EMAIL && { contactEmail: env.CONTACT_EMAIL }) } }),
   ...((env.PLATFORM_BILLING_TENANT || env.PLATFORM_PAYMENT_INSTRUCTIONS) && {
     billing: { ...(env.PLATFORM_BILLING_TENANT && { tenantSlug: env.PLATFORM_BILLING_TENANT }), ...(env.PLATFORM_PAYMENT_INSTRUCTIONS && { paymentInstructions: env.PLATFORM_PAYMENT_INSTRUCTIONS }) },
   }),

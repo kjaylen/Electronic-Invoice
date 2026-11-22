@@ -88,7 +88,8 @@ export function Start() {
         <ErrorText error={error} />
         <button type="submit" className="big" disabled={busy}>{t('Continue')}<span className="chip" aria-hidden="true">→</span></button>
       </form>
-      <p className="small">{t('New to eInvoicing?')} <Link to="/signup" viewTransition>{t('Create a business')}</Link></p>
+      <p className="small">{t('New to eInvoicing?')} <Link to="/signup" viewTransition>{t('Create a business')}</Link> · <Link to="/pricing">{t('Pricing')}</Link></p>
+      <p className="small muted start-links"><a href="/docs">{t('API')}</a> · <Link to="/terms">{t('Terms')}</Link> · <Link to="/privacy">{t('Privacy')}</Link></p>
     </Layout>
   );
 }
@@ -175,6 +176,7 @@ export function CreateBusiness() {
         </fieldset>
         <p className="small muted">{t('New businesses start in the BTS test environment, so nothing counts until you are ready.')}</p>
         <ErrorText error={error} />
+        <p className="small muted">{t('By creating a business you agree to the')} <Link to="/terms" target="_blank">{t('Terms of service')}</Link> {t('and the')} <Link to="/privacy" target="_blank">{t('Privacy policy')}</Link>.</p>
         <button type="submit" className="big" disabled={busy}>{busy ? t('Creating…') : t('Create business')}<span className="chip" aria-hidden="true">→</span></button>
         <p className="small">{t('Already have one?')} <Link to="/?choose=1" viewTransition>{t('Find your business')}</Link></p>
       </form>

@@ -186,3 +186,34 @@ test('key rotation re-encrypts certificate keys and two-step secrets under the n
     await db.close();
   }
 });
+
+test('security headers: HSTS behind TLS, a strict permissions policy, the photo CDN allowed in the CSP; public site info', async () => {
+  const f = await setupPipeline();
+  const { s3Store } = await import('../src/storage/objects.ts');
+  const app = await buildApp({
+    pipeline: f.deps,
+    cookieSecure: true,
+    site: { legalName: 'Example Services Ltd.', contactEmail: 'hello@example.test' },
+    objectStore: s3Store({ endpoint: 'https://s3.example.test', region: 'us-east-1', bucket: 'b', accessKeyId: 'k', secretAccessKey: 's', publicBaseUrl: 'https://cdn.example.test/photos' }),
+  });
+  try {
+    const res = await app.inject({ method: 'GET', url: '/v1/site' });
+    assert.equal(res.headers['strict-transport-security'], 'max-age=31536000; includeSubDomains');
+    assert.match(String(res.headers['permissions-policy']), /camera=\(\)/);
+    assert.match(String(res.headers['content-security-policy']), /img-src 'self' data: blob: https:\/\/cdn\.example\.test;/);
+    const site = res.json();
+    assert.equal(site.legalName, 'Example Services Ltd.');
+    assert.deepEqual(site.plans.map((p: { code: string }) => p.code), ['starter', 'business', 'pro']);
+  } finally {
+    await app.close();
+    await f.close();
+  }
+  const local = await setupPipeline();
+  const dev = await buildApp({ pipeline: local.deps, cookieSecure: false });
+  try {
+    assert.equal((await dev.inject({ method: 'GET', url: '/v1/site' })).headers['strict-transport-security'], undefined, 'no HSTS for local plain-HTTP development');
+  } finally {
+    await dev.close();
+    await local.close();
+  }
+});

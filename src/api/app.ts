@@ -52,6 +52,8 @@ import { registerDiscountRoutes } from './discounts.ts';
 import { domainCache } from '../commerce/domains.ts';
 import { registerIntegrationCallback, registerIntegrationRoutes } from './integrations.ts';
 import type { QuickBooksConfig } from '../integrations/quickbooks.ts';
+import { plansJson } from './billing.ts';
+import { TRIAL_DAYS } from '../billing/plans.ts';
 
 export type Principal = 'api' | Role;
 
@@ -97,6 +99,8 @@ export interface AppOptions {
   storeDomainTarget?: string;
   /** For tests: DNS TXT lookups for domain verification. */
   resolveTxt?: (name: string) => Promise<string[][]>;
+  /** Shown on the public pages (pricing, terms, privacy): who runs the service and how to reach them. */
+  site?: { legalName?: string; contactEmail?: string };
   /** The platform's Intuit app, for the QuickBooks Online integration. */
   quickbooks?: { clientId: string; clientSecret: string; environment: 'sandbox' | 'production'; fetch?: typeof fetch };
 }
@@ -112,9 +116,10 @@ function constantTimeEquals(a: string, b: string): boolean {
   return x.length === y.length && timingSafeEqual(x, y);
 }
 
-const CSP = [
+/** The content security policy; product photos may come from a CDN origin. */
+const csp = (imageOrigins: string[]) => [
   "default-src 'self'",
-  "img-src 'self' data: blob:",
+  `img-src 'self' data: blob:${imageOrigins.map((o) => ` ${o}`).join('')}`,
   "style-src 'self' 'unsafe-inline'",
   "frame-src 'self' blob:",
   "object-src 'none'",
@@ -137,11 +142,23 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   app.decorateRequest('principal', 'api');
   app.decorateRequest('userId', '');
   app.setErrorHandler(errorHandler);
+  const photoOrigin = (() => {
+    const u = options.objectStore?.publicUrl('probe');
+    try {
+      return u ? [new URL(u).origin] : [];
+    } catch {
+      return [];
+    }
+  })();
+  const CSP = csp(photoOrigin);
   app.addHook('onSend', async (_request, reply) => {
     reply.header('X-Content-Type-Options', 'nosniff');
     reply.header('X-Frame-Options', 'SAMEORIGIN');
     reply.header('Referrer-Policy', 'same-origin');
     reply.header('Content-Security-Policy', CSP);
+    reply.header('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
+    // Behind TLS (secure cookies), browsers should never use plain HTTP again.
+    if (options.cookieSecure !== false) reply.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   });
 
   const deps = options.pipeline;
@@ -258,6 +275,15 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
   registerPublicDocumentRoutes(app, deps);
   registerIntegrationCallback(app, deps, ctx, quickbooks);
+
+  // What the public pages need: who runs the service, and the plans.
+  app.get('/v1/site', async (_request, reply) => reply.header('Cache-Control', 'public, max-age=300').send({
+    productName: 'eInvoicing',
+    legalName: options.site?.legalName ?? null,
+    contactEmail: options.site?.contactEmail ?? null,
+    plans: plansJson(),
+    trialDays: TRIAL_DAYS,
+  }));
 
   // The public API's description (OpenAPI 3.1), from the routes' own schemas.
   let openapi: unknown;
