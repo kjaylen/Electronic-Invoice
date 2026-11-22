@@ -1,0 +1,172 @@
+/**
+ * The public API's OpenAPI 3.1 description, built from the routes' own
+ * validation schemas (so it can never drift from what the server accepts),
+ * served at GET /v1/openapi.json. The web app renders it at /docs.
+ */
+
+import type { RouteOptions } from 'fastify';
+import { WEBHOOK_EVENTS } from '../webhooks/webhooks.ts';
+
+interface CollectedRoute {
+  method: string;
+  url: string;
+  schema: { params?: Schema; querystring?: Schema; body?: Schema } | undefined;
+}
+type Schema = { type?: string | string[]; properties?: Record<string, Schema>; required?: readonly string[]; [k: string]: unknown };
+
+/** Areas of the API usable with an API key, in the order the reference shows them. */
+const TAGS: Array<{ prefix: string; name: string; description: string }> = [
+  { prefix: '/v1/documents', name: 'Documents', description: 'Issue tax invoices, receipts, credit and debit notes; read them back as JSON, signed XML or PDF; cancel; email; share.' },
+  { prefix: '/v1/customers', name: 'Customers', description: 'Saved customers, to issue invoices to by id.' },
+  { prefix: '/v1/items', name: 'Items', description: 'Catalog items (with barcodes), to issue lines by id.' },
+  { prefix: '/v1/products', name: 'Products', description: 'The online store\'s products, their variants and photos.' },
+  { prefix: '/v1/orders', name: 'Orders', description: 'Online orders: mark paid (issues the BTS document), delivered, cancelled, refunded.' },
+  { prefix: '/v1/reports', name: 'Reports', description: 'Totals and GST for a period, sales by customer and item, the document register and the archive.' },
+  { prefix: '/v1/webhooks', name: 'Webhooks', description: 'Be told when documents are authorized or rejected, and when orders change.' },
+  { prefix: '/v1/me', name: 'Business', description: 'The business the key belongs to: details, certificate, contingency state, plan.' },
+  { prefix: '/v1/certificate', name: 'Business', description: '' },
+  { prefix: '/v1/business', name: 'Business', description: '' },
+  { prefix: '/v1/store-settings', name: 'Products', description: '' },
+];
+
+const SUMMARIES: Record<string, string> = {
+  'POST /v1/documents': 'Issue a document. Answers 201 whenever a document was created, whatever BTS decided: check status.',
+  'GET /v1/documents': 'List documents (filters, cursor pagination)',
+  'POST /v1/documents/preview': 'Calculate totals without issuing',
+  'GET /v1/documents/{id}': 'A document, its lines and (for invoices and receipts) what is left to credit',
+  'GET /v1/documents/{id}/xml': 'The signed XML exactly as sent to BTS',
+  'GET /v1/documents/{id}/pdf': 'The printed copy (A4/Letter sheet or thermal receipt)',
+  'GET /v1/documents/{id}/view': 'The document as signed, for rendering, with its QR code',
+  'POST /v1/documents/{id}/cancel': 'Cancel an authorized document with BTS (event 050)',
+  'POST /v1/documents/{id}/email': 'Email the PDF and signed XML to one address',
+  'GET /v1/documents/{id}/messages': 'Emails sent for a document',
+  'POST /v1/documents/{id}/share': 'A link that opens the PDF without signing in (90 days)',
+  'GET /v1/customers': 'List and search saved customers',
+  'POST /v1/customers': 'Save a customer',
+  'GET /v1/customers/{id}': 'A customer',
+  'PUT /v1/customers/{id}': 'Replace a customer\'s details',
+  'DELETE /v1/customers/{id}': 'Archive a customer',
+  'GET /v1/items': 'List and search catalog items (q, barcode code, favorites)',
+  'POST /v1/items': 'Add a catalog item',
+  'GET /v1/items/{id}': 'An item',
+  'PUT /v1/items/{id}': 'Replace an item',
+  'DELETE /v1/items/{id}': 'Archive an item (frees its barcode)',
+  'GET /v1/reports/summary': 'Totals, GST by rate, by type and by day',
+  'GET /v1/reports/customers': 'Sales by customer',
+  'GET /v1/reports/items': 'Sales by item',
+  'GET /v1/reports/documents': 'The document register (CSV)',
+  'GET /v1/reports/archive': 'Everything for a period as one ZIP: signed XML, BTS replies, events, register, PDFs',
+  'GET /v1/orders': 'List online orders',
+  'GET /v1/orders/{id}': 'An order with its lines, document and refunds',
+  'POST /v1/orders/{id}/paid': 'Payment received: issues the BTS receipt or invoice and emails it',
+  'POST /v1/orders/{id}/fulfilled': 'Delivered or picked up',
+  'POST /v1/orders/{id}/cancel': 'Cancel an unpaid order (stock goes back)',
+  'POST /v1/orders/{id}/refund': 'Refund a paid order, all or some lines: a credit note',
+  'GET /v1/me': 'The business, its certificate, contingency state and plan',
+  'PUT /v1/certificate': 'Install or renew the BTS certificate (PEM)',
+  'POST /v1/certificate/pfx': 'Install or renew the BTS certificate (.pfx)',
+  'GET /v1/webhooks': 'Webhook endpoints and the event types on offer',
+  'POST /v1/webhooks': 'Add an endpoint; the signing secret is shown once',
+  'PATCH /v1/webhooks/{id}': 'Change an endpoint, or switch it on or off',
+  'DELETE /v1/webhooks/{id}': 'Remove an endpoint',
+  'POST /v1/webhooks/{id}/rotate-secret': 'A new signing secret (shown once)',
+  'POST /v1/webhooks/{id}/test': 'Send a ping now and report the answer',
+  'GET /v1/webhooks/{id}/deliveries': 'The last 50 deliveries',
+  'POST /v1/webhooks/deliveries/{id}/retry': 'Send a failed delivery again',
+};
+
+const DESCRIPTION = `Issue Belize electronic tax documents (BTS e-invoicing) from your own systems.
+
+## Authentication
+Create an API key in the web app (Settings → API keys) and send it as \`Authorization: Bearer etd_…\`.
+The key belongs to one business; every request acts for that business.
+
+## Money and quantities
+Decimal strings, never numbers: \`"24.99"\`, \`"2"\`. Totals come from the same calculation BTS checks, to the cent.
+
+## Errors
+Always \`{ "error": { "code", "message", "details"? } }\`. 400 malformed request, 401 bad key, 402 your plan's limit,
+403 not allowed, 404 not found, 409 wrong state, 422 a document BTS would refuse (the message names the rule), 429 too many requests.
+
+## Idempotency
+Send \`Idempotency-Key: <unique per sale>\` when issuing. A retry returns the original answer (\`Idempotent-Replayed: true\`) and never issues twice.
+
+## Rate limits
+600 requests a minute per key by default. Every answer carries \`X-RateLimit-Limit\` and \`X-RateLimit-Remaining\`; over the limit you get 429 with \`Retry-After\`.
+
+## Webhooks
+Events: ${WEBHOOK_EVENTS.map((e) => `\`${e}\``).join(', ')}.
+Each delivery is a JSON POST \`{ id, type, createdAt, data }\` signed with your endpoint's secret:
+\`X-EInvoicing-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<raw body>">\`.
+Check the signature and that \`t\` is recent, answer 2xx within 10 seconds, and handle the same \`id\` twice gracefully. Failed deliveries are retried for about a day.
+`;
+
+export function routeCollector() {
+  const routes: CollectedRoute[] = [];
+  return {
+    routes,
+    onRoute: (r: RouteOptions) => {
+      for (const method of ([] as string[]).concat(r.method as string | string[])) {
+        if (method === 'HEAD' || method === 'OPTIONS') continue;
+        routes.push({ method, url: r.url, schema: r.schema as CollectedRoute['schema'] });
+      }
+    },
+  };
+}
+
+const toOpenApiPath = (url: string) => url.replace(/:([A-Za-z_]+)/g, '{$1}');
+
+function parameters(schema: Schema | undefined, where: 'path' | 'query') {
+  if (!schema?.properties) return [];
+  return Object.entries(schema.properties)
+    .filter(([name]) => !(where === 'query' && name === 'b'))
+    .map(([name, s]) => ({ name, in: where, required: where === 'path' || Boolean(schema.required?.includes(name)), schema: s }));
+}
+
+export function buildOpenApi(routes: CollectedRoute[], options: { serverUrl?: string } = {}) {
+  const paths: Record<string, Record<string, unknown>> = {};
+  for (const r of routes) {
+    const tag = TAGS.find((t) => r.url === t.prefix || r.url.startsWith(`${t.prefix}/`));
+    if (!tag) continue;
+    const path = toOpenApiPath(r.url);
+    const key = `${r.method} ${path}`;
+    const op: Record<string, unknown> = {
+      tags: [tag.name],
+      summary: SUMMARIES[key] ?? `${r.method} ${path}`,
+      operationId: key.replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, ''),
+      parameters: [...parameters(r.schema?.params, 'path'), ...parameters(r.schema?.querystring, 'query')],
+      responses: {
+        [r.method === 'POST' && (path === '/v1/documents' || path === '/v1/customers' || path === '/v1/items' || path === '/v1/webhooks') ? '201' : '200']: { description: 'Success' },
+        default: { description: 'An error', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+      },
+    };
+    if (r.schema?.body) op.requestBody = { required: true, content: { 'application/json': { schema: r.schema.body } } };
+    if (key === 'POST /v1/documents') {
+      (op.parameters as unknown[]).push({ name: 'Idempotency-Key', in: 'header', required: false, schema: { type: 'string', maxLength: 200 }, description: 'Unique per sale; a retry returns the original answer.' });
+    }
+    (paths[path] ??= {})[r.method.toLowerCase()] = op;
+  }
+  const tags = [...new Map(TAGS.filter((t) => t.description).map((t) => [t.name, { name: t.name, description: t.description }])).values()];
+  return {
+    openapi: '3.1.0',
+    info: { title: 'eInvoicing API', version: '1.0', description: DESCRIPTION },
+    servers: [{ url: options.serverUrl ?? '/' }],
+    security: [{ apiKey: [] }],
+    tags,
+    paths: Object.fromEntries(Object.entries(paths).sort(([a], [b]) => {
+      const ta = TAGS.findIndex((t) => a.startsWith(t.prefix));
+      const tb = TAGS.findIndex((t) => b.startsWith(t.prefix));
+      return ta - tb || a.localeCompare(b);
+    })),
+    components: {
+      securitySchemes: { apiKey: { type: 'http', scheme: 'bearer', description: 'An API key from Settings → API keys: etd_<prefix>_<secret>' } },
+      schemas: {
+        Error: {
+          type: 'object',
+          required: ['error'],
+          properties: { error: { type: 'object', required: ['code', 'message'], properties: { code: { type: 'string' }, message: { type: 'string' }, details: {} } } },
+        },
+      },
+    },
+  };
+}

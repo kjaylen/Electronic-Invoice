@@ -13,6 +13,7 @@ import { useToast } from '../toast';
 import { CodeForm, RecoveryCodes, SetupSteps, type TwoFactorSetupInfo } from '../twofactor';
 import { DISTRICTS, ErrorText, Field, Modal, Segmented, usePageTitle } from '../ui';
 import { PlanTab, UpgradeNotice } from './Billing';
+import { WebhooksPanel } from './Webhooks';
 import { StoreSettingsTab } from './StoreSettings';
 
 function readAsBase64(file: File): Promise<string> {
@@ -669,6 +670,10 @@ function describe(t: T, e: AuditEvent): string {
     'business.two_factor_required': t('Required two-step sign-in for owners and admins'),
     'business.two_factor_optional': t('Made two-step sign-in optional'),
     'billing.plan_changed': t('Changed the plan'),
+    'webhook.created': t('Added the webhook {target}', { target }),
+    'webhook.updated': t('Changed the webhook {target}', { target }),
+    'webhook.deleted': t('Removed the webhook {target}', { target }),
+    'webhook.secret_rotated': t('Made a new secret for the webhook {target}', { target }),
   };
   return texts[e.action] ?? e.action;
 }
@@ -822,7 +827,7 @@ export function Settings() {
     ...(can('business.manage') ? [['store', t('Online store')] as [Tab, string]] : []),
     ...(can('users.manage') ? [['users', t('Users')] as [Tab, string]] : []),
     ...(can('audit.view') ? [['activity', t('Activity')] as [Tab, string]] : []),
-    ...(can('apikeys.manage') ? [['keys', t('API keys')] as [Tab, string]] : []),
+    ...(can('apikeys.manage') ? [['keys', t('Developers')] as [Tab, string]] : []),
   ];
   const requested = params.get('tab') as Tab | null;
   const tab: Tab = tabs.some(([k]) => k === requested) ? requested! : 'account';
@@ -840,7 +845,13 @@ export function Settings() {
       {tab === 'store' && (me?.billing && !me.billing.features.includes('store') ? <UpgradeNotice feature="store" /> : <StoreSettingsTab />)}
       {tab === 'users' && <UsersTab />}
       {tab === 'activity' && <ActivityTab />}
-      {tab === 'keys' && (me?.billing && !me.billing.features.includes('api') ? <UpgradeNotice feature="api" /> : <ApiKeysTab />)}
+      {tab === 'keys' && (me?.billing && !me.billing.features.includes('api') ? <UpgradeNotice feature="api" /> : (
+        <div className="stack">
+          <div className="banner info"><div><strong>{t('Build on eInvoicing')}</strong>{t('Issue documents from your own POS or accounting system with the API.')} <a href="/docs" target="_blank" rel="noreferrer">{t('Read the API reference')} ↗</a></div></div>
+          <ApiKeysTab />
+          {me?.billing && !me.billing.features.includes('webhooks') ? <UpgradeNotice feature="webhooks" /> : <WebhooksPanel />}
+        </div>
+      ))}
     </div>
   );
 }

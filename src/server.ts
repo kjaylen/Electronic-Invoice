@@ -11,6 +11,8 @@
  *                        product photos in S3-compatible storage behind a CDN (see src/storage/objects.ts)
  *   PLATFORM_BILLING_TENANT        address (slug) of the platform's own business, which issues subscribers' e-invoices
  *   PLATFORM_PAYMENT_INSTRUCTIONS  how subscribers pay (bank details), shown on the plan page and invoices
+ *   API_RATE_LIMIT_PER_MINUTE   requests per minute per API key (default 600)
+ *   WEBHOOK_INTERVAL_MS         how often webhooks are sent, from the worker's process (default 5000)
  *   WORKER_INTERVAL_MS   default 60000; 0 disables the worker in this process
  *   HOUSEKEEPING_INTERVAL_MS  default 300000 (notification emails, alerts, clean-up); 0 disables
  *   ALERT_WEBHOOK_URL    post operations alerts here (Slack/Teams/Discord-style JSON with "text")
@@ -37,6 +39,7 @@ import { buildApp } from './api/app.ts';
 import { billingContextFactory } from './api/billing.ts';
 import { startHousekeeping } from './api/housekeeping.ts';
 import { startWorker } from './api/worker.ts';
+import { startWebhookDispatcher } from './webhooks/webhooks.ts';
 import { objectStoreFromEnv } from './storage/objects.ts';
 import { migrate, pgDatabase } from './db/database.ts';
 import { keyringFromEnv } from './db/keystore.ts';
@@ -70,6 +73,7 @@ const app = await buildApp({
   ...(env.ADMIN_TOKEN && { adminToken: env.ADMIN_TOKEN }),
   ...(env.METRICS_TOKEN && { metricsToken: env.METRICS_TOKEN }),
   ...(objectStore && { objectStore }),
+  ...(env.API_RATE_LIMIT_PER_MINUTE && { apiRateLimitPerMinute: Number(env.API_RATE_LIMIT_PER_MINUTE) }),
   ...((env.PLATFORM_BILLING_TENANT || env.PLATFORM_PAYMENT_INSTRUCTIONS) && {
     billing: { ...(env.PLATFORM_BILLING_TENANT && { tenantSlug: env.PLATFORM_BILLING_TENANT }), ...(env.PLATFORM_PAYMENT_INSTRUCTIONS && { paymentInstructions: env.PLATFORM_PAYMENT_INSTRUCTIONS }) },
   }),
@@ -113,11 +117,22 @@ const housekeeping = housekeepingMs > 0
     })
   : undefined;
 
+// Webhooks go out from the process that runs the worker.
+const webhooks = intervalMs > 0
+  ? startWebhookDispatcher(db, {
+      keys: pipeline.keys,
+      intervalMs: Number(env.WEBHOOK_INTERVAL_MS ?? 5_000),
+      onError: (e) => app.log.error({ err: e }, 'webhook dispatch failure'),
+      onDisabled: async (tenantId, endpointId, url) => app.log.warn({ tenantId, endpointId, url }, 'webhook endpoint switched off after repeated failures'),
+    })
+  : undefined;
+
 await app.listen({ port: Number(env.PORT ?? 3000), host: env.HOST ?? '0.0.0.0' });
 
 const shutdown = async (signal: string) => {
   app.log.info({ signal }, 'shutting down');
   await worker?.stop();
+  await webhooks?.stop();
   await housekeeping?.stop();
   await app.close();
   clients.closeAll();

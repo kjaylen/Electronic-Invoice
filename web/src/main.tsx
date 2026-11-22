@@ -23,6 +23,7 @@ const Login = page(() => import('./pages/Auth'), 'Login');
 const ForgotPassword = page(() => import('./pages/Auth'), 'ForgotPassword');
 const ResetPassword = page(() => import('./pages/Auth'), 'ResetPassword');
 const ChangePasswordRequired = page(() => import('./pages/Auth'), 'ChangePasswordRequired');
+const Docs = page(() => import('./pages/Docs'), 'Docs');
 const TwoFactorRequired = page(() => import('./pages/Auth'), 'TwoFactorRequired');
 const Onboarding = page(() => import('./pages/Onboarding'), 'Onboarding');
 const Dashboard = page(() => import('./pages/Dashboard'), 'Dashboard');
@@ -323,6 +324,7 @@ function PublicApp() {
         {/* Our own staff: move businesses to BTS production. */}
         <Route path="/admin/*" element={<PlatformConsole />} />
       </Route>
+      <Route path="/docs" element={<Suspense fallback={<main><PageSkeleton /></main>}><Docs /></Suspense>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

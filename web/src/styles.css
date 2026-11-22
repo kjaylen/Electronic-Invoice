@@ -961,3 +961,46 @@ label.row > input[type='checkbox'] { flex: none; margin-top: 0.15rem; }
 .billing-bar.suspended { background: var(--coral-soft); color: var(--coral-ink); }
 .upgrade-notice { align-items: center; }
 .upgrade-notice .button { margin-left: auto; }
+
+/* ---------- webhooks ---------- */
+.endpoints { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.75rem; }
+.endpoints > li { border: 1px solid var(--hairline); border-radius: var(--radius-lg); padding: 0.85rem 1rem; background: var(--sheet); display: grid; gap: 0.5rem; }
+.endpoints > li.off { opacity: 0.75; background: var(--sheet-2); }
+.endpoint-url { font-size: 0.85rem; word-break: break-all; }
+.endpoint-actions { gap: 0.9rem; flex-wrap: wrap; }
+.event-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 0.35rem 1rem; }
+
+/* ---------- API reference ---------- */
+.docs-page { min-height: 100vh; background: var(--paper); }
+.docs-top { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 1rem; padding: 0.75rem clamp(1rem, 3vw, 2rem); background: rgba(251, 248, 241, 0.92); backdrop-filter: blur(10px); border-bottom: 1px solid var(--hairline); }
+.docs-body { display: grid; grid-template-columns: 270px minmax(0, 1fr); gap: 2rem; max-width: 1240px; margin: 0 auto; padding: 1.5rem clamp(1rem, 3vw, 2rem) 4rem; }
+.docs-nav { position: sticky; top: 4.5rem; align-self: start; max-height: calc(100vh - 6rem); overflow-y: auto; overflow-x: hidden; display: grid; gap: 0.15rem; font-size: 0.85rem; padding-right: 0.5rem; }
+.docs-nav input { margin-bottom: 0.75rem; }
+.docs-nav a { color: var(--ink-2); text-decoration: none; padding: 0.2rem 0.4rem; border-radius: 6px; }
+.docs-nav a:hover { background: var(--sheet-2); color: var(--ink); }
+.docs-nav-head { display: block; margin-top: 0.85rem; font-weight: 650; color: var(--ink) !important; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.08em; }
+.docs-nav-op { display: flex !important; gap: 0.4rem; align-items: baseline; font-family: var(--mono); font-size: 0.74rem; }
+.docs-main { min-width: 0; display: grid; gap: 1rem; }
+.docs-main > h1 { font-size: clamp(2rem, 4vw, 2.8rem); letter-spacing: -0.04em; margin: 0; }
+.docs-main code { font-family: var(--mono); font-size: 0.85em; background: var(--sheet-2); padding: 0.05rem 0.3rem; border-radius: 4px; }
+.doc-guide h2, .doc-tag > h2 { margin: 1.5rem 0 0.4rem; scroll-margin-top: 5rem; }
+.doc-tag { scroll-margin-top: 5rem; display: grid; gap: 0.85rem; }
+.doc-op { display: grid; gap: 0.5rem; scroll-margin-top: 5rem; }
+.doc-op h4 { margin: 0.5rem 0 0.1rem; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+.doc-op-head { gap: 0.6rem; flex-wrap: wrap; }
+.doc-path { font-size: 0.95rem !important; background: none !important; padding: 0 !important; word-break: break-all; }
+.method { display: inline-block; min-width: 3.4rem; text-align: center; font-family: var(--mono); font-size: 0.68rem; font-weight: 700; padding: 0.15rem 0.35rem; border-radius: 5px; color: #fff; background: var(--ink-2); }
+.method.get { background: #2f7d4f; }
+.method.post { background: var(--brand); }
+.method.put, .method.patch { background: var(--ochre); }
+.method.delete { background: var(--coral-ink); }
+.docs-nav .method { min-width: 2.9rem; font-size: 0.6rem; }
+.doc-fields { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.35rem; }
+.doc-fields li { padding: 0.4rem 0; border-bottom: 1px dashed var(--hairline); }
+.doc-fields .doc-fields { margin: 0.35rem 0 0 1rem; padding-left: 0.75rem; border-left: 2px solid var(--hairline); }
+.doc-fields .row { gap: 0.5rem; flex-wrap: wrap; align-items: baseline; }
+.doc-field-name { font-weight: 600; }
+.doc-type { font-family: var(--mono); font-size: 0.75rem; color: var(--brand-ink); }
+.doc-required { font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--coral-ink); font-weight: 700; }
+.doc-code { margin: 0.25rem 0 0; padding: 0.85rem 1rem; border-radius: var(--radius); background: #1d1428; color: #efe6fa; font-family: var(--mono); font-size: 0.78rem; line-height: 1.55; overflow-x: auto; white-space: pre; }
+@media (max-width: 900px) { .docs-body { grid-template-columns: 1fr; } .docs-nav { position: static; max-height: none; } }

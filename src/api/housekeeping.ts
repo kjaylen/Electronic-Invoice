@@ -57,6 +57,9 @@ export async function runHousekeepingOnce(db: Queryable, options: HousekeepingOp
   }
   result.sweptLimits = (await step('rate limits', () => sweepRateLimits(db))) ?? 0;
   await step('challenges', () => db.query('delete from login_challenges where expires_at < now()'));
+  // Webhook bookkeeping: handled outbox rows after a week, deliveries after 30 days.
+  await step('outbox', () => db.query("delete from event_outbox where processed_at < now() - interval '7 days'"));
+  await step('deliveries', () => db.query("delete from webhook_deliveries where status <> 'pending' and created_at < now() - interval '30 days'"));
   await step('heartbeat', () => heartbeat(db, 'housekeeping', { notifications: result.notifications, alerts: result.alerts }));
   return result;
 }

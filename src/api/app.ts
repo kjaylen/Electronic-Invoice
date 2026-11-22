@@ -2,6 +2,7 @@
  * The HTTP API (v1) and, when built, the web app.
  *
  *   /health                         liveness, database check and "ok" or "degraded", no auth
+ *   /v1/openapi.json                the public API's OpenAPI 3.1 description, no auth
  *   /metrics                        Prometheus metrics (Authorization: Bearer METRICS_TOKEN); off without a token
  *   /v1/admin/...                   onboarding, Bearer <ADMIN_TOKEN>
  *   /v1/auth/...                    signing in to a business (web app)
@@ -43,6 +44,9 @@ import { registerUserRoutes } from './users.ts';
 import { counters, metricsText, opsStatus } from '../ops/monitoring.ts';
 import type { ObjectStore } from '../storage/objects.ts';
 import { billingContextFactory, registerBillingRoutes } from './billing.ts';
+import { registerWebhookRoutes } from './webhooks.ts';
+import { countHit } from '../db/ratelimit.ts';
+import { buildOpenApi, routeCollector } from './openapi.ts';
 
 export type Principal = 'api' | Role;
 
@@ -78,6 +82,10 @@ export interface AppOptions {
   objectStore?: ObjectStore;
   /** The platform's billing: its own business's address (it issues the invoices) and payment instructions. */
   billing?: { tenantSlug?: string; paymentInstructions?: string };
+  /** Requests per minute per API key. Default 600. */
+  apiRateLimitPerMinute?: number;
+  /** Let webhooks reach private addresses and plain http (development and tests only). */
+  webhooksAllowPrivate?: boolean;
 }
 
 function bearer(request: FastifyRequest): string | undefined {
@@ -177,13 +185,24 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   await app.register(async (a) => registerAuthRoutes(a, deps, ctx), { prefix: '/v1/auth' });
 
   // Tenant routes: API key or session.
+  const collected = routeCollector();
   await app.register(async (tenant) => {
-    tenant.addHook('onRequest', async (request) => {
+    tenant.addHook('onRoute', collected.onRoute);
+    tenant.addHook('onRequest', async (request, reply) => {
       if (request.url.startsWith('/v1/admin') || request.url.startsWith('/v1/auth')) return;
       const key = bearer(request);
       if (key) {
         const principal = await authenticateApiKey(db, key);
         if (!principal) throw new ApiError(401, 'unauthorized', 'Missing or invalid API key');
+        // Per key, per minute, shared by every server process.
+        const limit = options.apiRateLimitPerMinute ?? 600;
+        const used = await countHit(db, `apikey|${principal.keyId}`, 60_000);
+        reply.header('X-RateLimit-Limit', String(limit));
+        reply.header('X-RateLimit-Remaining', String(Math.max(0, limit - used)));
+        if (used > limit) {
+          reply.header('Retry-After', '60');
+          throw new ApiError(429, 'rate_limited', `More than ${limit} requests in a minute with this API key; slow down and retry after the Retry-After seconds`);
+        }
         request.tenantId = principal.tenantId;
         request.principal = 'api';
         return;
@@ -212,9 +231,17 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     registerOrderRoutes(tenant, deps, ctx);
     registerReportRoutes(tenant, deps);
     registerBillingRoutes(tenant, deps, ctx, billingContext);
+    registerWebhookRoutes(tenant, deps, { ...(options.webhooksAllowPrivate && { allowPrivate: true }) });
   }, { prefix: '/v1' });
 
   registerPublicDocumentRoutes(app, deps);
+
+  // The public API's description (OpenAPI 3.1), from the routes' own schemas.
+  let openapi: unknown;
+  app.get('/v1/openapi.json', async (_request, reply) => {
+    openapi ??= buildOpenApi(collected.routes, { ...(options.publicUrl && { serverUrl: options.publicUrl }) });
+    return reply.header('Cache-Control', 'public, max-age=300').send(openapi);
+  });
 
   // The platform console, for our own staff.
   await app.register(async (platform) => registerPlatformRoutes(platform, deps, ctx, billingContext), { prefix: '/v1/platform' });
