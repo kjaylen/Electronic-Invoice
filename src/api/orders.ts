@@ -38,6 +38,7 @@ export function orderJson(o: OrderRow, lines?: OrderLineRow[], document?: { id: 
     address: o.street ? { street: o.street, city: o.city, districtCode: o.district_code, districtName: o.district_code ? BELIZE_DISTRICTS[o.district_code] : null } : null,
     business: o.buyer_tin ? { tin: o.buyer_tin, name: o.buyer_name } : null,
     note: o.note,
+    discount: o.discount_code ? { code: o.discount_code, net: centsString(o.discount_cents ?? 0) } : null,
     totals: { lineExtension: centsString(o.line_extension_cents), gst: centsString(o.gst_cents), total: centsString(o.total_cents), refunded: centsString(o.refunded_cents ?? 0) },
     documentId: o.document_id,
     ...(document !== undefined && { document }),
@@ -77,9 +78,13 @@ async function refundsJson(deps: PipelineDeps, tenantId: string, order: OrderRow
 /** The full order for its page: lines, document, refunds. */
 async function fullOrder(deps: PipelineDeps, tenantId: string, orderId: string) {
   const loaded = (await loadOrder(deps.db, tenantId, { id: orderId }))!;
+  const payments = (await deps.db.query<{ id: string; provider: string; status: string; amount_cents: unknown; currency: string; charged_amount: string | null; transaction_id: string | null; created_at: Date }>(
+    'select id, provider, status, amount_cents, currency, charged_amount, transaction_id, created_at from order_payments where order_id = $1 order by created_at', [orderId],
+  )).rows;
   return {
     ...orderJson(loaded.order, loaded.lines, await documentSummary(deps, tenantId, loaded.order.document_id)),
     ...(await refundsJson(deps, tenantId, loaded.order, loaded.lines)),
+    payments: payments.map((p) => ({ id: p.id, provider: p.provider, status: p.status, amount: centsString(p.amount_cents), charged: p.charged_amount ? `${p.currency} ${p.charged_amount}` : null, transactionId: p.transaction_id, createdAt: iso(p.created_at) })),
   };
 }
 

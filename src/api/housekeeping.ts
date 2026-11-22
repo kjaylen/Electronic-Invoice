@@ -22,6 +22,8 @@ export interface HousekeepingOptions {
   thresholds?: OpsThresholds;
   /** Runs the platform's billing when given. */
   billing?: () => Promise<BillingContext>;
+  /** Checks online payments buyers never came back from. */
+  reconcilePayments?: () => Promise<unknown>;
   intervalMs?: number;
   onError?: (step: string, error: unknown) => void;
 }
@@ -47,6 +49,7 @@ export async function runHousekeepingOnce(db: Queryable, options: HousekeepingOp
     const billing = options.billing;
     result.billing = await step('billing', async () => runBilling(await billing()));
   }
+  if (options.reconcilePayments) await step('payments', options.reconcilePayments);
   if (options.mailer) {
     const mailer = options.mailer;
     result.notifications = await step('notifications', () => runNotifications(db, { mailer, ...(options.publicUrl && { publicUrl: options.publicUrl }) }));

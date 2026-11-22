@@ -16,6 +16,10 @@ export interface ServerContext {
   objects?: ObjectStore;
   /** The platform's own billing: the business that issues its invoices (slug), and how subscribers pay. */
   billing?: { tenantSlug?: string; paymentInstructions?: string };
+  /** Where businesses point their store domains (CNAME), e.g. stores.example.bz. */
+  storeDomainTarget?: string;
+  /** DNS TXT lookup (replaceable in tests). */
+  resolveTxt?: (name: string) => Promise<string[][]>;
 }
 
 /** An absolute link into the web app. */

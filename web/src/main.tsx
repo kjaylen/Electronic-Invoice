@@ -6,7 +6,7 @@ import '@fontsource-variable/geist-mono';
 import './styles.css';
 import { api, type Permission } from './api';
 import { Brand } from './art';
-import { BUSINESS } from './business';
+import { BUSINESS, STORE_DOMAIN } from './business';
 import { ErrorBoundary } from './ErrorBoundary';
 import { Icons } from './icons';
 import { I18nProvider, LanguageToggle, useI18n } from './i18n';
@@ -42,6 +42,7 @@ const ShopProduct = page(() => import('./pages/Shop'), 'ShopProduct');
 const ShopCart = page(() => import('./pages/Shop'), 'ShopCart');
 const ShopCheckout = page(() => import('./pages/Shop'), 'ShopCheckout');
 const ShopOrder = page(() => import('./pages/Shop'), 'ShopOrder');
+const ShopTestPayment = page(() => import('./pages/Shop'), 'ShopTestPayment');
 const Reports = page(() => import('./pages/Reports'), 'Reports');
 const Settings = page(() => import('./pages/Settings'), 'Settings');
 
@@ -291,6 +292,7 @@ function BusinessApp() {
           <Route path="cart" element={<ShopCart />} />
           <Route path="checkout" element={<ShopCheckout />} />
           <Route path="orders/:number" element={<ShopOrder />} />
+          <Route path="pay/:paymentId" element={<ShopTestPayment />} />
         </Route>
       </Route>
       <Route element={<RequireSession />}>
@@ -315,6 +317,25 @@ function BusinessApp() {
 }
 
 /** The start page: find your business, or create one. */
+/** A store on its own domain: only the shop. */
+function StoreDomainApp() {
+  return (
+    <Routes>
+      <Route element={<Bare />}>
+        <Route path="/shop" element={<ShopLayout />}>
+          <Route index element={<ShopHome />} />
+          <Route path="products/:handle" element={<ShopProduct />} />
+          <Route path="cart" element={<ShopCart />} />
+          <Route path="checkout" element={<ShopCheckout />} />
+          <Route path="orders/:number" element={<ShopOrder />} />
+          <Route path="pay/:paymentId" element={<ShopTestPayment />} />
+        </Route>
+      </Route>
+      <Route path="*" element={<Navigate to="/shop" replace />} />
+    </Routes>
+  );
+}
+
 function PublicApp() {
   return (
     <Routes>
@@ -332,11 +353,11 @@ function PublicApp() {
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <BrowserRouter {...(BUSINESS && { basename: `/${BUSINESS}` })}>
+    <BrowserRouter {...(BUSINESS && !STORE_DOMAIN && { basename: `/${BUSINESS}` })}>
       <I18nProvider>
         <ToastProvider>
           <SessionProvider>
-            {BUSINESS ? <BusinessApp /> : <PublicApp />}
+            {STORE_DOMAIN ? <StoreDomainApp /> : BUSINESS ? <BusinessApp /> : <PublicApp />}
           </SessionProvider>
         </ToastProvider>
       </I18nProvider>

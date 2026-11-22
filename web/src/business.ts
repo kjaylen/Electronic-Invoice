@@ -16,7 +16,11 @@ function fromLocation(): string | null {
   return SLUG.test(first) && !APP_PAGES.has(first) ? first : null;
 }
 
-export const BUSINESS: string | null = fromLocation();
+/** On a store's own domain (shop.example.bz), the server names the store in the page. */
+const storeMeta = typeof document !== 'undefined' ? document.querySelector('meta[name="einvoicing-store"]')?.getAttribute('content') ?? null : null;
+export const STORE_DOMAIN = Boolean(storeMeta && SLUG.test(storeMeta));
+
+export const BUSINESS: string | null = STORE_DOMAIN ? storeMeta : fromLocation();
 
 export interface RecentBusiness {
   slug: string;

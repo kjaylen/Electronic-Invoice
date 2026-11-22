@@ -26,6 +26,8 @@ import { decimal, money, uuid } from './schemas.ts';
 import { photoKey } from '../storage/objects.ts';
 import type { ServerContext } from './context.ts';
 import { assertFeature } from '../billing/billing.ts';
+import { getPaymentAccount } from '../commerce/payments.ts';
+import { addDomain, checkDomain, DomainError, domainJson, type DomainRow, normalizeDomain, verifyDomain } from '../commerce/domains.ts';
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const MAX_IMAGES = 10;
@@ -243,6 +245,7 @@ const settingsSchema = {
         bankTransfer: { type: 'object', additionalProperties: false, properties: { enabled: { type: 'boolean' }, instructions: text(2000) } },
         cashOnDelivery: { type: 'object', additionalProperties: false, properties: { enabled: { type: 'boolean' } } },
         payAtPickup: { type: 'object', additionalProperties: false, properties: { enabled: { type: 'boolean' } } },
+        online: { type: 'object', additionalProperties: false, properties: { enabled: { type: 'boolean' }, provider: { type: 'string', enum: ['paypal', 'test'] } } },
       },
     },
   },
@@ -267,8 +270,49 @@ export async function sendPhoto(reply: FastifyReply, ctx: ServerContext, img: Ph
   return reply.type(img.content_type).header('Cache-Control', cacheControl).send(Buffer.from(img.data));
 }
 
-export function registerProductRoutes(app: FastifyInstance, deps: PipelineDeps, ctx: ServerContext) {
+export function registerProductRoutes(app: FastifyInstance, deps: PipelineDeps, ctx: ServerContext, domains?: { invalidate(): void }) {
   const { db } = deps;
+
+  // ---------- the store on the business's own domain ----------
+  const platformHosts = ctx.publicUrl ? [new URL(ctx.publicUrl).hostname] : [];
+  const domainParams = { type: 'object', required: ['domain'], properties: { domain: { type: 'string', maxLength: 253 } } } as const;
+  app.get('/store-domains', async (request) => {
+    requirePermission(request, 'business.manage');
+    const rows = (await db.query<DomainRow>('select * from store_domains where tenant_id = $1 order by created_at', [request.tenantId])).rows;
+    return { data: rows.map((r) => domainJson(r, ctx.storeDomainTarget)), target: ctx.storeDomainTarget ?? null };
+  });
+  app.post<{ Body: { domain: string } }>('/store-domains', { schema: { body: { type: 'object', required: ['domain'], additionalProperties: false, properties: { domain: { type: 'string', minLength: 4, maxLength: 253 } } } } }, async (request, reply) => {
+    requirePermission(request, 'business.manage');
+    await assertFeature(db, request.tenantId, 'store');
+    try {
+      const row = await addDomain(db, request.tenantId, checkDomain(request.body.domain, platformHosts));
+      await audit(db, { tenantId: request.tenantId, userId: request.userId || null, action: 'store.domain_added', target: row.domain, ip: request.ip });
+      return reply.code(201).send(domainJson(row, ctx.storeDomainTarget));
+    } catch (e) {
+      if (e instanceof DomainError) throw new ApiError(422, 'invalid_domain', e.message);
+      throw e;
+    }
+  });
+  app.post<{ Params: { domain: string } }>('/store-domains/:domain/verify', { schema: { params: domainParams } }, async (request) => {
+    requirePermission(request, 'business.manage');
+    try {
+      const row = await verifyDomain(db, request.tenantId, normalizeDomain(request.params.domain), ctx.resolveTxt);
+      domains?.invalidate();
+      await audit(db, { tenantId: request.tenantId, userId: request.userId || null, action: 'store.domain_verified', target: row.domain, ip: request.ip });
+      return domainJson(row, ctx.storeDomainTarget);
+    } catch (e) {
+      if (e instanceof DomainError) throw new ApiError(422, 'not_verified', e.message);
+      throw e;
+    }
+  });
+  app.delete<{ Params: { domain: string } }>('/store-domains/:domain', { schema: { params: domainParams } }, async (request, reply) => {
+    requirePermission(request, 'business.manage');
+    const r = await db.query('delete from store_domains where domain = $1 and tenant_id = $2 returning domain', [normalizeDomain(request.params.domain), request.tenantId]);
+    if (!r.rows.length) throw notFound('Domain');
+    domains?.invalidate();
+    await audit(db, { tenantId: request.tenantId, userId: request.userId || null, action: 'store.domain_removed', target: request.params.domain, ip: request.ip });
+    return reply.code(204).send();
+  });
 
   app.get<{ Querystring: { status?: string; q?: string } }>(
     '/products',
@@ -449,7 +493,12 @@ export function registerProductRoutes(app: FastifyInstance, deps: PipelineDeps, 
     const zones = merged.delivery.zones.map((z) => z.name.trim().toLowerCase());
     if (new Set(zones).size !== zones.length) throw new ApiError(422, 'invalid_settings', 'Two delivery zones have the same name');
     if (merged.enabled && !merged.delivery.enabled && !merged.pickup.enabled) throw new ApiError(422, 'invalid_settings', 'Offer delivery, pickup, or both');
-    if (merged.enabled && !merged.payments.bankTransfer.enabled && !merged.payments.cashOnDelivery.enabled && !merged.payments.payAtPickup.enabled) {
+    if (merged.payments.online.enabled) {
+      const env = (await db.query<{ environment: string }>('select environment from tenants where id = $1', [request.tenantId])).rows[0]!.environment;
+      if (merged.payments.online.provider === 'test' && env !== 'test') throw new ApiError(422, 'invalid_settings', 'Test payments are only for the BTS test environment; connect PayPal to take real payments');
+      if (merged.payments.online.provider === 'paypal' && !(await getPaymentAccount(db, request.tenantId, 'paypal'))?.configured) throw new ApiError(422, 'invalid_settings', 'Connect your PayPal account first');
+    }
+    if (merged.enabled && !merged.payments.bankTransfer.enabled && !merged.payments.cashOnDelivery.enabled && !merged.payments.payAtPickup.enabled && !merged.payments.online.enabled) {
       throw new ApiError(422, 'invalid_settings', 'Turn on at least one way to pay');
     }
     await db.query('update tenants set store_settings = $2 where id = $1', [request.tenantId, JSON.stringify(merged)]);

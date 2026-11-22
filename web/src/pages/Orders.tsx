@@ -9,7 +9,7 @@ import { useToast } from '../toast';
 import { ErrorText, Field, fromCents, Modal, money, Segmented, StatusBadge, toCents, TYPE_NAMES, usePageTitle, whatsappNumber } from '../ui';
 import { usePollWhile } from './Dashboard';
 
-export const PAYMENT_LABEL = { bank_transfer: 'Bank transfer', cash_on_delivery: 'Cash on delivery', pay_at_pickup: 'Pay at pickup' } as const;
+export const PAYMENT_LABEL = { bank_transfer: 'Bank transfer', cash_on_delivery: 'Cash on delivery', pay_at_pickup: 'Pay at pickup', online: 'Paid online' } as const;
 
 export function refundState(o: Pick<Order, 'totals'>): 'full' | 'partial' | null {
   const refunded = toCents(o.totals.refunded ?? '0');

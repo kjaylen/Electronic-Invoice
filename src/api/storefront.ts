@@ -6,6 +6,9 @@
  *   GET  /v1/store/:slug/products                active products
  *   GET  /v1/store/:slug/products/:handle        one product with its variants
  *   GET  /v1/store/:slug/images/:id              a product photo (long-cached)
+ *   POST /v1/store/:slug/orders/:n/pay?t=        start (or retry) paying an order online → where to send the buyer
+ *   POST /v1/store/:slug/orders/:n/payments/:id/confirm?t=   back from the provider: was it paid?
+ *   GET|POST /v1/store/:slug/test-payments/:id   the pretend card page of the test gateway
  *   POST /v1/store/:slug/quote                   price a cart, with delivery
  *   POST /v1/store/:slug/orders                  place an order
  *   GET  /v1/store/:slug/orders/:number?t=       the buyer's order page (the token from the order link)
@@ -29,6 +32,10 @@ import { overLimit } from '../db/ratelimit.ts';
 import { type PhotoRow, sendPhoto } from './products.ts';
 import { getSubscription } from '../billing/billing.ts';
 import { hasFeature } from '../billing/plans.ts';
+import { confirmPayment, gatewayFor, PaymentError, startPayment } from '../commerce/payments.ts';
+import { gatewayOptions, settlePaidOrder } from './payments.ts';
+import { toBigInt } from '../db/database.ts';
+import { formatCents } from '../engine/decimal.ts';
 
 
 // Limits on placing orders (shared by every server process), so a script cannot flood a store.
@@ -42,10 +49,12 @@ const cartSchema = {
   items: { type: 'object', required: ['variantId', 'quantity'], additionalProperties: false, properties: { variantId: uuid, quantity: { type: 'integer', minimum: 1, maximum: 9999 } } },
 } as const;
 
-const PAYMENT_TEXT = { bank_transfer: 'Bank transfer', cash_on_delivery: 'Cash on delivery', pay_at_pickup: 'Pay at pickup' } as const;
+const PAYMENT_TEXT = { bank_transfer: 'Bank transfer', cash_on_delivery: 'Cash on delivery', pay_at_pickup: 'Pay at pickup', online: 'Paid online' } as const;
 
-export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDeps, ctx: ServerContext) {
+export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDeps, ctx: ServerContext, payments: { fetch?: typeof fetch } = {}) {
   const { db } = deps;
+  const slugOf = async (tenantId: string) => (await db.query<{ slug: string }>('select slug from tenants where id = $1', [tenantId])).rows[0]!.slug;
+  const gatewaySettings = gatewayOptions(deps, slugOf, payments);
   // A store on a plan without the online store (after a downgrade) is closed to buyers.
   const store = async (request: FastifyRequest<{ Params: { slug: string } }>) => {
     const s = await loadStore(db, request.params.slug);
@@ -68,7 +77,7 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
       test: s.environment === 'test',
       delivery: { enabled: s.settings.delivery.enabled, zones: s.settings.delivery.enabled ? s.settings.delivery.zones.map((z) => ({ name: z.name, fee: priceWithGst(z.fee, 'S') })) : [] },
       pickup: { enabled: s.settings.pickup.enabled, address: s.settings.pickup.enabled ? `${s.street}, ${s.city}` : null },
-      payments: { bankTransfer: p.bankTransfer.enabled, cashOnDelivery: p.cashOnDelivery.enabled, payAtPickup: p.payAtPickup.enabled },
+      payments: { bankTransfer: p.bankTransfer.enabled, cashOnDelivery: p.cashOnDelivery.enabled, payAtPickup: p.payAtPickup.enabled, online: p.online.enabled ? p.online.provider : null },
     };
   });
 
@@ -159,15 +168,22 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
   const choiceProps = {
     fulfillment: { type: 'string', enum: ['delivery', 'pickup'] },
     zone: { type: 'string', maxLength: 80 },
+    discountCode: { type: 'string', maxLength: 40 },
   } as const;
 
-  app.post<{ Params: { slug: string }; Body: { lines: OrderInput['lines']; fulfillment: 'delivery' | 'pickup'; zone?: string } }>(
+  app.post<{ Params: { slug: string }; Body: { lines: OrderInput['lines']; fulfillment: 'delivery' | 'pickup'; zone?: string; discountCode?: string } }>(
     '/:slug/quote',
     { schema: { params: { type: 'object', required: ['slug'], properties: slugParams }, body: { type: 'object', required: ['lines', 'fulfillment'], additionalProperties: false, properties: { lines: cartSchema, ...choiceProps } } } },
     async (request) => {
       const s = await store(request);
       const q = await quoteCart(db, deps, s, request.body.lines, request.body);
-      return { lines: q.lines.map((l) => ({ variantId: l.variantId, productTitle: l.productTitle, variantTitle: l.variantTitle, quantity: l.quantity, total: l.total })), delivery: q.delivery && { zone: q.delivery.zone, total: q.delivery.total }, totals: q.totals, paymentMethods: paymentMethodsFor(s.settings, request.body.fulfillment) };
+      return {
+        lines: q.lines.map((l) => ({ variantId: l.variantId, productTitle: l.productTitle, variantTitle: l.variantTitle, quantity: l.quantity, total: l.total, listTotal: l.listTotal })),
+        delivery: q.delivery && { zone: q.delivery.zone, total: q.delivery.total },
+        discount: q.discount && { code: q.discount.code, kind: q.discount.kind, saved: q.discount.saved },
+        totals: q.totals,
+        paymentMethods: paymentMethodsFor(s.settings, request.body.fulfillment),
+      };
     },
   );
 
@@ -183,7 +199,7 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
           properties: {
             lines: cartSchema,
             ...choiceProps,
-            paymentMethod: { type: 'string', enum: ['bank_transfer', 'cash_on_delivery', 'pay_at_pickup'] },
+            paymentMethod: { type: 'string', enum: ['bank_transfer', 'cash_on_delivery', 'pay_at_pickup', 'online'] },
             customer: {
               type: 'object',
               required: ['name', 'phone'],
@@ -218,9 +234,29 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
       const path = `/${s.slug}/shop/orders/${placed.number}?t=${placed.token}`;
       await audit(db, { tenantId: s.tenantId, action: 'order.placed', target: `#${placed.number}`, details: { total: placed.quote.totals.total }, ip: request.ip });
       void notify(request, s, placed, path).catch((e) => request.log.error({ err: e }, 'order notification failed'));
-      return reply.code(201).send({ number: placed.number, token: placed.token, path, totals: placed.quote.totals });
+      // Paying online: straight to the provider's page. If that fails, the order stands and the buyer can retry from its page.
+      let payment: { redirectUrl: string } | { error: string } | undefined;
+      if (request.body.paymentMethod === 'online') {
+        try {
+          payment = await beginPayment(s, placed.id, placed.number, placed.token);
+        } catch (e) {
+          payment = { error: e instanceof PaymentError ? e.message : 'The payment could not be started; try again from your order page' };
+        }
+      }
+      return reply.code(201).send({ number: placed.number, token: placed.token, path, totals: placed.quote.totals, ...(payment && { payment }) });
     },
   );
+
+  /** Create a checkout with the store's provider; returns where to send the buyer. */
+  async function beginPayment(s: StoreRef, orderId: string, number: number, token: string) {
+    const gateway = await gatewayFor(db, s.tenantId, s.settings.payments.online.provider, await gatewaySettings(s.tenantId));
+    const base = ctx.publicUrl?.replace(/\/$/, '') ?? '';
+    if (gateway.provider !== 'test' && !base) throw new PaymentError('PUBLIC_URL is not set on this server, so the payment provider cannot send buyers back');
+    const order = (await db.query<{ id: string; tenant_id: string; number: number; total_cents: unknown }>('select id, tenant_id, number, total_cents from orders where id = $1', [orderId])).rows[0]!;
+    const orderPage = `${base}/${s.slug}/shop/orders/${number}?t=${token}`;
+    const started = await startPayment(db, gateway, order, { store: s.name, returnUrl: (paymentId) => `${orderPage}&payment=${paymentId}`, cancelUrl: `${orderPage}&cancelled=1` });
+    return { redirectUrl: started.redirectUrl, paymentId: started.paymentId };
+  }
 
   /** Order confirmation to the buyer and a heads-up to the business, by email when set up. */
   async function notify(request: FastifyRequest, s: StoreRef, placed: { id: string; number: number; quote: { totals: { total: string } } }, path: string) {
@@ -232,7 +268,8 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
     if (o.customer_email) {
       const how = o.payment_method === 'bank_transfer'
         ? [`Pay ${total} by bank transfer:`, s.settings.payments.bankTransfer.instructions || 'The store will send you its bank details.', `Use order #${o.number} as the reference.`]
-        : o.payment_method === 'cash_on_delivery' ? [`Pay ${total} in cash when your order is delivered.`] : [`Pay ${total} when you pick up your order.`];
+        : o.payment_method === 'cash_on_delivery' ? [`Pay ${total} in cash when your order is delivered.`]
+          : o.payment_method === 'online' ? [`Total ${total}, paid online. Your receipt is emailed as soon as the payment is confirmed.`] : [`Pay ${total} when you pick up your order.`];
       const link = publicLink(ctx, path);
       await ctx.mailer.send({
         to: o.customer_email,
@@ -288,6 +325,8 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
         cancelReason: j.cancelReason,
         // How to pay, while it is still owed.
         instructions: order.status === 'open' && order.payment_status === 'unpaid' && order.payment_method === 'bank_transfer' ? s.settings.payments.bankTransfer.instructions : null,
+        discount: order.discount_code ? { code: order.discount_code } : null,
+        online: order.payment_method === 'online' ? await onlineState(order.id, order.status === 'open' && order.payment_status === 'unpaid' && s.settings.payments.online.enabled) : null,
         pickup: order.fulfillment === 'pickup' ? { address: `${s.street}, ${s.city}`, instructions: s.settings.pickup.instructions } : null,
         document: doc && ['authorized', 'authorized_with_alert', 'contingency_pending'].includes(doc.status)
           ? { type: doc.type, series: doc.series, number: doc.number, status: doc.status }
@@ -305,6 +344,70 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
       const copy = await printedCopy(deps, s.tenantId, order.document_id);
       return reply.type('application/pdf').header('Cache-Control', 'private, no-store').header('X-Robots-Tag', 'noindex')
         .header('Content-Disposition', `inline; filename="${copy.filename}.pdf"`).send(copy.pdf);
+    },
+  );
+
+  async function onlineState(orderId: string, canPay: boolean) {
+    const last = (await db.query<{ status: string; provider: string; detail: { reason?: string; error?: string } | null }>(
+      'select status, provider, detail from order_payments where order_id = $1 order by created_at desc limit 1', [orderId],
+    )).rows[0];
+    return { canPay, lastStatus: last?.status ?? null, lastProblem: last?.detail?.reason ?? last?.detail?.error ?? null, provider: last?.provider ?? null };
+  }
+
+  app.post<{ Params: { slug: string; number: string }; Querystring: { t: string } }>(
+    '/:slug/orders/:number/pay',
+    { schema: { params: orderParams, querystring: tokenQuery } },
+    async (request) => {
+      const { s, order } = await buyerOrder(request);
+      if (order.payment_method !== 'online' || order.status !== 'open' || order.payment_status !== 'unpaid') throw new StoreError('conflict', 'This order is not waiting for an online payment');
+      if (!s.settings.payments.online.enabled) throw new StoreError('conflict', 'This store is not taking online payments right now; contact it to pay another way');
+      if (await overLimit(db, `pay|${order.id}`, 20, HOUR_MS)) throw new ApiError(429, 'too_many_attempts', 'Too many payment attempts for this order; contact the store');
+      try {
+        return await beginPayment(s, order.id, order.number, request.query.t);
+      } catch (e) {
+        if (e instanceof PaymentError) throw new StoreError('conflict', e.message);
+        throw e;
+      }
+    },
+  );
+
+  app.post<{ Params: { slug: string; number: string; paymentId: string }; Querystring: { t: string } }>(
+    '/:slug/orders/:number/payments/:paymentId/confirm',
+    { schema: { params: { ...orderParams, required: ['slug', 'number', 'paymentId'], properties: { ...orderParams.properties, paymentId: uuid } }, querystring: tokenQuery } },
+    async (request) => {
+      const { s, order } = await buyerOrder(request);
+      const p = (await db.query<{ id: string; provider: 'paypal' | 'test'; order_id: string }>('select id, provider, order_id from order_payments where id = $1 and order_id = $2', [request.params.paymentId, order.id])).rows[0];
+      if (!p) throw new StoreError('not_found', 'Payment not found');
+      const gateway = await gatewayFor(db, s.tenantId, p.provider, await gatewaySettings(s.tenantId));
+      const now = await confirmPayment(db, gateway, p.id);
+      if (now.status === 'paid') await settlePaidOrder(deps, ctx, now);
+      return { status: now.status, problem: (now.detail as { reason?: string } | null)?.reason ?? null };
+    },
+  );
+
+  // ---------- the test gateway's pretend card page ----------
+  const testParams = { type: 'object', required: ['slug', 'id'], properties: { ...slugParams, id: uuid } } as const;
+  const testPayment = async (slug: string, id: string) => {
+    const r = (await db.query<{ id: string; status: string; amount_cents: unknown; number: number; store: string; detail: Record<string, unknown> | null; order_id: string }>(
+      `select p.id, p.status, p.amount_cents, o.number, coalesce(t.trade_name, t.legal_name) as store, p.detail, p.order_id
+       from order_payments p join orders o on o.id = p.order_id join tenants t on t.id = p.tenant_id
+       where p.id = $1 and t.slug = $2 and p.provider = 'test'`, [id, slug],
+    )).rows[0];
+    if (!r) throw new StoreError('not_found', 'Payment not found');
+    return r;
+  };
+  app.get<{ Params: { slug: string; id: string } }>('/:slug/test-payments/:id', { schema: { params: testParams } }, async (request) => {
+    const p = await testPayment(request.params.slug, request.params.id);
+    return { store: p.store, orderNumber: p.number, amount: formatCents(toBigInt(p.amount_cents)), status: p.status, decided: Boolean(p.detail?.testDecision) };
+  });
+  app.post<{ Params: { slug: string; id: string }; Body: { decision: 'approved' | 'declined' } }>(
+    '/:slug/test-payments/:id',
+    { schema: { params: testParams, body: { type: 'object', required: ['decision'], additionalProperties: false, properties: { decision: { type: 'string', enum: ['approved', 'declined'] } } } } },
+    async (request) => {
+      const p = await testPayment(request.params.slug, request.params.id);
+      if (p.status !== 'pending' || p.detail?.testDecision) throw new StoreError('conflict', 'This test payment was already decided');
+      await db.query("update order_payments set detail = coalesce(detail, '{}'::jsonb) || $2::jsonb, updated_at = now() where id = $1", [p.id, JSON.stringify({ testDecision: request.body.decision })]);
+      return { ok: true };
     },
   );
 }

@@ -15,6 +15,7 @@ import { add, compare, formatCents, parseCents, parseDecimal, percentOf, roundTo
 import { calculateDocument, type LineInput } from '../engine/calc.ts';
 import { BELIZE_DISTRICTS, type Customer, type DistrictCode } from '../engine/ubl.ts';
 import { issueDocument, type IssueRequest, type IssueResult, type PipelineDeps } from '../pipeline/issue.ts';
+import { allocateDiscount, DiscountError, type DiscountKind, discountShare, findUsableDiscount } from './discounts.ts';
 
 export class StoreError extends Error {
   override name = 'StoreError';
@@ -47,6 +48,8 @@ export interface StoreSettings {
     bankTransfer: { enabled: boolean; instructions: string };
     cashOnDelivery: { enabled: boolean };
     payAtPickup: { enabled: boolean };
+    /** Card or PayPal at checkout, through the business's own payment account. */
+    online: { enabled: boolean; provider: 'paypal' | 'test' };
   };
 }
 
@@ -58,7 +61,7 @@ export const DEFAULT_STORE_SETTINGS: StoreSettings = {
   whatsapp: '',
   delivery: { enabled: true, zones: [{ name: 'Belize City', fee: '10.00' }] },
   pickup: { enabled: true, instructions: '' },
-  payments: { bankTransfer: { enabled: true, instructions: '' }, cashOnDelivery: { enabled: true }, payAtPickup: { enabled: true } },
+  payments: { bankTransfer: { enabled: true, instructions: '' }, cashOnDelivery: { enabled: true }, payAtPickup: { enabled: true }, online: { enabled: false, provider: 'test' } },
 };
 
 /** Stored settings over the defaults, so older or partial settings always have every field. */
@@ -77,6 +80,7 @@ export function withDefaults(stored: Partial<StoreSettings> | null | undefined):
       bankTransfer: { enabled: s.payments?.bankTransfer?.enabled ?? d.payments.bankTransfer.enabled, instructions: s.payments?.bankTransfer?.instructions ?? '' },
       cashOnDelivery: { enabled: s.payments?.cashOnDelivery?.enabled ?? d.payments.cashOnDelivery.enabled },
       payAtPickup: { enabled: s.payments?.payAtPickup?.enabled ?? d.payments.payAtPickup.enabled },
+      online: { enabled: s.payments?.online?.enabled ?? false, provider: s.payments?.online?.provider ?? 'test' },
     },
   };
 }
@@ -111,10 +115,11 @@ export function paymentMethodsFor(settings: StoreSettings, fulfillment: 'deliver
     ...(p.bankTransfer.enabled ? ['bank_transfer' as const] : []),
     ...(p.cashOnDelivery.enabled && fulfillment === 'delivery' ? ['cash_on_delivery' as const] : []),
     ...(p.payAtPickup.enabled && fulfillment === 'pickup' ? ['pay_at_pickup' as const] : []),
+    ...(p.online.enabled ? ['online' as const] : []),
   ];
 }
 
-export type PaymentMethod = 'bank_transfer' | 'cash_on_delivery' | 'pay_at_pickup';
+export type PaymentMethod = 'bank_transfer' | 'cash_on_delivery' | 'pay_at_pickup' | 'online';
 
 // ---------- prices ----------
 
@@ -136,6 +141,8 @@ export interface CartLine {
 export interface CheckoutChoice {
   fulfillment: 'delivery' | 'pickup';
   zone?: string;
+  /** A discount code the buyer typed. */
+  discountCode?: string;
 }
 
 interface VariantRow {
@@ -165,11 +172,17 @@ export interface QuotedLine {
   gstCategory: 'S' | 'Z' | 'E';
   exemptionReasonCode: string | null;
   total: string;
+  /** The line's share of the discount, before GST. */
+  discountCents: bigint;
+  /** The line's total without the discount (what the shelf price adds up to). */
+  listTotal: string;
 }
 
 export interface Quote {
   lines: QuotedLine[];
   delivery: { zone: string; fee: string; total: string } | null;
+  /** The discount applied: how much less the buyer pays (GST included). */
+  discount: { id: string; code: string; kind: DiscountKind; saved: string; net: bigint } | null;
   totals: { lineExtension: string; gst: string; total: string };
   cents: { lineExtension: bigint; gst: bigint; total: bigint };
 }
@@ -204,7 +217,7 @@ export async function quoteCart(db: Queryable, deps: Pick<PipelineDeps, 'tax'>, 
     }
     lines.push({
       variantId, productTitle: v.title, variantTitle: variantTitle(v), sellerCode: v.seller_code, quantity, unitCode: v.unit_code,
-      unitPrice: trimDecimal(v.unit_price), gstCategory: v.gst_category, exemptionReasonCode: v.exemption_reason_code, total: '0',
+      unitPrice: trimDecimal(v.unit_price), gstCategory: v.gst_category, exemptionReasonCode: v.exemption_reason_code, total: '0', discountCents: 0n, listTotal: '0',
     });
   }
 
@@ -218,12 +231,43 @@ export async function quoteCart(db: Queryable, deps: Pick<PipelineDeps, 'tax'>, 
     throw new StoreError('invalid_order', 'This store does not offer pickup');
   }
 
+  // A discount code: each item line's share, as an allowance before GST.
+  let discount: Quote['discount'] = null;
+  if (choice.discountCode?.trim()) {
+    const before = calculateDocument({ lines: toLineInputs(lines, null) }, deps.tax);
+    let d;
+    try {
+      d = await findUsableDiscount(db, store.tenantId, choice.discountCode, before.taxInclusiveAmount);
+    } catch (e) {
+      if (e instanceof DiscountError) throw new StoreError('invalid_order', e.message);
+      throw e;
+    }
+    const shares = allocateDiscount(d, before.lines.map((l) => ({ net: l.netAmount, total: l.lineTotal })));
+    lines.forEach((l, i) => {
+      l.discountCents = shares[i]!;
+      l.listTotal = formatCents(before.lines[i]!.lineTotal);
+    });
+    if (d.kind === 'free_delivery' && delivery) delivery.fee = '0';
+    discount = { id: d.id, code: d.code, kind: d.kind, saved: '0', net: shares.reduce((a, x) => a + x, 0n) };
+  }
+
   const t = calculateDocument({ lines: toLineInputs(lines, delivery) }, deps.tax);
-  lines.forEach((l, i) => (l.total = formatCents(t.lines[i]!.lineTotal)));
+  lines.forEach((l, i) => {
+    l.total = formatCents(t.lines[i]!.lineTotal);
+    if (!discount) l.listTotal = l.total;
+  });
   if (delivery) delivery.total = formatCents(t.lines[lines.length]!.lineTotal);
+  if (discount) {
+    // What the buyer saves: the same order without the code, minus this one.
+    const withoutLines = lines.map((l) => ({ ...l, discountCents: 0n }));
+    const zone = delivery && store.settings.delivery.zones.find((z) => z.name === delivery!.zone);
+    const without = calculateDocument({ lines: toLineInputs(withoutLines, delivery && zone ? { zone: delivery.zone, fee: zone.fee } : null) }, deps.tax);
+    discount.saved = formatCents(without.taxInclusiveAmount - t.taxInclusiveAmount);
+  }
   return {
     lines,
     delivery,
+    discount,
     totals: { lineExtension: formatCents(t.lineExtensionAmount), gst: formatCents(t.gstAmount), total: formatCents(t.taxInclusiveAmount) },
     cents: { lineExtension: t.lineExtensionAmount, gst: t.gstAmount, total: t.taxInclusiveAmount },
   };
@@ -233,7 +277,9 @@ function lineDescription(l: { productTitle: string; variantTitle: string | null 
   return l.variantTitle ? `${l.productTitle} – ${l.variantTitle}` : l.productTitle;
 }
 
-function toLineInputs(lines: Array<Pick<QuotedLine, 'productTitle' | 'variantTitle' | 'sellerCode' | 'quantity' | 'unitCode' | 'unitPrice' | 'gstCategory' | 'exemptionReasonCode'>>, delivery: { zone: string; fee: string } | null): LineInput[] {
+type LineSource = Pick<QuotedLine, 'productTitle' | 'variantTitle' | 'sellerCode' | 'quantity' | 'unitCode' | 'unitPrice' | 'gstCategory' | 'exemptionReasonCode'> & { discountCents?: bigint; discountLabel?: string };
+
+function toLineInputs(lines: LineSource[], delivery: { zone: string; fee: string } | null): LineInput[] {
   const out: LineInput[] = lines.map((l) => ({
     description: lineDescription(l),
     quantity: String(l.quantity),
@@ -242,6 +288,7 @@ function toLineInputs(lines: Array<Pick<QuotedLine, 'productTitle' | 'variantTit
     gstCategory: l.gstCategory,
     ...(l.sellerCode && { sellerItemCode: l.sellerCode }),
     ...(l.gstCategory === 'E' && l.exemptionReasonCode && { exemptionReasonCode: l.exemptionReasonCode }),
+    ...(l.discountCents && l.discountCents > 0n && { allowanceCharges: [{ isCharge: false, reason: l.discountLabel ?? 'Discount', amount: formatCents(l.discountCents) }] }),
   }));
   // Delivery is a standard-rated service line (free delivery still appears, at zero).
   if (delivery) {
@@ -273,6 +320,10 @@ export async function placeOrder(db: Database, deps: Pick<PipelineDeps, 'tax'>, 
 
   return db.transaction(async (tx) => {
     const quote = await quoteCart(tx, deps, store, input.lines, input);
+    if (quote.discount) {
+      const used = await tx.query("update discount_codes set uses = uses + 1 where id = $1 and active and (max_uses is null or uses < max_uses) returning id", [quote.discount.id]);
+      if (!used.rows.length) throw new StoreError('invalid_order', 'This discount code has just been used up');
+    }
     // Reserve stock; the update fails for a variant that sold out since the quote.
     for (const l of quote.lines) {
       const r = await tx.query(
@@ -287,20 +338,21 @@ export async function placeOrder(db: Database, deps: Pick<PipelineDeps, 'tax'>, 
     const a = input.address;
     await tx.query(
       `insert into orders (id, tenant_id, number, token_hash, payment_method, fulfillment, delivery_zone, delivery_fee, customer_name, customer_email, customer_phone,
-         street, city, district_code, buyer_tin, buyer_name, note, line_extension_cents, gst_cents, total_cents)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)`,
+         street, city, district_code, buyer_tin, buyer_name, note, line_extension_cents, gst_cents, total_cents, discount_code_id, discount_code, discount_cents)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)`,
       [id, store.tenantId, number, tokenHash(token), input.paymentMethod, input.fulfillment, quote.delivery?.zone ?? null, quote.delivery?.fee ?? '0',
         input.customer.name.trim(), input.customer.email?.trim().toLowerCase() || null, input.customer.phone.trim(),
         a?.street ?? null, a?.city ?? null, a?.districtCode ?? null, input.business?.tin ?? null, input.business?.name.trim() ?? null, input.note?.trim() || null,
-        String(quote.cents.lineExtension), String(quote.cents.gst), String(quote.cents.total)],
+        String(quote.cents.lineExtension), String(quote.cents.gst), String(quote.cents.total),
+        quote.discount?.id ?? null, quote.discount?.code ?? null, String(quote.discount?.net ?? 0n)],
     );
     let n = 0;
     for (const l of quote.lines) {
       await tx.query(
-        `insert into order_lines (order_id, tenant_id, line_number, item_id, product_title, variant_title, seller_code, quantity, unit_code, unit_price, gst_category, exemption_reason_code, total_cents)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+        `insert into order_lines (order_id, tenant_id, line_number, item_id, product_title, variant_title, seller_code, quantity, unit_code, unit_price, gst_category, exemption_reason_code, total_cents, discount_cents)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
         [id, store.tenantId, ++n, l.variantId, l.productTitle, l.variantTitle, l.sellerCode, l.quantity, l.unitCode, l.unitPrice, l.gstCategory, l.exemptionReasonCode,
-          String(parseCents(l.total))],
+          String(parseCents(l.total)), String(l.discountCents)],
       );
     }
     return { id, number, token, quote };
@@ -333,6 +385,8 @@ export interface OrderRow {
   gst_cents: unknown;
   total_cents: unknown;
   refunded_cents: unknown;
+  discount_code: string | null;
+  discount_cents: unknown;
   document_id: string | null;
   created_at: string | Date;
   paid_at: string | Date | null;
@@ -353,6 +407,7 @@ export interface OrderLineRow {
   gst_category: 'S' | 'Z' | 'E';
   exemption_reason_code: string | null;
   total_cents: unknown;
+  discount_cents: unknown;
 }
 
 export async function loadOrder(db: Queryable, tenantId: string, where: { id: string } | { number: number; token: string }): Promise<{ order: OrderRow; lines: OrderLineRow[] } | null> {
@@ -361,7 +416,7 @@ export async function loadOrder(db: Queryable, tenantId: string, where: { id: st
     : (await db.query<OrderRow>('select * from orders where tenant_id = $1 and number = $2 and token_hash = $3', [tenantId, where.number, tokenHash(where.token)])).rows[0];
   if (!order) return null;
   const lines = (await db.query<OrderLineRow>(
-    `select line_number, item_id, product_title, variant_title, seller_code, quantity::text as quantity, unit_code, unit_price::text as unit_price, gst_category, exemption_reason_code, total_cents
+    `select line_number, item_id, product_title, variant_title, seller_code, quantity::text as quantity, unit_code, unit_price::text as unit_price, gst_category, exemption_reason_code, total_cents, discount_cents
      from order_lines where order_id = $1 order by line_number`,
     [order.id],
   )).rows;
@@ -370,8 +425,8 @@ export async function loadOrder(db: Queryable, tenantId: string, where: { id: st
 
 // ---------- the e-invoice ----------
 
-const MEANS: Record<PaymentMethod, string> = { bank_transfer: '30', cash_on_delivery: '10', pay_at_pickup: '10' };
-const MEANS_TEXT: Record<PaymentMethod, string> = { bank_transfer: 'bank transfer', cash_on_delivery: 'cash on delivery', pay_at_pickup: 'payment at pickup' };
+const MEANS: Record<PaymentMethod, string> = { bank_transfer: '30', cash_on_delivery: '10', pay_at_pickup: '10', online: '68' };
+const MEANS_TEXT: Record<PaymentMethod, string> = { bank_transfer: 'bank transfer', cash_on_delivery: 'cash on delivery', pay_at_pickup: 'payment at pickup', online: 'online payment' };
 
 /** A paid order as a BTS document: a tax invoice when the buyer gave a TIN, otherwise a tax receipt. */
 export function orderToIssueRequest(order: OrderRow, lines: OrderLineRow[]): IssueRequest {
@@ -391,6 +446,7 @@ export function orderToIssueRequest(order: OrderRow, lines: OrderLineRow[]): Iss
       lines.map((l) => ({
         productTitle: l.product_title, variantTitle: l.variant_title, sellerCode: l.seller_code, quantity: Number(l.quantity), unitCode: l.unit_code,
         unitPrice: trimDecimal(l.unit_price), gstCategory: l.gst_category, exemptionReasonCode: l.exemption_reason_code,
+        discountCents: BigInt(String(l.discount_cents ?? 0)), discountLabel: order.discount_code ? `Discount ${order.discount_code}` : 'Discount',
       })),
       delivery,
     ),
@@ -517,7 +573,8 @@ export async function refundOrder(
   const delivery = input.delivery ?? (full && left.delivery);
   if (delivery && !left.delivery) throw new StoreError('invalid_order', 'The delivery fee was not charged or was already refunded');
   const seen = new Set<number>();
-  const chosen: Array<{ line: OrderLineRow; quantity: number }> = [];
+  const chosen: Array<{ line: OrderLineRow; quantity: number; discount: bigint }> = [];
+  const refundedBefore = (lineNumber: number) => Number(lines.find((l) => l.line_number === lineNumber)!.quantity) - (left.lines.get(lineNumber) ?? 0);
   for (const w of wanted) {
     const line = lines.find((l) => l.line_number === w.lineNumber);
     if (!line || seen.has(w.lineNumber)) throw new StoreError('invalid_order', `Line ${w.lineNumber} is not on this order`);
@@ -526,7 +583,7 @@ export async function refundOrder(
     if (w.quantity === 0) continue;
     const max = left.lines.get(w.lineNumber) ?? 0;
     if (w.quantity > max) throw new StoreError('invalid_order', max <= 0 ? `${line.product_title} was already refunded` : `Only ${max} of ${line.product_title} can still be refunded`);
-    chosen.push({ line, quantity: w.quantity });
+    chosen.push({ line, quantity: w.quantity, discount: discountShare(BigInt(String(line.discount_cents ?? 0)), Number(line.quantity), refundedBefore(w.lineNumber), w.quantity) });
   }
   if (chosen.length === 0 && !delivery) throw new StoreError('invalid_order', 'Nothing left to refund on this order');
 
@@ -535,9 +592,10 @@ export async function refundOrder(
     etdType: '04',
     ...(base.customer && { customer: base.customer }),
     lines: toLineInputs(
-      chosen.map(({ line: l, quantity }) => ({
+      chosen.map(({ line: l, quantity, discount }) => ({
         productTitle: l.product_title, variantTitle: l.variant_title, sellerCode: l.seller_code, quantity, unitCode: l.unit_code,
         unitPrice: trimDecimal(l.unit_price), gstCategory: l.gst_category, exemptionReasonCode: l.exemption_reason_code,
+        discountCents: discount, discountLabel: order.discount_code ? `Discount ${order.discount_code}` : 'Discount',
       })),
       delivery ? { zone: order.delivery_zone ?? 'Delivery', fee: trimDecimal(order.delivery_fee) } : null,
     ),

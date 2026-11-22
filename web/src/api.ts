@@ -267,11 +267,11 @@ export interface StoreSettings {
   whatsapp: string;
   delivery: { enabled: boolean; zones: Array<{ name: string; fee: string }> };
   pickup: { enabled: boolean; instructions: string };
-  payments: { bankTransfer: { enabled: boolean; instructions: string }; cashOnDelivery: { enabled: boolean }; payAtPickup: { enabled: boolean } };
+  payments: { bankTransfer: { enabled: boolean; instructions: string }; cashOnDelivery: { enabled: boolean }; payAtPickup: { enabled: boolean }; online: { enabled: boolean; provider: 'paypal' | 'test' } };
   slug?: string;
 }
 
-export type PaymentMethod = 'bank_transfer' | 'cash_on_delivery' | 'pay_at_pickup';
+export type PaymentMethod = 'bank_transfer' | 'cash_on_delivery' | 'pay_at_pickup' | 'online';
 
 export interface Order {
   id: string;

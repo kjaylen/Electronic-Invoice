@@ -25,7 +25,7 @@ interface StoreInfo {
   test: boolean;
   delivery: { enabled: boolean; zones: Array<{ name: string; fee: string }> };
   pickup: { enabled: boolean; address: string | null };
-  payments: { bankTransfer: boolean; cashOnDelivery: boolean; payAtPickup: boolean };
+  payments: { bankTransfer: boolean; cashOnDelivery: boolean; payAtPickup: boolean; online: 'paypal' | 'test' | null };
 }
 
 interface ProductCard {
@@ -49,7 +49,7 @@ interface ProductPage {
 const slug = BUSINESS ?? '';
 const shopApi = (path: string) => `/v1/store/${slug}${path}`;
 export const imageUrl = (id: string) => `/v1/store/${slug}/images/${id}`;
-const PAYMENT_LABEL: Record<PaymentMethod, string> = { bank_transfer: 'Bank transfer', cash_on_delivery: 'Cash on delivery', pay_at_pickup: 'Pay at pickup' };
+const PAYMENT_LABEL: Record<PaymentMethod, string> = { bank_transfer: 'Bank transfer', cash_on_delivery: 'Cash on delivery', pay_at_pickup: 'Pay at pickup', online: 'Pay online now' };
 
 // ---------- the cart, on this device ----------
 
@@ -309,8 +309,9 @@ export function ShopCart() {
 }
 
 interface QuoteResult {
-  lines: Array<{ variantId: string; productTitle: string; variantTitle: string | null; quantity: number; total: string }>;
+  lines: Array<{ variantId: string; productTitle: string; variantTitle: string | null; quantity: number; total: string; listTotal?: string }>;
   delivery: { zone: string; total: string } | null;
+  discount: { code: string; kind: string; saved: string } | null;
   totals: { lineExtension: string; gst: string; total: string };
   paymentMethods: PaymentMethod[];
 }
@@ -338,6 +339,9 @@ export function ShopCheckout() {
   const [wantsInvoice, setWantsInvoice] = useState(false);
   const [business, setBusiness] = useState({ tin: '', name: '' });
   const [note, setNote] = useState('');
+  const [codeInput, setCodeInput] = useState('');
+  const [code, setCode] = useState('');
+  const [codeError, setCodeError] = useState<unknown>(null);
   const [quote, setQuote] = useState<QuoteResult | null>(null);
   const [quoteError, setQuoteError] = useState<unknown>(null);
   const [error, setError] = useState<unknown>(null);
@@ -347,17 +351,24 @@ export function ShopCheckout() {
 
   const refresh = useCallback(() => {
     if (!linesBody.length) return;
-    void api<QuoteResult>(shopApi('/quote'), { method: 'POST', body: { lines: linesBody, fulfillment, ...(fulfillment === 'delivery' && { zone }) } })
+    void api<QuoteResult>(shopApi('/quote'), { method: 'POST', body: { lines: linesBody, fulfillment, ...(fulfillment === 'delivery' && { zone }), ...(code && { discountCode: code }) } })
       .then((q) => {
         setQuote(q);
         setQuoteError(null);
+        setCodeError(null);
         setPayment((p) => (p && q.paymentMethods.includes(p) ? p : q.paymentMethods[0] ?? ''));
       })
       .catch((e) => {
+        // A code that does not work is said next to it, and the order is quoted without it.
+        if (code) {
+          setCodeError(e);
+          setCode('');
+          return;
+        }
         setQuote(null);
         setQuoteError(e);
       });
-  }, [linesBody, fulfillment, zone]);
+  }, [linesBody, fulfillment, zone, code]);
   useEffect(refresh, [refresh]);
 
   if (!cart.lines.length) return <div className="shop-empty"><h1>{t('Your cart is empty')}</h1><Link className="button" to="/shop">{t('Keep shopping')}</Link></div>;
@@ -369,7 +380,7 @@ export function ShopCheckout() {
     setBusy(true);
     setError(null);
     try {
-      const r = await api<{ number: number; token: string; path: string }>(shopApi('/orders'), {
+      const r = await api<{ number: number; token: string; path: string; payment?: { redirectUrl: string } | { error: string } }>(shopApi('/orders'), {
         method: 'POST',
         headers: { 'Idempotency-Key': key },
         body: {
@@ -381,9 +392,17 @@ export function ShopCheckout() {
           ...(needsAddress && { address }),
           ...(wantsInvoice && { business }),
           ...(note.trim() && { note: note.trim() }),
+          ...(code && { discountCode: code }),
         },
       });
       cart.clear();
+      store.set(`etd.orderlinks.${slug}`, { ...(store.get<Record<string, string>>(`etd.orderlinks.${slug}`) ?? {}), [String(r.number)]: `/shop/orders/${r.number}?t=${r.token}` });
+      // Paying online: on to the payment page (the provider's, or the test card page).
+      if (r.payment && 'redirectUrl' in r.payment) {
+        if (/^https?:/.test(r.payment.redirectUrl)) window.location.assign(r.payment.redirectUrl);
+        else navigate(r.payment.redirectUrl.replace(/^\/[^/]+(?=\/shop\/)/, ''), { replace: true });
+        return;
+      }
       navigate(`/shop/orders/${r.number}?t=${r.token}`, { replace: true, viewTransition: true });
     } catch (err) {
       setError(err);
@@ -437,7 +456,7 @@ export function ShopCheckout() {
             {(quote?.paymentMethods ?? []).map((m) => (
               <Radio key={m} name="payment" value={m} checked={payment === m} onChange={(v) => setPayment(v as PaymentMethod)}>
                 <strong>{t(PAYMENT_LABEL[m])}</strong>
-                <span className="small muted">{m === 'bank_transfer' ? t('The bank details appear after you order.') : m === 'cash_on_delivery' ? t('Pay the driver in cash.') : t('Pay when you collect.')}</span>
+                <span className="small muted">{m === 'bank_transfer' ? t('The bank details appear after you order.') : m === 'cash_on_delivery' ? t('Pay the driver in cash.') : m === 'online' ? (info.payments.online === 'paypal' ? t('Card or PayPal, charged in US dollars at BZ$2 = US$1.') : t('Test payments: no money moves.')) : t('Pay when you collect.')}</span>
               </Radio>
             ))}
           </div>
@@ -457,15 +476,27 @@ export function ShopCheckout() {
         {quote ? (
           <>
             <ul className="summary-lines">
-              {quote.lines.map((l) => <li key={l.variantId}><span>{l.quantity} × {l.productTitle}{l.variantTitle && ` (${l.variantTitle})`}</span><span className="num">{money(l.total)}</span></li>)}
+              {quote.lines.map((l) => <li key={l.variantId}><span>{l.quantity} × {l.productTitle}{l.variantTitle && ` (${l.variantTitle})`}</span><span className="num">{money(l.listTotal ?? l.total)}</span></li>)}
               {quote.delivery && <li><span>{t('Delivery: {zone}', { zone: quote.delivery.zone })}</span><span className="num">{money(quote.delivery.total)}</span></li>}
+              {quote.discount && <li className="discount-line"><span>{t('Discount {code}', { code: quote.discount.code })}</span><span className="num">−{money(quote.discount.saved)}</span></li>}
             </ul>
             <div><span>{t('GST included')}</span><span>{money(quote.totals.gst)}</span></div>
             <div className="grand"><span>{t('Total')}</span><span>{money(quote.totals.total)}</span></div>
           </>
         ) : quoteError ? <ErrorText error={quoteError} /> : <div className="skeleton" />}
+        <div className="discount-entry">
+          {code && quote?.discount ? (
+            <div className="row small"><span>{t('Code {code} applied', { code: quote.discount.code })}</span><span className="spacer" /><button type="button" className="link" onClick={() => { setCode(''); setCodeInput(''); }}>{t('Remove')}</button></div>
+          ) : (
+            <div className="row">
+              <input aria-label={t('Discount code')} placeholder={t('Discount code')} value={codeInput} onChange={(e) => setCodeInput(e.target.value.toUpperCase())} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); setCode(codeInput.trim()); } }} />
+              <button type="button" className="secondary" disabled={!codeInput.trim()} onClick={() => setCode(codeInput.trim())}>{t('Apply')}</button>
+            </div>
+          )}
+          <ErrorText error={codeError} />
+        </div>
         <ErrorText error={error} />
-        <button type="submit" className="big lime" disabled={busy || !quote || !payment}>{busy ? t('Placing your order…') : t('Place order')}<span className="chip" aria-hidden="true">→</span></button>
+        <button type="submit" className="big lime" disabled={busy || !quote || !payment}>{busy ? t('Placing your order…') : payment === 'online' ? t('Pay {amount}', { amount: money(quote?.totals.total ?? '0') }) : t('Place order')}<span className="chip" aria-hidden="true">→</span></button>
         <p className="small muted">{t('You get a receipt authorized by the Belize Tax Service once your payment is confirmed.')}</p>
       </aside>
     </form>
@@ -490,6 +521,8 @@ interface BuyerOrder {
   instructions: string | null;
   pickup: { address: string; instructions: string } | null;
   document: { type: string; series: string; number: string } | null;
+  discount: { code: string } | null;
+  online: { canPay: boolean; lastStatus: string | null; lastProblem: string | null; provider: string | null } | null;
 }
 
 export function ShopOrder() {
@@ -501,9 +534,38 @@ export function ShopOrder() {
   const [error, setError] = useState<unknown>(null);
   usePageTitle(t('Order #{n}', { n: number ?? '' }));
   const load = useCallback(() => api<BuyerOrder>(shopApi(`/orders/${number}?t=${encodeURIComponent(token)}`)).then(setO).catch(setError), [number, token]);
+  const navigate = useNavigate();
+  const paymentId = params.get('payment');
+  const [confirming, setConfirming] = useState(Boolean(paymentId));
+  const [payError, setPayError] = useState<unknown>(null);
+  const [paying, setPaying] = useState(false);
   useEffect(() => {
-    void load();
-  }, [load]);
+    // Back from the payment page: ask whether it went through, then load the order.
+    if (!paymentId) {
+      void load();
+      return;
+    }
+    void api<{ status: string; problem: string | null }>(shopApi(`/orders/${number}/payments/${paymentId}/confirm?t=${encodeURIComponent(token)}`), { method: 'POST' })
+      .catch(() => null)
+      .finally(() => {
+        setConfirming(false);
+        navigate(`/shop/orders/${number}?t=${encodeURIComponent(token)}`, { replace: true });
+        void load();
+      });
+  }, [load, paymentId, number, token, navigate]);
+  const payNow = async () => {
+    setPaying(true);
+    setPayError(null);
+    try {
+      store.set(`etd.orderlinks.${slug}`, { ...(store.get<Record<string, string>>(`etd.orderlinks.${slug}`) ?? {}), [String(number)]: `/shop/orders/${number}?t=${token}` });
+      const r = await api<{ redirectUrl: string }>(shopApi(`/orders/${number}/pay?t=${encodeURIComponent(token)}`), { method: 'POST' });
+      if (/^https?:/.test(r.redirectUrl)) window.location.assign(r.redirectUrl);
+      else navigate(r.redirectUrl.replace(/^\/[^/]+(?=\/shop\/)/, ''));
+    } catch (e) {
+      setPayError(e);
+      setPaying(false);
+    }
+  };
   // While waiting for the payment to be confirmed, check now and then.
   useEffect(() => {
     if (!o || o.status === 'cancelled' || (o.paymentStatus === 'paid' && o.document && o.fulfillmentStatus === 'fulfilled')) return;
@@ -511,7 +573,7 @@ export function ShopOrder() {
     return () => clearInterval(timer);
   }, [o, load]);
   if (error) return <div className="shop-empty"><h1>{t('Order not found')}</h1><p className="muted">{t('Use the link from your confirmation.')}</p></div>;
-  if (!o) return <div className="skeleton" style={{ height: '20rem' }} />;
+  if (!o || confirming) return <div className="stack shop-narrow">{confirming && <p className="muted">{t('Checking your payment…')}</p>}<div className="skeleton" style={{ height: '20rem' }} /></div>;
 
   const steps: Array<[string, boolean]> = [
     [t('Ordered'), true],
@@ -540,7 +602,17 @@ export function ShopOrder() {
           <p className="small">{t('Use order #{n} as the reference. The store confirms your payment and your receipt appears here.', { n: o.number })}</p>
         </section>
       )}
-      {o.paymentStatus === 'unpaid' && o.status === 'open' && o.paymentMethod !== 'bank_transfer' && (
+      {o.online && o.paymentStatus === 'unpaid' && o.status === 'open' && (
+        <section className="card stack pay-box">
+          <h2>{t('Pay {amount} online', { amount: money(o.totals.total) })}</h2>
+          {o.online.lastStatus === 'failed' && <div className="banner bad"><div><strong>{t('The payment did not go through')}</strong>{o.online.lastProblem ?? t('Nothing was charged. You can try again.')}</div></div>}
+          {o.online.lastStatus === 'pending' && <p className="small muted">{t('If you already paid, it can take a minute to show here.')}</p>}
+          {o.online.canPay ? <button className="big lime" disabled={paying} onClick={() => void payNow()}>{paying ? t('Opening the payment page…') : t('Pay now')}<span className="chip" aria-hidden="true">→</span></button>
+            : <p className="small">{t('The store is not taking online payments right now. Contact it to pay another way.')}</p>}
+          <ErrorText error={payError} />
+        </section>
+      )}
+      {o.paymentStatus === 'unpaid' && o.status === 'open' && o.paymentMethod !== 'bank_transfer' && o.paymentMethod !== 'online' && (
         <div className="banner info"><div>{o.paymentMethod === 'cash_on_delivery' ? t('Pay {amount} in cash when your order arrives.', { amount: money(o.totals.total) }) : t('Pay {amount} when you pick up your order.', { amount: money(o.totals.total) })}</div></div>
       )}
       {o.document && (
@@ -560,6 +632,7 @@ export function ShopOrder() {
           {o.fulfillment === 'delivery' && <li><span>{t('Delivery: {zone}', { zone: o.deliveryZone ?? '' })}</span><span className="muted small">{o.address && `${o.address.street}, ${o.address.city}`}</span></li>}
         </ul>
         <div className="totals">
+          {o.discount && <div><span>{t('Discount code')}</span><span>{o.discount.code}</span></div>}
           <div><span>{t('GST included')}</span><span>{money(o.totals.gst)}</span></div>
           <div className="grand"><span>{t('Total')}</span><span>{money(o.totals.total)}</span></div>
         </div>
@@ -569,6 +642,50 @@ export function ShopOrder() {
         {wa && <> · <a href={`https://wa.me/${wa}?text=${encodeURIComponent(t('Hello, about my order #{n}', { n: o.number }))}`} target="_blank" rel="noreferrer">WhatsApp</a></>}
       </p>
       <p className="small muted">{t('Keep this page’s link: it is how you get back to your order and receipt.')}</p>
+    </div>
+  );
+}
+
+/** The test gateway's pretend card page: approve or decline; no money moves. */
+export function ShopTestPayment() {
+  const t = useT();
+  usePageTitle(t('Test payment'));
+  const { paymentId } = useParams();
+  const navigate = useNavigate();
+  const [info, setInfo] = useState<{ store: string; orderNumber: number; amount: string; status: string; decided: boolean } | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    void api<NonNullable<typeof info>>(shopApi(`/test-payments/${paymentId}`)).then(setInfo).catch(setError);
+  }, [paymentId]);
+  const decide = async (decision: 'approved' | 'declined') => {
+    setBusy(true);
+    try {
+      await api(shopApi(`/test-payments/${paymentId}`), { method: 'POST', body: { decision } });
+      // Back to the order, the way a real provider would send the buyer back.
+      const back = store.get<Record<string, string>>(`etd.orderlinks.${slug}`)?.[String(info!.orderNumber)];
+      navigate(back ? `${back}&payment=${paymentId}` : '/shop', { replace: true });
+    } catch (e) {
+      setError(e);
+      setBusy(false);
+    }
+  };
+  if (error) return <div className="shop-empty"><ErrorText error={error} /></div>;
+  if (!info) return <div className="skeleton" style={{ height: '16rem' }} />;
+  return (
+    <div className="shop-narrow stack test-pay">
+      <div className="banner warn"><div><strong>{t('Test payment')}</strong>{t('This store is in the BTS test environment. No card is charged and no money moves.')}</div></div>
+      <section className="card stack fake-card">
+        <span className="kicker">{info.store} · {t('Order #{n}', { n: info.orderNumber })}</span>
+        <div className="fake-card-amount">{money(info.amount)}</div>
+        <div className="fake-card-number mono">4242 4242 4242 4242</div>
+        <div className="row small muted"><span>12 / 34</span><span className="spacer" /><span>CVC 123</span></div>
+        <div className="row">
+          <button className="secondary" disabled={busy || info.decided} onClick={() => void decide('declined')}>{t('Decline')}</button>
+          <span className="spacer" />
+          <button className="lime" disabled={busy || info.decided} onClick={() => void decide('approved')}>{t('Pay {amount}', { amount: money(info.amount) })}</button>
+        </div>
+      </section>
     </div>
   );
 }

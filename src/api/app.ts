@@ -19,7 +19,7 @@
  * their role (see permissions.ts). Money and quantities are decimal strings in and out ("24.99").
  */
 
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { timingSafeEqual } from 'node:crypto';
 import fastifyStatic from '@fastify/static';
@@ -47,6 +47,9 @@ import { billingContextFactory, registerBillingRoutes } from './billing.ts';
 import { registerWebhookRoutes } from './webhooks.ts';
 import { countHit } from '../db/ratelimit.ts';
 import { buildOpenApi, routeCollector } from './openapi.ts';
+import { registerPaymentAccountRoutes } from './payments.ts';
+import { registerDiscountRoutes } from './discounts.ts';
+import { domainCache } from '../commerce/domains.ts';
 
 export type Principal = 'api' | Role;
 
@@ -86,6 +89,12 @@ export interface AppOptions {
   apiRateLimitPerMinute?: number;
   /** Let webhooks reach private addresses and plain http (development and tests only). */
   webhooksAllowPrivate?: boolean;
+  /** For tests: the fetch used to talk to payment providers. */
+  paymentsFetch?: typeof fetch;
+  /** Where businesses point their store domains (CNAME), e.g. stores.example.bz. */
+  storeDomainTarget?: string;
+  /** For tests: DNS TXT lookups for domain verification. */
+  resolveTxt?: (name: string) => Promise<string[][]>;
 }
 
 function bearer(request: FastifyRequest): string | undefined {
@@ -141,7 +150,10 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     allowSignup: options.allowSignup ?? true,
     ...(options.objectStore && { objects: options.objectStore }),
     ...(options.billing && { billing: options.billing }),
+    ...(options.storeDomainTarget && { storeDomainTarget: options.storeDomainTarget }),
+    ...(options.resolveTxt && { resolveTxt: options.resolveTxt }),
   };
+  const storeDomains = domainCache(db);
   const billingContext = billingContextFactory(deps, ctx);
 
   app.addHook('onResponse', async (_request, reply) => {
@@ -227,11 +239,13 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     registerDocumentRoutes(tenant, deps, ctx);
     registerUserRoutes(tenant, deps, ctx);
     registerBusinessRoutes(tenant, deps, ctx);
-    registerProductRoutes(tenant, deps, ctx);
+    registerProductRoutes(tenant, deps, ctx, storeDomains);
     registerOrderRoutes(tenant, deps, ctx);
     registerReportRoutes(tenant, deps);
     registerBillingRoutes(tenant, deps, ctx, billingContext);
     registerWebhookRoutes(tenant, deps, { ...(options.webhooksAllowPrivate && { allowPrivate: true }) });
+    registerPaymentAccountRoutes(tenant, deps, { ...(options.paymentsFetch && { fetch: options.paymentsFetch }) });
+    registerDiscountRoutes(tenant, deps);
   }, { prefix: '/v1' });
 
   registerPublicDocumentRoutes(app, deps);
@@ -247,12 +261,31 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   await app.register(async (platform) => registerPlatformRoutes(platform, deps, ctx, billingContext), { prefix: '/v1/platform' });
 
   // The public storefront: no sign-in, scoped by the business's address.
-  await app.register(async (store) => registerStorefrontRoutes(store, deps, ctx), { prefix: '/v1/store' });
+  await app.register(async (store) => registerStorefrontRoutes(store, deps, ctx, { ...(options.paymentsFetch && { fetch: options.paymentsFetch }) }), { prefix: '/v1/store' });
 
   // The web app: static files, and index.html for any other GET so client-side routes work.
   const webRoot = options.webRoot;
   const hasWeb = Boolean(webRoot && existsSync(join(webRoot, 'index.html')));
-  if (hasWeb) await app.register(fastifyStatic, { root: webRoot!, prefix: '/', wildcard: true, index: ['index.html'] });
+  // For a proxy with on-demand TLS: may it get a certificate for this domain?
+  app.get<{ Querystring: { domain?: string } }>('/v1/domains/check', async (request, reply) => {
+    const slug = request.query.domain ? await storeDomains.slugFor(request.query.domain) : undefined;
+    return slug ? { ok: true } : reply.code(404).send({ error: { code: 'not_found', message: 'Unknown domain' } });
+  });
+
+  // A store's own domain: its pages are the store, with the store named in the page (the app has no business in the path).
+  let indexHtml: string | null = null;
+  if (hasWeb) {
+    app.addHook('onRequest', async (request, reply) => {
+      if (request.method !== 'GET' || request.url.startsWith('/v1') || request.url.startsWith('/health') || request.url.startsWith('/assets/') || /\.[a-z0-9]{2,5}(\?|$)/i.test(request.url)) return;
+      const slug = await storeDomains.slugFor(request.hostname);
+      if (!slug) return;
+      if (!request.url.startsWith('/shop')) return reply.redirect('/shop', 302);
+      indexHtml ??= readFileSync(join(webRoot!, 'index.html'), 'utf8');
+      return reply.type('text/html').header('Cache-Control', 'no-cache')
+        .send(indexHtml.replace('</head>', `<meta name="einvoicing-store" content="${slug.replace(/[^a-z0-9-]/g, '')}"></head>`));
+    });
+    await app.register(fastifyStatic, { root: webRoot!, prefix: '/', wildcard: true, index: ['index.html'] });
+  }
   app.setNotFoundHandler((request, reply) => {
     const isPage = request.method === 'GET' && !request.url.startsWith('/v1') && !request.url.startsWith('/health') && !request.url.startsWith('/d/');
     if (hasWeb && isPage) return reply.type('text/html').sendFile('index.html');

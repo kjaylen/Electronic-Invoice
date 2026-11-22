@@ -13,6 +13,7 @@
  *   PLATFORM_PAYMENT_INSTRUCTIONS  how subscribers pay (bank details), shown on the plan page and invoices
  *   API_RATE_LIMIT_PER_MINUTE   requests per minute per API key (default 600)
  *   WEBHOOK_INTERVAL_MS         how often webhooks are sent, from the worker's process (default 5000)
+ *   STORE_DOMAIN_TARGET         the host businesses point their store domains at (CNAME), e.g. stores.example.bz
  *   WORKER_INTERVAL_MS   default 60000; 0 disables the worker in this process
  *   HOUSEKEEPING_INTERVAL_MS  default 300000 (notification emails, alerts, clean-up); 0 disables
  *   ALERT_WEBHOOK_URL    post operations alerts here (Slack/Teams/Discord-style JSON with "text")
@@ -37,6 +38,7 @@ import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { buildApp } from './api/app.ts';
 import { billingContextFactory } from './api/billing.ts';
+import { gatewayOptions, reconcilePayments } from './api/payments.ts';
 import { startHousekeeping } from './api/housekeeping.ts';
 import { startWorker } from './api/worker.ts';
 import { startWebhookDispatcher } from './webhooks/webhooks.ts';
@@ -74,6 +76,7 @@ const app = await buildApp({
   ...(env.METRICS_TOKEN && { metricsToken: env.METRICS_TOKEN }),
   ...(objectStore && { objectStore }),
   ...(env.API_RATE_LIMIT_PER_MINUTE && { apiRateLimitPerMinute: Number(env.API_RATE_LIMIT_PER_MINUTE) }),
+  ...(env.STORE_DOMAIN_TARGET && { storeDomainTarget: env.STORE_DOMAIN_TARGET }),
   ...((env.PLATFORM_BILLING_TENANT || env.PLATFORM_PAYMENT_INSTRUCTIONS) && {
     billing: { ...(env.PLATFORM_BILLING_TENANT && { tenantSlug: env.PLATFORM_BILLING_TENANT }), ...(env.PLATFORM_PAYMENT_INSTRUCTIONS && { paymentInstructions: env.PLATFORM_PAYMENT_INSTRUCTIONS }) },
   }),
@@ -96,19 +99,22 @@ const worker = intervalMs > 0
   : undefined;
 
 const billingSettings = { ...(env.PLATFORM_BILLING_TENANT && { tenantSlug: env.PLATFORM_BILLING_TENANT }), ...(env.PLATFORM_PAYMENT_INSTRUCTIONS && { paymentInstructions: env.PLATFORM_PAYMENT_INSTRUCTIONS }) };
-const billing = billingContextFactory(pipeline, {
+const backgroundCtx = {
   mailer: mailer ?? noMailer,
   mailConfigured: Boolean(mailer),
   ...(env.PUBLIC_URL && { publicUrl: env.PUBLIC_URL }),
   cookieSecure: env.COOKIE_SECURE !== 'false',
   allowSignup: env.ALLOW_SIGNUP !== 'false',
   billing: billingSettings,
-});
+};
+const billing = billingContextFactory(pipeline, backgroundCtx);
+const slugOf = async (tenantId: string) => (await db.query<{ slug: string }>('select slug from tenants where id = $1', [tenantId])).rows[0]!.slug;
 const housekeepingMs = Number(env.HOUSEKEEPING_INTERVAL_MS ?? 300_000);
 const housekeeping = housekeepingMs > 0
   ? startHousekeeping(db, {
       intervalMs: housekeepingMs,
       billing,
+      reconcilePayments: () => reconcilePayments(pipeline, backgroundCtx, gatewayOptions(pipeline, slugOf)),
       ...(mailer && { mailer }),
       ...(env.PUBLIC_URL && { publicUrl: env.PUBLIC_URL }),
       ...(env.ALERT_WEBHOOK_URL && { alertWebhookUrl: env.ALERT_WEBHOOK_URL }),
