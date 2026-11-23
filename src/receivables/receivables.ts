@@ -41,6 +41,7 @@ const RECEIVABLES = `
     coalesce((select sum(p.amount_cents) from invoice_payments p where p.document_id = d.id and p.voided_at is null), 0) as paid,
     coalesce((select sum(c.tax_inclusive_cents) from documents c where c.tenant_id = d.tenant_id and c.referenced_etdui = d.etdui
               and c.etd_type = '04' and c.status in ${CREDIT_STATUSES}), 0) as credited,
+    coalesce((select w.amount_cents from document_withholdings w where w.document_id = d.id), 0) as withheld,
     (${TODAY} - coalesce(d.due_date, d.issue_date)) as days_overdue
   from documents d
   where d.tenant_id = $1 and d.etd_type in ('01', '03') and d.status in ${OPEN_STATUSES}
@@ -61,6 +62,7 @@ interface ReceivableRow {
   customer_key: string;
   paid: unknown;
   credited: unknown;
+  withheld: unknown;
   days_overdue: number;
 }
 
@@ -70,7 +72,9 @@ function shape(r: ReceivableRow) {
   const total = toBigInt(r.total);
   const paid = toBigInt(r.paid);
   const credited = toBigInt(r.credited);
-  const balance = total - paid - credited;
+  // Contract tax the customer withholds and pays to BTS: not owed to the business.
+  const withheld = toBigInt(r.withheld);
+  const balance = total - paid - credited - withheld;
   const status: InvoiceStatus = balance < 0n ? 'credit' : balance === 0n ? 'paid' : r.days_overdue > 0 ? 'overdue' : paid + credited > 0n ? 'partial' : 'unpaid';
   return {
     documentId: r.id,
@@ -83,6 +87,7 @@ function shape(r: ReceivableRow) {
     total: formatCents(total),
     paid: formatCents(paid),
     credited: formatCents(credited),
+    withheld: formatCents(withheld),
     balance: formatCents(balance),
     balanceCents: balance,
     status,

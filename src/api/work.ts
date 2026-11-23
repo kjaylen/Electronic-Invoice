@@ -225,7 +225,7 @@ export function registerWorkRoutes(app: FastifyInstance, deps: PipelineDeps, ctx
       requirePermission(request, 'documents.issue');
       const { tenantId } = request;
       const b = request.body;
-      const customer = (await db.query<{ id: string; email: string | null }>('select id, email from customers where id = $1 and tenant_id = $2', [b.customerId, tenantId])).rows[0];
+      const customer = (await db.query<{ id: string; email: string | null; withholds_contract_tax: boolean }>('select id, email, withholds_contract_tax from customers where id = $1 and tenant_id = $2', [b.customerId, tenantId])).rows[0];
       if (!customer) throw notFound('Customer');
       // Claim the work first: nobody else can invoice it meanwhile.
       const params: unknown[] = [tenantId, b.customerId, new Date(Date.now() - CLAIM_MS).toISOString()];
@@ -260,6 +260,7 @@ export function registerWorkRoutes(app: FastifyInstance, deps: PipelineDeps, ctx
             ...(e.exemption_reason_code && { exemptionReasonCode: e.exemption_reason_code }),
           })),
           payment: { meansCode: '30', dueDate: addDays(belizeToday(), dueDays), terms: dueDays ? `Net ${dueDays}` : 'Due on receipt' },
+          ...(customer.withholds_contract_tax && { contractTax: true }),
           ...(b.note?.trim() && { note: b.note.trim() }),
         };
         const result = await issueFromBody(deps, tenantId, body, request.userId || null);

@@ -38,6 +38,7 @@ export const customerSchema = {
     contact: contactSchema,
     priceList: { type: 'string', enum: ['retail', 'wholesale'] },
     creditLimit: { anyOf: [{ type: 'string', pattern: '^\\d{1,10}(\\.\\d{1,2})?$' }, { type: 'null' }] },
+    withholdsContractTax: { type: 'boolean' },
   },
 } as const;
 
@@ -154,6 +155,8 @@ export const issueSchema = {
       properties: { meansCode: { type: 'string', pattern: '^\\d{1,3}$' }, dueDate: date, terms: text(500) },
     },
     note: text(1000),
+    // The customer withholds contract tax (a tax invoice only).
+    contractTax: { type: 'boolean' },
     prepaidAmount: money,
     payableRoundingAmount: money,
     // Tax receipts paid partly one way and partly another (cash and card): the parts, adding up to the total.

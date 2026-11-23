@@ -123,6 +123,12 @@ export function NewDocument({ mode = 'issue' }: { mode?: FormMode } = {}) {
   const [terms, setTerms] = useState(initialType === '02' ? '' : 'Net 30');
   // Tax invoices and debit notes paid on the spot: recorded as paid when issued.
   const [paidNow, setPaidNow] = useState(false);
+  // The customer withholds contract tax (a tax invoice): from their record, changeable here.
+  const [contractTax, setContractTax] = useState(false);
+  useEffect(() => {
+    if (editId) return;
+    setContractTax(customerMode === 'saved' && Boolean(customer?.withholdsContractTax));
+  }, [customer?.id, customer?.withholdsContractTax, customerMode, editId]);
   // Quotes and recurring invoices: when payment falls due after the invoice, and their own settings.
   const [dueDays, setDueDays] = useState('30');
   const [validUntil, setValidUntil] = useState(belizeDate(30));
@@ -227,6 +233,7 @@ export function NewDocument({ mode = 'issue' }: { mode?: FormMode } = {}) {
     void api<TemplateDetail>(mode === 'quote' ? `/v1/quotes/${editId}` : `/v1/recurring/${editId}`).then((d) => {
       const doc = d.document;
       setType(doc.type);
+      setContractTax(Boolean((doc as { contractTax?: boolean }).contractTax));
       setLines(doc.lines.map((l) => ({
         key: ++lineKey, ...(l.itemId && { itemId: l.itemId }), description: l.description ?? '', quantity: l.quantity, unitCode: l.unitCode ?? 'H87', unitPrice: l.unitPrice ?? '',
         gstCategory: l.gstCategory ?? 'S', exemptionReasonCode: l.exemptionReasonCode ?? '', discountPercent: l.allowanceCharges?.[0]?.percent ?? '',
@@ -435,7 +442,7 @@ export function NewDocument({ mode = 'issue' }: { mode?: FormMode } = {}) {
       }
       if (template) {
         // A quote or recurring invoice keeps what it will issue; the due date is set on issuing.
-        const document = { type, ...customerPart, lines: linesBody, payment: { meansCode, ...(terms.trim() && { terms: terms.trim() }) }, ...(note.trim() && { note: note.trim() }) };
+        const document = { type, ...customerPart, lines: linesBody, payment: { meansCode, ...(terms.trim() && { terms: terms.trim() }) }, ...(note.trim() && { note: note.trim() }), ...(contractTax && type === '01' && { contractTax: true }) };
         const due = Math.max(0, Math.min(365, Number(dueDays) || 0));
         let saved: { id: string };
         if (mode === 'quote') {
@@ -467,6 +474,7 @@ export function NewDocument({ mode = 'issue' }: { mode?: FormMode } = {}) {
           ...(note.trim() && { note: note.trim() }),
           ...(isNote && reference && { reference: { documentId: reference.id, reason: reason.trim() } }),
           ...(overrideCreditLimit && { overrideCreditLimit: true }),
+          ...(contractTax && type === '01' && { contractTax: true }),
         },
       });
       store.remove(draftKey);
@@ -684,6 +692,9 @@ export function NewDocument({ mode = 'issue' }: { mode?: FormMode } = {}) {
           {!template && (type === '01' || type === '03') && can('payments.record') && (
             <label className="row small"><input type="checkbox" checked={paidNow} onChange={(e) => setPaidNow(e.target.checked)} /> {t('Already paid in full (record the payment now)')}</label>
           )}
+          {type === '01' && (
+            <label className="row small"><input type="checkbox" checked={contractTax} onChange={(e) => setContractTax(e.target.checked)} /> {t('The customer withholds contract tax (6% of the amount before GST)')}</label>
+          )}
           <Field label={t('Terms')} hint={type === '02' ? t('Optional.') : undefined}><input value={terms} onChange={(e) => setTerms(e.target.value)} /></Field>
           <Field label={t('Note')} hint={t('Optional; printed on the document.')}><textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} /></Field>
         </fieldset>
@@ -695,6 +706,18 @@ export function NewDocument({ mode = 'issue' }: { mode?: FormMode } = {}) {
             <div><span>{t('Other taxes')}</span><span>{money(String((Number(preview.totals.tax) - Number(preview.totals.gst)).toFixed(2)))}</span></div>
           )}
           <div className="grand"><span>{t('Total')}</span><span aria-live="polite">{money(preview?.totals.taxInclusive ?? '0.00')}</span></div>
+          {contractTax && type === '01' && preview && (() => {
+            // As the server works it out: 6% of the amount before GST, half up to the cent.
+            const withheldCents = (toCents(preview.totals.lineExtension) * 6n + 50n) / 100n;
+            const withheld = (Number(withheldCents) / 100).toFixed(2);
+            const toPay = (Number(toCents(preview.totals.taxInclusive) - withheldCents) / 100).toFixed(2);
+            return (
+              <>
+                <div><span>{t('Contract tax withheld (6%)')}</span><span>−{money(withheld)}</span></div>
+                <div><span><strong>{t('To pay')}</strong></span><span><strong>{money(toPay)}</strong></span></div>
+              </>
+            );
+          })()}
           <ErrorText error={error} />
           {error instanceof ApiError && error.code === 'credit_limit' && can('documents.adjust') && (
             <button type="button" className="secondary" disabled={busy} onClick={() => void submit(null, true)}>{t('Allow it this time')}</button>

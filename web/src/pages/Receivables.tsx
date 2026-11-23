@@ -358,7 +358,7 @@ export function PaymentsCard({ doc, onChange }: { doc: DocumentDetailInfo; onCha
   const inv = data?.invoice;
   if (!inv) return null;
   const owed = toCents(inv.balance) > 0n;
-  const paidSoFar = toCents(inv.paid) + toCents(inv.credited);
+  const paidSoFar = toCents(inv.paid) + toCents(inv.credited) + toCents(inv.withheld ?? '0.00');
   const pct = toCents(inv.total) > 0n ? Number((paidSoFar * 100n) / toCents(inv.total)) : 0;
   return (
     <section className="card stack payments-card">
@@ -373,6 +373,7 @@ export function PaymentsCard({ doc, onChange }: { doc: DocumentDetailInfo; onCha
         <div><dt>{t('Due')}</dt><dd>{inv.dueDate}{inv.daysOverdue > 0 && <span className="late"> · {t('{n} days late', { n: inv.daysOverdue })}</span>}</dd></div>
         {!isZero(inv.paid) && <div><dt>{t('Paid')}</dt><dd>{money(inv.paid)}</dd></div>}
         {!isZero(inv.credited) && <div><dt>{t('Credit notes')}</dt><dd>{money(inv.credited)}</dd></div>}
+        {inv.withheld && !isZero(inv.withheld) && <div><dt>{t('Contract tax withheld')}</dt><dd>{money(inv.withheld)}</dd></div>}
       </dl>
       {data.payments.length > 0 && (
         <ul className="payment-list small">

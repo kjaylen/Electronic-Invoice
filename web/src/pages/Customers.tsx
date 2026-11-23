@@ -7,8 +7,8 @@ import { useToast } from '../toast';
 import { DISTRICTS, ErrorText, Field, Modal, Select, useDebounced, usePageTitle, Pager, usePages } from '../ui';
 import { ImportDialog } from './ImportDialog';
 
-type Form = { name: string; tin: string; street: string; city: string; districtCode: string; telephone: string; email: string; priceList: 'retail' | 'wholesale'; creditLimit: string };
-const EMPTY: Form = { name: '', tin: '', street: '', city: '', districtCode: '1', telephone: '', email: '', priceList: 'retail', creditLimit: '' };
+type Form = { name: string; tin: string; street: string; city: string; districtCode: string; telephone: string; email: string; priceList: 'retail' | 'wholesale'; creditLimit: string; withholdsContractTax: boolean };
+const EMPTY: Form = { name: '', tin: '', street: '', city: '', districtCode: '1', telephone: '', email: '', priceList: 'retail', creditLimit: '', withholdsContractTax: false };
 
 const toForm = (c: Customer): Form => ({
   name: c.name,
@@ -20,6 +20,7 @@ const toForm = (c: Customer): Form => ({
   email: c.contact.email ?? '',
   priceList: c.priceList ?? 'retail',
   creditLimit: c.creditLimit ?? '',
+  withholdsContractTax: Boolean(c.withholdsContractTax),
 });
 
 export const customerBody = (f: Form) => ({
@@ -29,6 +30,7 @@ export const customerBody = (f: Form) => ({
   ...((f.telephone || f.email) && { contact: { ...(f.telephone && { telephone: f.telephone }), ...(f.email && { email: f.email }) } }),
   priceList: f.priceList,
   creditLimit: f.creditLimit.trim() || null,
+  withholdsContractTax: f.withholdsContractTax,
 });
 
 /** Add or edit a customer. */
@@ -77,6 +79,10 @@ function CustomerForm(props: { initial?: Customer; onSaved: (c: Customer) => voi
           <input inputMode="decimal" pattern="\d{1,10}(\.\d{1,2})?" placeholder={t('No limit')} value={form.creditLimit} onChange={set('creditLimit')} />
         </Field>
       </div>
+      <label className="row small">
+        <input type="checkbox" checked={form.withholdsContractTax} onChange={(e) => setForm({ ...form, withholdsContractTax: e.target.checked })} />
+        <span>{t('Withholds contract tax (6% of the amount before GST)')} <span className="muted">· {t('Government, statutory bodies and companies that deduct it when they pay you. Their invoices say so, and the balance is what they pay.')}</span></span>
+      </label>
       {props.initial && <p className="small muted">{t('Documents already issued keep the details they were issued with.')}</p>}
       <ErrorText error={error} />
       <div className="row">

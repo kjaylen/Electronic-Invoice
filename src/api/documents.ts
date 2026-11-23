@@ -67,7 +67,14 @@ export interface IssueBody {
   overrideCreditLimit?: boolean;
   /** Loyalty points the customer uses as a reward on this sale (with customerId). */
   redeemPoints?: number;
+  /** The customer withholds contract tax from what they pay (a tax invoice only): noted on it, and its balance is the rest. */
+  contractTax?: boolean;
 }
+
+/** Contract tax a customer withholds: percent of the invoice before GST. Stored with each invoice, so a change never alters old ones. */
+export const CONTRACT_TAX_PERCENT = 6;
+/** Half up, to the cent. */
+export const contractTaxOn = (baseCents: bigint) => (baseCents * BigInt(CONTRACT_TAX_PERCENT * 100) + 5000n) / 10000n;
 
 const MEANS_NAMES: Record<string, string> = { '10': 'cash', '20': 'cheque', '30': 'transfer', '31': 'transfer', '42': 'bank transfer', '48': 'card', '54': 'credit card', '55': 'debit card' };
 
@@ -294,6 +301,16 @@ export async function issueFromBody(deps: PipelineDeps, tenantId: string, body: 
   // Paid in parts: checked against the total before anything is signed.
   const split = body.tenders ? splitPayment(issueRequest, body.tenders, deps.tax) : null;
   if (split) issueRequest = split.req;
+  // Contract tax withheld by the customer: written on the invoice (what they withhold, what they pay).
+  let withholding: { base: bigint; amount: bigint } | null = null;
+  if (body.contractTax) {
+    if (issueRequest.etdType !== '01') throw new ApiError(422, 'contract_tax_invoices_only', 'Contract tax is withheld on tax invoices only');
+    const t = calculateDocument({ lines: issueRequest.lines }, deps.tax);
+    const amount = contractTaxOn(t.lineExtensionAmount);
+    withholding = { base: t.lineExtensionAmount, amount };
+    const line = `Contract tax of ${CONTRACT_TAX_PERCENT}% (BZ$${formatCents(amount)} on BZ$${formatCents(t.lineExtensionAmount)} before GST) is withheld by the customer and paid to BTS. Amount to pay: BZ$${formatCents(t.payableAmount - amount)}.`;
+    issueRequest = { ...issueRequest, note: [issueRequest.note, line].filter(Boolean).join('\n') };
+  }
   if (issueRequest.etdType !== '04') await assertCanIssue(deps.db, tenantId);
   await checkCreditLimit(deps, tenantId, issueRequest);
   if (body.redeemPoints) {
@@ -303,6 +320,14 @@ export async function issueFromBody(deps: PipelineDeps, tenantId: string, body: 
   // Bought on account (an invoice not paid on the spot): within the customer's credit limit.
   if ((options.accountLimit ?? 'check') === 'check' && !body.paid) await checkAccountLimit(deps, tenantId, issueRequest);
   const result = await issueDocument(deps, tenantId, issueRequest);
+  // What the customer withholds counts towards the invoice's balance (and the business claims it against its business tax).
+  if (withholding && ['authorized', 'authorized_with_alert', 'contingency_pending', 'pending'].includes(result.status)) {
+    await deps.db.query(
+      `insert into document_withholdings (document_id, tenant_id, percent, base_cents, amount_cents)
+       select id, tenant_id, $3, $4, $5 from documents where tenant_id = $1 and (id = $2 or supersedes_document_id = $2) on conflict do nothing`,
+      [tenantId, result.documentId, CONTRACT_TAX_PERCENT, String(withholding.base), String(withholding.amount)],
+    );
+  }
   if (split) {
     await deps.db.query('update documents set tenders = $3 where tenant_id = $1 and (id = $2 or supersedes_document_id = $2)', [tenantId, result.documentId, JSON.stringify(split.parts)]);
   }
@@ -570,7 +595,15 @@ export function registerDocumentRoutes(app: FastifyInstance, deps: PipelineDeps,
   const withPayment = async <T extends { id: string; type: string }>(tenantId: string, doc: T) => {
     if (doc.type !== '01' && doc.type !== '03') return { ...doc, payment: null };
     const r = await receivable(db, tenantId, doc.id);
-    return { ...doc, payment: r ? { status: r.status, dueDate: r.dueDate, total: r.total, paid: r.paid, credited: r.credited, balance: r.balance, daysOverdue: r.daysOverdue } : null };
+    const contractTax = (await db.query<{ percent: string; amount_cents: unknown }>('select percent::text as percent, amount_cents from document_withholdings where document_id = $1', [doc.id])).rows[0];
+    return {
+      ...doc,
+      payment: r ? {
+        status: r.status, dueDate: r.dueDate, total: r.total, paid: r.paid, credited: r.credited, balance: r.balance, daysOverdue: r.daysOverdue,
+        // Contract tax the customer withholds (counted in the balance).
+        withheld: contractTax ? { percent: String(Number(contractTax.percent)), amount: formatCents(toBigInt(contractTax.amount_cents)) } : null,
+      } : null,
+    };
   };
 
   /** Invoices and receipts need documents.issue; credit and debit notes need documents.adjust. */

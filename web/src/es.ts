@@ -2842,4 +2842,9 @@ export const ES: Record<string, string> = {
   "Previous": "Anterior",
   "Page {n}": "Página {n}",
   "Older": "Más antiguos",
+  "Withholds contract tax (6% of the amount before GST)": "Retiene el impuesto por contrato (6% del monto antes del GST)",
+  "Government, statutory bodies and companies that deduct it when they pay you. Their invoices say so, and the balance is what they pay.": "Gobierno, entidades estatutarias y empresas que lo descuentan al pagarle. Sus facturas lo indican, y el saldo es lo que pagan.",
+  "The customer withholds contract tax (6% of the amount before GST)": "El cliente retiene el impuesto por contrato (6% del monto antes del GST)",
+  "Contract tax withheld (6%)": "Impuesto por contrato retenido (6%)",
+  "Contract tax withheld": "Impuesto por contrato retenido",
 };

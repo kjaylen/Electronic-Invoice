@@ -64,6 +64,7 @@ interface CustomerRow {
   email: string | null;
   price_list?: 'retail' | 'wholesale';
   credit_limit_cents?: string | number | bigint | null;
+  withholds_contract_tax?: boolean;
   archived_at?: string | Date | null;
   created_at: string | Date;
 }
@@ -77,6 +78,8 @@ export interface CustomerBody {
   priceList?: 'retail' | 'wholesale';
   /** How much they may owe on account (BZ$); null for no limit. */
   creditLimit?: string | null;
+  /** They withhold contract tax when they pay (government, statutory bodies, larger companies). */
+  withholdsContractTax?: boolean;
 }
 
 const customerJson = (r: CustomerRow) => ({
@@ -88,6 +91,7 @@ const customerJson = (r: CustomerRow) => ({
   contact: { telephone: r.telephone, email: r.email },
   priceList: r.price_list ?? 'retail',
   creditLimit: r.credit_limit_cents === null || r.credit_limit_cents === undefined ? null : formatCents(BigInt(r.credit_limit_cents)),
+  withholdsContractTax: Boolean(r.withholds_contract_tax),
   archived: Boolean(r.archived_at),
   createdAt: new Date(r.created_at).toISOString(),
 });
@@ -313,12 +317,12 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: PipelineDeps) 
     const b = request.body;
     const id = randomUUID();
     await db.query(
-      `insert into customers (id, tenant_id, name, tin, other_id_scheme, other_id_value, street, city, district_code, telephone, email, price_list, credit_limit_cents)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+      `insert into customers (id, tenant_id, name, tin, other_id_scheme, other_id_value, street, city, district_code, telephone, email, price_list, credit_limit_cents, withholds_contract_tax)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
       [id, request.tenantId, b.name, b.tin ?? null, b.otherId?.scheme ?? null, b.otherId?.value ?? null, b.address?.street ?? null,
         b.address?.city ?? null, b.address?.districtCode ?? null, b.contact?.telephone ?? null, b.contact?.email ?? null, b.priceList ?? 'retail',
         // Only those who manage the catalog set a credit limit (cashiers save customers at the counter).
-        b.creditLimit && can(request.principal, 'catalog.manage') ? String(parseCents(b.creditLimit)) : null],
+        b.creditLimit && can(request.principal, 'catalog.manage') ? String(parseCents(b.creditLimit)) : null, b.withholdsContractTax ?? false],
     );
     return reply.code(201).send(customerJson(await loadCustomer(deps, request.tenantId, id)));
   });
@@ -400,12 +404,13 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: PipelineDeps) 
       const r = await db.query(
         `update customers set name = $3, tin = $4, other_id_scheme = $5, other_id_value = $6, street = $7, city = $8, district_code = $9, telephone = $10, email = $11,
            price_list = coalesce($12, price_list),
-           credit_limit_cents = case when $13::boolean then $14::bigint else credit_limit_cents end
+           credit_limit_cents = case when $13::boolean then $14::bigint else credit_limit_cents end,
+           withholds_contract_tax = coalesce($15, withholds_contract_tax)
          where id = $1 and tenant_id = $2 returning id`,
         [request.params.id, request.tenantId, b.name, b.tin ?? null, b.otherId?.scheme ?? null, b.otherId?.value ?? null, b.address?.street ?? null,
           b.address?.city ?? null, b.address?.districtCode ?? null, b.contact?.telephone ?? null, b.contact?.email ?? null, b.priceList ?? null,
           // Left out: the limit stays; null removes it.
-          b.creditLimit !== undefined, b.creditLimit ? String(parseCents(b.creditLimit)) : null],
+          b.creditLimit !== undefined, b.creditLimit ? String(parseCents(b.creditLimit)) : null, b.withholdsContractTax ?? null],
       );
       if (!r.rows.length) throw notFound('Customer');
       return customerJson(await loadCustomer(deps, request.tenantId, request.params.id));

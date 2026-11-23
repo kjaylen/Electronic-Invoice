@@ -9,6 +9,7 @@
  *   profit-and-loss.csv     income and costs by month, costs by category
  *   sales-register.csv      every tax document of the period, any status
  *   payments-received.csv   payments recorded against invoices in the period (voided ones marked)
+ *   contract-tax-withheld.csv  invoices of the period whose customer withheld contract tax (for the business tax credit)
  *   expenses.csv            the period's purchases and costs
  *   receipts/               the receipts attached to those expenses
  *   receivables-ageing.csv  who owes what, as of today
@@ -64,6 +65,28 @@ async function paymentsCsv(db: Queryable, tenantId: string, from: string, to: st
   );
 }
 
+async function contractTaxCsv(db: Queryable, tenantId: string, from: string, to: string): Promise<string> {
+  const rows = (await db.query<{ issue_date: string; series_number: number; serial: string; customer: string | null; tin: string | null; base_cents: unknown; percent: string; amount_cents: unknown; status: string }>(
+    `select d.issue_date::text as issue_date, d.series_number, d.serial::text as serial, d.customer_snapshot->>'name' as customer, d.customer_snapshot->>'tin' as tin,
+       w.base_cents, w.percent::text as percent, w.amount_cents, d.status
+     from document_withholdings w join documents d on d.id = w.document_id
+     where w.tenant_id = $1 and d.issue_date between $2::date and $3::date and d.status in ('authorized', 'authorized_with_alert', 'contingency_pending', 'pending')
+     order by d.issue_date, d.serial`,
+    [tenantId, from, to],
+  )).rows;
+  const total = rows.reduce((a, r) => a + toBigInt(r.amount_cents), 0n);
+  return toCsv(
+    ['Invoice date', 'Invoice', 'Customer', 'Customer TIN', 'Before GST (BZD)', 'Rate (%)', 'Withheld (BZD)'],
+    [
+      ...rows.map((r) => [
+        { v: r.issue_date }, { v: `${String(r.series_number).padStart(3, '0')}-${r.serial.padStart(9, '0')}` }, { v: r.customer ?? '' }, { v: r.tin ?? '' },
+        { v: formatCents(toBigInt(r.base_cents)), text: false }, { v: String(Number(r.percent)), text: false }, { v: formatCents(toBigInt(r.amount_cents)), text: false },
+      ]),
+      [{ v: 'Total' }, { v: '' }, { v: '' }, { v: '' }, { v: '' }, { v: '' }, { v: formatCents(total), text: false }],
+    ],
+  );
+}
+
 function slugPart(s: string): string {
   return s.normalize('NFKD').replace(/[^\w]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'supplier';
 }
@@ -78,6 +101,7 @@ function readme(biz: { name: string; tin: string; environment: string }, from: s
     'profit-and-loss.csv    Income (before GST) and costs by month, and costs by category.',
     'sales-register.csv     Every tax document of the period, any status, with its BTS authorization.',
     'payments-received.csv  Payments recorded against invoices in the period. Voided payments are listed and marked.',
+    'contract-tax-withheld.csv  Invoices of the period whose customer withheld contract tax and paid it to BTS: a credit against business tax.',
     'expenses.csv           Purchases and costs of the period, with the supplier, GST treatment and whether the GST is claimable.',
     `receipts/              The receipts attached to those expenses (${receipts.included} of ${receipts.total}).`,
     'receivables-ageing.csv Who owes what, as of today (not as of the end of the period).',
@@ -119,6 +143,7 @@ export function registerAccountantPackRoutes(app: FastifyInstance, deps: Pipelin
         await zip.add('profit-and-loss.csv', profitCsv(await profitAndLoss(db, tenantId, from, to)));
         await zip.add('sales-register.csv', await documentRegisterCsv(db, tenantId, { from, to }));
         await zip.add('payments-received.csv', await paymentsCsv(db, tenantId, from, to));
+        await zip.add('contract-tax-withheld.csv', await contractTaxCsv(db, tenantId, from, to));
         await zip.add('expenses.csv', expensesCsvText(expenses.map(expenseJson)));
         for (const e of withReceipt.slice(0, MAX_PACK_RECEIPTS)) {
           const r = (await db.query<{ receipt_data: Uint8Array | null; receipt_key: string | null }>('select receipt_data, receipt_key from expenses where id = $1', [e.id])).rows[0];

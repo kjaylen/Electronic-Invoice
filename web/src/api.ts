@@ -158,6 +158,8 @@ export interface Customer {
   contact: { telephone: string | null; email: string | null };
   /** Wholesale customers pay items' wholesale prices. */
   priceList?: 'retail' | 'wholesale';
+  /** They withhold contract tax when they pay. */
+  withholdsContractTax?: boolean;
   /** How much they may owe on account (BZ$); null: no limit. */
   creditLimit?: string | null;
   archived?: boolean;
@@ -218,7 +220,7 @@ export interface DocumentInfo {
   issuedBy?: string | null;
   createdAt: string;
   /** Tax invoices and debit notes: what is owed (null for other documents and store orders paid at checkout). */
-  payment?: { status: InvoiceStatus; balance: string; dueDate: string; total?: string; paid?: string; credited?: string; daysOverdue?: number } | null;
+  payment?: { status: InvoiceStatus; balance: string; dueDate: string; total?: string; paid?: string; credited?: string; daysOverdue?: number; withheld?: { percent: string; amount: string } | null } | null;
 }
 
 // ---------- getting paid ----------
@@ -237,6 +239,8 @@ export interface Receivable {
   total: string;
   paid: string;
   credited: string;
+  /** Contract tax the customer withholds (counted in the balance). */
+  withheld?: string;
   balance: string;
   status: InvoiceStatus;
 }
