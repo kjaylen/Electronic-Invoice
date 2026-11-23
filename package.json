@@ -1,5 +1,5 @@
 {
-  "name": "belize-einvoicing",
+  "name": "floreo",
   "version": "0.1.0",
   "private": true,
   "description": "Belize e-invoicing core engine: builds, signs and submits Electronic Tax Documents to the Belize Tax Service.",

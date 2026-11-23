@@ -87,7 +87,7 @@ export function Start() {
         <button type="submit" className="big" disabled={busy}>{t('Continue')}<span className="chip" aria-hidden="true">→</span></button>
       </form>
       <div className="auth-foot">
-        <p>{t('New to eInvoicing?')} <Link to="/signup" viewTransition>{t('Create a business')}</Link></p>
+        <p>{t('New to Floreo?')} <Link to="/signup" viewTransition>{t('Create a business')}</Link></p>
         <p className="auth-foot-links"><Link to="/pricing">{t('Pricing')}</Link><a href="/docs">{t('API')}</a><Link to="/terms">{t('Terms')}</Link><Link to="/privacy">{t('Privacy')}</Link></p>
       </div>
     </Layout>

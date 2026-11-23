@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Restore a dump made by scripts/backup.sh into DATABASE_URL.
 #
-#   DATABASE_URL=postgres://.../einvoicing_restore npm run restore -- backups/einvoicing-20261122T030000Z.dump
+#   DATABASE_URL=postgres://.../einvoicing_restore npm run restore -- backups/floreo-20261122T030000Z.dump
 #
 # Restore into a NEW, empty database first and check it (see docs/operations.md,
 # "Recovery"), then point the app at it. Restoring over a live database needs

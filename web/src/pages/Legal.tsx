@@ -47,7 +47,7 @@ export function PublicFooter() {
   const t = useT();
   return (
     <footer className="public-footer">
-      <span>eInvoicing · {t('Electronic tax documents for Belize')}</span>
+      <span>Floreo · {t('by Altiora Technologies')}</span>
       <span className="spacer" />
       <Link to="/pricing">{t('Pricing')}</Link>
       <a href="/docs">{t('API')}</a>
@@ -123,7 +123,7 @@ export function Terms() {
       <article className="legal">
         <span className="kicker">{t('Last updated {date}', { date: UPDATED })}</span>
         <h1>{t('Terms of service')}</h1>
-        <p>These terms are an agreement between your business and <Who site={site} /> ("we") for the use of eInvoicing, a service that prepares, signs and sends electronic tax documents to the Belize Tax Service (BTS), and the related online store, counter and tools.</p>
+        <p>These terms are an agreement between your business and <Who site={site} /> ("we") for the use of Floreo, a service that prepares, signs and sends electronic tax documents to the Belize Tax Service (BTS), and the related online store, counter and tools.</p>
         <h2>1. Your account</h2>
         <p>You create an account for a business you are allowed to act for. You are responsible for the people you give access to, their roles, and keeping sign-in details safe. Turn on two-step sign-in for owners and admins.</p>
         <h2>2. Your documents and BTS</h2>
@@ -158,7 +158,7 @@ export function Privacy() {
       <article className="legal">
         <span className="kicker">{t('Last updated {date}', { date: UPDATED })}</span>
         <h1>{t('Privacy policy')}</h1>
-        <p>This policy explains what <Who site={site} /> collects when businesses use eInvoicing and when people buy from their online stores, why, and what you can do about it.</p>
+        <p>This policy explains what <Who site={site} /> collects when businesses use Floreo and when people buy from their online stores, why, and what you can do about it.</p>
         <h2>What we collect</h2>
         <ul>
           <li><strong>Businesses:</strong> registered and trade name, TIN, address, contact details, BTS certificate.</li>

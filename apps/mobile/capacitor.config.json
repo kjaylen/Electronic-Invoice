@@ -1,8 +1,8 @@
 {
-  "appId": "bz.einvoicing.till",
-  "appName": "eInvoicing Till",
+  "appId": "bz.floreo.till",
+  "appName": "Floreo Till",
   "webDir": "www",
   "android": { "allowMixedContent": false },
-  "ios": { "contentInset": "never", "scheme": "eInvoicing Till" },
+  "ios": { "contentInset": "never", "scheme": "Floreo Till" },
   "plugins": { "SplashScreen": { "launchAutoHide": true } }
 }

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="16 8 36 46" width="360" height="460" role="img" aria-label="Floreo">
+  <title>Floreo</title>
+    <mask id="g-veins" maskUnits="userSpaceOnUse" x="0" y="0" width="64" height="64">
+      <rect width="64" height="64" fill="#fff"/>
+      <path d="M29.63 20.03L41.87 15.47" stroke="#000" stroke-width="1.05" stroke-linecap="round"/>
+      <path d="M28.85 33.7L36.65 31.3" stroke="#000" stroke-width="0.95" stroke-linecap="round"/>
+    </mask>
+    <g mask="url(#g-veins)">
+      <path d="M23 22.5Q32.33 8.57 48.5 13Q39.17 26.93 23 22.5Z" fill="#FFFFFF"/>
+      <path d="M23 35.5Q30.59 25.48 42.5 29.5Q34.91 39.52 23 35.5Z" fill="#FFFFFF"/>
+    </g>
+    <rect x="19.5" y="14" width="7.5" height="36" rx="3.75" fill="#FFFFFF"/>
+</svg>

@@ -1,6 +1,6 @@
 {
-  "name": "einvoicing-till",
-  "productName": "eInvoicing Till",
+  "name": "floreo-till",
+  "productName": "Floreo Till",
   "version": "1.0.0",
   "private": true,
   "description": "The till for Windows, macOS and Linux: sell, print receipts on network and USB receipt printers, open the cash drawer, show the customer the total.",
@@ -15,8 +15,8 @@
     "dist:linux": "npm run web && electron-builder --linux"
   },
   "build": {
-    "appId": "bz.einvoicing.till",
-    "productName": "eInvoicing Till",
+    "appId": "bz.floreo.till",
+    "productName": "Floreo Till",
     "files": [
       "main.cjs",
       "preload.cjs",
@@ -32,7 +32,7 @@
       "target": [
         "nsis"
       ],
-      "artifactName": "eInvoicing-Till-Setup-${version}.${ext}"
+      "artifactName": "Floreo-Till-Setup-${version}.${ext}"
     },
     "nsis": {
       "oneClick": false,
@@ -44,7 +44,7 @@
         "dmg"
       ],
       "category": "public.app-category.business",
-      "artifactName": "eInvoicing-Till-${version}.${ext}"
+      "artifactName": "Floreo-Till-${version}.${ext}"
     },
     "linux": {
       "target": [
@@ -52,7 +52,7 @@
         "deb"
       ],
       "category": "Office",
-      "artifactName": "eInvoicing-Till-${version}.${ext}"
+      "artifactName": "Floreo-Till-${version}.${ext}"
     }
   },
   "devDependencies": {

@@ -110,7 +110,7 @@ export function belizeDate(offsetDays: number): string {
 
 /** Sets the browser tab title for the page. */
 /** The tab's title: the page, then the site (the platform, or a store's own name on its pages). */
-export function usePageTitle(title: string, site = 'eInvoicing') {
+export function usePageTitle(title: string, site = 'Floreo') {
   useEffect(() => {
     document.title = title && title !== site ? `${title} · ${site}` : site;
   }, [title, site]);

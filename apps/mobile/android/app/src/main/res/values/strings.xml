@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">eInvoicing Till</string>
-    <string name="title_activity_main">eInvoicing Till</string>
-    <string name="package_name">bz.einvoicing.till</string>
-    <string name="custom_url_scheme">bz.einvoicing.till</string>
+    <string name="app_name">Floreo Till</string>
+    <string name="title_activity_main">Floreo Till</string>
+    <string name="package_name">bz.floreo.till</string>
+    <string name="custom_url_scheme">bz.floreo.till</string>
 </resources>

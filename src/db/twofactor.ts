@@ -19,7 +19,7 @@ import type { KeyProtector } from './keystore.ts';
 export type OwnerKind = 'user' | 'staff';
 
 /** The name authenticator apps show next to the code. */
-export const TOTP_ISSUER = 'eInvoicing Belize';
+export const TOTP_ISSUER = 'Floreo';
 
 // ---------- TOTP ----------
 

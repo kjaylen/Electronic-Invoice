@@ -48,7 +48,7 @@ test('webhook URLs: https only, never private or internal addresses', () => {
   for (const bad of ['https://127.0.0.1/x', 'https://10.1.2.3/x', 'https://192.168.0.10/x', 'https://169.254.169.254/latest', 'https://localhost/x', 'https://db.internal/x', 'https://[::1]/x', 'https://user:pw@example.com/x']) {
     assert.throws(() => checkEndpointUrl(bad), Error, bad);
   }
-  assert.equal(checkEndpointUrl('https://hooks.example.com/einvoicing?k=1').hostname, 'hooks.example.com');
+  assert.equal(checkEndpointUrl('https://hooks.example.com/floreo?k=1').hostname, 'hooks.example.com');
   for (const ip of ['10.0.0.1', '172.16.5.4', '172.31.255.255', '100.64.0.1', '0.0.0.0', '::ffff:127.0.0.1', 'fd00::1', 'fe80::1']) assert.equal(isPrivateAddress(ip), true, ip);
   for (const ip of ['8.8.8.8', '172.32.0.1', '200.32.1.1', '2001:4860:4860::8888']) assert.equal(isPrivateAddress(ip), false, ip);
 });
@@ -75,9 +75,9 @@ test('webhooks: Pro plan; signed deliveries when documents are authorized or rej
     const sent = await dispatchWebhooks(f.db, { keys: f.deps.keys, allowPrivate: true });
     assert.deepEqual(sent, { created: 1, attempted: 1 });
     const first = hook.got[0]!;
-    assert.equal(first.headers['x-einvoicing-event'], 'document.authorized');
-    assert.ok(verifySignature(secret, String(first.headers['x-einvoicing-signature']), first.body), 'signed with the endpoint secret');
-    assert.equal(verifySignature('whsec_wrong', String(first.headers['x-einvoicing-signature']), first.body), false);
+    assert.equal(first.headers['x-floreo-event'], 'document.authorized');
+    assert.ok(verifySignature(secret, String(first.headers['x-floreo-signature']), first.body), 'signed with the endpoint secret');
+    assert.equal(verifySignature('whsec_wrong', String(first.headers['x-floreo-signature']), first.body), false);
     const event = JSON.parse(first.body);
     assert.equal(event.type, 'document.authorized');
     assert.equal(event.data.document.id, doc.id);
@@ -104,7 +104,7 @@ test('webhooks: Pro plan; signed deliveries when documents are authorized or rej
     // The test button.
     const ping = await app.inject({ method: 'POST', url: `/v1/webhooks/${endpointId}/test`, headers: h });
     assert.deepEqual(ping.json(), { ok: true, status: 200, error: null });
-    assert.equal(hook.got.at(-1)!.headers['x-einvoicing-event'], 'ping');
+    assert.equal(hook.got.at(-1)!.headers['x-floreo-event'], 'ping');
 
     // Twenty failures in a row switch the endpoint off.
     hook.answer(503);
@@ -165,7 +165,7 @@ test('the OpenAPI description covers the API-key routes, from their own schemas'
     assert.deepEqual(spec.paths['/v1/documents/{id}'].get.parameters.map((p: { name: string; in: string }) => [p.name, p.in]), [['id', 'path']]);
     assert.ok(spec.paths['/v1/webhooks'].post);
     for (const hidden of ['/v1/users', '/v1/billing', '/v1/api-keys', '/v1/audit']) assert.equal(spec.paths[hidden], undefined, hidden);
-    assert.match(spec.info.description, /X-EInvoicing-Signature/);
+    assert.match(spec.info.description, /X-Floreo-Signature/);
   } finally {
     await app.close();
     await f.close();

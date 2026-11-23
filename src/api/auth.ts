@@ -272,7 +272,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: PipelineDeps, opt
       const ipKey = `login|${request.ip}`;
       if (await atLimit(db, accountKey, 10) || await atLimit(db, ipKey, 50)) throw tooMany();
       const business = await businessOr404(slug);
-      if (business.suspended) throw new ApiError(403, 'business_suspended', 'This business is suspended. Contact eInvoicing support.');
+      if (business.suspended) throw new ApiError(403, 'business_suspended', 'This business is suspended. Contact Floreo support.');
       const result = await checkCredentials(db, business.id, login, request.body.password);
       if (!result.ok) {
         await countHit(db, accountKey, WINDOW_MS);
@@ -408,10 +408,10 @@ export function registerAuthRoutes(app: FastifyInstance, deps: PipelineDeps, opt
         await options.mailer.send({
           to: user.email,
           subject: `Reset your ${name} password`,
-          text: `Hello ${user.name},\n\nSomeone (hopefully you) asked to reset your password for ${name} on eInvoicing.\n\nChoose a new password here (the link works for one hour):\n${link}\n\nIf you did not ask for this, ignore this email; your password stays the same.`,
+          text: `Hello ${user.name},\n\nSomeone (hopefully you) asked to reset your password for ${name} on Floreo.\n\nChoose a new password here (the link works for one hour):\n${link}\n\nIf you did not ask for this, ignore this email; your password stays the same.`,
           html: simpleHtml({
             heading: 'Reset your password',
-            paragraphs: [`Hello ${user.name},`, `Someone (hopefully you) asked to reset your password for ${name} on eInvoicing. The link works for one hour.`, 'If you did not ask for this, ignore this email; your password stays the same.'],
+            paragraphs: [`Hello ${user.name},`, `Someone (hopefully you) asked to reset your password for ${name} on Floreo. The link works for one hour.`, 'If you did not ask for this, ignore this email; your password stays the same.'],
             button: { label: 'Choose a new password', url: link },
           }),
         });

@@ -64,7 +64,7 @@ export function makeKeyAndCertificate(commonName: string, now = new Date()): { p
   cert.validity.notBefore = new Date(now.getTime() - 5 * 60_000);
   const expiresAt = new Date(now.getTime() + 728 * 86_400_000);
   cert.validity.notAfter = expiresAt;
-  const name = [{ name: 'commonName', value: commonName.slice(0, 64) }, { name: 'organizationName', value: 'eInvoicing' }];
+  const name = [{ name: 'commonName', value: commonName.slice(0, 64) }, { name: 'organizationName', value: 'Floreo' }];
   cert.setSubject(name);
   cert.setIssuer(name);
   cert.sign(forge.pki.privateKeyFromPem(privateKey), forge.md.sha256.create());

@@ -103,7 +103,7 @@ export function AuthPanel() {
         <div className="lux-grain" />
         <div className="lux-vignette" />
       </div>
-      <div className="brand"><Brand light /></div>
+      <div className="brand"><Brand light /><span className="byline">{t('by Altiora Technologies')}</span></div>
       <div className="headline">
         <span className="kicker">{name ?? t('The commerce platform for Belize')}</span>
         <h2>{t('Sell in store and online, with e-invoicing built in.')}</h2>

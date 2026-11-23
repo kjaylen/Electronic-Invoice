@@ -1,6 +1,6 @@
 # The server and web app in one image.
-#   docker build -t einvoicing .
-#   docker run --env-file deploy/env.example -p 3000:3000 einvoicing
+#   docker build -t floreo .
+#   docker run --env-file deploy/env.example -p 3000:3000 floreo
 # Node runs the TypeScript sources directly (type stripping), so there is no compile step
 # for the server; the web app is built in the first stage.
 

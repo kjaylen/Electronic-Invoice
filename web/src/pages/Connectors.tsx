@@ -369,10 +369,10 @@ function NetSuiteSetup({ link: l, onClose, onSaved }: { link: ConnectorLink; onC
         <p className="small muted" style={{ margin: 0 }}>{t('Done once, by a NetSuite administrator. NetSuite signs this service in with a certificate made for this connection: no password is shared.')}</p>
         <ol className="connector-steps">
           <li>{t('Setup > Company > Enable Features > SuiteCloud: tick REST Web Services and OAuth 2.0.')}</li>
-          <li>{t('Setup > Integration > Manage Integrations > New: name it eInvoicing, tick only "Client Credentials (Machine to Machine) Grant", save, and copy the Client ID.')}</li>
+          <li>{t('Setup > Integration > Manage Integrations > New: name it Floreo, tick only "Client Credentials (Machine to Machine) Grant", save, and copy the Client ID.')}</li>
           <li>{t('A role for it with: Invoice, Cash Sale and Credit Memo (Edit, to write the BTS number back); Customers (View); REST Web Services and Log in using OAuth 2.0 Access Tokens (Full); SuiteAnalytics Workbook. Give the role to the employee the connection acts as.')}</li>
           <li>{t('Customization > Lists, Records & Fields > Transaction Body Fields > New: label "BTS number", ID _bts_number, type Free-Form Text, applied to Sale. Optionally a second one, _bts_status, for the status and ETDUI.')}</li>
-          <li>{t('Setup > Integration > Manage Authentication > OAuth 2.0 Client Credentials (M2M) Setup > Create New: the employee, the role and the eInvoicing application, and this certificate. Copy the Certificate ID.')} <a className="button small-button" href={link(`/v1/connectors/${l.id}/certificate`)} download>{t('Download the certificate')}</a></li>
+          <li>{t('Setup > Integration > Manage Authentication > OAuth 2.0 Client Credentials (M2M) Setup > Create New: the employee, the role and the Floreo application, and this certificate. Copy the Certificate ID.')} <a className="button small-button" href={link(`/v1/connectors/${l.id}/certificate`)} download>{t('Download the certificate')}</a></li>
         </ol>
         <div className="form-grid">
           <Field label={t('Account ID')} hint={t('Setup > Company > Company Information, e.g. 1234567 (a sandbox: 1234567_SB1).')}><input required value={accountId} onChange={(e) => setAccountId(e.target.value)} autoComplete="off" spellCheck={false} /></Field>

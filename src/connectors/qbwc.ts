@@ -278,7 +278,7 @@ export function writebackText(r: { payload: { memo?: string | null }; status: st
     tag = `[BTS ${number} · ${STATUS_WORDS[r.doc_status ?? ''] ?? r.doc_status} · ETDUI ${r.etdui}]`;
     other = number;
   } else {
-    tag = `[BTS not authorized: ${(r.problem ?? 'see eInvoicing').slice(0, 300)}. Fix it and save; it is sent again.]`;
+    tag = `[BTS not authorized: ${(r.problem ?? 'see Floreo').slice(0, 300)}. Fix it and save; it is sent again.]`;
     other = 'BTS: not authorized';
   }
   return { memo: [base, tag].filter(Boolean).join(' '), other };
@@ -461,10 +461,10 @@ async function stagePosReceipt(db: Queryable, link: ConnectorLink, p: PosReceipt
 export function qwcFile(link: { name: string; username: string; owner_id: string; file_id: string; kind: 'qbd' | 'qbpos' }, appUrl: string, businessName: string): string {
   return `<?xml version="1.0"?>
 <QBWCXML>
-  <AppName>${esc(`eInvoicing BTS - ${businessName} (${link.name})`.slice(0, 120))}</AppName>
+  <AppName>${esc(`Floreo BTS - ${businessName} (${link.name})`.slice(0, 120))}</AppName>
   <AppID></AppID>
   <AppURL>${esc(appUrl)}</AppURL>
-  <AppDescription>Sends your QuickBooks ${link.kind === 'qbpos' ? 'Point of Sale receipts' : 'invoices and sales receipts'} to the Belize Tax Service through eInvoicing${link.kind === 'qbd' ? ', and writes the BTS number back' : ''}.</AppDescription>
+  <AppDescription>Sends your QuickBooks ${link.kind === 'qbpos' ? 'Point of Sale receipts' : 'invoices and sales receipts'} to the Belize Tax Service through Floreo${link.kind === 'qbd' ? ', and writes the BTS number back' : ''}.</AppDescription>
   <AppSupport>${esc(new URL('/docs', appUrl).toString())}</AppSupport>
   <UserName>${esc(link.username)}</UserName>
   <OwnerID>{${link.owner_id}}</OwnerID>

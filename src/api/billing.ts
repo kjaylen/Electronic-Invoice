@@ -78,7 +78,7 @@ export async function emailServiceInvoice(deps: PipelineDeps, ctx: ServerContext
   if (!t) return;
   const j = invoiceJson(invoice);
   const lines = [
-    `Your eInvoicing ${j.planName} plan for ${new Date(j.periodStart).toLocaleDateString('en-GB', { month: 'long', year: 'numeric', timeZone: 'America/Belize' })}: BZ$${j.total} (GST included), due ${j.dueAt.slice(0, 10)}.`,
+    `Your Floreo ${j.planName} plan for ${new Date(j.periodStart).toLocaleDateString('en-GB', { month: 'long', year: 'numeric', timeZone: 'America/Belize' })}: BZ$${j.total} (GST included), due ${j.dueAt.slice(0, 10)}.`,
     ...(ctx.billing?.paymentInstructions ? [`How to pay: ${ctx.billing.paymentInstructions}`] : []),
   ];
   if (documentId && issuerId) {
@@ -88,9 +88,9 @@ export async function emailServiceInvoice(deps: PipelineDeps, ctx: ServerContext
   const url = ctx.publicUrl ? publicLink(ctx, `/${t.slug}/settings?tab=plan`) : undefined;
   await ctx.mailer.send({
     to: t.email,
-    subject: `${t.name}: your eInvoicing invoice (BZ$${j.total})`,
+    subject: `${t.name}: your Floreo invoice (BZ$${j.total})`,
     text: [...lines, ...(url ? [url] : [])].join('\n\n'),
-    html: simpleHtml({ heading: 'Your eInvoicing invoice', paragraphs: lines, ...(url && { button: { label: 'See your plan', url } }) }),
+    html: simpleHtml({ heading: 'Your Floreo invoice', paragraphs: lines, ...(url && { button: { label: 'See your plan', url } }) }),
   });
 }
 

@@ -453,7 +453,7 @@ export function registerPlatformRoutes(app: FastifyInstance, deps: PipelineDeps,
         return t;
       });
       void tellOwners(t, `${t.trade_name ?? t.legal_name} is suspended`, [
-        `${t.trade_name ?? t.legal_name} has been suspended on eInvoicing, so no one can sign in, its tills and API keys stop working and its online store is closed.`,
+        `${t.trade_name ?? t.legal_name} has been suspended on Floreo, so no one can sign in, its tills and API keys stop working and its online store is closed.`,
         `Reason: ${request.body.reason.trim()}`,
         'Documents already on their way to the Belize Tax Service still finish. Reply to this email to talk to us about it.',
       ]).catch((e) => request.log.error({ err: e }, 'suspension email failed'));
@@ -477,7 +477,7 @@ export function registerPlatformRoutes(app: FastifyInstance, deps: PipelineDeps,
         return t;
       });
       void tellOwners(t, `${t.trade_name ?? t.legal_name} is active again`, [
-        `${t.trade_name ?? t.legal_name} is active again on eInvoicing: your team can sign in, and your tills, API keys and online store work as before.`,
+        `${t.trade_name ?? t.legal_name} is active again on Floreo: your team can sign in, and your tills, API keys and online store work as before.`,
       ]).catch((e) => request.log.error({ err: e }, 'reactivation email failed'));
       return { ok: true, suspended: false };
     },
@@ -531,13 +531,13 @@ export function registerPlatformRoutes(app: FastifyInstance, deps: PipelineDeps,
       subject: `Reset your ${name} password`,
       text: `Hello ${u.name},
 
-eInvoicing support sent you this link to choose a new password for ${name} (it works for one hour):
+Floreo support sent you this link to choose a new password for ${name} (it works for one hour):
 ${link}
 
 If you did not ask for help, ignore this email; your password stays the same.`,
       html: simpleHtml({
         heading: 'Choose a new password',
-        paragraphs: [`Hello ${u.name},`, `eInvoicing support sent you this link to choose a new password for ${name}. It works for one hour.`, 'If you did not ask for help, ignore this email; your password stays the same.'],
+        paragraphs: [`Hello ${u.name},`, `Floreo support sent you this link to choose a new password for ${name}. It works for one hour.`, 'If you did not ask for help, ignore this email; your password stays the same.'],
         button: { label: 'Choose a new password', url: link },
       }),
     });
@@ -570,12 +570,12 @@ If you did not ask for help, ignore this email; your password stays the same.`,
           subject: `Two-step sign-in was turned off for ${name}`,
           text: `Hello ${u.name},
 
-eInvoicing support turned off two-step sign-in on your ${name} account, as you asked. Sign in with your password and set it up again with your new phone.
+Floreo support turned off two-step sign-in on your ${name} account, as you asked. Sign in with your password and set it up again with your new phone.
 
 If you did not ask for this, tell an owner of ${name} and reply to this email at once.`,
           html: simpleHtml({
             heading: 'Two-step sign-in was turned off',
-            paragraphs: [`Hello ${u.name},`, `eInvoicing support turned off two-step sign-in on your ${name} account, as you asked. Sign in with your password and set it up again with your new phone.`, `If you did not ask for this, tell an owner of ${name} and reply to this email at once.`],
+            paragraphs: [`Hello ${u.name},`, `Floreo support turned off two-step sign-in on your ${name} account, as you asked. Sign in with your password and set it up again with your new phone.`, `If you did not ask for this, tell an owner of ${name} and reply to this email at once.`],
           }),
         }).catch((e) => request.log.error({ err: e }, 'two-factor reset email failed'));
       }
@@ -684,7 +684,7 @@ If you did not ask for this, tell an owner of ${name} and reply to this email at
         to: o.email,
         subject: `${name} is live with BTS`,
         text: [`Hello ${o.name},`, ...lines, link].join('\n\n'),
-        html: simpleHtml({ heading: `${name} is live`, paragraphs: [`Hello ${o.name},`, ...lines], button: { label: 'Open eInvoicing', url: link } }),
+        html: simpleHtml({ heading: `${name} is live`, paragraphs: [`Hello ${o.name},`, ...lines], button: { label: 'Open Floreo', url: link } }),
       });
     }
   }

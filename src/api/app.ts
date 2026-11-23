@@ -389,7 +389,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
   // What the public pages need: who runs the service, and the plans.
   app.get('/v1/site', async (_request, reply) => reply.header('Cache-Control', 'public, max-age=300').send({
-    productName: 'eInvoicing',
+    productName: 'Floreo',
     legalName: options.site?.legalName ?? null,
     contactEmail: options.site?.contactEmail ?? null,
     plans: plansJson(),
@@ -457,7 +457,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         if (!path.startsWith('/shop')) return reply.redirect('/shop', 302);
         // The page's title and picture for link previews and search results.
         const meta = await storePageMeta(db, slug, path.replace(/^\/shop\/?/, ''), `${origin}/shop`).catch(() => null);
-        const html = page().replace('</head>', `<meta name="einvoicing-store" content="${slug.replace(/[^a-z0-9-]/g, '')}"></head>`);
+        const html = page().replace('</head>', `<meta name="floreo-store" content="${slug.replace(/[^a-z0-9-]/g, '')}"></head>`);
         return reply.type('text/html').header('Cache-Control', 'no-cache').send(meta ? withMeta(html, meta) : html);
       }
       // A store on the app's own address (/<slug>/shop/...): the same, with its sitemap beside it.

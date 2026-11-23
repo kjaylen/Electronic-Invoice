@@ -17,7 +17,7 @@ function fromLocation(): string | null {
 }
 
 /** On a store's own domain (shop.example.bz), the server names the store in the page. */
-const storeMeta = typeof document !== 'undefined' ? document.querySelector('meta[name="einvoicing-store"]')?.getAttribute('content') ?? null : null;
+const storeMeta = typeof document !== 'undefined' ? document.querySelector('meta[name="floreo-store"]')?.getAttribute('content') ?? null : null;
 export const STORE_DOMAIN = Boolean(storeMeta && SLUG.test(storeMeta));
 
 export const BUSINESS: string | null = STORE_DOMAIN ? storeMeta : fromLocation();

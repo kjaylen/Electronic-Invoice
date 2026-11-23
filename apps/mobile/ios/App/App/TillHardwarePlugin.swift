@@ -16,7 +16,7 @@ public class TillHardwarePlugin: CAPPlugin, CAPBridgedPlugin {
     ]
 
     /// One serial queue: every callback for a print runs here, one at a time.
-    private let queue = DispatchQueue(label: "bz.einvoicing.till.printer")
+    private let queue = DispatchQueue(label: "bz.floreo.till.printer")
 
     @objc func sendNetwork(_ call: CAPPluginCall) {
         guard let host = call.getString("host")?.trimmingCharacters(in: .whitespaces), !host.isEmpty,

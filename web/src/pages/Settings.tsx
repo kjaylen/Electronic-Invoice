@@ -462,8 +462,8 @@ function Handover({ result, onDone }: { result: { user: Account; welcomeUrl?: st
   const { session } = useSession();
   const address = `${window.location.host}/${session!.business.slug}`;
   const message = result.welcomeUrl
-    ? `${t('Your eInvoicing account is ready. Choose your password here:')} ${result.welcomeUrl}`
-    : `${t('Your eInvoicing account is ready.')} ${t('Sign in at {address} as {login}.', { address, login: signIn(result.user) })}`;
+    ? `${t('Your Floreo account is ready. Choose your password here:')} ${result.welcomeUrl}`
+    : `${t('Your Floreo account is ready.')} ${t('Sign in at {address} as {login}.', { address, login: signIn(result.user) })}`;
   return (
     <div className="stack">
       <div className="banner ok" role="status">
@@ -742,10 +742,10 @@ function describe(t: T, e: AuditEvent): string {
     'document.cancelled': t('Cancelled document {target}', { target }),
     'business.went_live': t('Moved this business to BTS production'),
     'business.back_to_test': t('Moved this business back to the BTS test environment'),
-    'business.suspended': t('eInvoicing suspended this business'),
-    'business.reactivated': t('eInvoicing reactivated this business'),
-    'support.reset_link_sent': t('eInvoicing support emailed {target} a link to choose a new password', { target }),
-    'support.two_factor_reset': t('eInvoicing support turned off two-step sign-in for {target}', { target }),
+    'business.suspended': t('Floreo suspended this business'),
+    'business.reactivated': t('Floreo reactivated this business'),
+    'support.reset_link_sent': t('Floreo support emailed {target} a link to choose a new password', { target }),
+    'support.two_factor_reset': t('Floreo support turned off two-step sign-in for {target}', { target }),
     'store.opened': t('Opened the online store'),
     'store.closed': t('Closed the online store'),
     'order.placed': t('Order {target} was placed online', { target }),
@@ -1053,7 +1053,7 @@ export function Settings() {
       {tab === 'activity' && <ActivityTab />}
       {tab === 'keys' && (me?.billing && !me.billing.features.includes('api') ? <UpgradeNotice feature="api" /> : (
         <div className="stack">
-          <div className="banner info"><div><strong>{t('Build on eInvoicing')}</strong>{t('Issue documents from your own POS or accounting system with the API.')} <a href="/docs" target="_blank" rel="noreferrer">{t('Read the API reference')} ↗</a></div></div>
+          <div className="banner info"><div><strong>{t('Build on Floreo')}</strong>{t('Issue documents from your own POS or accounting system with the API.')} <a href="/docs" target="_blank" rel="noreferrer">{t('Read the API reference')} ↗</a></div></div>
           <ApiKeysTab />
           {me?.billing && !me.billing.features.includes('webhooks') ? <UpgradeNotice feature="webhooks" /> : <WebhooksPanel />}
         </div>

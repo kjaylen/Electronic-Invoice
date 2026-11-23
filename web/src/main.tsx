@@ -195,7 +195,7 @@ function Layout() {
       <a className="skip-link" href="#main">{t('Skip to content')}</a>
       <aside className="sidebar" aria-label={t('Sidebar')}>
         <div className="sidebar-head">
-          <NavLink to="/" className="brand" viewTransition aria-label="eInvoicing"><Brand /></NavLink>
+          <NavLink to="/" className="brand" viewTransition aria-label="Floreo"><Brand /></NavLink>
           <button className="icon-button sidebar-close" aria-label={t('Close menu')} onClick={close}><Icons.close /></button>
         </div>
         <div className="biz-card">
@@ -252,7 +252,7 @@ function Layout() {
       <div className="workspace">
         <header className="mobilebar">
           <button className="icon-button" aria-expanded={open} aria-controls="main-nav" aria-label={t('Open menu')} onClick={() => setOpen(true)}><Icons.menu /></button>
-          <NavLink to="/" className="brand" viewTransition aria-label="eInvoicing"><Brand /></NavLink>
+          <NavLink to="/" className="brand" viewTransition aria-label="Floreo"><Brand /></NavLink>
           <span className="spacer" />
           {session!.business.environment === 'test' && <span className="badge test">{t('Test')}</span>}
         </header>
@@ -327,7 +327,7 @@ function NoticeBars({ notices }: { notices: NonNullable<Me['notices']> }) {
     <>
       {shown.map((n) => (
         <div key={n.id} className={`statusbar notice-bar ${n.level}`} role="status">
-          <span><strong>{t('From eInvoicing:')}</strong> {lang === 'es' && n.messageEs ? n.messageEs : n.message}</span>
+          <span><strong>{t('From Floreo:')}</strong> {lang === 'es' && n.messageEs ? n.messageEs : n.message}</span>
           <button type="button" className="link notice-dismiss" aria-label={t('Dismiss')} onClick={() => dismiss(n.id)}>×</button>
         </div>
       ))}

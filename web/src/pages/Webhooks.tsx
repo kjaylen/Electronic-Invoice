@@ -40,7 +40,7 @@ function SecretReveal({ secret, onDone }: { secret: string; onDone: () => void }
       <div style={{ width: '100%' }}>
         <strong>{t('Copy this signing secret now. It will not be shown again.')}</strong>
         <div className="key-reveal mono">{secret}</div>
-        <p className="small">{t('Use it to check the X-EInvoicing-Signature header of each delivery (see the API reference).')}</p>
+        <p className="small">{t('Use it to check the X-Floreo-Signature header of each delivery (see the API reference).')}</p>
         <div className="row" style={{ marginTop: '0.5rem' }}>
           <button className="secondary" onClick={() => void navigator.clipboard?.writeText(secret).then(() => toast(t('Secret copied')))}>{t('Copy')}</button>
           <button className="link" onClick={onDone}>{t("I've saved it")}</button>
@@ -171,7 +171,7 @@ export function WebhooksPanel() {
       {adding && (
         <Modal title={t('Add a webhook endpoint')} onClose={() => setAdding(false)}>
           <form className="stack" onSubmit={(e) => void create(e)}>
-            <Field label={t('URL')} hint={t('Must start with https:// and be reachable on the internet.')}><input type="url" required autoFocus placeholder="https://erp.example.bz/einvoicing" value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} /></Field>
+            <Field label={t('URL')} hint={t('Must start with https:// and be reachable on the internet.')}><input type="url" required autoFocus placeholder="https://erp.example.bz/floreo" value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} /></Field>
             <Field label={t('Description')}><input value={form.description} maxLength={200} placeholder={t('For example: our ERP')} onChange={(e) => setForm({ ...form, description: e.target.value })} /></Field>
             <fieldset className="plain stack">
               <legend>{t('Events')}</legend>

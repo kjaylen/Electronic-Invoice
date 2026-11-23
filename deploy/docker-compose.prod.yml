@@ -7,7 +7,7 @@
 
 services:
   app:
-    image: einvoicing:latest
+    image: floreo:latest
     build: ..
     restart: unless-stopped
     env_file: .env.production
@@ -36,7 +36,7 @@ services:
   # Nightly at 03:00 Belize time (09:00 UTC); dumps kept 14 days, and copied to
   # BACKUP_S3_URI when set. See docs/operations.md for restoring.
   backup:
-    image: einvoicing:latest
+    image: floreo:latest
     restart: unless-stopped
     # Root only to write the backups volume; the app container runs as "node".
     user: root

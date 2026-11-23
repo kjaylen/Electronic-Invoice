@@ -630,7 +630,7 @@ test('QuickBooks Desktop: connect it, an invoice made in QuickBooks goes to BTS,
   expect(username).toMatch(/^corner-store-qbd-/);
   const download = page.waitForEvent('download');
   await dialog.getByRole('link', { name: 'Download the .qwc file' }).click();
-  expect((await download).suggestedFilename()).toBe('einvoicing-qbd.qwc');
+  expect((await download).suggestedFilename()).toBe('floreo-qbd.qwc');
   await dialog.getByRole('button', { name: 'Done' }).click();
   await expect(page.locator('.connector-link')).toContainText('Not connected yet');
 

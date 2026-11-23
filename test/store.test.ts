@@ -460,7 +460,7 @@ test('store settings: validation, and only owners and admins change them', () =>
 test('link previews and search: store pages carry their title, price and picture; each store has a sitemap', () => {
   // A stand-in for the built web app.
   const web = mkdtempSync(join(tmpdir(), 'store-seo-'));
-  writeFileSync(join(web, 'index.html'), '<!doctype html><html><head><title>eInvoicing</title></head><body><div id="root"></div></body></html>');
+  writeFileSync(join(web, 'index.html'), '<!doctype html><html><head><title>Floreo</title></head><body><div id="root"></div></body></html>');
   return withStore(async (c) => {
     // Closed: the plain page, and no sitemap.
     const closed = await c.app.inject({ method: 'GET', url: `/${c.slug}/shop` });

@@ -1,4 +1,4 @@
-# eInvoicing Till for Windows, macOS and Linux
+# Floreo Till for Windows, macOS and Linux
 
 The till as a desktop app (Electron). The till itself is the web till (`web/src/pos`), bundled with the app and served from `app://pos/`. The app adds:
 

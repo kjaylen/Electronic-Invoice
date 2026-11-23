@@ -242,7 +242,7 @@ function Pair({ platform, initialServer, onPaired }: { platform: Platform; initi
 
   const pair = async (s: string, c: string) => {
     const base = normalizeServer(s);
-    if (!base) return setError(new ApiError(0, 'server', t('Enter the address of your eInvoicing server')));
+    if (!base) return setError(new ApiError(0, 'server', t('Enter the address of your Floreo server')));
     setBusy(true);
     setError(null);
     setTillTransport({ baseUrl: base, token: () => null });
@@ -267,7 +267,7 @@ function Pair({ platform, initialServer, onPaired }: { platform: Platform; initi
     setCamera(false);
     if (!text) return;
     const link = readPairingLink(text);
-    if (!link) return setError(new ApiError(0, 'qr', t('That is not a pairing code from eInvoicing')));
+    if (!link) return setError(new ApiError(0, 'qr', t('That is not a pairing code from Floreo')));
     setServer(link.server);
     setCode(link.code);
     void pair(link.server, link.code);
@@ -285,7 +285,7 @@ function Pair({ platform, initialServer, onPaired }: { platform: Platform; initi
         <p className="muted">{t('In the web app, a manager opens Settings → Tills, adds this till and gets a pairing code. Scan its QR code or type the code here.')}</p>
         {(platform.scanBarcode || browserCanScan()) && <button type="button" className="big secondary" onClick={() => void scan()}>{t('Scan the QR code')}</button>}
         {editServer ? (
-          <Field label={t('Server address')} hint={t('The address you sign in to eInvoicing at, e.g. app.example.bz')}>
+          <Field label={t('Server address')} hint={t('The address you sign in to Floreo at, e.g. app.example.bz')}>
             <input inputMode="url" autoCapitalize="off" autoCorrect="off" value={server} onChange={(e) => setServer(e.target.value)} required />
           </Field>
         ) : (

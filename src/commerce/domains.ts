@@ -3,7 +3,7 @@
  *
  * The business adds the domain, then creates two DNS records:
  *   CNAME  shop.example.bz             → STORE_DOMAIN_TARGET (our host for stores)
- *   TXT    _einvoicing.shop.example.bz → the verification token
+ *   TXT    _floreo.shop.example.bz → the verification token
  * and presses Verify. Once verified, requests for that host show the store.
  *
  * Certificates: put a proxy with on-demand TLS in front (Caddy's
@@ -41,7 +41,7 @@ export interface DomainRow {
   created_at: Date | string;
 }
 
-export const txtName = (domain: string) => `_einvoicing.${domain}`;
+export const txtName = (domain: string) => `_floreo.${domain}`;
 
 export function domainJson(r: DomainRow, target: string | undefined) {
   return {
@@ -62,7 +62,7 @@ export async function addDomain(db: Queryable, tenantId: string, domain: string)
   if (taken) return (await db.query<DomainRow>('select * from store_domains where domain = $1', [domain])).rows[0]!;
   const count = (await db.query<{ n: number }>('select count(*)::int as n from store_domains where tenant_id = $1', [tenantId])).rows[0]!.n;
   if (count >= 3) throw new DomainError('A store can have up to 3 domains');
-  const token = `einvoicing-verify=${randomBytes(16).toString('hex')}`;
+  const token = `floreo-verify=${randomBytes(16).toString('hex')}`;
   await db.query('insert into store_domains (domain, tenant_id, verification_token) values ($1, $2, $3)', [domain, tenantId, token]);
   return (await db.query<DomainRow>('select * from store_domains where domain = $1', [domain])).rows[0]!;
 }

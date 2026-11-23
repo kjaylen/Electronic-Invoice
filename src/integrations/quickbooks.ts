@@ -12,7 +12,7 @@
  * Each document's DocNumber is its series and number ("001-000000012"), and
  * the BTS document id (ETDUI) and authorization go in the private note.
  * Customers are matched by name (and created when missing). Lines use one
- * service item ("eInvoicing sales", created on the first sync). GST: when the
+ * service item ("Floreo sales", created on the first sync). GST: when the
  * business maps its QuickBooks tax codes to the GST rates, lines carry them
  * and QuickBooks books the tax; until then lines are sent with GST included
  * so totals always agree with the e-invoice.
@@ -32,7 +32,7 @@ export const TOKEN_URL = 'https://oauth.platform.intuit.com/oauth2/v1/tokens/bea
 export const REVOKE_URL = 'https://developer.api.intuit.com/v2/oauth2/tokens/revoke';
 export const API_HOSTS = { sandbox: 'https://sandbox-quickbooks.api.intuit.com', production: 'https://quickbooks.api.intuit.com' } as const;
 const MINOR_VERSION = '73';
-export const SALES_ITEM_NAME = 'eInvoicing sales';
+export const SALES_ITEM_NAME = 'Floreo sales';
 const RETRY_DELAYS_S = [60, 300, 1800, 7200, 43200];
 
 export interface QuickBooksConfig {

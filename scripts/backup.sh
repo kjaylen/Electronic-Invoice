@@ -6,7 +6,7 @@
 #
 #   BACKUP_DIR          where dumps go (default ./backups)
 #   BACKUP_KEEP_DAYS    delete local dumps older than this (default 14)
-#   BACKUP_S3_URI       optional, e.g. s3://my-backups/einvoicing/ (needs the aws CLI;
+#   BACKUP_S3_URI       optional, e.g. s3://my-backups/floreo/ (needs the aws CLI;
 #                       set AWS_ENDPOINT_URL for R2, Spaces or MinIO)
 #
 # The dump holds signed documents, customers and *encrypted* certificate keys.
@@ -20,7 +20,7 @@ keep="${BACKUP_KEEP_DAYS:-14}"
 mkdir -p "$dir"
 
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
-file="$dir/einvoicing-$stamp.dump"
+file="$dir/floreo-$stamp.dump"
 
 # Custom format: compressed, and pg_restore can restore single tables.
 pg_dump --format=custom --compress=6 --no-owner --no-privileges --file="$file.partial" "$DATABASE_URL"
@@ -35,7 +35,7 @@ if [ -n "${BACKUP_S3_URI:-}" ]; then
   aws s3 cp "$file.sha256" "$BACKUP_S3_URI" --only-show-errors
 fi
 
-find "$dir" -name 'einvoicing-*.dump*' -type f -mtime +"$keep" -delete
+find "$dir" -name 'floreo-*.dump*' -type f -mtime +"$keep" -delete
 
 size="$(du -h "$file" | cut -f1)"
 echo "Backup written: $file ($size)"

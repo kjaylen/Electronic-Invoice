@@ -195,7 +195,7 @@ export function ShopLayout() {
         {info?.about && <p>{info.about}</p>}
         <p className="small">{info?.city && `${info.city} · `}{info?.telephone}{info?.whatsapp && <> · <a href={`https://wa.me/${whatsappNumber(info.whatsapp) ?? ''}`} target="_blank" rel="noreferrer">WhatsApp</a></>}</p>
         <ThemeSection html={theme.footer} className="shop-footer-section" />
-        <p className="small muted">{t('Every purchase comes with a receipt authorized by the Belize Tax Service.')} · eInvoicing</p>
+        <p className="small muted">{t('Every purchase comes with a receipt authorized by the Belize Tax Service.')} · Floreo</p>
       </footer>
     </div>
   );

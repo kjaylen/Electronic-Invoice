@@ -107,7 +107,7 @@ export function registerConnectorRoutes(app: FastifyInstance, deps: PipelineDeps
       const today = new Date(Date.now() - 6 * 3600_000).toISOString().slice(0, 10);
       if (b.kind === 'netsuite') {
         // A key of its own, and the certificate the business uploads to NetSuite.
-        const made = makeKeyAndCertificate(`eInvoicing ${slug}`);
+        const made = makeKeyAndCertificate(`Floreo ${slug}`);
         const secret = await deps.keys.encrypt(Buffer.from(made.privateKeyPem), secretContext({ tenant_id: request.tenantId, id }));
         await db.query(
           `insert into connector_links (id, tenant_id, kind, name, sync_from, created_by, secret_encrypted, certificate_pem, certificate_expires_at, settings)
@@ -136,7 +136,7 @@ export function registerConnectorRoutes(app: FastifyInstance, deps: PipelineDeps
     const biz = (await db.query<{ name: string }>('select coalesce(trade_name, legal_name) as name from tenants where id = $1', [request.tenantId])).rows[0]!.name;
     if (!ctx.publicUrl) throw new ApiError(503, 'not_configured', 'This server has no public address for the Web Connector to reach');
     const file = qwcFile({ name: link.name, username: link.username, owner_id: link.owner_id, file_id: link.file_id, kind: link.kind }, publicLink(ctx, '/v1/qbwc'), biz);
-    return reply.type('application/xml').header('Content-Disposition', `attachment; filename="einvoicing-${link.kind}.qwc"`).send(file);
+    return reply.type('application/xml').header('Content-Disposition', `attachment; filename="floreo-${link.kind}.qwc"`).send(file);
   });
 
   app.post<{ Params: { id: string } }>('/connectors/:id/password', { schema: { params: idParams } }, async (request) => {
@@ -154,7 +154,7 @@ export function registerConnectorRoutes(app: FastifyInstance, deps: PipelineDeps
     requirePermission(request, 'business.manage');
     const link = await loadLink(db, request.tenantId, request.params.id);
     if (link.kind !== 'netsuite' || !link.certificate_pem) throw new ApiError(409, 'no_certificate', 'Only NetSuite connections have a certificate');
-    return reply.type('application/x-pem-file').header('Content-Disposition', 'attachment; filename="einvoicing-netsuite.pem"').send(link.certificate_pem);
+    return reply.type('application/x-pem-file').header('Content-Disposition', 'attachment; filename="floreo-netsuite.pem"').send(link.certificate_pem);
   });
 
   app.post<{ Params: { id: string } }>('/connectors/:id/sync', { schema: { params: idParams } }, async (request) => {
@@ -339,5 +339,5 @@ export function registerQbwcRoutes(app: FastifyInstance, deps: PipelineDeps) {
     return reply.type('text/xml; charset=utf-8').send(await handleQbwc(deps.db, xml));
   });
   // A browser opening the address sees what it is.
-  app.get('/', async (_request, reply) => reply.type('text/plain').send('eInvoicing: QuickBooks Web Connector service. Add it to the Web Connector with the .qwc file from Settings → Integrations.'));
+  app.get('/', async (_request, reply) => reply.type('text/plain').send('Floreo: QuickBooks Web Connector service. Add it to the Web Connector with the .qwc file from Settings → Integrations.'));
 }

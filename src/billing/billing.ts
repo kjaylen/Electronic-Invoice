@@ -208,7 +208,7 @@ export async function createInvoice(ctx: BillingContext, tenantId: string, plan:
   return row;
 }
 
-const lineFor = (plan: PlanCode, periodStart: Date) => ({ description: `eInvoicing ${PLANS[plan].name} plan, ${monthLabel(periodStart)}`, quantity: '1', unitCode: 'MON', unitPrice: PLANS[plan].price, gstCategory: 'S' as const });
+const lineFor = (plan: PlanCode, periodStart: Date) => ({ description: `Floreo ${PLANS[plan].name} plan, ${monthLabel(periodStart)}`, quantity: '1', unitCode: 'MON', unitPrice: PLANS[plan].price, gstCategory: 'S' as const });
 
 /** The platform business's e-invoice for a billing invoice; null when there is no billing business. */
 async function issueForInvoice(ctx: BillingContext, invoice: BillingInvoiceRow, line: ReturnType<typeof lineFor>, due: Date): Promise<string | null> {

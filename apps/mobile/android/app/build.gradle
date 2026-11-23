@@ -1,10 +1,10 @@
 apply plugin: 'com.android.application'
 
 android {
-    namespace = "bz.einvoicing.till"
+    namespace = "bz.floreo.till"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "bz.einvoicing.till"
+        applicationId "bz.floreo.till"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1

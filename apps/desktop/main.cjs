@@ -1,5 +1,5 @@
 /**
- * eInvoicing Till for Windows, macOS and Linux.
+ * Floreo Till for Windows, macOS and Linux.
  *
  * The till itself is the web till (web/src/pos), bundled with the app and
  * served from app://pos/. This process gives it what a browser cannot:
@@ -84,7 +84,7 @@ function createTill() {
     height: 820,
     minWidth: 900,
     minHeight: 600,
-    title: 'eInvoicing Till',
+    title: 'Floreo Till',
     backgroundColor: '#efe7d6',
     autoHideMenuBar: true,
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false, additionalArguments: [`--till-version=${app.getVersion()}`] },

@@ -92,18 +92,18 @@ export function metricsText(s: OpsStatus): string {
   const metric = (name: string, help: string, type: 'gauge' | 'counter', value: number) => {
     lines.push(`# HELP ${name} ${help}`, `# TYPE ${name} ${type}`, `${name} ${value}`);
   };
-  metric('einvoicing_up', 'The server and database answer', 'gauge', s.database ? 1 : 0);
-  metric('einvoicing_degraded', 'Something needs attention (see /metrics problems)', 'gauge', s.status === 'degraded' ? 1 : 0);
-  metric('einvoicing_worker_heartbeat_age_seconds', 'Seconds since the background worker last reported', 'gauge', s.worker.ageSeconds ?? -1);
-  metric('einvoicing_documents_pending', 'Documents waiting for a BTS answer', 'gauge', s.queue.pending);
-  metric('einvoicing_documents_stuck', 'Documents pending longer than the threshold', 'gauge', s.queue.stuckPending);
-  metric('einvoicing_documents_contingency', 'Contingency documents waiting to be sent', 'gauge', s.queue.contingencyPending);
-  metric('einvoicing_outages_open', 'Businesses currently in contingency mode', 'gauge', s.queue.openOutages);
-  metric('einvoicing_certificates_expiring_soon', 'Active certificates expiring within 7 days', 'gauge', s.certificates.expiringSoon);
-  metric('einvoicing_certificates_expired', 'Active certificates already expired', 'gauge', s.certificates.expired);
-  metric('einvoicing_http_requests_total', 'HTTP requests served by this process', 'counter', counters.requests);
-  metric('einvoicing_http_server_errors_total', 'HTTP 5xx responses from this process', 'counter', counters.serverErrors);
-  metric('einvoicing_process_uptime_seconds', 'Seconds since this process started', 'gauge', Math.round((Date.now() - counters.startedAt) / 1000));
+  metric('floreo_up', 'The server and database answer', 'gauge', s.database ? 1 : 0);
+  metric('floreo_degraded', 'Something needs attention (see /metrics problems)', 'gauge', s.status === 'degraded' ? 1 : 0);
+  metric('floreo_worker_heartbeat_age_seconds', 'Seconds since the background worker last reported', 'gauge', s.worker.ageSeconds ?? -1);
+  metric('floreo_documents_pending', 'Documents waiting for a BTS answer', 'gauge', s.queue.pending);
+  metric('floreo_documents_stuck', 'Documents pending longer than the threshold', 'gauge', s.queue.stuckPending);
+  metric('floreo_documents_contingency', 'Contingency documents waiting to be sent', 'gauge', s.queue.contingencyPending);
+  metric('floreo_outages_open', 'Businesses currently in contingency mode', 'gauge', s.queue.openOutages);
+  metric('floreo_certificates_expiring_soon', 'Active certificates expiring within 7 days', 'gauge', s.certificates.expiringSoon);
+  metric('floreo_certificates_expired', 'Active certificates already expired', 'gauge', s.certificates.expired);
+  metric('floreo_http_requests_total', 'HTTP requests served by this process', 'counter', counters.requests);
+  metric('floreo_http_server_errors_total', 'HTTP 5xx responses from this process', 'counter', counters.serverErrors);
+  metric('floreo_process_uptime_seconds', 'Seconds since this process started', 'gauge', Math.round((Date.now() - counters.startedAt) / 1000));
   return `${lines.join('\n')}\n`;
 }
 
@@ -138,7 +138,7 @@ export async function sendAlerts(db: Queryable, status: OpsStatus, options: Aler
     const claimed = await db.query("insert into notifications_sent (key) values ($1) on conflict do nothing returning key", [key]);
     if (!claimed.rows.length) continue;
     try {
-      await say(`:rotating_light: eInvoicing${where}: ${p.message}`);
+      await say(`:rotating_light: Floreo${where}: ${p.message}`);
       fired.push(p.key);
     } catch (e) {
       await db.query('delete from notifications_sent where key = $1', [key]);
@@ -149,7 +149,7 @@ export async function sendAlerts(db: Queryable, status: OpsStatus, options: Aler
     if (active.has(key)) continue;
     const gone = await db.query('delete from notifications_sent where key = $1 returning key', [key]);
     if (!gone.rows.length) continue;
-    await say(`:white_check_mark: eInvoicing${where}: resolved (${key.slice('alert:'.length).replace(/_/g, ' ')})`);
+    await say(`:white_check_mark: Floreo${where}: resolved (${key.slice('alert:'.length).replace(/_/g, ' ')})`);
     resolved.push(key.slice('alert:'.length));
   }
   return { fired, resolved };

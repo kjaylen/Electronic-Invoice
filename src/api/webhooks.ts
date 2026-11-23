@@ -134,7 +134,7 @@ export function registerWebhookRoutes(app: FastifyInstance, deps: PipelineDeps, 
     const id = randomUUID();
     await db.query(
       `insert into webhook_deliveries (id, endpoint_id, tenant_id, type, payload, status, next_attempt_at) values ($1, $2, $3, 'ping', $4, 'pending', now() + interval '1 hour')`,
-      [id, ep.id, request.tenantId, JSON.stringify({ createdAt: new Date().toISOString(), data: { message: 'A test from eInvoicing. Your endpoint works.' } })],
+      [id, ep.id, request.tenantId, JSON.stringify({ createdAt: new Date().toISOString(), data: { message: 'A test from Floreo. Your endpoint works.' } })],
     );
     // Send just this one, now.
     await db.query('update webhook_deliveries set next_attempt_at = now() where id = $1', [id]);

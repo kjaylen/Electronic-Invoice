@@ -209,7 +209,7 @@ export async function runNotifications(db: Queryable, options: NotifyOptions): P
     const business = await businessOf(db, inv.tenant_id);
     const pause = new Date(new Date(inv.due_at).getTime() + 14 * 86_400_000).toISOString().slice(0, 10);
     await once(db, inv.tenant_id, [`invoice-overdue:${inv.id}`], result, () => send(options, db, business, {
-      subject: 'Your eInvoicing invoice is overdue',
+      subject: 'Your Floreo invoice is overdue',
       heading: 'Your invoice is overdue',
       paragraphs: [
         `BZ$${(Number(String(inv.total_cents)) / 100).toFixed(2)} was due on ${new Date(inv.due_at).toISOString().slice(0, 10)}.`,
@@ -228,7 +228,7 @@ export async function runNotifications(db: Queryable, options: NotifyOptions): P
       subject: 'Issuing is paused',
       heading: 'Issuing is paused',
       paragraphs: [
-        'An invoice for your eInvoicing plan is more than 14 days overdue, so new documents cannot be issued for now.',
+        'An invoice for your Floreo plan is more than 14 days overdue, so new documents cannot be issued for now.',
         'Pay it and issuing resumes as soon as the payment is recorded. Everything you issued stays available to view, print and download.',
       ],
       button: { label: 'See your plan', path: '/settings?tab=plan' },

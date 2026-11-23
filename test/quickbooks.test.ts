@@ -50,7 +50,7 @@ function fakeIntuit() {
         const name = /DisplayName = '(.+)'/.exec(q)![1]!;
         return json(200, { QueryResponse: customers.has(name) ? { Customer: [{ Id: customers.get(name) }] } : {} });
       }
-      if (q.includes('from Item')) return json(200, { QueryResponse: items.has('eInvoicing sales') ? { Item: [{ Id: items.get('eInvoicing sales') }] } : {} });
+      if (q.includes('from Item')) return json(200, { QueryResponse: items.has('Floreo sales') ? { Item: [{ Id: items.get('Floreo sales') }] } : {} });
       if (q.includes('from Account')) return json(200, { QueryResponse: { Account: [{ Id: '79' }] } });
       if (q.includes('from TaxCode')) return json(200, { QueryResponse: { TaxCode: [{ Id: '5', Name: 'GST 12.5%', Active: true }, { Id: '6', Name: 'Zero', Active: true }] } });
     }

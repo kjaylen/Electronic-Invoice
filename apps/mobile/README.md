@@ -1,4 +1,4 @@
-# eInvoicing Till for iPhone, iPad and Android
+# Floreo Till for iPhone, iPad and Android
 
 The till as a mobile app (Capacitor 8). The till itself is the web till (`web/src/pos`), copied into `www/` as `index.html`.
 

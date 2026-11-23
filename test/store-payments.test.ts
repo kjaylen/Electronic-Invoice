@@ -248,13 +248,13 @@ test('a store on its own domain: DNS verification, then the domain shows the sto
     assert.equal(added.statusCode, 201, added.body);
     const d = added.json();
     assert.equal(d.domain, 'shop.cornerstore.bz');
-    assert.deepEqual(d.records.map((r: { type: string; name: string }) => [r.type, r.name]), [['CNAME', 'shop.cornerstore.bz'], ['TXT', '_einvoicing.shop.cornerstore.bz']]);
+    assert.deepEqual(d.records.map((r: { type: string; name: string }) => [r.type, r.name]), [['CNAME', 'shop.cornerstore.bz'], ['TXT', '_floreo.shop.cornerstore.bz']]);
     assert.equal(d.records[0].value, 'stores.example.test');
 
     const verify = () => app.inject({ method: 'POST', url: '/v1/store-domains/shop.cornerstore.bz/verify', headers: owner });
     assert.equal((await verify()).statusCode, 422, 'no TXT record yet');
     assert.equal((await app.inject({ method: 'GET', url: '/v1/domains/check?domain=shop.cornerstore.bz' })).statusCode, 404, 'no certificate before verification');
-    txt.set('_einvoicing.shop.cornerstore.bz', [[d.records[1].value]]);
+    txt.set('_floreo.shop.cornerstore.bz', [[d.records[1].value]]);
     const ok = await verify();
     assert.equal(ok.statusCode, 200, ok.body);
     assert.equal(ok.json().verified, true);
@@ -265,12 +265,12 @@ test('a store on its own domain: DNS verification, then the domain shows the sto
     assert.equal(root.headers.location, '/shop');
     const page = await app.inject({ method: 'GET', url: '/shop/products/tee', headers: { host: 'shop.cornerstore.bz' } });
     assert.equal(page.statusCode, 200);
-    assert.ok(page.body.includes(`<meta name="einvoicing-store" content="${slug}">`), 'the page names the store');
+    assert.ok(page.body.includes(`<meta name="floreo-store" content="${slug}">`), 'the page names the store');
     const robots = await app.inject({ method: 'GET', url: '/robots.txt', headers: { host: 'shop.cornerstore.bz' } });
     assert.match(robots.body, /Sitemap: https:\/\/shop\.cornerstore\.bz\/sitemap\.xml/);
     assert.equal((await app.inject({ method: 'GET', url: '/sitemap.xml', headers: { host: 'shop.cornerstore.bz' } })).statusCode, 404, 'no sitemap while the store is closed');
     const plain = await app.inject({ method: 'GET', url: '/shop', headers: { host: 'app.example.test' } });
-    assert.ok(!plain.body.includes('einvoicing-store'), 'the platform host is unchanged');
+    assert.ok(!plain.body.includes('floreo-store'), 'the platform host is unchanged');
     // Another business cannot take the domain.
     await createUser(f.db, { tenantId: f.tenantB, name: 'Bo', email: 'bo@other.example', role: 'owner', password: PASSWORD });
     const slugB = (await f.db.query<{ slug: string }>('select slug from tenants where id = $1', [f.tenantB])).rows[0]!.slug;

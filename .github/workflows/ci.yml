@@ -66,7 +66,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build the container image
-        run: docker build -t einvoicing:ci .
+        run: docker build -t floreo:ci .
       - name: Smoke test the image
         run: |
           docker network create ci
@@ -76,7 +76,7 @@ jobs:
             -e DATABASE_URL=postgres://e:e@db:5432/e \
             -e KEY_ENCRYPTION_KEY="$(openssl rand -base64 32)" \
             -e COOKIE_SECURE=false \
-            einvoicing:ci
+            floreo:ci
           for i in $(seq 1 30); do curl -fs http://localhost:3000/health && break; sleep 1; done
           curl -fs http://localhost:3000/health
           curl -fs http://localhost:3000/ | grep -q '<div id="root">'

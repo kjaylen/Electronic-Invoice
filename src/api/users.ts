@@ -90,11 +90,11 @@ export function registerUserRoutes(app: FastifyInstance, deps: PipelineDeps, ctx
         await ctx.mailer.send({
           to: user.email,
           subject: welcome ? `${inviter} created your ${b.name} account` : `Set a new password for ${b.name}`,
-          text: `${welcome ? `${inviter} created an account for you at ${b.name} on eInvoicing.` : `${inviter} asked you to set a new password for ${b.name}.`}\n\nSign-in: ${login}\nChoose your password here (the link works for 7 days):\n${link}\n\nAfterwards, sign in at ${publicLink(ctx, `/${b.slug}`)}`,
+          text: `${welcome ? `${inviter} created an account for you at ${b.name} on Floreo.` : `${inviter} asked you to set a new password for ${b.name}.`}\n\nSign-in: ${login}\nChoose your password here (the link works for 7 days):\n${link}\n\nAfterwards, sign in at ${publicLink(ctx, `/${b.slug}`)}`,
           html: simpleHtml({
             heading: welcome ? `Welcome to ${b.name}` : 'Set a new password',
             paragraphs: [
-              welcome ? `${inviter} created an account for you at ${b.name} on eInvoicing.` : `${inviter} asked you to set a new password for ${b.name}.`,
+              welcome ? `${inviter} created an account for you at ${b.name} on Floreo.` : `${inviter} asked you to set a new password for ${b.name}.`,
               `Sign-in: ${login}. The link works for 7 days.`,
               `Afterwards, sign in at ${publicLink(ctx, `/${b.slug}`)}`,
             ],

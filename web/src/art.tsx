@@ -19,7 +19,7 @@ export function Brand({ light = false }: { light?: boolean }) {
   return (
     <>
       <BrandMark />
-      <span style={light ? { color: '#fbf8f1' } : undefined}>eInvoicing<span style={{ color: light ? '#7bf583' : '#6d2d93' }}>.</span></span>
+      <span style={light ? { color: '#fbf8f1' } : undefined}>Floreo<span style={{ color: light ? '#7bf583' : '#6d2d93' }}>.</span></span>
     </>
   );
 }

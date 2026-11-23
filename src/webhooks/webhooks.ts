@@ -9,9 +9,9 @@
  *
  * with headers
  *
- *   X-EInvoicing-Event: document.authorized
- *   X-EInvoicing-Delivery: <delivery id>
- *   X-EInvoicing-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<body>" with the endpoint secret>
+ *   X-Floreo-Event: document.authorized
+ *   X-Floreo-Delivery: <delivery id>
+ *   X-Floreo-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<body>" with the endpoint secret>
  *
  * A 2xx answer within 10 seconds is success. Otherwise it is retried after
  * 1 minute, 5 minutes, 30 minutes, 2, 6 and 12 hours, then marked failed; an
@@ -140,7 +140,7 @@ export function postJson(rawUrl: string, body: string, headers: Record<string, s
     const lib = url.protocol === 'https:' ? https : http;
     const req = lib.request(url, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body), 'user-agent': 'eInvoicing-Webhooks/1', ...headers },
+      headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body), 'user-agent': 'Floreo-Webhooks/1', ...headers },
       lookup: guardedLookup as never,
       timeout: options.timeoutMs ?? 10_000,
     }, (res) => {
@@ -338,7 +338,7 @@ export async function deliverDue(db: Queryable, options: DispatchOptions, limit 
     const secret = (await options.keys.decrypt(ep.secret_encrypted, `webhook:${d.endpoint_id}`)).toString('utf8');
     const body = JSON.stringify({ id: d.id, type: d.type, createdAt: d.payload.createdAt, data: d.payload.data });
     const t = Math.floor(Date.now() / 1000);
-    const result = await postJson(ep.url, body, { 'x-einvoicing-event': d.type, 'x-einvoicing-delivery': d.id, 'x-einvoicing-signature': signature(secret, t, body) }, { ...(options.allowPrivate && { allowPrivate: true }) });
+    const result = await postJson(ep.url, body, { 'x-floreo-event': d.type, 'x-floreo-delivery': d.id, 'x-floreo-signature': signature(secret, t, body) }, { ...(options.allowPrivate && { allowPrivate: true }) });
     const attempts = d.attempts + 1;
     if (result.ok) {
       await db.query("update webhook_deliveries set status = 'delivered', attempts = $2, response_status = $3, response_body = $4, error = null, delivered_at = now() where id = $1", [d.id, attempts, result.status, result.body]);

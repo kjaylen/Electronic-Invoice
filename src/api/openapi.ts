@@ -226,7 +226,7 @@ Send \`Idempotency-Key: <unique per sale>\` when issuing. A retry returns the or
 ## Webhooks
 Events: ${WEBHOOK_EVENTS.map((e) => `\`${e}\``).join(', ')}.
 Each delivery is a JSON POST \`{ id, type, createdAt, data }\` signed with your endpoint's secret:
-\`X-EInvoicing-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<raw body>">\`.
+\`X-Floreo-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<raw body>">\`.
 Check the signature and that \`t\` is recent, answer 2xx within 10 seconds, and handle the same \`id\` twice gracefully. Failed deliveries are retried for about a day.
 `;
 
@@ -278,7 +278,7 @@ export function buildOpenApi(routes: CollectedRoute[], options: { serverUrl?: st
   const tags = [...new Map(TAGS.filter((t) => t.description).map((t) => [t.name, { name: t.name, description: t.description }])).values()];
   return {
     openapi: '3.1.0',
-    info: { title: 'eInvoicing API', version: '1.0', description: DESCRIPTION },
+    info: { title: 'Floreo API', version: '1.0', description: DESCRIPTION },
     servers: [{ url: options.serverUrl ?? '/' }],
     security: [{ apiKey: [] }],
     tags,

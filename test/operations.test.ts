@@ -146,9 +146,9 @@ test('monitoring: worker heartbeat, stuck documents, alerts when problems start 
       assert.equal((await app.inject({ method: 'GET', url: '/metrics' })).statusCode, 401);
       const metrics = await app.inject({ method: 'GET', url: '/metrics', headers: { authorization: `Bearer ${token}` } });
       assert.equal(metrics.statusCode, 200);
-      assert.match(metrics.body, /^einvoicing_up 1$/m);
-      assert.match(metrics.body, /^einvoicing_documents_pending 0$/m);
-      assert.match(metrics.body, /^einvoicing_http_requests_total \d+$/m);
+      assert.match(metrics.body, /^floreo_up 1$/m);
+      assert.match(metrics.body, /^floreo_documents_pending 0$/m);
+      assert.match(metrics.body, /^floreo_http_requests_total \d+$/m);
     } finally {
       await app.close();
     }

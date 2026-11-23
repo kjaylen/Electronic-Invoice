@@ -1,4 +1,4 @@
-# Running eInvoicing in production
+# Running Floreo in production
 
 This is the runbook for the team that operates the service: how it is deployed,
 what to watch, how to back it up and recover, how keys are handled, and what to
@@ -71,7 +71,7 @@ network, and disk/CPU alerts from the host or cloud provider.
 
 1. Create a new, empty database.
 2. Restore: managed PITR to a timestamp, or
-   `DATABASE_URL=<new db> npm run restore -- backups/einvoicing-<stamp>.dump`.
+   `DATABASE_URL=<new db> npm run restore -- backups/floreo-<stamp>.dump`.
 3. Start one app server against it with the same `KEY_ENCRYPTION_KEY` and
    `WORKER_INTERVAL_MS=0`. Sign in to a business, open a document's PDF (this
    proves the signed XML), and check the platform console.

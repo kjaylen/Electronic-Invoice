@@ -1,6 +1,6 @@
 {
-  "name": "eInvoicing Belize",
-  "short_name": "eInvoicing",
+  "name": "Floreo",
+  "short_name": "Floreo",
   "description": "Electronic tax documents for Belize: issue, sign and get them authorized by BTS.",
   "start_url": "/",
   "scope": "/",

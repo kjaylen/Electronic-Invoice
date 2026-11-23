@@ -29,7 +29,7 @@
  *   ALLOW_SIGNUP         "false" to close self-service sign-up; default true
  *   PUBLIC_URL           public address of the web app (links in emails, share links), e.g. https://app.example.bz
  *   SMTP_URL             outgoing mail server, e.g. smtps://user:pass@smtp.example.com:465
- *   MAIL_FROM            sender address, e.g. "eInvoicing <no-reply@example.bz>"
+ *   MAIL_FROM            sender address, e.g. "Floreo <no-reply@example.bz>"
  *   MAIL_OUTBOX_DIR      instead of SMTP: write each email as an .eml file here (development)
  *   PDF_RENDERER         "chromium" to print documents from the businesses' templates (needs a Chromium:
  *                        `npx playwright install chromium`); unset: the built-in layouts
@@ -77,7 +77,7 @@ const pipeline = { db, keys: keyringFromEnv(env), clients };
 
 const defaultWebRoot = fileURLToPath(new URL('../web/dist/', import.meta.url));
 const webRoot = env.WEB_ROOT ?? (existsSync(defaultWebRoot) ? defaultWebRoot : undefined);
-const mailFrom = env.MAIL_FROM ?? 'eInvoicing <no-reply@localhost>';
+const mailFrom = env.MAIL_FROM ?? 'Floreo <no-reply@localhost>';
 const mailer: Mailer | undefined = env.SMTP_URL ? smtpMailer(env.SMTP_URL, mailFrom) : env.MAIL_OUTBOX_DIR ? outboxMailer(env.MAIL_OUTBOX_DIR, mailFrom) : undefined;
 const objectStore = objectStoreFromEnv(env);
 // E-Kyash's API addresses, given by Belize Bank (the same for every merchant).
@@ -98,7 +98,7 @@ const app = await buildApp({
   ...(env.API_RATE_LIMIT_PER_MINUTE && { apiRateLimitPerMinute: Number(env.API_RATE_LIMIT_PER_MINUTE) }),
   ...(env.STORE_DOMAIN_TARGET && { storeDomainTarget: env.STORE_DOMAIN_TARGET }),
   ...(quickbooksApp && { quickbooks: quickbooksApp }),
-  ...((env.LEGAL_NAME || env.CONTACT_EMAIL) && { site: { ...(env.LEGAL_NAME && { legalName: env.LEGAL_NAME }), ...(env.CONTACT_EMAIL && { contactEmail: env.CONTACT_EMAIL }) } }),
+  site: { legalName: env.LEGAL_NAME || 'Altiora Technologies', ...(env.CONTACT_EMAIL && { contactEmail: env.CONTACT_EMAIL }) },
   ...((env.PLATFORM_BILLING_TENANT || env.PLATFORM_PAYMENT_INSTRUCTIONS) && {
     billing: { ...(env.PLATFORM_BILLING_TENANT && { tenantSlug: env.PLATFORM_BILLING_TENANT }), ...(env.PLATFORM_PAYMENT_INSTRUCTIONS && { paymentInstructions: env.PLATFORM_PAYMENT_INSTRUCTIONS }) },
   }),

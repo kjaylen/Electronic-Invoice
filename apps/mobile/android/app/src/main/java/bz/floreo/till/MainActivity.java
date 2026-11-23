@@ -1,4 +1,4 @@
-package bz.einvoicing.till;
+package bz.floreo.till;
 
 import android.os.Bundle;
 import android.view.WindowManager;

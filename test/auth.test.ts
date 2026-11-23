@@ -245,7 +245,7 @@ test('preview returns exact totals for a draft without issuing anything', () =>
 
 test('serves the web app: files, client-side routes, JSON 404s for the API, security headers', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'etd-web-'));
-  writeFileSync(join(dir, 'index.html'), '<!doctype html><title>eInvoicing</title><div id="root"></div>');
+  writeFileSync(join(dir, 'index.html'), '<!doctype html><title>Floreo</title><div id="root"></div>');
   writeFileSync(join(dir, 'app.js'), 'console.log(1)');
   try {
     await withApp(async (_f, app) => {
