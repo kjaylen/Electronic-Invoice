@@ -17,7 +17,7 @@
 import { ShiftBar } from './Shifts';
 import { type FormEvent, type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
-import { api, type Customer, type DocumentDetailInfo, type DocumentInfo, type Item, link, type Page } from '../api';
+import { api, ApiError, type Customer, type DocumentDetailInfo, type DocumentInfo, type Item, link, type Page } from '../api';
 import { useT } from '../i18n';
 import { printPdf } from '../print';
 import { useSession } from '../session';
@@ -155,7 +155,7 @@ export function CounterPanel(props: {
 }) {
   const t = useT();
   const toast = useToast();
-  const { me, session } = useSession();
+  const { me, session, can } = useSession();
   const storageKey = `etd.counter.${session?.business.id}.${session?.user.id}`;
   // Held sales stay on this device for anyone selling at it (cashiers share a counter).
   const heldKey = `etd.counter.held.${session?.business.id}`;
@@ -304,7 +304,7 @@ export function CounterPanel(props: {
   });
   const canIssue = valid.length > 0 && valid.length === sale.lines.length && Boolean(totals) && previewFresh && Boolean(me?.certificate) && (change === null || change >= 0n) && splitOk && !overLimit;
 
-  const issue = async (e?: FormEvent) => {
+  const issue = async (e?: FormEvent, overrideCreditLimit = false) => {
     e?.preventDefault();
     if (!canIssue || busy) return;
     setBusy(true);
@@ -316,6 +316,7 @@ export function CounterPanel(props: {
         type: onAccount ? '01' : '02',
         ...(sale.customer ? { customerId: sale.customer.id } : sale.tin.trim() ? { customer: { tin: sale.tin.trim() } } : {}),
         lines: linesBody,
+        ...(overrideCreditLimit && { overrideCreditLimit: true }),
         ...(onAccount
           ? { payment: { meansCode: '30', dueDate: belizeDate(days), terms: `Payment due in ${days} days` } }
           : means === 'split'
@@ -595,6 +596,9 @@ export function CounterPanel(props: {
           )}
           {overLimit && <p className="form-error" role="alert">{t('You can take up to {n}% off a line. Ask a manager to make this sale.', { n: limitText! })}</p>}
           <ErrorText error={error} />
+          {error instanceof ApiError && error.code === 'credit_limit' && can('documents.adjust') && (
+            <button type="button" className="secondary" disabled={busy} onClick={() => void issue(undefined, true)}>{t('Allow it this time')}</button>
+          )}
           <button type="submit" className="big lime" disabled={!canIssue || busy}>
             {busy ? t('Signing and sending…') : means === 'account' ? t('Issue invoice') : t('Issue receipt')}<span className="chip" aria-hidden="true">F2</span>
           </button>

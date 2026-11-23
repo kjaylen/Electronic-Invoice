@@ -45,6 +45,17 @@ function ItemForm(props: { initial?: Item; categories: Category[]; onSaved: (i: 
   const [form, setForm] = useState<Form>(props.initial ? toForm(props.initial) : EMPTY);
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
+  // What the item costs on average (from stock received), for the margin at the price typed.
+  const [cost, setCost] = useState<number | null>(null);
+  useEffect(() => {
+    if (!props.initial) return;
+    api<{ averageCost: string | null }>(`/v1/inventory/${props.initial.id}`).then((r) => setCost(r.averageCost === null ? null : Number(r.averageCost))).catch(() => {});
+  }, [props.initial]);
+  const marginHint = (price: string) => {
+    if (cost === null || !/^\d+(\.\d{1,6})?$/.test(price) || Number(price) <= 0) return null;
+    const pct = Math.round(((Number(price) - cost) / Number(price)) * 1000) / 10;
+    return pct < 0 ? t('Below its cost of {cost}: a loss of {pct}% on each sale.', { cost: money(cost.toFixed(2)), pct: Math.abs(pct) }) : t('Costs {cost} on average: a {pct}% margin.', { cost: money(cost.toFixed(2)), pct });
+  };
   const set = (k: keyof Form) => (e: { target: { value: string } }) => setForm({ ...form, [k]: e.target.value });
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -77,8 +88,8 @@ function ItemForm(props: { initial?: Item; categories: Category[]; onSaved: (i: 
       </div>
       <div className="form-grid">
         <Field label={t('Unit')}><Select value={form.unitCode} onChange={set('unitCode')}>{UNITS.map(([c, n]) => <option key={c} value={c}>{t(n)}</option>)}</Select></Field>
-        <Field label={t('Price (BZ$, before GST)')}><input required inputMode="decimal" pattern="\d+(\.\d{1,6})?" value={form.unitPrice} onChange={set('unitPrice')} /></Field>
-        <Field label={t('Wholesale price')} hint={t('Before GST, for wholesale customers. Optional.')}><input inputMode="decimal" pattern="\d+(\.\d{1,6})?" value={form.wholesalePrice} onChange={set('wholesalePrice')} /></Field>
+        <Field label={t('Price (BZ$, before GST)')} {...(marginHint(form.unitPrice) && { hint: marginHint(form.unitPrice)! })}><input required inputMode="decimal" pattern="\d+(\.\d{1,6})?" value={form.unitPrice} onChange={set('unitPrice')} /></Field>
+        <Field label={t('Wholesale price')} hint={marginHint(form.wholesalePrice) ?? t('Before GST, for wholesale customers. Optional.')}><input inputMode="decimal" pattern="\d+(\.\d{1,6})?" value={form.wholesalePrice} onChange={set('wholesalePrice')} /></Field>
         <Field label="GST"><Select value={form.gstCategory} onChange={set('gstCategory')}>{GST_CATEGORIES.map(([c, n]) => <option key={c} value={c}>{t(n)}</option>)}</Select></Field>
         {form.gstCategory === 'E' && <Field label={t('Exemption reason code')}><input required value={form.exemptionReasonCode} onChange={set('exemptionReasonCode')} /></Field>}
       </div>

@@ -31,7 +31,7 @@ import { can, requirePermission } from './permissions.ts';
 import { ApiError, notFound } from './errors.ts';
 import { date as dateSchema, issueSchema, listQuery, uuid } from './schemas.ts';
 import { assertCanIssue } from '../billing/billing.ts';
-import { type PaymentMethod, receivable, recordPayment, statusesFor } from '../receivables/receivables.ts';
+import { openReceivables, type PaymentMethod, receivable, recordPayment, statusesFor } from '../receivables/receivables.ts';
 import { openShiftSql } from '../db/shifts.ts';
 import { documentPdf as templateDocumentPdf } from '../templates/pdf.ts';
 import { logoForPdf, logoPath } from '../templates/assets.ts';
@@ -62,6 +62,8 @@ export interface IssueBody {
   payableRoundingAmount?: string;
   paid?: { method: PaymentMethod; reference?: string };
   tenders?: Array<{ meansCode: string; amount: string }>;
+  /** Issue an invoice on account even if it takes the customer over their credit limit (owners, admins, managers). */
+  overrideCreditLimit?: boolean;
 }
 
 const MEANS_NAMES: Record<string, string> = { '10': 'cash', '20': 'cheque', '30': 'transfer', '31': 'transfer', '42': 'bank transfer', '48': 'card', '54': 'credit card', '55': 'debit card' };
@@ -277,7 +279,7 @@ async function checkDiscountLimit(deps: PipelineDeps, tenantId: string, req: Iss
   });
 }
 
-export async function issueFromBody(deps: PipelineDeps, tenantId: string, body: IssueBody, userId: string | null, options: { deviceId?: string | null; limitDiscounts?: boolean } = {}): Promise<IssueResult> {
+export async function issueFromBody(deps: PipelineDeps, tenantId: string, body: IssueBody, userId: string | null, options: { deviceId?: string | null; limitDiscounts?: boolean; accountLimit?: 'check' | 'override' | 'skip' } = {}): Promise<IssueResult> {
   let issueRequest = await toIssueRequest(deps, tenantId, body);
   if (options.limitDiscounts) await checkDiscountLimit(deps, tenantId, issueRequest);
   // Paid in parts: checked against the total before anything is signed.
@@ -285,6 +287,8 @@ export async function issueFromBody(deps: PipelineDeps, tenantId: string, body: 
   if (split) issueRequest = split.req;
   if (issueRequest.etdType !== '04') await assertCanIssue(deps.db, tenantId);
   await checkCreditLimit(deps, tenantId, issueRequest);
+  // Bought on account (an invoice not paid on the spot): within the customer's credit limit.
+  if ((options.accountLimit ?? 'check') === 'check' && !body.paid) await checkAccountLimit(deps, tenantId, issueRequest);
   const result = await issueDocument(deps, tenantId, issueRequest);
   if (split) {
     await deps.db.query('update documents set tenders = $3 where tenant_id = $1 and (id = $2 or supersedes_document_id = $2)', [tenantId, result.documentId, JSON.stringify(split.parts)]);
@@ -362,6 +366,23 @@ export async function checkCreditLimit(deps: PipelineDeps, tenantId: string, req
       `This credit note (BZ$${formatCents(total)}) is more than what is left to credit on the original: BZ$${formatCents(left)}`,
       { remaining: formatCents(left), requested: formatCents(total) });
   }
+}
+
+/**
+ * An invoice to a saved customer with a credit limit may not take what they owe on account over it.
+ * What they owe counts every open invoice (less payments and credit notes).
+ */
+export async function checkAccountLimit(deps: PipelineDeps, tenantId: string, req: IssueRequest): Promise<void> {
+  if (req.etdType !== '01' || !req.customerId) return;
+  const c = (await deps.db.query<{ name: string; credit_limit_cents: unknown }>('select name, credit_limit_cents from customers where id = $1 and tenant_id = $2', [req.customerId, tenantId])).rows[0];
+  if (!c || c.credit_limit_cents === null) return;
+  const limit = toBigInt(c.credit_limit_cents);
+  const owed = (await openReceivables(deps.db, tenantId, { customerKey: `c:${req.customerId}` })).reduce((a, r) => a + (r.balanceCents > 0n ? r.balanceCents : 0n), 0n);
+  const total = calculateDocument({ lines: req.lines }, deps.tax).taxInclusiveAmount;
+  if (owed + total <= limit) return;
+  throw new ApiError(422, 'credit_limit',
+    `This invoice would take ${c.name} to BZ$${formatCents(owed + total)} on account, over their credit limit of BZ$${formatCents(limit)} (they owe BZ$${formatCents(owed)})`,
+    { limit: formatCents(limit), owed: formatCents(owed), invoice: formatCents(total), available: formatCents(limit > owed ? limit - owed : 0n) });
 }
 
 const idParams = { type: 'object', required: ['id'], properties: { id: uuid } } as const;
@@ -566,7 +587,10 @@ export function registerDocumentRoutes(app: FastifyInstance, deps: PipelineDeps,
 
     let documentId: string | undefined;
     try {
-      const result = await issueFromBody(deps, tenantId, request.body, request.userId || null, { deviceId: request.posDevice?.id ?? null, limitDiscounts: request.principal === 'cashier' });
+      if (request.body.overrideCreditLimit && !can(request.principal, 'documents.adjust')) throw new ApiError(403, 'forbidden', 'Only an owner, admin or manager can go over a customer\'s credit limit');
+      const result = await issueFromBody(deps, tenantId, request.body, request.userId || null, {
+        deviceId: request.posDevice?.id ?? null, limitDiscounts: request.principal === 'cashier', accountLimit: request.body.overrideCreditLimit ? 'override' : 'check',
+      });
       documentId = result.documentId;
       // Paid on the spot: record it, once the invoice has legal value (a rejected one is never owed).
       const paid = request.body.paid;

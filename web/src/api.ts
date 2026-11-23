@@ -154,6 +154,8 @@ export interface Customer {
   contact: { telephone: string | null; email: string | null };
   /** Wholesale customers pay items' wholesale prices. */
   priceList?: 'retail' | 'wholesale';
+  /** How much they may owe on account (BZ$); null: no limit. */
+  creditLimit?: string | null;
   archived?: boolean;
 }
 

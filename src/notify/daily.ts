@@ -2,7 +2,7 @@
  * The daily summary: each morning, owners and admins of businesses that turned it on get
  * yesterday at a glance: sales and GST (against the same day last week), how customers paid,
  * the best sellers, discounts given, cash drawer differences, what customers owe, what is
- * running low and anything BTS rejected. Days with nothing sold and nothing paid send nothing.
+ * running low, bills to pay and late purchase orders, and anything BTS rejected. Days with nothing sold and nothing paid send nothing.
  *
  * Sent once a day per business (its key is claimed in notifications_sent first), from 7 am
  * Belize time, for the day before. Safe to run from several processes at once.
@@ -46,6 +46,10 @@ export interface DailySummary {
   drawers: Array<{ register: string; number: number; difference: bigint }>;
   owed: { total: bigint; overdue: bigint; overdueInvoices: number };
   lowStock: Array<{ name: string; stock: number }>;
+  /** Supplier bills unpaid: overdue, and due today or tomorrow. */
+  bills: { overdue: number; overdueTotal: bigint; dueSoon: number; dueSoonTotal: bigint };
+  /** Purchase orders sent but not all received by the day they were wanted. */
+  lateOrders: string[];
   rejected: number;
 }
 
@@ -106,6 +110,18 @@ export async function dailySummary(db: Queryable, tenantId: string, day: string)
      order by stock_quantity, name limit 8`,
     [tenantId],
   )).rows;
+  // Bills to pay: the morning after `day` is today.
+  const morning = new Date(new Date(`${day}T12:00:00Z`).getTime() + 86_400_000).toISOString().slice(0, 10);
+  const bills = (await db.query<{ overdue: number; overdue_total: unknown; soon: number; soon_total: unknown }>(
+    `select count(*) filter (where due_date < $2::date)::int as overdue, coalesce(sum(total_cents) filter (where due_date < $2::date), 0) as overdue_total,
+       count(*) filter (where due_date between $2::date and $2::date + 1)::int as soon, coalesce(sum(total_cents) filter (where due_date between $2::date and $2::date + 1), 0) as soon_total
+     from expenses where tenant_id = $1 and paid_on is null and due_date is not null`,
+    [tenantId, morning],
+  )).rows[0]!;
+  const lateOrders = (await db.query<{ number: number; supplier_name: string }>(
+    `select number, supplier_name from purchase_orders where tenant_id = $1 and status in ('sent', 'partial') and expected_on < $2::date order by expected_on, number limit 5`,
+    [tenantId, morning],
+  )).rows;
   // Rejected and not issued again since.
   const rejected = (await db.query<{ n: number }>(
     `select count(*)::int as n from documents d where d.tenant_id = $1 and d.issue_date = $2::date and d.status = 'rejected'
@@ -125,6 +141,8 @@ export async function dailySummary(db: Queryable, tenantId: string, day: string)
     drawers: drawers.map((d) => ({ register: d.register, number: d.number, difference: toBigInt(d.difference) })),
     owed: { total: open.reduce((a, r) => a + r.balanceCents, 0n), overdue: overdue.reduce((a, r) => a + r.balanceCents, 0n), overdueInvoices: overdue.length },
     lowStock: lowStock.map((i) => ({ name: i.name, stock: Number(i.stock) })),
+    bills: { overdue: bills.overdue, overdueTotal: toBigInt(bills.overdue_total), dueSoon: bills.soon, dueSoonTotal: toBigInt(bills.soon_total) },
+    lateOrders: lateOrders.map((o) => `PO-${o.number} (${o.supplier_name})`),
     rejected,
   };
 }
@@ -148,6 +166,9 @@ export function summaryParagraphs(s: DailySummary): string[] {
   for (const d of s.drawers) p.push(`Cash drawer: ${d.register}, shift ${d.number}, was ${money(d.difference < 0n ? -d.difference : d.difference)} ${d.difference < 0n ? 'short' : 'over'}.`);
   if (s.owed.total > 0n) p.push(`Customers owe ${money(s.owed.total)}${s.owed.overdueInvoices ? `, of which ${money(s.owed.overdue)} is overdue (${plural(s.owed.overdueInvoices, 'invoice', 'invoices')})` : ''}.`);
   if (s.lowStock.length) p.push(`Running low: ${s.lowStock.map((i) => `${i.name} (${i.stock} left)`).join(', ')}.`);
+  const bills = [s.bills.dueSoon && `${plural(s.bills.dueSoon, 'bill', 'bills')} for ${money(s.bills.dueSoonTotal)} due by tomorrow`, s.bills.overdue && `${plural(s.bills.overdue, 'bill', 'bills')} for ${money(s.bills.overdueTotal)} overdue`].filter(Boolean);
+  if (bills.length) p.push(`Bills to pay: ${bills.join('; ')}.`);
+  if (s.lateOrders.length) p.push(`Late deliveries: ${s.lateOrders.join(', ')}.`);
   if (s.rejected) p.push(`Needs attention: BTS rejected ${plural(s.rejected, 'document', 'documents')}.`);
   return p;
 }

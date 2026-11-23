@@ -7,8 +7,8 @@ import { useToast } from '../toast';
 import { DISTRICTS, ErrorText, Field, Modal, Select, useDebounced, usePageTitle } from '../ui';
 import { ImportDialog } from './ImportDialog';
 
-type Form = { name: string; tin: string; street: string; city: string; districtCode: string; telephone: string; email: string; priceList: 'retail' | 'wholesale' };
-const EMPTY: Form = { name: '', tin: '', street: '', city: '', districtCode: '1', telephone: '', email: '', priceList: 'retail' };
+type Form = { name: string; tin: string; street: string; city: string; districtCode: string; telephone: string; email: string; priceList: 'retail' | 'wholesale'; creditLimit: string };
+const EMPTY: Form = { name: '', tin: '', street: '', city: '', districtCode: '1', telephone: '', email: '', priceList: 'retail', creditLimit: '' };
 
 const toForm = (c: Customer): Form => ({
   name: c.name,
@@ -19,6 +19,7 @@ const toForm = (c: Customer): Form => ({
   telephone: c.contact.telephone ?? '',
   email: c.contact.email ?? '',
   priceList: c.priceList ?? 'retail',
+  creditLimit: c.creditLimit ?? '',
 });
 
 export const customerBody = (f: Form) => ({
@@ -27,6 +28,7 @@ export const customerBody = (f: Form) => ({
   ...(f.street && f.city && { address: { street: f.street, city: f.city, districtCode: f.districtCode } }),
   ...((f.telephone || f.email) && { contact: { ...(f.telephone && { telephone: f.telephone }), ...(f.email && { email: f.email }) } }),
   priceList: f.priceList,
+  creditLimit: f.creditLimit.trim() || null,
 });
 
 /** Add or edit a customer. */
@@ -70,6 +72,9 @@ function CustomerForm(props: { initial?: Customer; onSaved: (c: Customer) => voi
             <option value="retail">{t('Retail')}</option>
             <option value="wholesale">{t('Wholesale')}</option>
           </Select>
+        </Field>
+        <Field label={t('Credit limit (BZ$)')} hint={t('The most they may owe on invoices. Empty: no limit.')}>
+          <input inputMode="decimal" pattern="\d{1,10}(\.\d{1,2})?" placeholder={t('No limit')} value={form.creditLimit} onChange={set('creditLimit')} />
         </Field>
       </div>
       {props.initial && <p className="small muted">{t('Documents already issued keep the details they were issued with.')}</p>}

@@ -37,6 +37,7 @@ export const customerSchema = {
     address: addressSchema,
     contact: contactSchema,
     priceList: { type: 'string', enum: ['retail', 'wholesale'] },
+    creditLimit: { anyOf: [{ type: 'string', pattern: '^\\d{1,10}(\\.\\d{1,2})?$' }, { type: 'null' }] },
   },
 } as const;
 
@@ -148,6 +149,7 @@ export const issueSchema = {
     prepaidAmount: money,
     payableRoundingAmount: money,
     // Tax receipts paid partly one way and partly another (cash and card): the parts, adding up to the total.
+    overrideCreditLimit: { type: 'boolean' },
     tenders: {
       type: 'array',
       minItems: 2,

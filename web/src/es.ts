@@ -2500,4 +2500,11 @@ export const ES: Record<string, string> = {
   "What you buy from them": "Lo que les compra",
   "No stock received from this supplier yet.": "Aún no ha recibido mercancía de este proveedor.",
   "Last received": "Última entrega",
+  "Allow it this time": "Permitirlo esta vez",
+  "Over their limit of {limit}": "Por encima de su límite de {limit}",
+  "{amount} left of a {limit} limit": "Le quedan {amount} de un límite de {limit}",
+  "Credit limit (BZ$)": "Límite de crédito (BZ$)",
+  "The most they may owe on invoices. Empty: no limit.": "Lo máximo que puede deber en facturas. Vacío: sin límite.",
+  "Below its cost of {cost}: a loss of {pct}% on each sale.": "Por debajo de su costo de {cost}: una pérdida de {pct}% en cada venta.",
+  "Costs {cost} on average: a {pct}% margin.": "Cuesta {cost} en promedio: un margen de {pct}%.",
 };

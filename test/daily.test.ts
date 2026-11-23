@@ -65,6 +65,18 @@ test('the daily summary: sales against last week, how customers paid, best selle
     const hours = (await app.inject({ method: 'GET', url: `/v1/reports/hours?${period}`, headers: owner })).json().data as Array<{ documents: number }>;
     assert.equal(hours.reduce((a, h) => a + h.documents, 0), 3);
 
+    // Bills to pay and late deliveries, as of the next morning.
+    const morning = new Date(new Date(`${belizeToday()}T12:00:00Z`).getTime() + 86_400_000).toISOString().slice(0, 10);
+    const bill = (due: string, cents: number) => f.db.query(
+      `insert into expenses (id, tenant_id, supplier_name, expense_date, due_date, category, gst_treatment, net_cents, gst_cents, total_cents)
+       values (gen_random_uuid(), $1, 'Roaster', $2::date, $3::date, 'Stock for resale', 'none', $4, 0, $4)`, [f.tenantA, belizeToday(), due, cents]);
+    await bill(belizeToday(), 2000);
+    await bill(morning, 1000);
+    await f.db.query(`insert into purchase_orders (id, tenant_id, number, supplier_name, status, expected_on) values (gen_random_uuid(), $1, 7, 'Roaster', 'sent', $2::date)`, [f.tenantA, belizeToday()]);
+    const later = (await dailySummary(f.db, f.tenantA, belizeToday()))!;
+    assert.deepEqual(later.bills, { overdue: 1, overdueTotal: 2000n, dueSoon: 1, dueSoonTotal: 1000n });
+    assert.deepEqual(later.lateOrders, ['PO-7 (Roaster)']);
+
     const mail = memoryMailer();
     // Off by default.
     assert.deepEqual(await runDailySummaries(f.db, { mailer: mail, now: nextMorning(8) }), { sent: 0, failed: 0 });
@@ -79,6 +91,8 @@ test('the daily summary: sales against last week, how customers paid, best selle
     assert.match(email.text, /Taken: cash BZ\$60\.00, card BZ\$50\.25\./);
     assert.match(email.text, /Best sellers: Coffee beans \(2, BZ\$80\.00\), Cappuccino \(1, BZ\$18\.00\)\./);
     assert.match(email.text, /Discounts given: BZ\$2\.00 on 1 sale\./);
+    assert.match(email.text, /Bills to pay: 1 bill for BZ\$10\.00 due by tomorrow; 1 bill for BZ\$20\.00 overdue\./);
+    assert.match(email.text, /Late deliveries: PO-7 \(Roaster\)\./);
     assert.ok(email.text.includes(`https://app.example.test/${slug}/reports`));
     // Once a day.
     assert.deepEqual(await runDailySummaries(f.db, { mailer: mail, now: nextMorning(9) }), { sent: 0, failed: 0 });

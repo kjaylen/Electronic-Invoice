@@ -9,7 +9,7 @@ import { Link, useParams } from 'react-router';
 import { api, type Customer, type DocStatus } from '../api';
 import { useT } from '../i18n';
 import { useSession } from '../session';
-import { DISTRICTS, ErrorText, money, StatusBadge, TYPE_NAMES, usePageTitle } from '../ui';
+import { DISTRICTS, ErrorText, fromCents, money, StatusBadge, toCents, TYPE_NAMES, usePageTitle } from '../ui';
 import { StatementModal } from './Receivables';
 
 interface Summary {
@@ -38,6 +38,7 @@ export function CustomerDetail() {
   if (error) return <div className="stack"><Link to="/customers" viewTransition>← {t('Customers')}</Link><div className="banner bad"><ErrorText error={error} /></div></div>;
   if (!s) return <div className="stack"><div className="skeleton" style={{ height: '4rem' }} /><div className="skeleton" style={{ height: '10rem' }} /></div>;
   const c = s.customer;
+  const overLimit = Boolean(c.creditLimit) && toCents(s.owed.total) > toCents(c.creditLimit!);
   const district = c.address ? DISTRICTS.find(([code]) => code === c.address!.districtCode)?.[1] : null;
 
   return (
@@ -62,7 +63,11 @@ export function CustomerDetail() {
       <div className="kpis">
         <div className="kpi card"><span className="kpi-head">{t('Bought this year')}</span><span className="kpi-value num">{money(s.sales.thisYear)}</span></div>
         <div className="kpi card"><span className="kpi-head">{t('Bought in all')}</span><span className="kpi-value num">{money(s.sales.lifetime)}</span><span className="small muted">{s.sales.documents === 1 ? t('1 document') : t('{n} documents', { n: s.sales.documents })}{s.sales.firstSale ? ` · ${t('since {date}', { date: longDate(s.sales.firstSale) })}` : ''}</span></div>
-        <div className={`kpi card ${s.owed.overdue !== '0.00' ? 'alert' : ''}`}><span className="kpi-head">{t('Owes')}</span><span className="kpi-value num">{money(s.owed.total)}</span>{s.owed.overdue !== '0.00' && <span className="small overdue-text">{t('{amount} overdue', { amount: money(s.owed.overdue) })}</span>}</div>
+        <div className={`kpi card ${s.owed.overdue !== '0.00' || overLimit ? 'alert' : ''}`}>
+          <span className="kpi-head">{t('Owes')}</span><span className="kpi-value num">{money(s.owed.total)}</span>
+          {s.owed.overdue !== '0.00' && <span className="small overdue-text">{t('{amount} overdue', { amount: money(s.owed.overdue) })}</span>}
+          {c.creditLimit && <span className={`small ${overLimit ? 'overdue-text' : 'muted'}`}>{overLimit ? t('Over their limit of {limit}', { limit: money(c.creditLimit) }) : t('{amount} left of a {limit} limit', { amount: money(fromCents(toCents(c.creditLimit) - toCents(s.owed.total))), limit: money(c.creditLimit) })}</span>}
+        </div>
         <div className="kpi card"><span className="kpi-head">{t('Last purchase')}</span><span className="kpi-value">{s.sales.lastSale ? longDate(s.sales.lastSale) : '—'}</span></div>
       </div>
 

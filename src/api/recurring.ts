@@ -131,7 +131,8 @@ async function runOne(deps: PipelineDeps, ctx: ServerContext, r: RecurringRow, r
   };
   let documentId: string | null = null;
   try {
-    const result = await issueFromBody(deps, r.tenant_id, body, null);
+    // Agreed in advance: a recurring invoice is not held back by the customer's credit limit.
+    const result = await issueFromBody(deps, r.tenant_id, body, null, { accountLimit: 'skip' });
     documentId = result.documentId;
     if (!VALID_DOCUMENT.includes(result.status)) {
       const why = result.conditions.map((c) => c.description).filter(Boolean).join('; ');

@@ -1,6 +1,6 @@
 import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { Navigate, useNavigate, useParams, useSearchParams } from 'react-router';
-import { api, type BusinessProfile, type Customer, type DocumentDetailInfo, type DocumentInfo, type Item, type Page } from '../api';
+import { api, ApiError, type BusinessProfile, type Customer, type DocumentDetailInfo, type DocumentInfo, type Item, type Page } from '../api';
 import { DocumentPaper, type PaperParty, type PaperView } from '../paper';
 import { useT } from '../i18n';
 import { useSession } from '../session';
@@ -381,8 +381,8 @@ export function NewDocument({ mode = 'issue' }: { mode?: FormMode } = {}) {
     return template || Boolean(me?.certificate);
   }, [ready.length, lines.length, needsCustomer, customerMode, customer, newCustomer, isNote, reference, reason, me, overCredit, template, mode, scheduleName, endMode, endDate]);
 
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
+  const submit = async (e: FormEvent | null, overrideCreditLimit = false) => {
+    e?.preventDefault();
     if (!canIssue || busy) return;
     setBusy(true);
     setError(null);
@@ -441,6 +441,7 @@ export function NewDocument({ mode = 'issue' }: { mode?: FormMode } = {}) {
           ...(paidNow && (type === '01' || type === '03') && { paid: { method: PAID_METHOD[meansCode] ?? 'other' } }),
           ...(note.trim() && { note: note.trim() }),
           ...(isNote && reference && { reference: { documentId: reference.id, reason: reason.trim() } }),
+          ...(overrideCreditLimit && { overrideCreditLimit: true }),
         },
       });
       store.remove(draftKey);
@@ -670,6 +671,9 @@ export function NewDocument({ mode = 'issue' }: { mode?: FormMode } = {}) {
           )}
           <div className="grand"><span>{t('Total')}</span><span aria-live="polite">{money(preview?.totals.taxInclusive ?? '0.00')}</span></div>
           <ErrorText error={error} />
+          {error instanceof ApiError && error.code === 'credit_limit' && can('documents.adjust') && (
+            <button type="button" className="secondary" disabled={busy} onClick={() => void submit(null, true)}>{t('Allow it this time')}</button>
+          )}
           {!template && <button type="button" className="secondary paper-preview-button" disabled={ready.length === 0} onClick={openPaper}>{t('Preview the document')}</button>}
           {template ? (
             <>
