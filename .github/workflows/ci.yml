@@ -33,7 +33,7 @@ jobs:
       DATABASE_URL: postgres://einvoicing:einvoicing@localhost:5432/einvoicing
       E2E_ADMIN_DATABASE_URL: postgres://einvoicing:einvoicing@localhost:5432/einvoicing
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -64,7 +64,7 @@ jobs:
     needs: test
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Build the container image
         run: docker build -t floreo:ci .
       - name: Smoke test the image
