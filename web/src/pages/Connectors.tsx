@@ -369,7 +369,17 @@ function NetSuiteSetup({ link: l, onClose, onSaved }: { link: ConnectorLink; onC
         <p className="small muted" style={{ margin: 0 }}>{t('Done once, by a NetSuite administrator. NetSuite signs this service in with a certificate made for this connection: no password is shared.')}</p>
         <ol className="connector-steps">
           <li>{t('Setup > Company > Enable Features > SuiteCloud: tick REST Web Services and OAuth 2.0.')}</li>
-          <li>{t('Setup > Integration > Manage Integrations > New: name it Floreo, tick only "Client Credentials (Machine to Machine) Grant", save, and copy the Client ID.')}</li>
+          <li>
+            {t('Setup > Integration > Manage Integrations > New, and fill in the Integration page:')}
+            <ul className="connector-substeps">
+              <li>{t('Name: Floreo. State: Enabled.')}</li>
+              <li>{t('Authentication tab, Token-based Authentication: leave Token-based Authentication unticked.')}</li>
+              <li>{t('OAuth 2.0: untick Authorization Code Grant (then no Redirect URI is needed) and tick Client Credentials (Machine to Machine) Grant.')}</li>
+              <li>{t('Scope: tick REST Web Services only.')}</li>
+              <li>{t('User Credentials: leave it unticked.')}</li>
+              <li>{t('Save. NetSuite shows the Client ID and Client Secret once, at the bottom of the page: copy the Client ID (the secret is not needed).')}</li>
+            </ul>
+          </li>
           <li>{t('A role for it with: Invoice, Cash Sale and Credit Memo (Edit, to write the BTS number back); Customers (View); REST Web Services and Log in using OAuth 2.0 Access Tokens (Full); SuiteAnalytics Workbook. Give the role to the employee the connection acts as.')}</li>
           <li>{t('Customization > Lists, Records & Fields > Transaction Body Fields > New: label "BTS number", ID _bts_number, type Free-Form Text, applied to Sale. Optionally a second one, _bts_status, for the status and ETDUI.')}</li>
           <li>{t('Setup > Integration > Manage Authentication > OAuth 2.0 Client Credentials (M2M) Setup > Create New: the employee, the role and the Floreo application, and this certificate. Copy the Certificate ID.')} <a className="button small-button" href={link(`/v1/connectors/${l.id}/certificate`)} download>{t('Download the certificate')}</a></li>

@@ -2126,4 +2126,5 @@ ol.activity.loading { opacity: 0.55; transition: opacity 150ms; }
 .connector-reason { max-width: 11rem; }
 .connector-problem { color: var(--ochre-ink); margin-top: 0.25rem; max-width: 42rem; }
 .connector-steps { margin: 0; padding-left: 1.2rem; display: grid; gap: 0.55rem; }
+.connector-substeps { margin: 0.35rem 0 0; padding-left: 1.1rem; display: grid; gap: 0.25rem; list-style: disc; color: var(--ink-2, inherit); font-size: 0.95em; }
 .connector-secret { font-size: 1.05rem; background: var(--sheet-2); border: 1px dashed var(--hairline-strong); border-radius: 8px; padding: 0.25rem 0.5rem; width: fit-content; user-select: all; }
