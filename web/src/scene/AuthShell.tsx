@@ -105,14 +105,19 @@ export function AuthPanel() {
       </div>
       <div className="brand"><Brand light /></div>
       <div className="headline">
-        <span className="kicker">{name ?? t('Electronic tax documents')}</span>
-        <h2>{t('Issue it. Sign it. Get it authorized.')}</h2>
-        <p>{t('Every business has its own address, its own team and its own records.')}</p>
+        <span className="kicker">{name ?? t('The commerce platform for Belize')}</span>
+        <h2>{t('Sell in store and online, with e-invoicing built in.')}</h2>
+        <p>
+          {t('Your till, your online store, stock and getting paid, with every sale sent to BTS as an authorized e-invoice.')}
+          {/* Where it is going, for people finding or starting a business here. */}
+          {!BUSINESS && <> {t('We are building the rest of what Belizean businesses need to sell and grow.')}</>}
+        </p>
       </div>
       <div className="facts">
-        <span>BTS e-invoicing</span>
-        <span>Signed &amp; authorized</span>
-        <span>Keeps working in outages</span>
+        <span>{t('BTS e-invoicing')}</span>
+        <span>{t('Point of sale')}</span>
+        <span>{t('Online store')}</span>
+        <span>{t('Payments and inventory')}</span>
       </div>
     </aside>
   );

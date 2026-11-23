@@ -2709,4 +2709,11 @@ export const ES: Record<string, string> = {
   "Pick a business you have used on this device, or enter another address.": "Elija un negocio que haya usado en este dispositivo o escriba otra dirección.",
   "Enter the address your administrator gave you.": "Escriba la dirección que le dio su administrador.",
   "Register the business and create the owner account. You add your team afterwards, each with their own login and role.": "Registre el negocio y cree la cuenta del propietario. Después agrega a su equipo, cada uno con su propio usuario y rol.",
+  "The commerce platform for Belize": "La plataforma de comercio de Belice",
+  "Sell in store and online, with e-invoicing built in.": "Venda en su local y en línea, con la facturación electrónica incluida.",
+  "Your till, your online store, stock and getting paid, with every sale sent to BTS as an authorized e-invoice.": "Su caja, su tienda en línea, su inventario y sus cobros, con cada venta enviada al BTS como factura electrónica autorizada.",
+  "We are building the rest of what Belizean businesses need to sell and grow.": "Estamos construyendo todo lo demás que los negocios de Belice necesitan para vender y crecer.",
+  "BTS e-invoicing": "Facturación electrónica BTS",
+  "Point of sale": "Punto de venta",
+  "Payments and inventory": "Cobros e inventario",
 };
