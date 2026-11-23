@@ -32,7 +32,12 @@ interface TenantRow {
   certificateValidTo: string | null;
   createdAt: string;
   productionSince: string | null;
+  suspended?: boolean;
 }
+
+interface Person { id: string; name: string; login: string | null; role: string; hasEmail: boolean; twoFactor: boolean; lastLoginAt: string | null }
+
+interface NoticeRow { id: string; message: string; messageEs: string | null; level: 'info' | 'warning'; startsAt: string; endsAt: string | null; createdAt: string; by: string | null; live: boolean }
 
 interface TenantDetail {
   id: string;
@@ -47,6 +52,9 @@ interface TenantDetail {
   approvalReference: string | null;
   users: number;
   admins: Array<{ name: string; login: string | null; role: string; lastLoginAt: string | null }>;
+  people: Person[];
+  suspended: { at: string; reason: string | null } | null;
+  queue: { pending: number; stuck: number; offline: number; outage: boolean };
   certificate: { tin: string; validTo: string; daysLeft: number } | null;
   readiness: { ready: boolean; checks: Array<{ key: string; ok: boolean; required: boolean; detail: string }> };
   documents: { testAuthorized: number; testRejected: number; production: number };
@@ -82,6 +90,13 @@ const ACTION_LABEL: Record<string, string> = {
   'invoice.voided': 'Voided an invoice',
   'invoice.issued': 'Issued an invoice',
   'subscription.changed': 'Changed a plan',
+  'tenant.suspended': 'Suspended the business',
+  'tenant.reactivated': 'Reactivated the business',
+  'tenant.retried': 'Sent documents waiting for BTS',
+  'user.reset_link_sent': 'Emailed a password link',
+  'user.two_factor_reset': 'Turned off two-step sign-in',
+  'notice.created': 'Posted a notice',
+  'notice.ended': 'Ended a notice',
 };
 
 function EnvBadge({ env }: { env: 'test' | 'production' }) {
@@ -109,6 +124,7 @@ export function PlatformConsole() {
         <Route path="businesses/:id" element={<Business />} />
         <Route path="billing" element={<ConsoleBilling />} />
         <Route path="activity" element={<Activity />} />
+        <Route path="notices" element={<Notices />} />
       </Route>
       <Route path="*" element={<Navigate to="/admin" replace />} />
     </Routes>
@@ -216,6 +232,7 @@ function ConsoleLayout({ admin, onSignOut }: { admin: StaffAdmin; onSignOut: () 
           <NavLink to="/admin" end>{t('Overview')}</NavLink>
           <NavLink to="/admin/businesses">{t('Businesses')}</NavLink>
           <NavLink to="/admin/billing">{t('Billing')}</NavLink>
+          <NavLink to="/admin/notices">{t('Notices')}</NavLink>
           <NavLink to="/admin/activity">{t('Staff log')}</NavLink>
         </nav>
         <span className="spacer" />
@@ -292,7 +309,7 @@ function SignupBars({ weeks }: { weeks: PlatformOverview['businesses']['signups'
     <div>
       <div className="signup-bars" aria-hidden="true">
         {weeks.map((w) => (
-          <div key={w.week} className={`bar${w.count === 0 ? ' zero' : ''}`}>
+          <div key={w.week} className={`sbar${w.count === 0 ? ' zero' : ''}`}>
             <span data-tip={label(w)} style={{ height: `${w.count === 0 ? 0 : Math.max(4, (w.count / max) * 100)}%` }} />
           </div>
         ))}
@@ -435,7 +452,7 @@ function Businesses() {
               <tbody>
                 {rows.map((r) => (
                   <tr key={r.id} className="clickable" onClick={() => navigate(`/admin/businesses/${r.id}`)}>
-                    <td data-label={t('Business')}><Link to={`/admin/businesses/${r.id}`} onClick={(e) => e.stopPropagation()}><strong>{r.name}</strong></Link><div className="small muted mono">/{r.slug} · {t('{n} users', { n: r.users })}</div></td>
+                    <td data-label={t('Business')}><Link to={`/admin/businesses/${r.id}`} onClick={(e) => e.stopPropagation()}><strong>{r.name}</strong></Link>{r.suspended && <> <span className="badge rejected">{t('Suspended')}</span></>}<div className="small muted mono">/{r.slug} · {t('{n} users', { n: r.users })}</div></td>
                     <td data-label="TIN" className="mono">{r.tin}</td>
                     <td data-label={t('Environment')}><EnvBadge env={r.environment} />{r.productionSince && <div className="small muted">{t('since {date}', { date: date(r.productionSince) })}</div>}</td>
                     <td data-label={t('Test documents')} className="right">{r.testAuthorized}</td>
@@ -460,6 +477,8 @@ function Business() {
   const [d, setD] = useState<TenantDetail | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [dialog, setDialog] = useState<'live' | 'test' | null>(null);
+  const [action, setAction] = useState<null | { kind: 'suspend' | 'reactivate' } | { kind: 'two-factor'; person: Person }>(null);
+  const [retrying, setRetrying] = useState(false);
   usePageTitle(d?.name ?? t('Business'));
   const load = useCallback(() => api<TenantDetail>(`/v1/platform/tenants/${id}`).then(setD).catch(setError), [id]);
   useEffect(() => {
@@ -475,8 +494,41 @@ function Business() {
           <p className="muted">{d.legalName} · <span className="mono">/{d.slug}</span> · {d.contact.city}</p>
         </div>
         <span className="spacer" />
+        {d.suspended && <span className="badge rejected">{t('Suspended')}</span>}
         <EnvBadge env={d.environment} />
       </div>
+
+      {d.suspended && (
+        <div className="banner bad" role="status">
+          <div>
+            <strong>{t('Suspended since {date}', { date: when(d.suspended.at) })}</strong>
+            {t('No one can sign in; its tills, API keys and online store are refused. Reason: {reason}', { reason: d.suspended.reason ?? '—' })}
+          </div>
+          <button className="secondary" onClick={() => setAction({ kind: 'reactivate' })}>{t('Reactivate')}</button>
+        </div>
+      )}
+
+      {(d.queue.pending > 0 || d.queue.offline > 0 || d.queue.outage) && (
+        <section className={`card row queue-card${d.queue.stuck > 0 ? ' stuck' : ''}`}>
+          <div>
+            <h2>{t('Waiting for BTS')}</h2>
+            <p className="small muted">
+              {t('{n} pending', { n: d.queue.pending })}{d.queue.stuck > 0 && <> · <strong>{t('{n} for more than 15 minutes', { n: d.queue.stuck })}</strong></>} · {t('{n} issued offline, to send', { n: d.queue.offline })}{d.queue.outage && <> · {t('issuing offline now')}</>}
+            </p>
+          </div>
+          <span className="spacer" />
+          <button
+            disabled={retrying}
+            onClick={() => {
+              setRetrying(true);
+              void api<{ settled: number; stillPending: number; stillOffline: number; outageClosed: boolean }>(`/v1/platform/tenants/${d.id}/retry`, { method: 'POST' })
+                .then((r) => toast(r.settled ? t('{n} documents settled with BTS', { n: r.settled }) : t('Nothing could be settled yet; BTS may still be unreachable.'), r.settled ? 'ok' : 'bad'))
+                .catch((e: unknown) => toast(e instanceof Error ? e.message : String(e), 'bad'))
+                .finally(() => { setRetrying(false); void load(); });
+            }}
+          >{retrying ? t('Sending…') : t('Send now')}</button>
+        </section>
+      )}
 
       {d.environment === 'test' ? (
         <section className={`card stack golive ${d.readiness.ready ? 'ready' : ''}`}>
@@ -532,6 +584,41 @@ function Business() {
         </section>
       </div>
 
+      <section className="card stack">
+        <div>
+          <h2>{t('People')}</h2>
+          <p className="small muted">{t('For someone locked out. A password link only ever goes to the person’s own email; you never see it.')}</p>
+        </div>
+        <div className="table-wrap">
+          <table className="responsive">
+            <thead><tr><th scope="col">{t('Name')}</th><th scope="col">{t('Role')}</th><th scope="col">{t('Two-step')}</th><th scope="col">{t('Last sign-in')}</th><th scope="col"><span className="sr-only">{t('Actions')}</span></th></tr></thead>
+            <tbody>
+              {d.people.map((p) => (
+                <tr key={p.id}>
+                  <td data-label={t('Name')}><strong>{p.name}</strong><div className="small muted mono">{p.login}</div></td>
+                  <td data-label={t('Role')}>{p.role}</td>
+                  <td data-label={t('Two-step')}>{p.twoFactor ? <span className="badge authorized">{t('On')}</span> : <span className="muted small">{t('Off')}</span>}</td>
+                  <td data-label={t('Last sign-in')} className="small">{p.lastLoginAt ? when(p.lastLoginAt) : <span className="muted">{t('Never')}</span>}</td>
+                  <td className="right">
+                    <div className="row" style={{ justifyContent: 'flex-end', gap: '0.4rem' }}>
+                      <button
+                        className="secondary small-button"
+                        disabled={!p.hasEmail}
+                        title={p.hasEmail ? undefined : t('No email on this account: an owner or admin of the business can set a temporary password')}
+                        onClick={() => void api<{ emailed: string }>(`/v1/platform/tenants/${d.id}/users/${p.id}/reset-link`, { method: 'POST' })
+                          .then((r) => { toast(t('Password link emailed to {email}', { email: r.emailed })); void load(); })
+                          .catch((e: unknown) => toast(e instanceof Error ? e.message : String(e), 'bad'))}
+                      >{t('Email a password link')}</button>
+                      {p.twoFactor && <button className="secondary small-button" onClick={() => setAction({ kind: 'two-factor', person: p })}>{t('Turn off two-step')}</button>}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
       {d.history.length > 0 && (
         <section className="card stack">
           <h2>{t('Staff actions')}</h2>
@@ -546,7 +633,139 @@ function Business() {
         </section>
       )}
 
+      {!d.suspended && (
+        <section className="card row danger-zone">
+          <div>
+            <h2>{t('Suspend this business')}</h2>
+            <p className="small muted">{t('For fraud, abuse or a legal order. No one can sign in, its tills, API keys and store stop, and its owners are told why. Documents already on their way to BTS still finish.')}</p>
+          </div>
+          <span className="spacer" />
+          <button className="danger" onClick={() => setAction({ kind: 'suspend' })}>{t('Suspend')}</button>
+        </section>
+      )}
+
       {dialog && <EnvironmentDialog detail={d} target={dialog} onClose={() => setDialog(null)} onDone={(msg) => { setDialog(null); toast(msg); void load(); }} />}
+      {action && <StaffActionDialog detail={d} action={action} onClose={() => setAction(null)} onDone={(msg) => { setAction(null); toast(msg); void load(); }} />}
+    </div>
+  );
+}
+
+/** Suspend, reactivate, or turn off someone's two-step sign-in: each with a reason, for the record. */
+function StaffActionDialog({ detail, action, onClose, onDone }: { detail: TenantDetail; action: { kind: 'suspend' | 'reactivate' } | { kind: 'two-factor'; person: Person }; onClose: () => void; onDone: (message: string) => void }) {
+  const t = useT();
+  const [reason, setReason] = useState('');
+  const [tin, setTin] = useState('');
+  const [error, setError] = useState<unknown>(null);
+  const [busy, setBusy] = useState(false);
+  const person = action.kind === 'two-factor' ? action.person : null;
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      if (action.kind === 'suspend') {
+        await api(`/v1/platform/tenants/${detail.id}/suspend`, { method: 'POST', body: { confirmTin: tin, reason } });
+        onDone(t('{name} is suspended', { name: detail.name }));
+      } else if (action.kind === 'reactivate') {
+        await api(`/v1/platform/tenants/${detail.id}/reactivate`, { method: 'POST', body: { reason } });
+        onDone(t('{name} is active again', { name: detail.name }));
+      } else {
+        await api(`/v1/platform/tenants/${detail.id}/users/${person!.id}/two-factor/reset`, { method: 'POST', body: { reason } });
+        onDone(t('Two-step sign-in is off for {name}', { name: person!.name }));
+      }
+    } catch (err) {
+      setError(err instanceof ApiError && err.code === 'confirmation_mismatch' ? new Error(t('The TIN does not match this business.')) : err);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const title = action.kind === 'suspend' ? t('Suspend {name}?', { name: detail.name }) : action.kind === 'reactivate' ? t('Reactivate {name}?', { name: detail.name }) : t('Turn off two-step sign-in for {name}?', { name: person!.name });
+  return (
+    <Modal title={title} onClose={onClose}>
+      <form className="stack" onSubmit={submit}>
+        {action.kind === 'suspend' && <p className="small">{t('Its owners are emailed the reason, and it appears in the business’s own activity log.')}</p>}
+        {action.kind === 'reactivate' && <p className="small">{t('Its people can sign in again and its tills, API keys and store work as before. Its owners are emailed.')}</p>}
+        {action.kind === 'two-factor' && <p className="small">{t('Only once you are sure it is them (a lost or replaced phone). They are signed out everywhere, emailed, and set it up again after signing in with their password.')}</p>}
+        <Field label={t('Reason')} hint={action.kind === 'two-factor' ? t('How you confirmed who they are.') : undefined}><input required minLength={3} maxLength={500} autoFocus value={reason} onChange={(e) => setReason(e.target.value)} /></Field>
+        {action.kind === 'suspend' && <Field label={t('Type the TIN to confirm: {tin}', { tin: detail.tin })}><input required inputMode="numeric" pattern="\d{6}" maxLength={6} value={tin} onChange={(e) => setTin(e.target.value)} /></Field>}
+        <ErrorText error={error} />
+        <div className="row">
+          <span className="spacer" />
+          <button type="button" className="secondary" onClick={onClose}>{t('Cancel')}</button>
+          <button type="submit" className={action.kind === 'reactivate' ? '' : 'danger'} disabled={busy || reason.trim().length < 3 || (action.kind === 'suspend' && tin.length !== 6)}>
+            {busy ? t('Saving…') : action.kind === 'suspend' ? t('Suspend') : action.kind === 'reactivate' ? t('Reactivate') : t('Turn off two-step')}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+/** Notices to every business: shown in their app while they last. */
+function Notices() {
+  const t = useT();
+  const toast = useToast();
+  usePageTitle(t('Notices'));
+  const [rows, setRows] = useState<NoticeRow[] | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  const [form, setForm] = useState({ message: '', messageEs: '', level: 'info' as 'info' | 'warning', endsAt: '' });
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(() => api<{ data: NoticeRow[] }>('/v1/platform/notices').then((r) => setRows(r.data)).catch(setError), []);
+  useEffect(() => {
+    void load();
+  }, [load]);
+  const post = async (e: FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      await api('/v1/platform/notices', { method: 'POST', body: { message: form.message, messageEs: form.messageEs || null, level: form.level, endsAt: form.endsAt ? new Date(form.endsAt).toISOString() : null } });
+      setForm({ message: '', messageEs: '', level: 'info', endsAt: '' });
+      toast(t('Notice posted to every business'));
+      void load();
+    } catch (err) {
+      setError(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const end = (id: string) => void api(`/v1/platform/notices/${id}/end`, { method: 'POST' }).then(() => { toast(t('Notice ended')); void load(); }).catch((e: unknown) => toast(e instanceof Error ? e.message : String(e), 'bad'));
+  return (
+    <div className="stack">
+      <div><span className="kicker">{t('Platform console')}</span><h1>{t('Notices')}</h1><p className="small muted">{t('A line at the top of every business’s app while it lasts: maintenance, a BTS outage, news. Each person can dismiss it.')}</p></div>
+      <form className="card stack" onSubmit={post}>
+        <h2>{t('Post a notice')}</h2>
+        <Field label={t('Message')}><input required maxLength={500} value={form.message} onChange={(e) => setForm({ ...form, message: e.target.value })} placeholder={t('Maintenance tonight from 11 pm to midnight.')} /></Field>
+        <Field label={t('In Spanish')} hint={t('Optional: shown to people using the app in Spanish.')}><input maxLength={500} value={form.messageEs} onChange={(e) => setForm({ ...form, messageEs: e.target.value })} /></Field>
+        <div className="form-grid">
+          <Field label={t('Kind')}>
+            <Select value={form.level} onChange={(e) => setForm({ ...form, level: e.target.value as 'info' | 'warning' })}>
+              <option value="info">{t('Information')}</option>
+              <option value="warning">{t('Warning')}</option>
+            </Select>
+          </Field>
+          <Field label={t('Ends')} hint={t('Optional: it stays until you end it.')}><input type="datetime-local" value={form.endsAt} onChange={(e) => setForm({ ...form, endsAt: e.target.value })} /></Field>
+        </div>
+        <ErrorText error={error} />
+        <div className="row"><span className="spacer" /><button type="submit" disabled={busy || !form.message.trim()}>{busy ? t('Posting…') : t('Post to every business')}</button></div>
+      </form>
+      <section className="card stack">
+        <h2>{t('Recent notices')}</h2>
+        {rows === null ? <div className="skeleton" style={{ height: '6rem' }} /> : rows.length === 0 ? <p className="muted">{t('No notices yet.')}</p> : (
+          <ul className="plain-list">
+            {rows.map((n) => (
+              <li key={n.id} className="row">
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div>{n.live ? <span className={`badge ${n.level === 'warning' ? 'pending' : 'authorized'}`}>{t('Showing')}</span> : <span className="badge cancelled">{t('Ended')}</span>} {n.message}</div>
+                  {n.messageEs && <div className="small muted">{n.messageEs}</div>}
+                  <div className="small muted">{t('{who}, {date}', { who: n.by ?? t('Someone'), date: when(n.createdAt) })}{n.endsAt && <> · {n.live ? t('until {date}', { date: when(n.endsAt) }) : t('ended {date}', { date: when(n.endsAt) })}</>}</div>
+                </div>
+                {n.live && <button className="secondary small-button" onClick={() => end(n.id)}>{t('End now')}</button>}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
     </div>
   );
 }

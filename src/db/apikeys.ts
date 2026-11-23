@@ -33,12 +33,12 @@ export async function authenticateApiKey(db: Database, presented: string): Promi
   if (!m) return null;
   const [, prefix, secret] = m;
   const row = (
-    await db.query<{ id: string; tenant_id: string; name: string; key_hash: string; revoked_at: unknown }>(
-      'select id, tenant_id, name, key_hash, revoked_at from api_keys where prefix = $1',
+    await db.query<{ id: string; tenant_id: string; name: string; key_hash: string; revoked_at: unknown; suspended: boolean }>(
+      'select k.id, k.tenant_id, k.name, k.key_hash, k.revoked_at, t.suspended_at is not null as suspended from api_keys k join tenants t on t.id = k.tenant_id where k.prefix = $1',
       [prefix],
     )
   ).rows[0];
-  if (!row || row.revoked_at) return null;
+  if (!row || row.revoked_at || row.suspended) return null;
   const expected = Buffer.from(row.key_hash, 'hex');
   const actual = Buffer.from(hash(secret!), 'hex');
   if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) return null;

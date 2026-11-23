@@ -100,11 +100,12 @@ export interface StoreRef {
 }
 
 export async function loadStore(db: Queryable, slug: string, opts: { requireOpen?: boolean } = {}): Promise<StoreRef> {
-  const r = (await db.query<{ id: string; slug: string; name: string; email: string; telephone: string; street: string; city: string; environment: string; store_settings: Partial<StoreSettings> }>(
-    `select id, slug, coalesce(trade_name, legal_name) as name, email, telephone, street, city, environment, store_settings from tenants where slug = $1`,
+  const r = (await db.query<{ id: string; slug: string; name: string; email: string; telephone: string; street: string; city: string; environment: string; store_settings: Partial<StoreSettings>; suspended: boolean }>(
+    `select id, slug, coalesce(trade_name, legal_name) as name, email, telephone, street, city, environment, store_settings, suspended_at is not null as suspended from tenants where slug = $1`,
     [slug.toLowerCase()],
   )).rows[0];
   if (!r) throw new StoreError('not_found', 'There is no store at this address');
+  if (r.suspended) throw new StoreError('store_closed', 'This store is not open right now');
   const settings = withDefaults(r.store_settings);
   if ((opts.requireOpen ?? true) && !settings.enabled) throw new StoreError('store_closed', 'This store is not open yet');
   return { tenantId: r.id, slug: r.slug, name: r.name, email: r.email, telephone: r.telephone, street: r.street, city: r.city, environment: r.environment, settings };

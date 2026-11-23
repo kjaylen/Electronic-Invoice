@@ -105,11 +105,11 @@ export async function createTenant(db: Queryable, t: NewTenant): Promise<string>
   return id;
 }
 
-export async function tenantBySlug(db: Queryable, slug: string): Promise<{ id: string; slug: string; legalName: string; tradeName: string | null; environment: string } | null> {
-  const r = (await db.query<{ id: string; slug: string; legal_name: string; trade_name: string | null; environment: string }>(
-    'select id, slug, legal_name, trade_name, environment from tenants where slug = $1', [slug],
+export async function tenantBySlug(db: Queryable, slug: string): Promise<{ id: string; slug: string; legalName: string; tradeName: string | null; environment: string; suspended: boolean } | null> {
+  const r = (await db.query<{ id: string; slug: string; legal_name: string; trade_name: string | null; environment: string; suspended: boolean }>(
+    'select id, slug, legal_name, trade_name, environment, suspended_at is not null as suspended from tenants where slug = $1', [slug],
   )).rows[0];
-  return r ? { id: r.id, slug: r.slug, legalName: r.legal_name, tradeName: r.trade_name, environment: r.environment } : null;
+  return r ? { id: r.id, slug: r.slug, legalName: r.legal_name, tradeName: r.trade_name, environment: r.environment, suspended: r.suspended } : null;
 }
 
 /**

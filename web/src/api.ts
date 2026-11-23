@@ -140,6 +140,8 @@ export interface Me {
   environment: 'test' | 'production';
   certificate: { id: string; tin: string; validFrom: string; validTo: string; daysLeft: number; status: string } | null;
   contingency: { active: boolean; since: string | null; reason: string | null; queued: number };
+  /** Notices from the platform (maintenance, a BTS outage, news). */
+  notices?: Array<{ id: string; message: string; messageEs: string | null; level: 'info' | 'warning' }>;
   /** How the counter works: the most a cashier may take off a line (percent), or no limit. */
   counter?: { cashierDiscountLimit: string | null; loyalty?: { pointValue: string; minRedeem: number } | null };
   billing?: { plan: 'starter' | 'business' | 'pro'; planName: string; status: 'trialing' | 'active' | 'past_due' | 'suspended'; trialDaysLeft: number | null; overdueInvoices: number; features: Array<'store' | 'api' | 'webhooks' | 'integrations'> };

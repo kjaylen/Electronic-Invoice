@@ -12,6 +12,11 @@
  *   GET  /v1/platform/billing                      subscriptions and invoices: monthly revenue, open and overdue invoices
  *   POST /v1/platform/invoices/:id/paid | void | issue   record a payment, cancel an invoice, (re)issue its e-invoice
  *   PUT  /v1/platform/tenants/:id/subscription     staff: set a business's plan or extend its trial
+ *   POST /v1/platform/tenants/:id/suspend | reactivate   { confirmTin, reason } / { reason }: refuse its people, tills, keys and store
+ *   POST /v1/platform/tenants/:id/retry            send its documents waiting for BTS now (pending and offline ones)
+ *   POST /v1/platform/tenants/:id/users/:userId/reset-link       email a person a link to choose a new password
+ *   POST /v1/platform/tenants/:id/users/:userId/two-factor/reset { reason }: turn off two-step sign-in (lost phone)
+ *   GET  /v1/platform/notices, POST /v1/platform/notices, POST /v1/platform/notices/:id/end   notices to every business
  *
  * Staff sign in with their own accounts (npm run platform-admin), in a cookie
  * of their own ("etd_admin"), with the same CSRF header rule as the web app.
@@ -38,14 +43,16 @@ import {
 } from '../db/platform.ts';
 import { simpleHtml } from '../mail/mailer.ts';
 import type { Database, Queryable } from '../db/database.ts';
-import type { PipelineDeps } from '../pipeline/issue.ts';
+import { catchUpContingency, type PipelineDeps, resumePending } from '../pipeline/issue.ts';
 import { certificateSummary } from './admin.ts';
 import { readCookie, requireCsrfHeader } from './auth.ts';
 import { publicLink, type ServerContext } from './context.ts';
 import { ApiError, notFound } from './errors.ts';
 import { uuid } from './schemas.ts';
 import { atLimit, countHit } from '../db/ratelimit.ts';
-import { beginTwoFactorSetup, confirmTwoFactorSetup, createLoginChallenge, endLoginChallenge, otpauthQr, otpauthUrl, TOTP_ISSUER, twoFactorStatus, useLoginChallenge, verifySecondFactor } from '../db/twofactor.ts';
+import { beginTwoFactorSetup, confirmTwoFactorSetup, createLoginChallenge, disableTwoFactor, endLoginChallenge, otpauthQr, otpauthUrl, TOTP_ISSUER, twoFactorStatus, useLoginChallenge, verifySecondFactor } from '../db/twofactor.ts';
+import { createPasswordLink } from '../db/users.ts';
+import { randomUUID } from 'node:crypto';
 import { type BillingContext, type BillingInvoiceRow, billingSummary, getSubscription, invoiceJson, issueInvoiceDocument, markInvoicePaid, refreshStatus } from '../billing/billing.ts';
 import { type PlanCode, PLANS } from '../billing/plans.ts';
 import { toBigInt } from '../db/database.ts';
@@ -74,6 +81,8 @@ interface TenantRow {
   created_at: string | Date;
   production_since: string | Date | null;
   bts_approval_reference: string | null;
+  suspended_at: string | Date | null;
+  suspended_reason: string | null;
 }
 
 const iso = (v: string | Date | null) => (v ? new Date(v).toISOString() : null);
@@ -288,6 +297,7 @@ export function registerPlatformRoutes(app: FastifyInstance, deps: PipelineDeps,
           certificateValidTo: iso(t.cert_valid_to),
           createdAt: iso(t.created_at),
           productionSince: iso(t.production_since),
+          suspended: Boolean(t.suspended_at),
         })),
       };
     },
@@ -325,6 +335,20 @@ export function registerPlatformRoutes(app: FastifyInstance, deps: PipelineDeps,
     const owners = (await db.query<{ name: string; email: string | null; username: string | null; role: string; last_login_at: string | Date | null }>(
       `select name, email, username, role, last_login_at from users where tenant_id = $1 and status = 'active' and role in ('owner', 'admin') order by role desc, created_at`, [t.id],
     )).rows;
+    // Everyone who can sign in, for helping someone locked out.
+    const people = (await db.query<{ id: string; name: string; email: string | null; username: string | null; role: string; last_login_at: string | Date | null; two_factor: boolean }>(
+      `select u.id, u.name, u.email, u.username, u.role, u.last_login_at,
+         exists (select 1 from two_factor tf where tf.owner_kind = 'user' and tf.owner_id = u.id and tf.confirmed_at is not null) as two_factor
+       from users u where u.tenant_id = $1 and u.status = 'active'
+       order by case u.role when 'owner' then 0 when 'admin' then 1 when 'manager' then 2 else 3 end, u.name limit 200`, [t.id],
+    )).rows;
+    const queue = (await db.query<{ pending: number; stuck: number; offline: number; outage: boolean }>(
+      `select count(*) filter (where status = 'pending')::int as pending,
+         count(*) filter (where status = 'pending' and created_at < now() - interval '15 minutes')::int as stuck,
+         count(*) filter (where status = 'contingency_pending')::int as offline,
+         exists (select 1 from contingency_periods where tenant_id = $1 and ended_at is null) as outage
+       from documents where tenant_id = $1 and status in ('pending', 'contingency_pending')`, [t.id],
+    )).rows[0]!;
     const users = (await db.query<{ n: number }>(`select count(*)::int as n from users where tenant_id = $1 and status = 'active'`, [t.id])).rows[0]!.n;
     const history = (await db.query<{ action: string; details: Record<string, unknown> | null; at: string | Date; admin: string | null }>(
       `select p.action, p.details, p.at, a.name as admin from platform_audit p left join platform_admins a on a.id = p.admin_id where p.tenant_id = $1 order by p.id desc limit 50`, [t.id],
@@ -343,6 +367,9 @@ export function registerPlatformRoutes(app: FastifyInstance, deps: PipelineDeps,
       approvalReference: t.bts_approval_reference,
       users,
       admins: owners.map((o) => ({ name: o.name, login: o.email ?? o.username, role: o.role, lastLoginAt: iso(o.last_login_at) })),
+      people: people.map((p) => ({ id: p.id, name: p.name, login: p.email ?? p.username, role: p.role, hasEmail: Boolean(p.email), twoFactor: p.two_factor, lastLoginAt: iso(p.last_login_at) })),
+      suspended: t.suspended_at ? { at: iso(t.suspended_at), reason: t.suspended_reason } : null,
+      queue: { pending: queue.pending, stuck: queue.stuck, offline: queue.offline, outage: queue.outage },
       certificate: r.certificate,
       readiness: { ready: r.ready, checks: r.checks },
       billing: await billingSummary(db, t.id),
@@ -407,6 +434,204 @@ export function registerPlatformRoutes(app: FastifyInstance, deps: PipelineDeps,
     },
   );
 
+  // ---------- suspending a business ----------
+
+  app.post<{ Params: { id: string }; Body: { confirmTin: string; reason: string } }>(
+    '/tenants/:id/suspend',
+    { schema: confirmSchema({ reason: { type: 'string', minLength: 3, maxLength: 500 } }, ['reason']) },
+    async (request) => {
+      const a = admin(request);
+      const t = await db.transaction(async (tx) => {
+        const t = (await tx.query<TenantRow>('select * from tenants where id = $1 for update', [request.params.id])).rows[0];
+        if (!t) throw notFound('Business');
+        if (request.body.confirmTin !== t.tin) throw new ApiError(422, 'confirmation_mismatch', 'Type the business’s TIN to confirm');
+        if (t.suspended_at) throw new ApiError(409, 'already_suspended', 'This business is already suspended');
+        const reason = request.body.reason.trim();
+        await tx.query('update tenants set suspended_at = now(), suspended_reason = $2 where id = $1', [t.id, reason]);
+        await platformAudit(tx, { adminId: a.id, tenantId: t.id, action: 'tenant.suspended', details: { reason }, ip: request.ip });
+        await audit(tx, { tenantId: t.id, action: 'business.suspended', details: { reason }, ip: request.ip });
+        return t;
+      });
+      void tellOwners(t, `${t.trade_name ?? t.legal_name} is suspended`, [
+        `${t.trade_name ?? t.legal_name} has been suspended on eInvoicing, so no one can sign in, its tills and API keys stop working and its online store is closed.`,
+        `Reason: ${request.body.reason.trim()}`,
+        'Documents already on their way to the Belize Tax Service still finish. Reply to this email to talk to us about it.',
+      ]).catch((e) => request.log.error({ err: e }, 'suspension email failed'));
+      return { ok: true, suspended: true };
+    },
+  );
+
+  app.post<{ Params: { id: string }; Body: { reason: string } }>(
+    '/tenants/:id/reactivate',
+    { schema: { params: { type: 'object', required: ['id'], properties: { id: uuid } }, body: { type: 'object', required: ['reason'], additionalProperties: false, properties: { reason: { type: 'string', minLength: 3, maxLength: 500 } } } } },
+    async (request) => {
+      const a = admin(request);
+      const t = await db.transaction(async (tx) => {
+        const t = (await tx.query<TenantRow>('select * from tenants where id = $1 for update', [request.params.id])).rows[0];
+        if (!t) throw notFound('Business');
+        if (!t.suspended_at) throw new ApiError(409, 'not_suspended', 'This business is not suspended');
+        const reason = request.body.reason.trim();
+        await tx.query('update tenants set suspended_at = null, suspended_reason = null where id = $1', [t.id]);
+        await platformAudit(tx, { adminId: a.id, tenantId: t.id, action: 'tenant.reactivated', details: { reason }, ip: request.ip });
+        await audit(tx, { tenantId: t.id, action: 'business.reactivated', details: { reason }, ip: request.ip });
+        return t;
+      });
+      void tellOwners(t, `${t.trade_name ?? t.legal_name} is active again`, [
+        `${t.trade_name ?? t.legal_name} is active again on eInvoicing: your team can sign in, and your tills, API keys and online store work as before.`,
+      ]).catch((e) => request.log.error({ err: e }, 'reactivation email failed'));
+      return { ok: true, suspended: false };
+    },
+  );
+
+  // ---------- documents waiting for BTS ----------
+
+  app.post<{ Params: { id: string } }>('/tenants/:id/retry', { schema: { params: { type: 'object', required: ['id'], properties: { id: uuid } } } }, async (request) => {
+    const a = admin(request);
+    const t = await loadTenant(request.params.id);
+    // Not documents created in the last minute: their own request may still settle them.
+    const resumed = await resumePending(deps, t.id, { olderThanMs: 60_000 });
+    const caught = await catchUpContingency(deps, t.id);
+    const left = (await db.query<{ pending: number; offline: number }>(
+      `select count(*) filter (where status = 'pending')::int as pending, count(*) filter (where status = 'contingency_pending')::int as offline
+       from documents where tenant_id = $1 and status in ('pending', 'contingency_pending')`, [t.id],
+    )).rows[0]!;
+    const result = {
+      settled: resumed.filter((r) => r.status !== 'pending').length + caught.delivered.length,
+      stillPending: left.pending,
+      stillOffline: left.offline,
+      outageClosed: caught.periodClosed,
+    };
+    await platformAudit(db, { adminId: a.id, tenantId: t.id, action: 'tenant.retried', details: result, ip: request.ip });
+    return result;
+  });
+
+  // ---------- helping someone locked out ----------
+
+  const personOf = async (tenantId: string, userId: string) => {
+    const u = (await db.query<{ id: string; name: string; email: string | null; username: string | null }>(
+      `select id, name, email, username from users where id = $1 and tenant_id = $2 and status = 'active'`, [userId, tenantId],
+    )).rows[0];
+    if (!u) throw notFound('Person');
+    return u;
+  };
+  const personParams = { type: 'object', required: ['id', 'userId'], properties: { id: uuid, userId: uuid } } as const;
+
+  app.post<{ Params: { id: string; userId: string } }>('/tenants/:id/users/:userId/reset-link', { schema: { params: personParams } }, async (request) => {
+    const a = admin(request);
+    const t = await loadTenant(request.params.id);
+    const u = await personOf(t.id, request.params.userId);
+    // Only ever to the person's own address: staff never see or hand out the link.
+    if (!u.email) throw new ApiError(422, 'no_email', 'This person has no email address; an owner or admin of the business can set a temporary password');
+    if (!ctx.mailConfigured || !ctx.publicUrl) throw new ApiError(503, 'mail_not_configured', 'Email is not set up on this server');
+    const token = await createPasswordLink(db, u.id, 'reset');
+    const link = publicLink(ctx, `/${t.slug}/reset-password?token=${token}`);
+    const name = t.trade_name ?? t.legal_name;
+    await ctx.mailer.send({
+      to: u.email,
+      subject: `Reset your ${name} password`,
+      text: `Hello ${u.name},
+
+eInvoicing support sent you this link to choose a new password for ${name} (it works for one hour):
+${link}
+
+If you did not ask for help, ignore this email; your password stays the same.`,
+      html: simpleHtml({
+        heading: 'Choose a new password',
+        paragraphs: [`Hello ${u.name},`, `eInvoicing support sent you this link to choose a new password for ${name}. It works for one hour.`, 'If you did not ask for help, ignore this email; your password stays the same.'],
+        button: { label: 'Choose a new password', url: link },
+      }),
+    });
+    await platformAudit(db, { adminId: a.id, tenantId: t.id, action: 'user.reset_link_sent', details: { person: u.name }, ip: request.ip });
+    await audit(db, { tenantId: t.id, action: 'support.reset_link_sent', target: u.name, ip: request.ip });
+    return { emailed: u.email };
+  });
+
+  app.post<{ Params: { id: string; userId: string }; Body: { reason: string } }>(
+    '/tenants/:id/users/:userId/two-factor/reset',
+    { schema: { params: personParams, body: { type: 'object', required: ['reason'], additionalProperties: false, properties: { reason: { type: 'string', minLength: 3, maxLength: 500 } } } } },
+    async (request) => {
+      const a = admin(request);
+      const t = await loadTenant(request.params.id);
+      const u = await personOf(t.id, request.params.userId);
+      const reason = request.body.reason.trim();
+      const off = await db.transaction(async (tx) => {
+        const off = await disableTwoFactor(tx, 'user', u.id);
+        if (!off) throw new ApiError(409, 'two_factor_off', 'Two-step sign-in is not on for this person');
+        // Signed out everywhere: whoever has the old phone has no way in.
+        await tx.query('delete from sessions where user_id = $1 and device_id is null', [u.id]);
+        await platformAudit(tx, { adminId: a.id, tenantId: t.id, action: 'user.two_factor_reset', details: { person: u.name, reason }, ip: request.ip });
+        await audit(tx, { tenantId: t.id, action: 'support.two_factor_reset', target: u.name, details: { reason }, ip: request.ip });
+        return off;
+      });
+      if (off && u.email && ctx.mailConfigured) {
+        const name = t.trade_name ?? t.legal_name;
+        void ctx.mailer.send({
+          to: u.email,
+          subject: `Two-step sign-in was turned off for ${name}`,
+          text: `Hello ${u.name},
+
+eInvoicing support turned off two-step sign-in on your ${name} account, as you asked. Sign in with your password and set it up again with your new phone.
+
+If you did not ask for this, tell an owner of ${name} and reply to this email at once.`,
+          html: simpleHtml({
+            heading: 'Two-step sign-in was turned off',
+            paragraphs: [`Hello ${u.name},`, `eInvoicing support turned off two-step sign-in on your ${name} account, as you asked. Sign in with your password and set it up again with your new phone.`, `If you did not ask for this, tell an owner of ${name} and reply to this email at once.`],
+          }),
+        }).catch((e) => request.log.error({ err: e }, 'two-factor reset email failed'));
+      }
+      return { ok: true };
+    },
+  );
+
+  // ---------- notices to every business ----------
+
+  const noticeJson = (n: { id: string; message: string; message_es: string | null; level: string; starts_at: string | Date; ends_at: string | Date | null; created_at: string | Date; admin: string | null }) => ({
+    id: n.id, message: n.message, messageEs: n.message_es, level: n.level, startsAt: iso(n.starts_at), endsAt: iso(n.ends_at), createdAt: iso(n.created_at), by: n.admin,
+    live: new Date(n.starts_at).getTime() <= Date.now() && (!n.ends_at || new Date(n.ends_at).getTime() > Date.now()),
+  });
+  const NOTICE_COLUMNS = 'n.id, n.message, n.message_es, n.level, n.starts_at, n.ends_at, n.created_at, a.name as admin';
+
+  app.get('/notices', async () => ({
+    data: (await db.query<Parameters<typeof noticeJson>[0]>(`select ${NOTICE_COLUMNS} from platform_notices n left join platform_admins a on a.id = n.created_by order by n.created_at desc limit 50`)).rows.map(noticeJson),
+  }));
+
+  app.post<{ Body: { message: string; messageEs?: string | null; level?: 'info' | 'warning'; endsAt?: string | null } }>(
+    '/notices',
+    {
+      schema: {
+        body: {
+          type: 'object', required: ['message'], additionalProperties: false,
+          properties: {
+            message: { type: 'string', minLength: 1, maxLength: 500 },
+            messageEs: { type: ['string', 'null'], maxLength: 500 },
+            level: { type: 'string', enum: ['info', 'warning'] },
+            endsAt: { type: ['string', 'null'], format: 'date-time' },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const a = admin(request);
+      const b = request.body;
+      if (b.endsAt && new Date(b.endsAt).getTime() <= Date.now()) throw new ApiError(422, 'invalid_end', 'The notice must end in the future');
+      const id = randomUUID();
+      await db.query('insert into platform_notices (id, message, message_es, level, ends_at, created_by) values ($1, $2, $3, $4, $5, $6)', [
+        id, b.message.trim(), b.messageEs?.trim() || null, b.level ?? 'info', b.endsAt ?? null, a.id,
+      ]);
+      await platformAudit(db, { adminId: a.id, action: 'notice.created', details: { message: b.message.trim().slice(0, 120) }, ip: request.ip });
+      const n = (await db.query<Parameters<typeof noticeJson>[0]>(`select ${NOTICE_COLUMNS} from platform_notices n left join platform_admins a on a.id = n.created_by where n.id = $1`, [id])).rows[0]!;
+      return reply.code(201).send(noticeJson(n));
+    },
+  );
+
+  app.post<{ Params: { id: string } }>('/notices/:id/end', { schema: { params: { type: 'object', required: ['id'], properties: { id: uuid } } } }, async (request) => {
+    const a = admin(request);
+    const r = await db.query<{ id: string }>('update platform_notices set ends_at = now() where id = $1 and (ends_at is null or ends_at > now()) returning id', [request.params.id]);
+    if (!r.rows.length) throw new ApiError(409, 'notice_ended', 'This notice has already ended');
+    await platformAudit(db, { adminId: a.id, action: 'notice.ended', details: { id: request.params.id }, ip: request.ip });
+    return { ok: true };
+  });
+
   app.get<{ Querystring: { before?: string } }>(
     '/audit',
     { schema: { querystring: { type: 'object', additionalProperties: false, properties: { before: { type: 'string', pattern: '^\\d{1,18}$' } } } } },
@@ -430,6 +655,20 @@ export function registerPlatformRoutes(app: FastifyInstance, deps: PipelineDeps,
   );
 
   /** Tell the business's owners they are live (best effort). */
+  /** A short email to a business's owners about something staff did. */
+  async function tellOwners(t: TenantRow, subject: string, lines: string[]) {
+    if (!ctx.mailConfigured) return;
+    const owners = (await db.query<{ email: string; name: string }>(`select email, name from users where tenant_id = $1 and role = 'owner' and status = 'active' and email is not null`, [t.id])).rows;
+    for (const o of owners) {
+      await ctx.mailer.send({
+        to: o.email,
+        subject,
+        text: [`Hello ${o.name},`, ...lines].join('\n\n'),
+        html: simpleHtml({ heading: subject, paragraphs: [`Hello ${o.name},`, ...lines] }),
+      });
+    }
+  }
+
   async function notifyOwners(t: TenantRow, retired: boolean) {
     if (!ctx.mailConfigured || !ctx.publicUrl) return;
     const owners = (await db.query<{ email: string; name: string }>(`select email, name from users where tenant_id = $1 and role = 'owner' and status = 'active' and email is not null`, [t.id])).rows;

@@ -784,7 +784,8 @@ pre.instructions { white-space: pre-wrap; font-family: var(--figures); font-size
 .console-bar nav a { color: rgba(255, 255, 255, 0.75); }
 .console-bar nav a:hover { background: rgba(255, 255, 255, 0.1); color: var(--sheet); }
 .console-bar nav a.active { background: var(--lime); color: var(--ink); }
-.console-bar button.secondary { color: var(--sheet); border-color: rgba(255, 255, 255, 0.35); }
+.console-bar button.secondary { color: var(--sheet); background: transparent; border-color: rgba(255, 255, 255, 0.35); box-shadow: none; }
+.console-bar button.secondary:hover:not(:disabled) { background: rgba(255, 255, 255, 0.1); color: var(--sheet); }
 @media (max-width: 1280px) { .console-bar nav { display: flex; width: auto; flex-direction: row; } }
 .golive { border-left: 4px solid var(--hairline-strong); }
 .golive.ready { border-left-color: var(--lime); }
@@ -1864,13 +1865,13 @@ button.cat-tag:hover:not(:disabled) { background: var(--brand); border-color: va
 
 /* Platform console overview */
 .signup-bars { display: flex; align-items: flex-end; gap: 2px; height: 120px; padding-top: 1.6rem; border-bottom: 1px solid var(--hairline-strong); }
-.signup-bars .bar { flex: 1; height: 100%; display: flex; align-items: flex-end; }
-.signup-bars .bar span { position: relative; display: block; width: 100%; background: var(--brand); border-radius: 4px 4px 0 0; }
-.signup-bars .bar:hover span { filter: brightness(1.15); }
-.signup-bars .bar span::after { content: attr(data-tip); position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); white-space: nowrap; background: var(--ink); color: var(--sheet); font-size: 0.75rem; font-weight: 600; padding: 0.25rem 0.5rem; border-radius: 6px; opacity: 0; pointer-events: none; transition: opacity 0.12s; z-index: 3; }
-.signup-bars .bar:hover span::after { opacity: 1; }
-.signup-bars .bar:first-child span::after { left: 0; transform: none; }
-.signup-bars .bar:last-child span::after { left: auto; right: 0; transform: none; }
+.signup-bars .sbar { flex: 1; height: 100%; display: flex; align-items: flex-end; }
+.signup-bars .sbar span { position: relative; display: block; width: 100%; background: var(--brand); border-radius: 4px 4px 0 0; }
+.signup-bars .sbar:hover span { filter: brightness(1.15); }
+.signup-bars .sbar span::after { content: attr(data-tip); position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); white-space: nowrap; background: var(--ink); color: var(--sheet); font-size: 0.75rem; font-weight: 600; padding: 0.25rem 0.5rem; border-radius: 6px; opacity: 0; pointer-events: none; transition: opacity 0.12s; z-index: 3; }
+.signup-bars .sbar:hover span::after { opacity: 1; }
+.signup-bars .sbar:first-child span::after { left: 0; transform: none; }
+.signup-bars .sbar:last-child span::after { left: auto; right: 0; transform: none; }
 .signup-axis { display: flex; justify-content: space-between; margin-top: 0.3rem; }
 .attention-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.5rem; max-height: 26rem; overflow-y: auto; }
 .attention-list li { display: grid; gap: 0.2rem; padding: 0.6rem 0.75rem; border: 1px solid var(--hairline); border-radius: 10px; }
@@ -2058,3 +2059,14 @@ button.cat-tag:hover:not(:disabled) { background: var(--brand); border-color: va
 .auth-foot-links { display: flex; flex-wrap: wrap; gap: 0.3rem 1.15rem; }
 .auth-foot-links a { color: var(--muted); font-weight: 500; }
 .auth-foot-links a:hover { color: var(--brand); }
+
+/* Notices from the platform; the console's operator tools */
+.notice-bar { justify-content: space-between; gap: 1rem; background: var(--brand-soft); color: var(--brand-ink); border-bottom: 1px solid var(--brand-line); }
+.notice-bar.warning { background: var(--ochre-soft); color: var(--ochre-ink); border-bottom-color: var(--ochre-line); }
+.notice-dismiss { font-size: 1.2rem; line-height: 1; padding: 0 0.35rem; min-height: 0; color: inherit; }
+.banner.bad { background: var(--coral-soft); border-color: var(--coral-line); color: var(--coral-ink); align-items: center; }
+.queue-card.stuck { border-color: var(--ochre-line); background: var(--ochre-soft); }
+.danger-zone { border-color: var(--coral-line); }
+.danger-zone h2 { color: var(--coral-ink); }
+/* Stat cards written with spans (the console): one line each. */
+.card.stat > span { display: block; }

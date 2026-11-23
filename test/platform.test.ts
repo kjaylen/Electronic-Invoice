@@ -9,10 +9,10 @@ import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
 import { buildApp } from '../src/api/app.ts';
 import { createApiKey } from '../src/db/apikeys.ts';
 import { createPlatformAdmin, setPlatformAdminStatus } from '../src/db/platform.ts';
-import { base32Decode, stepAt, totpCode } from '../src/db/twofactor.ts';
+import { base32Decode, beginTwoFactorSetup, confirmTwoFactorSetup, stepAt, totpCode } from '../src/db/twofactor.ts';
 import { createUser } from '../src/db/users.ts';
 import { platformOverview } from '../src/api/platform-overview.ts';
-import { SUBMIT_PATHS } from '../src/engine/transport.ts';
+import { DOCUMENT_QUERY_PATH, SUBMIT_PATHS } from '../src/engine/transport.ts';
 import { memoryMailer } from '../src/mail/mailer.ts';
 import { AUTHORIZED, setupPipeline, type PipelineFixture } from './pipeline-setup.ts';
 
@@ -215,4 +215,119 @@ test('overview: growth, documents, health and the businesses that need a person,
     const severities = later.attention.map((a: { severity: string }) => a.severity);
     assert.deepEqual(severities, [...severities].sort((x: string, y: string) => (x === y ? 0 : x === 'problem' ? -1 : 1)));
     assert.deepEqual(o.newest.map((n: { tenant: { id: string } }) => n.tenant.id).sort(), [f.tenantA, f.tenantB].sort());
+  }));
+
+test('suspending a business refuses its people, sessions and keys until it is reactivated; both sides are told', () =>
+  withConsole(async ({ f, app, mail, staff, key }) => {
+    const slug = (await f.db.query<{ slug: string }>('select slug from tenants where id = $1', [f.tenantB])).rows[0]!.slug;
+    await createUser(f.db, { tenantId: f.tenantB, name: 'Bea Owner', email: 'bea@biz-b.example', role: 'owner', password: PASSWORD });
+    const login = () => app.inject({ method: 'POST', url: '/v1/auth/login', headers: CSRF, payload: { business: slug, login: 'bea@biz-b.example', password: PASSWORD } });
+    const signedIn = await login();
+    assert.equal(signedIn.statusCode, 200, signedIn.body);
+    const cookie = String(signedIn.headers['set-cookie']).split(';')[0]!;
+    const me = (headers: Record<string, string>) => app.inject({ method: 'GET', url: '/v1/me', headers: { ...CSRF, 'x-business': slug, ...headers } });
+    assert.equal((await me({ cookie })).statusCode, 200);
+    assert.equal((await me({ authorization: `Bearer ${key}` })).statusCode, 200);
+
+    const wrongTin = await app.inject({ method: 'POST', url: `/v1/platform/tenants/${f.tenantB}/suspend`, headers: staff, payload: { confirmTin: '000000', reason: 'Card fraud reported' } });
+    assert.equal(wrongTin.json().error.code, 'confirmation_mismatch');
+    const suspended = await app.inject({ method: 'POST', url: `/v1/platform/tenants/${f.tenantB}/suspend`, headers: staff, payload: { confirmTin: '654321', reason: 'Card fraud reported' } });
+    assert.equal(suspended.statusCode, 200, suspended.body);
+    assert.equal((await me({ cookie })).statusCode, 401, 'its sessions stop');
+    assert.equal((await me({ authorization: `Bearer ${key}` })).statusCode, 401, 'its API keys stop');
+    const refused = await login();
+    assert.equal(refused.statusCode, 403);
+    assert.equal(refused.json().error.code, 'business_suspended');
+    assert.ok(mail.sent.some((m) => m.to === 'bea@biz-b.example' && /is suspended/.test(m.subject) && /Card fraud reported/.test(m.text)), 'the owners are told why');
+    const detail = (await app.inject({ method: 'GET', url: `/v1/platform/tenants/${f.tenantB}`, headers: staff })).json();
+    assert.equal(detail.suspended.reason, 'Card fraud reported');
+    assert.equal((await app.inject({ method: 'GET', url: '/v1/platform/tenants', headers: staff })).json().data.find((t: { id: string }) => t.id === f.tenantB).suspended, true);
+    const logged = (await f.db.query<{ action: string }>("select action from audit_events where tenant_id = $1 and action like 'business.%'", [f.tenantB])).rows.map((r) => r.action);
+    assert.ok(logged.includes('business.suspended'), 'in the business\'s own activity log too');
+
+    const back = await app.inject({ method: 'POST', url: `/v1/platform/tenants/${f.tenantB}/reactivate`, headers: staff, payload: { reason: 'Cleared by the bank' } });
+    assert.equal(back.statusCode, 200, back.body);
+    assert.equal((await me({ cookie })).statusCode, 200, 'the session works again');
+    assert.equal((await me({ authorization: `Bearer ${key}` })).statusCode, 200);
+    assert.equal((await login()).statusCode, 200);
+    assert.ok(mail.sent.some((m) => /is active again/.test(m.subject)));
+    assert.equal((await app.inject({ method: 'POST', url: `/v1/platform/tenants/${f.tenantB}/reactivate`, headers: staff, payload: { reason: 'again' } })).statusCode, 409);
+  }));
+
+test('retry: staff send a business\'s documents waiting for BTS now', () =>
+  withConsole(async ({ f, app, staff, key }) => {
+    f.deps.contingency = { enabled: false };
+    f.bts.script(SUBMIT_PATHS['02'], { status: 500, body: 'Rejection: Server error' });
+    await app.inject({ method: 'POST', url: '/v1/documents', headers: { authorization: `Bearer ${key}` }, payload: receipt });
+    let detail = (await app.inject({ method: 'GET', url: `/v1/platform/tenants/${f.tenantB}`, headers: staff })).json();
+    assert.equal(detail.queue.pending, 1);
+    // Too new to touch: its own request may still settle it.
+    let r = (await app.inject({ method: 'POST', url: `/v1/platform/tenants/${f.tenantB}/retry`, headers: staff })).json();
+    assert.equal(r.settled, 0);
+    assert.equal(r.stillPending, 1);
+    // A few minutes later, with BTS answering again.
+    f.deps.now = () => new Date(Date.now() + 5 * 60_000);
+    f.bts.script(DOCUMENT_QUERY_PATH, { status: 200, contentType: 'application/json', body: JSON.stringify({ GetDocument: { ResponseCode: '004' } }) });
+    f.bts.script(SUBMIT_PATHS['02'], AUTHORIZED);
+    r = (await app.inject({ method: 'POST', url: `/v1/platform/tenants/${f.tenantB}/retry`, headers: staff })).json();
+    assert.equal(r.settled, 1);
+    assert.equal(r.stillPending, 0);
+    detail = (await app.inject({ method: 'GET', url: `/v1/platform/tenants/${f.tenantB}`, headers: staff })).json();
+    assert.equal(detail.queue.pending, 0);
+    assert.ok(detail.history.some((h: { action: string }) => h.action === 'tenant.retried'));
+  }));
+
+test('locked out: staff email a reset link (only to the person) or turn off two-step sign-in, logged on both sides', () =>
+  withConsole(async ({ f, app, mail, staff }) => {
+    const slug = (await f.db.query<{ slug: string }>('select slug from tenants where id = $1', [f.tenantB])).rows[0]!.slug;
+    const beaId = (await createUser(f.db, { tenantId: f.tenantB, name: 'Bea Owner', email: 'bea@biz-b.example', role: 'owner', password: PASSWORD })).id;
+    const tillId = (await createUser(f.db, { tenantId: f.tenantB, name: 'Till 2', username: 'till2', role: 'cashier', password: PASSWORD })).id;
+    const detail = (await app.inject({ method: 'GET', url: `/v1/platform/tenants/${f.tenantB}`, headers: staff })).json();
+    const person = detail.people.find((p: { id: string }) => p.id === beaId);
+    assert.equal(person.hasEmail, true);
+    assert.equal(person.twoFactor, false);
+
+    const sent = await app.inject({ method: 'POST', url: `/v1/platform/tenants/${f.tenantB}/users/${beaId}/reset-link`, headers: staff });
+    assert.equal(sent.statusCode, 200, sent.body);
+    assert.equal(sent.json().emailed, 'bea@biz-b.example');
+    assert.equal(JSON.stringify(sent.json()).includes('token'), false, 'staff never see the link');
+    const email = mail.sent.at(-1)!;
+    assert.equal(email.to, 'bea@biz-b.example');
+    assert.ok(email.text.includes(`/${slug}/reset-password?token=`));
+    assert.equal((await app.inject({ method: 'POST', url: `/v1/platform/tenants/${f.tenantB}/users/${tillId}/reset-link`, headers: staff })).json().error.code, 'no_email');
+    assert.equal((await app.inject({ method: 'POST', url: `/v1/platform/tenants/${f.tenantA}/users/${beaId}/reset-link`, headers: staff })).statusCode, 404, 'only people of that business');
+
+    // Two-step sign-in on, then a lost phone.
+    const secret = await beginTwoFactorSetup(f.db, f.deps.keys, 'user', beaId);
+    await confirmTwoFactorSetup(f.db, f.deps.keys, 'user', beaId, totpCode(base32Decode(secret), stepAt(Date.now())));
+    assert.equal((await app.inject({ method: 'GET', url: `/v1/platform/tenants/${f.tenantB}`, headers: staff })).json().people.find((p: { id: string }) => p.id === beaId).twoFactor, true);
+    const reset = await app.inject({ method: 'POST', url: `/v1/platform/tenants/${f.tenantB}/users/${beaId}/two-factor/reset`, headers: staff, payload: { reason: 'Lost her phone; checked her ID by video call' } });
+    assert.equal(reset.statusCode, 200, reset.body);
+    const signIn = await app.inject({ method: 'POST', url: '/v1/auth/login', headers: CSRF, payload: { business: slug, login: 'bea@biz-b.example', password: PASSWORD } });
+    assert.equal(signIn.statusCode, 200);
+    assert.equal(signIn.json().twoFactorRequired, undefined, 'the password alone signs her in again');
+    assert.equal((await app.inject({ method: 'POST', url: `/v1/platform/tenants/${f.tenantB}/users/${beaId}/two-factor/reset`, headers: staff, payload: { reason: 'again' } })).statusCode, 409);
+    const actions = (await f.db.query<{ action: string }>("select action from audit_events where tenant_id = $1 and action like 'support.%'", [f.tenantB])).rows.map((r) => r.action);
+    assert.deepEqual(actions.sort(), ['support.reset_link_sent', 'support.two_factor_reset']);
+  }));
+
+test('notices: staff post one, every business sees it (in Spanish when given) until it ends', () =>
+  withConsole(async ({ app, staff, key }) => {
+    const me = async () => (await app.inject({ method: 'GET', url: '/v1/me', headers: { authorization: `Bearer ${key}` } })).json();
+    assert.deepEqual((await me()).notices, []);
+    const created = await app.inject({ method: 'POST', url: '/v1/platform/notices', headers: staff, payload: { message: 'Maintenance tonight 11 pm to midnight.', messageEs: 'Mantenimiento esta noche de 11 pm a medianoche.', level: 'warning' } });
+    assert.equal(created.statusCode, 201, created.body);
+    assert.equal(created.json().live, true);
+    const shown = (await me()).notices;
+    assert.equal(shown.length, 1);
+    assert.equal(shown[0].messageEs, 'Mantenimiento esta noche de 11 pm a medianoche.');
+    assert.equal(shown[0].level, 'warning');
+    assert.equal((await app.inject({ method: 'POST', url: '/v1/platform/notices', headers: staff, payload: { message: 'Old news', endsAt: '2020-01-01T00:00:00Z' } })).statusCode, 422);
+    const ended = await app.inject({ method: 'POST', url: `/v1/platform/notices/${created.json().id}/end`, headers: staff });
+    assert.equal(ended.statusCode, 200);
+    assert.deepEqual((await me()).notices, []);
+    const list = (await app.inject({ method: 'GET', url: '/v1/platform/notices', headers: staff })).json().data;
+    assert.equal(list[0].live, false);
+    assert.equal(list[0].by, 'Olga Ops');
+    assert.equal((await app.inject({ method: 'POST', url: '/v1/platform/notices', headers: { 'x-requested-with': 'etd-web' }, payload: { message: 'x' } })).statusCode, 401, 'staff only');
   }));

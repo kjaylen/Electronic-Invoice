@@ -336,15 +336,17 @@ export async function createSession(db: Queryable, userId: string, options: { de
 
 export async function lookupSession(db: Queryable, token: string): Promise<Session | null> {
   if (!/^[A-Za-z0-9_-]{43}$/.test(token)) return null;
-  const row = (await db.query<UserRow & { session_id: string; s_created_at: string | Date; expires_at: string | Date; slug: string; legal_name: string; trade_name: string | null; environment: string; require_two_factor: boolean; tf_enabled: boolean; device_id: string | null; device_register: string | null; device_revoked: boolean | null }>(
+  const row = (await db.query<UserRow & { session_id: string; s_created_at: string | Date; expires_at: string | Date; slug: string; legal_name: string; trade_name: string | null; environment: string; require_two_factor: boolean; tf_enabled: boolean; device_id: string | null; device_register: string | null; device_revoked: boolean | null; suspended: boolean }>(
     `select ${USER_COLUMNS}, s.id as session_id, s.created_at as s_created_at, s.expires_at, t.slug, t.legal_name, t.trade_name, t.environment, t.require_two_factor,
        exists (select 1 from two_factor tf where tf.owner_kind = 'user' and tf.owner_id = u.id and tf.confirmed_at is not null) as tf_enabled,
-       s.device_id, d.register_id as device_register, d.revoked_at is not null as device_revoked
+       s.device_id, d.register_id as device_register, d.revoked_at is not null as device_revoked, t.suspended_at is not null as suspended
      from sessions s join users u on u.id = s.user_id join tenants t on t.id = u.tenant_id left join pos_devices d on d.id = s.device_id
      where s.token_hash = $1`,
     [tokenHash(token)],
   )).rows[0];
   if (!row) return null;
+  // A suspended business: refused while suspended (the session works again if it is reactivated in time).
+  if (row.suspended) return null;
   const now = Date.now();
   const created = new Date(row.s_created_at).getTime();
   const [idle, max] = row.device_id ? [POS_SESSION_IDLE_MS, POS_SESSION_MAX_MS] : [SESSION_IDLE_MS, SESSION_MAX_MS];

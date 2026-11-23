@@ -518,6 +518,10 @@ For the team that runs this service, not for businesses. Staff move a business f
   - its owners are emailed, and the change appears in the business's own activity log and in the staff log
 - **Going back to test** is allowed only while nothing has been issued in production.
 - **Staff log:** every staff sign-in and change, permanent.
+- **Suspending a business** (fraud, abuse, a legal order; the TIN typed again and a reason): no one can sign in, existing sessions, tills and API keys are refused, and its online store is closed until staff reactivate it (sessions work again then). Documents already on their way to BTS still finish, and customers' links to their documents keep working. Its owners are emailed the reason, and it appears in the business's own activity log.
+- **Documents waiting for BTS:** a business's page shows what is pending (and for how long) or issued offline; **Send now** runs the worker's retry for that business at once (pending documents older than a minute, then the offline queue).
+- **Someone locked out:** from the business's People, staff email a person a link to choose a new password (only ever to that person's own address; staff never see the link), or turn off a person's two-step sign-in after a lost phone, with how they confirmed who it is (the person is signed out everywhere and emailed). Both appear in the staff log and the business's activity log.
+- **Notices** (Console → Notices): a line at the top of every business's app while it lasts (maintenance, a BTS outage, news), in English and optionally Spanish, information or warning, until an end time or until staff end it; each person can dismiss it.
 
 | Method and path | What it does |
 |---|---|
@@ -526,6 +530,10 @@ For the team that runs this service, not for businesses. Staff move a business f
 | `GET /v1/platform/tenants`, `GET /v1/platform/tenants/:id` | Businesses; one business with its readiness checks and staff history |
 | `POST /v1/platform/tenants/:id/go-live` | `{ confirmTin, approvalReference, retireCertificate? }` |
 | `POST /v1/platform/tenants/:id/back-to-test` | `{ confirmTin, reason }` |
+| `POST /v1/platform/tenants/:id/suspend`, `.../reactivate` | `{ confirmTin, reason }`, `{ reason }` |
+| `POST /v1/platform/tenants/:id/retry` | Send the business's documents waiting for BTS now |
+| `POST /v1/platform/tenants/:id/users/:userId/reset-link`, `.../two-factor/reset` | Email a password link; turn off two-step sign-in (`{ reason }`) |
+| `GET /v1/platform/notices`, `POST /v1/platform/notices`, `POST /v1/platform/notices/:id/end` | Notices to every business (`{ message, messageEs?, level?, endsAt? }`) |
 | `GET /v1/platform/audit` | The staff log |
 
 To confirm with BTS: whether production numbering should restart at 1 (what this does) and whether production needs a different certificate (the console lets staff choose).

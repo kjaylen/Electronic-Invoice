@@ -227,6 +227,10 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: PipelineDeps) 
       certificate: await certificateSummary(deps, request.tenantId),
       billing: await billingBanner(db, request.tenantId),
       contingency: { active: Boolean(period), since: period ? new Date(period.started_at).toISOString() : null, reason: period?.reason ?? null, queued },
+      // Notices from the platform (maintenance, a BTS outage, news), newest first.
+      notices: (await db.query<{ id: string; message: string; message_es: string | null; level: 'info' | 'warning' }>(
+        `select id, message, message_es, level from platform_notices where starts_at <= now() and (ends_at is null or ends_at > now()) order by created_at desc limit 3`,
+      )).rows.map((n) => ({ id: n.id, message: n.message, messageEs: n.message_es, level: n.level })),
       counter: {
         cashierDiscountLimit: t.cashier_discount_limit === null ? null : String(Number(t.cashier_discount_limit)),
         loyalty: await loyaltySettings(db, request.tenantId).then((l) => (l.enabled ? { pointValue: l.pointValue, minRedeem: l.minRedeem } : null)),

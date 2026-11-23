@@ -269,6 +269,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: PipelineDeps, opt
       const ipKey = `login|${request.ip}`;
       if (await atLimit(db, accountKey, 10) || await atLimit(db, ipKey, 50)) throw tooMany();
       const business = await businessOr404(slug);
+      if (business.suspended) throw new ApiError(403, 'business_suspended', 'This business is suspended. Contact eInvoicing support.');
       const result = await checkCredentials(db, business.id, login, request.body.password);
       if (!result.ok) {
         await countHit(db, accountKey, WINDOW_MS);

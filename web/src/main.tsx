@@ -5,7 +5,7 @@ import '@fontsource-variable/inter/opsz.css';
 import '@fontsource-variable/inter-tight';
 import '@fontsource-variable/geist-mono';
 import './styles.css';
-import { api, type Permission } from './api';
+import { api, type Me, type Permission } from './api';
 import { Brand } from './art';
 import { BUSINESS, STORE_DOMAIN } from './business';
 import { ErrorBoundary } from './ErrorBoundary';
@@ -16,6 +16,7 @@ import { SessionProvider, useSession } from './session';
 import { ToastProvider } from './toast';
 import { installIndicators } from './motion';
 import { AuthShell } from './scene/AuthShell';
+import { store } from './storage';
 
 // Each page is its own chunk, loaded when first visited.
 const page = <K extends string>(load: () => Promise<Record<K, React.ComponentType>>, name: K) => lazy(() => load().then((m) => ({ default: m[name] })));
@@ -272,6 +273,7 @@ function Layout() {
             </span>
           </div>
         )}
+        <NoticeBars notices={me?.notices ?? []} />
         <main id="main" ref={mainRef} tabIndex={-1}>
           {/* Keyed by page, so a crash stays inside one page. Tabs and filters (the query) keep the page:
               what stays the same stays still. Editors start fresh for each query (a new invoice, a credit note). */}
@@ -306,6 +308,29 @@ function Allowed({ permission, children }: { permission: Permission; children: R
 }
 
 /** Pages outside the signed-in layout (sign-in, setup, the start page). */
+/** Notices from the platform, each dismissed for good on this device. */
+function NoticeBars({ notices }: { notices: NonNullable<Me['notices']> }) {
+  const { t, lang } = useI18n();
+  const [dismissed, setDismissed] = useState<string[]>(() => store.get<string[]>('etd.notices.dismissed') ?? []);
+  const shown = notices.filter((n) => !dismissed.includes(n.id));
+  if (!shown.length) return null;
+  const dismiss = (id: string) => {
+    const next = [...dismissed, id].slice(-50);
+    setDismissed(next);
+    store.set('etd.notices.dismissed', next);
+  };
+  return (
+    <>
+      {shown.map((n) => (
+        <div key={n.id} className={`statusbar notice-bar ${n.level}`} role="status">
+          <span><strong>{t('From eInvoicing:')}</strong> {lang === 'es' && n.messageEs ? n.messageEs : n.message}</span>
+          <button type="button" className="link notice-dismiss" aria-label={t('Dismiss')} onClick={() => dismiss(n.id)}>×</button>
+        </div>
+      ))}
+    </>
+  );
+}
+
 function Bare() {
   return (
     <ErrorBoundary>
