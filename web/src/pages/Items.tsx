@@ -1,6 +1,6 @@
 import { type FormEvent, useEffect, useState } from 'react';
 import { Link } from 'react-router';
-import { api, type Item, type Page } from '../api';
+import { api, link, type Item, type Page } from '../api';
 import { useT } from '../i18n';
 import { useSession } from '../session';
 import { useToast } from '../toast';
@@ -141,6 +141,7 @@ export function Items() {
         <div><h2>{t('All items')}</h2></div>
         <span className="spacer" />
         <Link className="button secondary" to="/labels" viewTransition>{t('Print labels')}</Link>
+        {manage && <a className="button secondary" href={link('/v1/items/export.csv')} download>{t('Export')}</a>}
         {manage && <button type="button" className="secondary" onClick={() => setImporting(true)}>{t('Import')}</button>}
         {manage && <button onClick={() => setEditing('new')}>{t('Add item')}</button>}
       </div>

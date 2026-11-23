@@ -2395,4 +2395,9 @@ export const ES: Record<string, string> = {
   "Uploaded the image {target}": "Subió la imagen {target}",
   "Deleted the image {target}": "Eliminó la imagen {target}",
   "Changed the logo": "Cambió el logotipo",
+  "Currency of the cash": "Moneda del efectivo",
+  "Quick amounts": "Montos rápidos",
+  "US${usd} is {bz} (BZ$2 to US$1). Change in BZ$.": "US${usd} son {bz} (BZ$2 por US$1). El cambio en BZ$.",
+  "Exact": "Exacto",
+  "Export": "Exportar",
 };

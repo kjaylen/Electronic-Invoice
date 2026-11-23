@@ -79,6 +79,15 @@ test('importing items and customers: dry run first, then the good rows; matches 
 
     assert.equal((await app.inject({ method: 'POST', url: '/v1/items/import', headers: owner, payload: { csv: 'Title only\nx' } })).json().error.code, 'invalid_csv');
 
+    // An export in the import's columns comes back as updates, with nothing lost.
+    const exported = await app.inject({ method: 'GET', url: '/v1/items/export.csv', headers: owner });
+    assert.equal(exported.statusCode, 200);
+    assert.match(String(exported.headers['content-type']), /text\/csv/);
+    assert.match(exported.body, /Coffee, dark roast/);
+    const again = (await app.inject({ method: 'POST', url: '/v1/items/import', headers: owner, payload: { csv: exported.body, dryRun: true } })).json();
+    assert.deepEqual([again.created, again.errors], [0, 0]);
+    assert.equal(again.updated, again.rows);
+
     // Customers: matched by TIN, then email; addresses need street, town and district.
     await app.inject({ method: 'POST', url: '/v1/customers', headers: owner, payload: { name: 'Hotel SI', tin: '777888' } });
     const people = [
@@ -94,6 +103,11 @@ test('importing items and customers: dry run first, then the good rows; matches 
     const hotel = list.find((x) => x.tin === '777888')!;
     assert.deepEqual([hotel.name, hotel.address?.districtCode, hotel.contact.telephone], ['Hotel San Ignacio Ltd.', '2', '824-0000']);
     assert.equal(list.find((x) => x.name === 'Maria Chan')?.contact.email, 'maria@example.com');
+
+    const people2 = await app.inject({ method: 'GET', url: '/v1/customers/export.csv', headers: owner });
+    assert.match(people2.body, /Hotel San Ignacio Ltd\.,777888,.*Cayo/);
+    const back = (await app.inject({ method: 'POST', url: '/v1/customers/import', headers: owner, payload: { csv: people2.body, dryRun: true } })).json();
+    assert.equal(back.errors, 0);
 
     // Cashiers cannot import.
     await createUser(f.db, { tenantId: f.tenantA, name: 'Cass', email: 'cass@biz.example', role: 'cashier', password: PASSWORD });

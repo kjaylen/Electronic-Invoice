@@ -49,6 +49,8 @@ interface Sale {
   lines: CartLine[];
   meansCode: Means;
   tendered: string;
+  /** The cash came in US dollars (BZ$2 to US$1); change is given in BZ$. */
+  usd?: boolean;
   tin: string;
   idempotencyKey: string;
   /** A percentage off every line. */
@@ -90,6 +92,20 @@ const addQty = (q: string, delta: number) => {
 };
 /** Quantity × price, to the cent. */
 const lineBase = (l: CartLine) => (DECIMAL.test(l.quantity) && DECIMAL.test(l.unitPrice) ? (toCents(l.unitPrice) * BigInt(Math.round(Number(l.quantity) * 1000))) / 1000n : null);
+/** The Belize dollar is pegged: BZ$2 to US$1. */
+const USD_RATE = 2n;
+/** Amounts to offer for cash received: the exact amount, then the next notes up. */
+function quickCash(dueCents: bigint, usd: boolean): bigint[] {
+  if (dueCents <= 0n) return [];
+  const due = usd ? (dueCents + USD_RATE - 1n) / USD_RATE : dueCents; // in the currency handed over
+  const notes = (usd ? [1, 5, 10, 20, 50, 100] : [5, 10, 20, 50, 100]).map((n) => BigInt(n) * 100n);
+  const out: bigint[] = [due];
+  for (const n of notes) {
+    const up = ((due + n - 1n) / n) * n;
+    if (up > due && !out.includes(up)) out.push(up);
+  }
+  return out.slice(0, 4);
+}
 const percentOk = (v: string | undefined) => Boolean(v && DECIMAL.test(v) && Number(v) > 0 && Number(v) <= 100);
 const discountOk = (l: CartLine) => {
   if (!l.discount) return true;
@@ -263,7 +279,9 @@ export function CounterPanel(props: {
   const splitOther = means === 'split' && sale.split && MONEY.test(sale.split.amount) ? toCents(sale.split.amount) : null;
   const splitOk = means !== 'split' || (splitOther !== null && splitOther > 0n && splitOther < totalCents);
   const cashDue = means === '10' ? totalCents : means === 'split' && splitOther !== null ? totalCents - splitOther : null;
-  const change = cashDue !== null && DECIMAL.test(sale.tendered) && totals ? toCents(sale.tendered) - cashDue : null;
+  // Cash received, in BZ$ (US dollars count double).
+  const tenderedBz = DECIMAL.test(sale.tendered) ? toCents(sale.tendered) * (sale.usd ? USD_RATE : 1n) : null;
+  const change = cashDue !== null && tenderedBz !== null && totals ? tenderedBz - cashDue : null;
   // A cashier's discounts stay within the business's limit (the server checks it too).
   const limitText = session?.user.role === 'cashier' ? me?.counter?.cashierDiscountLimit ?? null : null;
   const overLimit = limitText !== null && previewFresh && preview !== null && valid.some((l, i) => {
@@ -289,7 +307,7 @@ export function CounterPanel(props: {
           ? { payment: { meansCode: '30', dueDate: belizeDate(days), terms: `Payment due in ${days} days` } }
           : means === 'split'
             ? { tenders: [{ meansCode: sale.split!.means, amount: sale.split!.amount }, { meansCode: '10', amount: fromCents(cashDue!) }] }
-            : { payment: { meansCode: means, terms: `Paid by ${means === '10' ? 'cash' : means === '48' ? 'card' : 'bank transfer'}` } }),
+            : { payment: { meansCode: means, terms: means === '10' && sale.usd && tenderedBz !== null ? `Paid by cash (US$${fromCents(toCents(sale.tendered))} received)` : `Paid by ${means === '10' ? 'cash' : means === '48' ? 'card' : 'bank transfer'}` } }),
       };
       const doc = await api<DocumentInfo>('/v1/documents', { method: 'POST', headers: { 'Idempotency-Key': sale.idempotencyKey }, body });
       const changeText = change !== null ? fromCents(change) : null;
@@ -524,9 +542,28 @@ export function CounterPanel(props: {
             </div>
           )}
           {(means === '10' || (means === 'split' && splitOk && cashDue !== null)) && (
-            <div className="tender">
-              <label>{t('Cash received')}<input inputMode="decimal" placeholder="0.00" value={sale.tendered} onChange={(e) => set({ tendered: e.target.value })} /></label>
-              <span className={change !== null && change < 0n ? 'short' : ''}>{change === null ? '' : change < 0n ? t('Short {amount}', { amount: money(fromCents(-change)) }) : `${t('Change')} ${money(fromCents(change))}`}</span>
+            <div className="tender-block">
+              <div className="tender">
+                <div className="tender-field">
+                  <span className="tender-label">
+                    <span>{t('Cash received')}</span>
+                    <span className="currency-switch" role="group" aria-label={t('Currency of the cash')}>
+                      <button type="button" aria-pressed={!sale.usd} onClick={() => set({ usd: false })}>BZ$</button>
+                      <button type="button" aria-pressed={Boolean(sale.usd)} onClick={() => set({ usd: true })}>US$</button>
+                    </span>
+                  </span>
+                  <input inputMode="decimal" placeholder="0.00" aria-label={t('Cash received')} value={sale.tendered} onChange={(e) => set({ tendered: e.target.value })} />
+                </div>
+                <span className={change !== null && change < 0n ? 'short' : ''}>{change === null ? '' : change < 0n ? t('Short {amount}', { amount: money(fromCents(-change)) }) : `${t('Change')} ${money(fromCents(change))}`}</span>
+              </div>
+              {sale.usd && tenderedBz !== null && <p className="usd-note">{t('US${usd} is {bz} (BZ$2 to US$1). Change in BZ$.', { usd: fromCents(toCents(sale.tendered)), bz: money(fromCents(tenderedBz)) })}</p>}
+              {cashDue !== null && cashDue > 0n && (
+                <div className="quick-cash" role="group" aria-label={t('Quick amounts')}>
+                  {quickCash(cashDue, Boolean(sale.usd)).map((a, i) => (
+                    <button key={String(a)} type="button" onClick={() => set({ tendered: fromCents(a) })}>{i === 0 ? t('Exact') : `${sale.usd ? 'US$' : 'BZ$'}${Number(a / 100n)}`}</button>
+                  ))}
+                </div>
+              )}
             </div>
           )}
           {means === 'account' && sale.customer && (

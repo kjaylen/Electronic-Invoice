@@ -55,11 +55,15 @@ export async function importItems(db: Queryable, tenantId: string, csv: string, 
   const col = columns(rows[0]!, ITEM_COLUMNS);
   if (col.name === undefined) throw new CsvError('No "Name" column (the item\'s name)');
   if (col.price === undefined && col.priceWithGst === undefined) throw new CsvError('No "Price" column (before GST), or "Price with GST"');
-  const existing = (await db.query<{ id: string; seller_code: string | null; barcode: string | null }>(
-    'select id, seller_code, barcode from items where tenant_id = $1 and archived_at is null', [tenantId],
+  const existing = (await db.query<{ id: string; seller_code: string | null; barcode: string | null; name: string }>(
+    'select id, seller_code, barcode, name from items where tenant_id = $1 and archived_at is null', [tenantId],
   )).rows;
   const byCode = new Map(existing.filter((e) => e.seller_code).map((e) => [e.seller_code!.toLowerCase(), e]));
   const byBarcode = new Map(existing.filter((e) => e.barcode).map((e) => [e.barcode!, e]));
+  // A row with neither code nor barcode matches an item by name, when only one item has that name.
+  const nameCounts = new Map<string, number>();
+  for (const e of existing) nameCounts.set(e.name.toLowerCase(), (nameCounts.get(e.name.toLowerCase()) ?? 0) + 1);
+  const byName = new Map(existing.filter((e) => nameCounts.get(e.name.toLowerCase()) === 1).map((e) => [e.name.toLowerCase(), e]));
   const seenCodes = new Set<string>();
   const seenBarcodes = new Set<string>();
   const results: RowResult[] = [];
@@ -101,7 +105,7 @@ export async function importItems(db: Queryable, tenantId: string, csv: string, 
       fail('Stock quantities are numbers with up to 3 decimals');
       continue;
     }
-    const match = (code && byCode.get(code.toLowerCase())) || (barcode && byBarcode.get(barcode)) || null;
+    const match = (code && byCode.get(code.toLowerCase())) || (barcode && byBarcode.get(barcode)) || (!code && !barcode && byName.get(name.toLowerCase())) || null;
     // A barcode already on a different item.
     const barcodeOwner = barcode ? byBarcode.get(barcode) : undefined;
     if (barcodeOwner && match && barcodeOwner.id !== match.id) { fail(`Barcode ${barcode} belongs to another item`); continue; }
@@ -128,8 +132,8 @@ export async function importItems(db: Queryable, tenantId: string, csv: string, 
          values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
         [id, tenantId, name, description, code, unit, price, gst, gst === 'E' ? exemption : null, barcode, favorite ?? false, lowStock, wholesale],
       );
-      if (code) byCode.set(code.toLowerCase(), { id, seller_code: code, barcode });
-      if (barcode) byBarcode.set(barcode, { id, seller_code: code, barcode });
+      if (code) byCode.set(code.toLowerCase(), { id, seller_code: code, barcode, name });
+      if (barcode) byBarcode.set(barcode, { id, seller_code: code, barcode, name });
     }
     // The stock column is a count: it sets the level, through the stock ledger.
     if (stock !== null) await moveStock(db, { tenantId, itemId: id!, quantity: stock, mode: 'set', reason: 'count', startTracking: true, note: 'Imported', userId: options.userId });

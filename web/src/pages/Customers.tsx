@@ -1,6 +1,6 @@
 import { type FormEvent, useEffect, useState } from 'react';
 import { Link } from 'react-router';
-import { api, type Customer, type Page } from '../api';
+import { api, link, type Customer, type Page } from '../api';
 import { useT } from '../i18n';
 import { useSession } from '../session';
 import { useToast } from '../toast';
@@ -130,6 +130,7 @@ export function Customers() {
       <div className="row">
         <div><span className="kicker">{t('Directory')}</span><h1>{t('Customers')}</h1></div>
         <span className="spacer" />
+        {manage && <a className="button secondary" href={link('/v1/customers/export.csv')} download>{t('Export')}</a>}
         {manage && <button type="button" className="secondary" onClick={() => setImporting(true)}>{t('Import')}</button>}
         {manage && <button onClick={() => setEditing('new')}>{t('Add customer')}</button>}
       </div>

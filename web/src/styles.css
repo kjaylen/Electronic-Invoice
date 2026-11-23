@@ -1777,3 +1777,16 @@ a.strong-link:hover { color: var(--brand); text-decoration: underline; text-unde
 
 .badge.price-list { margin-left: 0.55rem; vertical-align: middle; background: var(--ochre-soft); color: var(--ochre-ink); border-color: var(--ochre-line); }
 h1 .badge.price-list { font-family: var(--sans); letter-spacing: 0; position: relative; top: -0.2em; }
+
+/* ---------- counter: cash in BZ$ or US$, quick amounts ---------- */
+.tender-block { display: flex; flex-direction: column; gap: 0.45rem; }
+.tender-field { display: flex; flex-direction: column; gap: 0.3rem; max-width: 12rem; }
+.tender-label { display: flex; align-items: center; gap: 0.5rem; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: rgba(255, 255, 255, 0.75); }
+.currency-switch { display: inline-flex; border: 1px solid rgba(255, 255, 255, 0.3); border-radius: 999px; padding: 1px; }
+.currency-switch button { background: transparent; border: 0; color: rgba(255, 255, 255, 0.7); min-height: 0; padding: 0.05rem 0.45rem; font-size: 0.68rem; font-weight: 700; border-radius: 999px; box-shadow: none; letter-spacing: 0.02em; }
+.currency-switch button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.1); color: #fff; }
+.currency-switch button[aria-pressed='true'], .currency-switch button[aria-pressed='true']:hover:not(:disabled) { background: var(--lime); color: var(--ink); }
+.usd-note { margin: 0; font-size: 0.8rem; color: rgba(255, 255, 255, 0.75); }
+.quick-cash { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.quick-cash button { background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.22); color: #fff; min-height: 0; padding: 0.3rem 0.65rem; font-size: 0.82rem; font-weight: 600; border-radius: 8px; box-shadow: none; font-variant-numeric: tabular-nums; }
+.quick-cash button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.14); border-color: rgba(255, 255, 255, 0.45); color: #fff; }
