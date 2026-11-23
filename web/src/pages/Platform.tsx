@@ -6,7 +6,8 @@
 import { type FormEvent, useCallback, useEffect, useState } from 'react';
 import { Link, Navigate, NavLink, Outlet, Route, Routes, useNavigate, useOutletContext, useParams } from 'react-router';
 import { api, ApiError, UNAUTHORIZED_EVENT } from '../api';
-import { BrandMark, FlowField } from '../art';
+import { BrandMark } from '../art';
+import { AuthPage } from '../scene/AuthShell';
 import { useT } from '../i18n';
 import { useToast } from '../toast';
 import { CodeForm, RecoveryCodes, SetupSteps, type TwoFactorChallenge } from '../twofactor';
@@ -163,50 +164,46 @@ function StaffLogin({ onDone }: { onDone: (a: StaffAdmin) => void }) {
   };
   const header = (title: string, text?: string) => (
     <>
-      <div className="row"><BrandMark /><span className="kicker">{t('Platform console')}</span></div>
+      <div className="row console-head"><BrandMark /><span className="kicker">{t('Platform console')}</span></div>
       <h1>{title}</h1>
       {text && <p className="small muted">{text}</p>}
     </>
   );
   if (signedIn) {
     return (
-      <div className="console-login">
-        <FlowField />
+      <AuthPage>
         <div className="card auth-card stack">
           {header(t('Two-step sign-in is on'))}
           <RecoveryCodes codes={signedIn.recoveryCodes} label={`${t('Platform console')}: ${signedIn.admin.email}`} onDone={() => onDone(signedIn.admin)} />
         </div>
-      </div>
+      </AuthPage>
     );
   }
   if (challenge?.setup && challenge.secret && challenge.qr) {
     return (
-      <div className="console-login">
-        <FlowField />
+      <AuthPage>
         <div className="card auth-card stack">
           {header(t('Set up two-step sign-in'), t('Staff accounts always use two-step sign-in. Set it up once; every sign-in then asks for a code.'))}
           <SetupSteps info={{ secret: challenge.secret, qr: challenge.qr, otpauthUrl: challenge.otpauthUrl ?? '' }} onConfirm={verify} />
           <button type="button" className="link small" onClick={back}>{t('Back')}</button>
         </div>
-      </div>
+      </AuthPage>
     );
   }
   if (challenge) {
     return (
-      <div className="console-login">
-        <FlowField />
+      <AuthPage>
         <div className="card auth-card stack">
           {header(t('Enter your code'), t('Open your authenticator app for the code.'))}
           <CodeForm submitLabel={t('Sign in')} onBack={back} onSubmit={verify} />
         </div>
-      </div>
+      </AuthPage>
     );
   }
   return (
-    <div className="console-login">
-      <FlowField />
+    <AuthPage>
       <form className="card auth-card stack" onSubmit={submit}>
-        <div className="row"><BrandMark /><span className="kicker">{t('Platform console')}</span></div>
+        <div className="row console-head"><BrandMark /><span className="kicker">{t('Platform console')}</span></div>
         <h1>{t('Staff sign-in')}</h1>
         <p className="small muted">{t('For the team that runs this service. Businesses sign in at their own address.')}</p>
         <Field label={t('Email')}><input type="email" autoComplete="username" required autoFocus value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
@@ -214,7 +211,7 @@ function StaffLogin({ onDone }: { onDone: (a: StaffAdmin) => void }) {
         <ErrorText error={error} />
         <button type="submit" className="big" disabled={busy}>{busy ? t('Signing in…') : t('Sign in')}<span className="chip" aria-hidden="true">→</span></button>
       </form>
-    </div>
+    </AuthPage>
   );
 }
 

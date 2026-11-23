@@ -777,8 +777,7 @@ pre.instructions { white-space: pre-wrap; font-family: var(--figures); font-size
 .shop-footer-section { margin-bottom: 1rem; }
 
 /* ---------- platform console: dark bar, so staff always know where they are ---------- */
-.console-login { min-height: 100vh; display: grid; place-items: center; padding: 1.5rem; background: linear-gradient(160deg, #24093a 0%, #160923 70%); }
-.console-login .auth-card .row svg { width: 26px; height: 26px; }
+.console-head svg { width: 28px; height: 28px; flex: none; }
 .console-bar { background: var(--ink); border-bottom-color: var(--ink); }
 .console-bar .brand, .console-bar .brand:hover, .console-bar .who { color: var(--sheet); }
 .console-bar nav a { color: rgba(255, 255, 255, 0.75); }
@@ -1094,9 +1093,6 @@ label.row > input[type='checkbox'] { flex: none; margin-top: 0.15rem; }
 }
 .paper-receipt .paper-watermark { font-size: 1.25rem; }
 .doc-aside > .card { align-self: start; }
-.console-login { position: relative; overflow: hidden; isolation: isolate; }
-.console-login > .card { position: relative; z-index: 2; }
-.console-login .crystals { z-index: 0; }
 
 /* The business address, made from its name: shown, not edited. */
 .address-preview { display: grid; gap: 0.15rem; padding: 0.7rem 0.85rem; border: 1px dashed var(--hairline-strong); border-radius: var(--radius); background: var(--sheet-2); }
@@ -2016,7 +2012,7 @@ button.cat-tag:hover:not(:disabled) { background: var(--brand); border-color: va
   .lux-check-path { stroke-dashoffset: 0; }
 }
 /* The other sign-in cards' main buttons match "Log in": full width, the same height and corners. */
-.auth-page .auth-card form button[type='submit'].big { width: 100%; min-height: 3.2rem; border-radius: 10px; }
+.auth-page .auth-card form button[type='submit'].big, .auth-page form.auth-card button[type='submit'].big { width: 100%; min-height: 3.2rem; border-radius: 10px; }
 .auth-page .auth-card form.stack + p, .auth-page .auth-card form + p { margin-top: 0.15rem; }
 
 /* ==========================================================================
