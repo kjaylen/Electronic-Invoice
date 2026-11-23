@@ -126,6 +126,7 @@ interface ItemRow {
   wholesale_price?: string | null;
   category?: string | null;
   is_bundle?: boolean;
+  price_breaks?: Array<{ minQuantity: string; unitPrice: string }> | null;
   stock_quantity?: string | null;
   archived_at: string | Date | null;
   created_at: string | Date;
@@ -150,13 +151,15 @@ const itemJson = (r: ItemRow) => ({
   category: r.category ?? null,
   /** Made of other items (in lists). */
   ...(r.is_bundle !== undefined && { bundle: r.is_bundle }),
+  /** Lower prices for larger quantities, smallest quantity first (in lists and single items). */
+  ...(r.price_breaks !== undefined && { priceBreaks: (r.price_breaks ?? []).map((b) => ({ minQuantity: String(Number(b.minQuantity)), unitPrice: trimDecimal(b.unitPrice) })) }),
   /** In stock now; null when stock is not tracked. */
   stock: r.stock_quantity === null || r.stock_quantity === undefined ? null : Number(r.stock_quantity),
   archived: Boolean(r.archived_at),
   createdAt: new Date(r.created_at).toISOString(),
 });
 
-type ItemBody = { name: string; description?: string; sellerCode?: string; unitCode: string; unitPrice: string; gstCategory: 'S' | 'Z' | 'E'; exemptionReasonCode?: string; barcode?: string; favorite?: boolean; wholesalePrice?: string | null; category?: string | null };
+type ItemBody = { name: string; description?: string; sellerCode?: string; unitCode: string; unitPrice: string; gstCategory: 'S' | 'Z' | 'E'; exemptionReasonCode?: string; barcode?: string; favorite?: boolean; wholesalePrice?: string | null; category?: string | null; priceBreaks?: Array<{ minQuantity: string; unitPrice: string }> };
 
 /** A LIKE pattern matching q anywhere, with LIKE's special characters escaped. */
 export const likePattern = (q: string) => `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
@@ -173,9 +176,29 @@ async function withBarcodeCheck<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
+/** Each item's quantity prices as JSON, for item queries (`items` as the table's name). */
+export const PRICE_BREAKS_SQL = `(select coalesce(json_agg(json_build_object('minQuantity', b.min_quantity::text, 'unitPrice', b.unit_price::text) order by b.min_quantity), '[]'::json)
+  from item_price_breaks b where b.item_id = items.id) as price_breaks`;
+
+/** The quantity prices of an item, replaced (inside the caller's transaction or not). */
+async function savePriceBreaks(db: Queryable, itemId: string, breaks: Array<{ minQuantity: string; unitPrice: string }>) {
+  if (new Set(breaks.map((b) => Number(b.minQuantity))).size !== breaks.length) throw new ApiError(422, 'invalid_item', 'Each quantity once in the quantity prices');
+  if (breaks.some((b) => Number(b.minQuantity) <= 1)) throw new ApiError(422, 'invalid_item', 'Quantity prices start above 1');
+  await db.query('delete from item_price_breaks where item_id = $1', [itemId]);
+  for (const b of breaks) await db.query('insert into item_price_breaks (item_id, min_quantity, unit_price) values ($1, $2, $3)', [itemId, b.minQuantity, b.unitPrice]);
+}
+
+/** The price of one unit when buying this many: the best quantity price reached, else the usual price. */
+export function priceForQuantity(item: { unitPrice: string; priceBreaks?: Array<{ minQuantity: string; unitPrice: string }> }, quantity: string): string {
+  const q = Number(quantity);
+  let best = item.unitPrice;
+  for (const b of item.priceBreaks ?? []) if (q >= Number(b.minQuantity)) best = b.unitPrice;
+  return best;
+}
+
 export async function loadItems(deps: PipelineDeps, tenantId: string, ids: string[]): Promise<Map<string, ReturnType<typeof itemJson>>> {
   if (ids.length === 0) return new Map();
-  const rows = (await deps.db.query<ItemRow>('select * from items where tenant_id = $1 and id = any($2::uuid[])', [tenantId, ids])).rows;
+  const rows = (await deps.db.query<ItemRow>(`select *, ${PRICE_BREAKS_SQL} from items where tenant_id = $1 and id = any($2::uuid[])`, [tenantId, ids])).rows;
   return new Map(rows.map((r) => [r.id, itemJson(r)]));
 }
 
@@ -401,6 +424,7 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: PipelineDeps) 
          values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
         [id, request.tenantId, b.name, b.description ?? b.name, b.sellerCode ?? null, b.unitCode, b.unitPrice, b.gstCategory, b.exemptionReasonCode ?? null, b.barcode ?? null, b.favorite ?? false, b.wholesalePrice ?? null, category],
       ));
+      if (b.priceBreaks?.length) await savePriceBreaks(db, id, b.priceBreaks);
       return reply.code(201).send((await loadItems(deps, request.tenantId, [id])).get(id));
     },
   );
@@ -426,6 +450,7 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: PipelineDeps) 
           b.category !== undefined, category],
       ));
       if (!r.rows.length) throw notFound('Item');
+      if (b.priceBreaks) await savePriceBreaks(db, request.params.id, b.priceBreaks);
       return (await loadItems(deps, request.tenantId, [request.params.id])).get(request.params.id);
     },
   );
@@ -583,7 +608,7 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: PipelineDeps) 
       where += ` and (created_at, id) < ($${params.length - 1}::timestamptz, $${params.length}::uuid)`;
     }
     params.push(page.limit + 1);
-    const rows = (await db.query<ItemRow>(`select *, exists (select 1 from item_components c where c.item_id = items.id) as is_bundle from items where ${where} order by created_at desc, id desc limit $${params.length}`, params)).rows;
+    const rows = (await db.query<ItemRow>(`select *, exists (select 1 from item_components c where c.item_id = items.id) as is_bundle, ${PRICE_BREAKS_SQL} from items where ${where} order by created_at desc, id desc limit $${params.length}`, params)).rows;
     const { items, nextCursor: next } = nextCursor(rows, page.limit);
     return { data: items.map(itemJson), nextCursor: next };
   });

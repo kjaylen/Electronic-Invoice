@@ -23,7 +23,7 @@ import QRCode from 'qrcode';
 import { qrUrl, readEtdForPrint } from '../render/view.ts';
 import { type Queryable, toBigInt } from '../db/database.ts';
 import { businessContext, renderEmail } from '../templates/render.ts';
-import { type CustomerBody, customerFromRow, likePattern, loadCustomer, loadItems, nextCursor, parsePage } from './catalog.ts';
+import { type CustomerBody, customerFromRow, likePattern, loadCustomer, loadItems, nextCursor, parsePage, priceForQuantity } from './catalog.ts';
 import { audit } from '../db/audit.ts';
 import { overLimit } from '../db/ratelimit.ts';
 import { publicLink, requireMail, type ServerContext } from './context.ts';
@@ -203,7 +203,7 @@ export async function toIssueRequest(deps: PipelineDeps, tenantId: string, body:
     if (l.itemId && !item) throw new ApiError(422, 'invalid_document', `Line ${i + 1}: item ${l.itemId} not found`);
     const description = l.description ?? item?.description;
     const unitCode = l.unitCode ?? item?.unitCode;
-    const unitPrice = l.unitPrice ?? (wholesale && item?.wholesalePrice ? item.wholesalePrice : item?.unitPrice);
+    const unitPrice = l.unitPrice ?? (wholesale && item?.wholesalePrice ? item.wholesalePrice : item ? priceForQuantity(item, l.quantity) : undefined);
     const gstCategory = l.gstCategory ?? item?.gstCategory;
     if (!description || !unitCode || !unitPrice || !gstCategory) {
       throw new ApiError(422, 'invalid_document', `Line ${i + 1}: give an itemId, or description, unitCode, unitPrice and gstCategory`);

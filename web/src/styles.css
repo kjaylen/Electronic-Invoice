@@ -1841,3 +1841,5 @@ button.cat-tag:hover:not(:disabled) { background: var(--brand); border-color: va
 .clock-pill button { min-height: 0; padding: 0.35rem 0.8rem; font-size: 0.85rem; }
 .clock-pill.on .small { color: var(--lime-ink); font-weight: 600; }
 .clock-badge { margin-left: 0.4rem; }
+.bundle-part.break-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; }
+@media (max-width: 640px) { .bundle-part.break-row { grid-template-columns: 1fr 1fr; } }

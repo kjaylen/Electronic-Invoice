@@ -7,8 +7,9 @@ import { useToast } from '../toast';
 import { Combobox, ErrorText, Field, GST_CATEGORIES, Modal, money, Select, unitName, UNITS, useDebounced, usePageTitle } from '../ui';
 import { ImportDialog } from './ImportDialog';
 
-type Form = { name: string; description: string; sellerCode: string; barcode: string; category: string; unitCode: string; unitPrice: string; wholesalePrice: string; gstCategory: string; exemptionReasonCode: string; favorite: boolean };
-const EMPTY: Form = { name: '', description: '', sellerCode: '', barcode: '', category: '', unitCode: 'H87', unitPrice: '', wholesalePrice: '', gstCategory: 'S', exemptionReasonCode: '', favorite: false };
+type Form = { name: string; description: string; sellerCode: string; barcode: string; category: string; unitCode: string; unitPrice: string; wholesalePrice: string; gstCategory: string; exemptionReasonCode: string; favorite: boolean; breaks: Array<{ key: number; minQuantity: string; unitPrice: string }> };
+const EMPTY: Form = { name: '', description: '', sellerCode: '', barcode: '', category: '', unitCode: 'H87', unitPrice: '', wholesalePrice: '', gstCategory: 'S', exemptionReasonCode: '', favorite: false, breaks: [] };
+let breakKey = 0;
 
 export interface Category { name: string; items: number }
 interface Part { key: number; item: { id: string; name: string } | null; quantity: string }
@@ -26,6 +27,7 @@ const toForm = (i: Item): Form => ({
   gstCategory: i.gstCategory,
   exemptionReasonCode: i.exemptionReasonCode ?? '',
   favorite: i.favorite,
+  breaks: (i.priceBreaks ?? []).map((b) => ({ key: ++breakKey, ...b })),
 });
 
 const itemBody = (f: Form) => ({
@@ -40,6 +42,7 @@ const itemBody = (f: Form) => ({
   gstCategory: f.gstCategory,
   ...(f.gstCategory === 'E' && { exemptionReasonCode: f.exemptionReasonCode.trim() }),
   favorite: f.favorite,
+  priceBreaks: f.breaks.filter((b) => b.minQuantity.trim() && b.unitPrice.trim()).map((b) => ({ minQuantity: b.minQuantity.trim(), unitPrice: b.unitPrice.trim() })),
 });
 
 function ItemForm(props: { initial?: Item; categories: Category[]; onSaved: (i: Item) => void; onCancel: () => void }) {
@@ -113,6 +116,18 @@ function ItemForm(props: { initial?: Item; categories: Category[]; onSaved: (i: 
         <Field label="GST"><Select value={form.gstCategory} onChange={set('gstCategory')}>{GST_CATEGORIES.map(([c, n]) => <option key={c} value={c}>{t(n)}</option>)}</Select></Field>
         {form.gstCategory === 'E' && <Field label={t('Exemption reason code')}><input required value={form.exemptionReasonCode} onChange={set('exemptionReasonCode')} /></Field>}
       </div>
+      <fieldset className="stack bundle-parts">
+        <legend>{t('Quantity prices')}</legend>
+        {form.breaks.length === 0 && <p className="small muted">{t('Optional: a lower price each when buying more, such as 12 or more at BZ$2.50.')}</p>}
+        {form.breaks.map((b) => (
+          <div key={b.key} className="bundle-part break-row">
+            <Field label={t('From a quantity of')}><input inputMode="decimal" required pattern="\d{1,9}(\.\d{1,3})?" value={b.minQuantity} onChange={(e) => setForm({ ...form, breaks: form.breaks.map((x) => (x.key === b.key ? { ...x, minQuantity: e.target.value } : x)) })} /></Field>
+            <Field label={t('Price each (BZ$, before GST)')} {...(marginHint(b.unitPrice) && { hint: marginHint(b.unitPrice)! })}><input inputMode="decimal" required pattern="\d+(\.\d{1,6})?" value={b.unitPrice} onChange={(e) => setForm({ ...form, breaks: form.breaks.map((x) => (x.key === b.key ? { ...x, unitPrice: e.target.value } : x)) })} /></Field>
+            <button type="button" className="link" onClick={() => setForm({ ...form, breaks: form.breaks.filter((x) => x.key !== b.key) })}>{t('Remove')}</button>
+          </div>
+        ))}
+        <div className="row"><button type="button" className="secondary" disabled={form.breaks.length >= 10} onClick={() => setForm({ ...form, breaks: [...form.breaks, { key: ++breakKey, minQuantity: '', unitPrice: '' }] })}>+ {t('Add a quantity price')}</button></div>
+      </fieldset>
       <label className="row small"><input type="checkbox" checked={form.favorite} onChange={(e) => setForm({ ...form, favorite: e.target.checked })} /> {t('Show as a quick button at the counter')}</label>
       <label className="row small"><input type="checkbox" checked={bundle} onChange={(e) => { setBundle(e.target.checked); if (e.target.checked && !parts.length) setParts([{ key: ++partKey, item: null, quantity: '1' }]); }} /> {t('A bundle of other items (a combo, a gift basket)')}</label>
       {bundle && (

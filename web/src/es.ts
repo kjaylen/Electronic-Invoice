@@ -2541,4 +2541,9 @@ export const ES: Record<string, string> = {
   "Empty: still in.": "Vacío: aún dentro.",
   "Forgot to clock out": "Olvidó marcar la salida",
   "Belize time. The change is kept in the activity log.": "Hora de Belice. El cambio queda en el registro de actividad.",
+  "Quantity prices": "Precios por cantidad",
+  "Optional: a lower price each when buying more, such as 12 or more at BZ$2.50.": "Opcional: un precio más bajo por unidad al comprar más, como 12 o más a BZ$2.50.",
+  "From a quantity of": "Desde una cantidad de",
+  "Price each (BZ$, before GST)": "Precio por unidad (BZ$, antes del GST)",
+  "Add a quantity price": "Agregar un precio por cantidad",
 };

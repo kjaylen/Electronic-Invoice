@@ -174,6 +174,8 @@ export interface Item {
   wholesalePrice?: string | null;
   /** Made of other items: selling it takes them off the shelf. */
   bundle?: boolean;
+  /** Lower prices (before GST) from a quantity on, smallest first. */
+  priceBreaks?: Array<{ minQuantity: string; unitPrice: string }>;
   /** A group such as Coffee or Bakery: tabs at the counter, a filter, sales by category. */
   category?: string | null;
   /** In stock now; null when stock is not tracked. */

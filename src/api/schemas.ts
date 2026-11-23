@@ -81,9 +81,17 @@ export const itemSchema = {
     exemptionReasonCode: text(50),
     barcode: { type: 'string', pattern: '^[0-9A-Za-z-]{1,64}$' },
     favorite: { type: 'boolean' },
-    // The price (before GST) for customers on the wholesale list; null: they pay the usual price.
     category: { anyOf: [{ type: 'string', minLength: 1, maxLength: 80 }, { type: 'null' }] },
+    // The price (before GST) for customers on the wholesale list; null: they pay the usual price.
     wholesalePrice: { anyOf: [{ type: 'string', pattern: '^\\d{1,15}(\\.\\d{1,6})?$' }, { type: 'null' }] },
+    // Lower prices for larger quantities; left out on an edit, they stay as they were.
+    priceBreaks: {
+      type: 'array', maxItems: 10,
+      items: {
+        type: 'object', required: ['minQuantity', 'unitPrice'], additionalProperties: false,
+        properties: { minQuantity: { type: 'string', pattern: '^\\d{1,9}(\\.\\d{1,3})?$' }, unitPrice: { type: 'string', pattern: '^\\d{1,15}(\\.\\d{1,6})?$' } },
+      },
+    },
   },
 } as const;
 

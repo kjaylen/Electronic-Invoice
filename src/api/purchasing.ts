@@ -339,6 +339,7 @@ export function registerPurchasingRoutes(app: FastifyInstance, deps: PipelineDep
         to = request.body?.to ?? po.supplier_email;
         if (!to) throw new ApiError(422, 'no_email', 'This supplier has no email address; enter one');
         if (await overLimit(db, `po-send|${po.id}`, 10, 24 * 3600_000)) throw new ApiError(429, 'too_many_emails', 'Enough emails for this order today');
+        if (await overLimit(db, `po-send-business|${request.tenantId}`, 200, 24 * 3600_000)) throw new ApiError(429, 'too_many_emails', 'Enough purchase order emails for today');
         const j = poJson(po, lines);
         const biz = await businessContext(db, request.tenantId);
         const mail = await renderEmail(db, request.tenantId, 'email.purchase-order', {

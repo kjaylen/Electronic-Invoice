@@ -42,6 +42,8 @@ interface CartLine {
   /** The catalog's prices, so the line can follow the customer's price list. */
   retailPrice?: string;
   wholesalePrice?: string | null;
+  /** Lower prices from a quantity on (retail customers). */
+  breaks?: Array<{ minQuantity: string; unitPrice: string }>;
 }
 
 type Means = '10' | '48' | '30' | 'split' | 'account';
@@ -83,10 +85,17 @@ const newSale = (): Sale => ({ lines: [], meansCode: '10', tendered: '', tin: ''
 const fromItem = (it: Item, quantity = '1', wholesale = false): CartLine => ({
   key: ++key, itemId: it.id, name: it.name, quantity, unitCode: it.unitCode, unitPrice: wholesale && it.wholesalePrice ? it.wholesalePrice : it.unitPrice, gstCategory: it.gstCategory,
   retailPrice: it.unitPrice, wholesalePrice: it.wholesalePrice ?? null,
+  ...(it.priceBreaks?.length && { breaks: it.priceBreaks }),
   ...(it.exemptionReasonCode && { exemptionReasonCode: it.exemptionReasonCode }),
 });
+/** The retail price each at this quantity: the best quantity price reached, else the usual price. */
+const retailFor = (l: CartLine) => {
+  let best = l.retailPrice!;
+  for (const b of l.breaks ?? []) if (Number(l.quantity) >= Number(b.minQuantity)) best = b.unitPrice;
+  return best;
+};
 /** Catalog lines follow the customer's price list (lines typed in by hand keep their price). */
-const reprice = (lines: CartLine[], wholesale: boolean) => lines.map((l) => (l.custom || !l.retailPrice ? l : { ...l, unitPrice: wholesale && l.wholesalePrice ? l.wholesalePrice : l.retailPrice }));
+const reprice = (lines: CartLine[], wholesale: boolean) => lines.map((l) => (l.custom || !l.retailPrice ? l : { ...l, unitPrice: wholesale && l.wholesalePrice ? l.wholesalePrice : retailFor(l) }));
 const addQty = (q: string, delta: number) => {
   const n = Math.round((Number(q) + delta) * 1e6) / 1e6;
   return n > 0 ? String(n) : q;
@@ -223,6 +232,11 @@ export function CounterPanel(props: {
 
   const set = (patch: Partial<Sale>) => setSale((s) => ({ ...s, ...patch }));
   const wholesale = sale.customer?.priceList === 'wholesale';
+  // Quantity prices follow the quantity: whenever a line with them changes, its price is worked out again.
+  useEffect(() => {
+    const next = reprice(sale.lines, wholesale);
+    if (next.some((l, i) => l.unitPrice !== sale.lines[i]!.unitPrice && l.breaks)) setSale((s) => ({ ...s, lines: reprice(s.lines, wholesale) }));
+  }, [sale.lines, wholesale]);
   const focusSearch = () => setTimeout(() => search.current?.focus(), 0);
   const add = useCallback((line: CartLine) => {
     setSale((s) => {
