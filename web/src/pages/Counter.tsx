@@ -38,6 +38,9 @@ interface CartLine {
   exemptionReasonCode?: string;
   custom?: boolean;
   discount?: LineDiscount;
+  /** The catalog's prices, so the line can follow the customer's price list. */
+  retailPrice?: string;
+  wholesalePrice?: string | null;
 }
 
 type Means = '10' | '48' | '30' | 'split' | 'account';
@@ -50,7 +53,7 @@ interface Sale {
   idempotencyKey: string;
   /** A percentage off every line. */
   discount?: string;
-  customer?: { id: string; name: string; tin: string | null; email?: string | null } | null;
+  customer?: { id: string; name: string; tin: string | null; email?: string | null; priceList?: 'retail' | 'wholesale' } | null;
   /** Split payment: the card or transfer part; cash pays the rest. */
   split?: { means: '48' | '30'; amount: string };
   /** Charged to the customer's account: days until it is due. */
@@ -74,10 +77,13 @@ let key = 0;
 const DECIMAL = /^\d+(\.\d{1,6})?$/;
 const MONEY = /^\d+(\.\d{1,2})?$/;
 const newSale = (): Sale => ({ lines: [], meansCode: '10', tendered: '', tin: '', idempotencyKey: crypto.randomUUID() });
-const fromItem = (it: Item, quantity = '1'): CartLine => ({
-  key: ++key, itemId: it.id, name: it.name, quantity, unitCode: it.unitCode, unitPrice: it.unitPrice, gstCategory: it.gstCategory,
+const fromItem = (it: Item, quantity = '1', wholesale = false): CartLine => ({
+  key: ++key, itemId: it.id, name: it.name, quantity, unitCode: it.unitCode, unitPrice: wholesale && it.wholesalePrice ? it.wholesalePrice : it.unitPrice, gstCategory: it.gstCategory,
+  retailPrice: it.unitPrice, wholesalePrice: it.wholesalePrice ?? null,
   ...(it.exemptionReasonCode && { exemptionReasonCode: it.exemptionReasonCode }),
 });
+/** Catalog lines follow the customer's price list (lines typed in by hand keep their price). */
+const reprice = (lines: CartLine[], wholesale: boolean) => lines.map((l) => (l.custom || !l.retailPrice ? l : { ...l, unitPrice: wholesale && l.wholesalePrice ? l.wholesalePrice : l.retailPrice }));
 const addQty = (q: string, delta: number) => {
   const n = Math.round((Number(q) + delta) * 1e6) / 1e6;
   return n > 0 ? String(n) : q;
@@ -170,6 +176,7 @@ export function CounterPanel(props: {
   }, []);
 
   const set = (patch: Partial<Sale>) => setSale((s) => ({ ...s, ...patch }));
+  const wholesale = sale.customer?.priceList === 'wholesale';
   const focusSearch = () => setTimeout(() => search.current?.focus(), 0);
   const add = useCallback((line: CartLine) => {
     setSale((s) => {
@@ -194,7 +201,7 @@ export function CounterPanel(props: {
         const found = await searchItems(code, 2);
         if (found.length === 1) hit = found[0];
       }
-      if (hit) add(fromItem(hit, quantity));
+      if (hit) add(fromItem(hit, quantity, wholesale));
       else toast(t('No item matches "{code}"', { code }), 'bad');
     } catch (e) {
       setError(e);
@@ -398,7 +405,7 @@ export function CounterPanel(props: {
                 search={(q) => (/^\d+(\.\d+)?\s*[*x]/i.test(q) ? Promise.resolve([]) : searchItems(q))}
                 render={(it) => <><strong>{it.name}</strong> <span className="muted">· {money(it.unitPrice)}{it.sellerCode && ` · ${it.sellerCode}`}</span></>}
                 onPick={(it) => {
-                  add(fromItem(it));
+                  add(fromItem(it, '1', wholesale));
                   focusSearch();
                 }}
                 onEnter={enter}
@@ -418,7 +425,7 @@ export function CounterPanel(props: {
           {favorites.length > 0 && (
             <div className="quick-grid" role="group" aria-label={t('Quick buttons')}>
               {favorites.map((it) => (
-                <button key={it.id} type="button" className="quick" onClick={() => { add(fromItem(it)); focusSearch(); }}>
+                <button key={it.id} type="button" className="quick" onClick={() => { add(fromItem(it, '1', wholesale)); focusSearch(); }}>
                   <span className="name">{it.name}</span>
                   <span className="price num">{money(it.unitPrice)}</span>
                 </button>
@@ -499,7 +506,7 @@ export function CounterPanel(props: {
           <CustomerPicker
             customer={sale.customer ?? null}
             tin={sale.tin}
-            onCustomer={(c) => set({ customer: c, ...(c === null && sale.meansCode === 'account' && { meansCode: '10' as Means }) })}
+            onCustomer={(c) => setSale((s) => ({ ...s, customer: c, lines: reprice(s.lines, c?.priceList === 'wholesale'), ...(c === null && s.meansCode === 'account' && { meansCode: '10' as Means }) }))}
             onTin={(tin) => set({ tin })}
           />
 
@@ -689,16 +696,16 @@ function HeldDialog({ held, onRecall, onDelete, onClose }: { held: HeldSale[]; o
 
 /** A saved customer on the sale (or just their TIN on the receipt). */
 function CustomerPicker({ customer, tin, onCustomer, onTin }: {
-  customer: { id: string; name: string; tin: string | null; email?: string | null } | null;
+  customer: { id: string; name: string; tin: string | null; email?: string | null; priceList?: 'retail' | 'wholesale' } | null;
   tin: string;
-  onCustomer: (c: { id: string; name: string; tin: string | null; email?: string | null } | null) => void;
+  onCustomer: (c: { id: string; name: string; tin: string | null; email?: string | null; priceList?: 'retail' | 'wholesale' } | null) => void;
   onTin: (tin: string) => void;
 }) {
   const t = useT();
   if (customer) {
     return (
       <div className="cart-customer">
-        <span className="cart-customer-name"><span className="kicker">{t('Customer')}</span>{customer.name}{customer.tin && <span className="muted"> · TIN {customer.tin}</span>}</span>
+        <span className="cart-customer-name"><span className="kicker">{customer.priceList === 'wholesale' ? t('Customer · wholesale prices') : t('Customer')}</span>{customer.name}{customer.tin && <span className="muted"> · TIN {customer.tin}</span>}</span>
         <button type="button" className="remove" aria-label={t('Remove the customer')} onClick={() => onCustomer(null)}>×</button>
       </div>
     );
@@ -711,7 +718,7 @@ function CustomerPicker({ customer, tin, onCustomer, onTin }: {
         placeholder={t('Search by name or TIN')}
         search={(q) => api<Page<Customer>>(`/v1/customers?limit=6&q=${encodeURIComponent(q)}`).then((r) => r.data)}
         render={(c) => <><strong>{c.name}</strong>{c.tin && <span className="muted"> · TIN {c.tin}</span>}</>}
-        onPick={(c) => onCustomer({ id: c.id, name: c.name, tin: c.tin, email: c.contact.email })}
+        onPick={(c) => onCustomer({ id: c.id, name: c.name, tin: c.tin, email: c.contact.email, priceList: c.priceList ?? 'retail' })}
       />
       <label className="cart-tin">
         <span>{t('Or just their TIN')}</span>

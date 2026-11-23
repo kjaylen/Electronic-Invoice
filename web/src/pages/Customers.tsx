@@ -7,8 +7,8 @@ import { useToast } from '../toast';
 import { DISTRICTS, ErrorText, Field, Modal, Select, useDebounced, usePageTitle } from '../ui';
 import { ImportDialog } from './ImportDialog';
 
-type Form = { name: string; tin: string; street: string; city: string; districtCode: string; telephone: string; email: string };
-const EMPTY: Form = { name: '', tin: '', street: '', city: '', districtCode: '1', telephone: '', email: '' };
+type Form = { name: string; tin: string; street: string; city: string; districtCode: string; telephone: string; email: string; priceList: 'retail' | 'wholesale' };
+const EMPTY: Form = { name: '', tin: '', street: '', city: '', districtCode: '1', telephone: '', email: '', priceList: 'retail' };
 
 const toForm = (c: Customer): Form => ({
   name: c.name,
@@ -18,6 +18,7 @@ const toForm = (c: Customer): Form => ({
   districtCode: c.address?.districtCode ?? '1',
   telephone: c.contact.telephone ?? '',
   email: c.contact.email ?? '',
+  priceList: c.priceList ?? 'retail',
 });
 
 export const customerBody = (f: Form) => ({
@@ -25,6 +26,7 @@ export const customerBody = (f: Form) => ({
   ...(f.tin && { tin: f.tin }),
   ...(f.street && f.city && { address: { street: f.street, city: f.city, districtCode: f.districtCode } }),
   ...((f.telephone || f.email) && { contact: { ...(f.telephone && { telephone: f.telephone }), ...(f.email && { email: f.email }) } }),
+  priceList: f.priceList,
 });
 
 /** Add or edit a customer. */
@@ -63,6 +65,12 @@ function CustomerForm(props: { initial?: Customer; onSaved: (c: Customer) => voi
       <div className="form-grid">
         <Field label={t('Telephone')} hint={t('Used to send documents by WhatsApp.')}><input type="tel" value={form.telephone} onChange={set('telephone')} /></Field>
         <Field label={t('Email')}><input type="email" value={form.email} onChange={set('email')} /></Field>
+        <Field label={t('Prices')} hint={t('Wholesale customers pay items\' wholesale prices.')}>
+          <Select value={form.priceList} onChange={(e) => setForm({ ...form, priceList: e.target.value as Form['priceList'] })}>
+            <option value="retail">{t('Retail')}</option>
+            <option value="wholesale">{t('Wholesale')}</option>
+          </Select>
+        </Field>
       </div>
       {props.initial && <p className="small muted">{t('Documents already issued keep the details they were issued with.')}</p>}
       <ErrorText error={error} />
@@ -135,7 +143,7 @@ export function Customers() {
               <tbody>
                 {list.map((c) => (
                   <tr key={c.id}>
-                    <td data-label={t('Name')}><Link to={`/customers/${c.id}`} className="strong-link" viewTransition>{c.name}</Link></td>
+                    <td data-label={t('Name')}><Link to={`/customers/${c.id}`} className="strong-link" viewTransition>{c.name}</Link>{c.priceList === 'wholesale' && <span className="badge price-list">{t('Wholesale')}</span>}</td>
                     <td data-label="TIN">{c.tin ?? '—'}</td>
                     <td data-label={t('Address')}>{c.address ? `${c.address.street}, ${c.address.city}` : '—'}</td>
                     <td data-label={t('Contact')}>{[c.contact.telephone, c.contact.email].filter(Boolean).join(' · ') || '—'}</td>

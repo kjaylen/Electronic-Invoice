@@ -178,8 +178,12 @@ async function loadDocument(deps: PipelineDeps, tenantId: string, id: string): P
 export async function toIssueRequest(deps: PipelineDeps, tenantId: string, body: IssueBody): Promise<IssueRequest> {
   if (body.customerId && body.customer) throw new ApiError(422, 'invalid_document', 'Give customerId or customer, not both');
   let customer: Customer | undefined;
+  // A customer on the wholesale list pays an item's wholesale price when a line gives no price of its own.
+  let wholesale = false;
   if (body.customerId) {
-    customer = customerFromRow(await loadCustomer(deps, tenantId, body.customerId));
+    const row = await loadCustomer(deps, tenantId, body.customerId);
+    wholesale = (row as { price_list?: string }).price_list === 'wholesale';
+    customer = customerFromRow(row);
   } else if (body.customer) {
     const c = body.customer;
     customer = {
@@ -197,7 +201,7 @@ export async function toIssueRequest(deps: PipelineDeps, tenantId: string, body:
     if (l.itemId && !item) throw new ApiError(422, 'invalid_document', `Line ${i + 1}: item ${l.itemId} not found`);
     const description = l.description ?? item?.description;
     const unitCode = l.unitCode ?? item?.unitCode;
-    const unitPrice = l.unitPrice ?? item?.unitPrice;
+    const unitPrice = l.unitPrice ?? (wholesale && item?.wholesalePrice ? item.wholesalePrice : item?.unitPrice);
     const gstCategory = l.gstCategory ?? item?.gstCategory;
     if (!description || !unitCode || !unitPrice || !gstCategory) {
       throw new ApiError(422, 'invalid_document', `Line ${i + 1}: give an itemId, or description, unitCode, unitPrice and gstCategory`);

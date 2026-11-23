@@ -7,8 +7,8 @@ import { useToast } from '../toast';
 import { ErrorText, Field, GST_CATEGORIES, Modal, money, Select, unitName, UNITS, useDebounced, usePageTitle } from '../ui';
 import { ImportDialog } from './ImportDialog';
 
-type Form = { name: string; description: string; sellerCode: string; barcode: string; unitCode: string; unitPrice: string; gstCategory: string; exemptionReasonCode: string; favorite: boolean };
-const EMPTY: Form = { name: '', description: '', sellerCode: '', barcode: '', unitCode: 'H87', unitPrice: '', gstCategory: 'S', exemptionReasonCode: '', favorite: false };
+type Form = { name: string; description: string; sellerCode: string; barcode: string; unitCode: string; unitPrice: string; wholesalePrice: string; gstCategory: string; exemptionReasonCode: string; favorite: boolean };
+const EMPTY: Form = { name: '', description: '', sellerCode: '', barcode: '', unitCode: 'H87', unitPrice: '', wholesalePrice: '', gstCategory: 'S', exemptionReasonCode: '', favorite: false };
 
 const toForm = (i: Item): Form => ({
   name: i.name,
@@ -17,6 +17,7 @@ const toForm = (i: Item): Form => ({
   barcode: i.barcode ?? '',
   unitCode: i.unitCode,
   unitPrice: i.unitPrice,
+  wholesalePrice: i.wholesalePrice ?? '',
   gstCategory: i.gstCategory,
   exemptionReasonCode: i.exemptionReasonCode ?? '',
   favorite: i.favorite,
@@ -29,6 +30,7 @@ const itemBody = (f: Form) => ({
   ...(f.barcode.trim() && { barcode: f.barcode.trim() }),
   unitCode: f.unitCode,
   unitPrice: f.unitPrice,
+  wholesalePrice: f.wholesalePrice.trim() || null,
   gstCategory: f.gstCategory,
   ...(f.gstCategory === 'E' && { exemptionReasonCode: f.exemptionReasonCode.trim() }),
   favorite: f.favorite,
@@ -68,6 +70,7 @@ function ItemForm(props: { initial?: Item; onSaved: (i: Item) => void; onCancel:
       <div className="form-grid">
         <Field label={t('Unit')}><Select value={form.unitCode} onChange={set('unitCode')}>{UNITS.map(([c, n]) => <option key={c} value={c}>{t(n)}</option>)}</Select></Field>
         <Field label={t('Price (BZ$, before GST)')}><input required inputMode="decimal" pattern="\d+(\.\d{1,6})?" value={form.unitPrice} onChange={set('unitPrice')} /></Field>
+        <Field label={t('Wholesale price')} hint={t('Before GST, for wholesale customers. Optional.')}><input inputMode="decimal" pattern="\d+(\.\d{1,6})?" value={form.wholesalePrice} onChange={set('wholesalePrice')} /></Field>
         <Field label="GST"><Select value={form.gstCategory} onChange={set('gstCategory')}>{GST_CATEGORIES.map(([c, n]) => <option key={c} value={c}>{t(n)}</option>)}</Select></Field>
         {form.gstCategory === 'E' && <Field label={t('Exemption reason code')}><input required value={form.exemptionReasonCode} onChange={set('exemptionReasonCode')} /></Field>}
       </div>

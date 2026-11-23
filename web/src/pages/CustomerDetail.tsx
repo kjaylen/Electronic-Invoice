@@ -46,7 +46,7 @@ export function CustomerDetail() {
       <div className="row customer-head">
         <div>
           <span className="kicker">{t('Customer')}</span>
-          <h1>{c.name}</h1>
+          <h1>{c.name}{c.priceList === 'wholesale' && <span className="badge price-list">{t('Wholesale')}</span>}</h1>
           <p className="muted small">
             {[c.tin && `TIN ${c.tin}`, c.address && `${c.address.street}, ${c.address.city}${district ? `, ${district}` : ''}`, c.contact.telephone, c.contact.email].filter(Boolean).join(' · ') || t('No details yet.')}
           </p>

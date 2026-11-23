@@ -94,6 +94,8 @@ export function NewDocument({ mode = 'issue' }: { mode?: FormMode } = {}) {
   const [reason, setReason] = useState('');
   const [customerMode, setCustomerMode] = useState<'saved' | 'new' | 'walkin'>(initialType === '02' ? 'walkin' : 'saved');
   const [customer, setCustomer] = useState<Customer | null>(null);
+  // Wholesale customers pay items' wholesale prices (on lines added once they are chosen).
+  const priceFor = (it: Item) => (customerMode === 'saved' && customer?.priceList === 'wholesale' && it.wholesalePrice ? it.wholesalePrice : it.unitPrice);
   // From a customer's page: start with them chosen.
   const presetCustomer = params.get('customer');
   useEffect(() => {
@@ -608,10 +610,10 @@ export function NewDocument({ mode = 'issue' }: { mode?: FormMode } = {}) {
                   render={(it) => <><strong>{it.name}</strong> <span className="muted">· {money(it.unitPrice)}{it.sellerCode && ` · ${it.sellerCode}`}{it.stock !== null && it.stock !== undefined && ` · ${t('{n} in stock', { n: it.stock })}`}</span></>}
                   value={l.description}
                   onText={(v) => updateLine(l.key, { description: v, itemId: undefined })}
-                  onPick={(it) => updateLine(l.key, { itemId: it.id, description: it.description, unitCode: it.unitCode, unitPrice: it.unitPrice, gstCategory: it.gstCategory, exemptionReasonCode: it.exemptionReasonCode ?? '' })}
+                  onPick={(it) => updateLine(l.key, { itemId: it.id, description: it.description, unitCode: it.unitCode, unitPrice: priceFor(it), gstCategory: it.gstCategory, exemptionReasonCode: it.exemptionReasonCode ?? '' })}
                   onEnter={async (code) => {
                     const [hit] = (await api<Page<Item>>(`/v1/items?limit=1&code=${encodeURIComponent(code)}`)).data;
-                    if (hit) updateLine(l.key, { itemId: hit.id, description: hit.description, unitCode: hit.unitCode, unitPrice: hit.unitPrice, gstCategory: hit.gstCategory, exemptionReasonCode: hit.exemptionReasonCode ?? '' });
+                    if (hit) updateLine(l.key, { itemId: hit.id, description: hit.description, unitCode: hit.unitCode, unitPrice: priceFor(hit), gstCategory: hit.gstCategory, exemptionReasonCode: hit.exemptionReasonCode ?? '' });
                   }}
                 />
               </Field>

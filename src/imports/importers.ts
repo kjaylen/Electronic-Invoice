@@ -46,6 +46,7 @@ const ITEM_COLUMNS = {
   stock: ['stock', 'quantity', 'qty', 'onhand', 'instock', 'stockquantity', 'stocklevel'],
   lowStock: ['lowstock', 'reorderlevel', 'reorderpoint', 'minstock', 'minimumstock'],
   favorite: ['quickbutton', 'favorite', 'favourite', 'star', 'starred'],
+  wholesale: ['wholesaleprice', 'wholesale', 'tradeprice', 'pricewholesale'],
 };
 
 export async function importItems(db: Queryable, tenantId: string, csv: string, options: { dryRun: boolean; userId: string | null }): Promise<ImportResult> {
@@ -81,6 +82,8 @@ export async function importItems(db: Queryable, tenantId: string, csv: string, 
       if (withGst !== null) price = gst === 'S' ? (Math.round((Number(withGst) / 1.125) * 1e6) / 1e6).toFixed(6).replace(/0+$/, '').replace(/\.$/, '') : withGst;
     }
     if (price === null) { fail(`"${get(r, 'price') || get(r, 'priceWithGst')}" is not a price`); continue; }
+    const wholesale = get(r, 'wholesale') ? amount(get(r, 'wholesale')) : null;
+    if (get(r, 'wholesale') && wholesale === null) { fail(`Wholesale price "${get(r, 'wholesale')}" is not a price`); continue; }
     const unit = unitCode(get(r, 'unit'));
     if (!unit) { fail(`Unit "${get(r, 'unit')}" is not one we know (each, kg, lb, litre, box, hour…)`); continue; }
     const code = get(r, 'code') || null;
@@ -114,16 +117,16 @@ export async function importItems(db: Queryable, tenantId: string, csv: string, 
     if (match) {
       await db.query(
         `update items set name = $3, description = $4, seller_code = coalesce($5, seller_code), unit_code = $6, unit_price = $7, gst_category = $8,
-           exemption_reason_code = $9, barcode = coalesce($10, barcode), favorite = coalesce($11, favorite)${lowStock !== null ? ', low_stock = $12' : ''}
+           exemption_reason_code = $9, barcode = coalesce($10, barcode), favorite = coalesce($11, favorite), wholesale_price = coalesce($12, wholesale_price)${lowStock !== null ? ', low_stock = $13' : ''}
          where id = $1 and tenant_id = $2`,
-        [match.id, tenantId, name, description, code, unit, price, gst, gst === 'E' ? exemption : null, barcode, favorite, ...(lowStock !== null ? [lowStock] : [])],
+        [match.id, tenantId, name, description, code, unit, price, gst, gst === 'E' ? exemption : null, barcode, favorite, wholesale, ...(lowStock !== null ? [lowStock] : [])],
       );
     } else {
       id = randomUUID();
       await db.query(
-        `insert into items (id, tenant_id, name, description, seller_code, unit_code, unit_price, gst_category, exemption_reason_code, barcode, favorite, low_stock)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-        [id, tenantId, name, description, code, unit, price, gst, gst === 'E' ? exemption : null, barcode, favorite ?? false, lowStock],
+        `insert into items (id, tenant_id, name, description, seller_code, unit_code, unit_price, gst_category, exemption_reason_code, barcode, favorite, low_stock, wholesale_price)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+        [id, tenantId, name, description, code, unit, price, gst, gst === 'E' ? exemption : null, barcode, favorite ?? false, lowStock, wholesale],
       );
       if (code) byCode.set(code.toLowerCase(), { id, seller_code: code, barcode });
       if (barcode) byBarcode.set(barcode, { id, seller_code: code, barcode });
@@ -142,6 +145,7 @@ const CUSTOMER_COLUMNS = {
   street: ['street', 'address', 'address1', 'streetaddress', 'addressline1'],
   city: ['city', 'town', 'village'],
   district: ['district', 'districtcode'],
+  priceList: ['pricelist', 'pricing', 'customertype', 'type'],
 };
 const DISTRICTS: Record<string, string> = { belize: '1', cayo: '2', corozal: '3', orangewalk: '4', stanncreek: '5', toledo: '6' };
 const districtCode = (v: string): string | null => {
@@ -179,6 +183,9 @@ export async function importCustomers(db: Queryable, tenantId: string, csv: stri
     const district = get(r, 'district') ? districtCode(get(r, 'district')) : null;
     if (get(r, 'district') && !district) { fail(`District "${get(r, 'district')}" is not one of Belize, Cayo, Corozal, Orange Walk, Stann Creek or Toledo`); continue; }
     const fullAddress = Boolean(street && city && district);
+    const listText = get(r, 'priceList').toLowerCase();
+    const priceList = !listText ? null : /^(w|wholesale|trade|mayorista)$/.test(listText) ? 'wholesale' : /^(r|retail|regular|normal)$/.test(listText) ? 'retail' : undefined;
+    if (priceList === undefined) { fail(`Price list "${get(r, 'priceList')}" is not retail or wholesale`); continue; }
     const match = (tin && byTin.get(tin)) || (email && byEmail.get(email.toLowerCase())) || null;
     const partial = (street || city || district) && !fullAddress ? 'address left out: it needs a street, a town and a district' : undefined;
     results.push({ row: n, action: match ? 'update' : 'create', name, ...(partial || tin ? { detail: [tin && `TIN ${tin}`, partial].filter(Boolean).join('; ') } : {}) });
@@ -187,15 +194,16 @@ export async function importCustomers(db: Queryable, tenantId: string, csv: stri
     if (match) {
       await db.query(
         `update customers set name = $3, tin = coalesce($4, tin), email = coalesce($5, email), telephone = coalesce($6, telephone),
-           street = case when $10 then $7 else street end, city = case when $10 then $8 else city end, district_code = case when $10 then $9 else district_code end
+           street = case when $10 then $7 else street end, city = case when $10 then $8 else city end, district_code = case when $10 then $9 else district_code end,
+           price_list = coalesce($11, price_list)
          where id = $1 and tenant_id = $2`,
-        [match, tenantId, name, tin, email, phone, street, city, district, fullAddress],
+        [match, tenantId, name, tin, email, phone, street, city, district, fullAddress, priceList],
       );
     } else {
       const id = randomUUID();
       await db.query(
-        `insert into customers (id, tenant_id, name, tin, street, city, district_code, telephone, email) values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-        [id, tenantId, name, tin, fullAddress ? street : null, fullAddress ? city : null, fullAddress ? district : null, phone, email],
+        `insert into customers (id, tenant_id, name, tin, street, city, district_code, telephone, email, price_list) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [id, tenantId, name, tin, fullAddress ? street : null, fullAddress ? city : null, fullAddress ? district : null, phone, email, priceList ?? 'retail'],
       );
       if (tin) byTin.set(tin, id);
       if (email) byEmail.set(email.toLowerCase(), id);

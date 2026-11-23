@@ -36,6 +36,7 @@ export const customerSchema = {
     otherId: { type: 'object', required: ['scheme', 'value'], additionalProperties: false, properties: { scheme: text(50), value: text(100) } },
     address: addressSchema,
     contact: contactSchema,
+    priceList: { type: 'string', enum: ['retail', 'wholesale'] },
   },
 } as const;
 
@@ -79,6 +80,8 @@ export const itemSchema = {
     exemptionReasonCode: text(50),
     barcode: { type: 'string', pattern: '^[0-9A-Za-z-]{1,64}$' },
     favorite: { type: 'boolean' },
+    // The price (before GST) for customers on the wholesale list; null: they pay the usual price.
+    wholesalePrice: { anyOf: [{ type: 'string', pattern: '^\\d{1,15}(\\.\\d{1,6})?$' }, { type: 'null' }] },
   },
 } as const;
 

@@ -60,6 +60,7 @@ interface CustomerRow {
   district_code: DistrictCode | null;
   telephone: string | null;
   email: string | null;
+  price_list?: 'retail' | 'wholesale';
   archived_at?: string | Date | null;
   created_at: string | Date;
 }
@@ -70,6 +71,7 @@ export interface CustomerBody {
   otherId?: { scheme: string; value: string };
   address?: { street: string; additionalStreet?: string; city: string; districtCode: DistrictCode };
   contact?: { telephone?: string; email?: string };
+  priceList?: 'retail' | 'wholesale';
 }
 
 const customerJson = (r: CustomerRow) => ({
@@ -79,6 +81,7 @@ const customerJson = (r: CustomerRow) => ({
   otherId: r.other_id_scheme && r.other_id_value ? { scheme: r.other_id_scheme, value: r.other_id_value } : null,
   address: r.street && r.city && r.district_code ? { street: r.street, city: r.city, districtCode: r.district_code } : null,
   contact: { telephone: r.telephone, email: r.email },
+  priceList: r.price_list ?? 'retail',
   archived: Boolean(r.archived_at),
   createdAt: new Date(r.created_at).toISOString(),
 });
@@ -115,6 +118,7 @@ interface ItemRow {
   exemption_reason_code: string | null;
   barcode: string | null;
   favorite: boolean;
+  wholesale_price?: string | null;
   stock_quantity?: string | null;
   archived_at: string | Date | null;
   created_at: string | Date;
@@ -134,13 +138,15 @@ const itemJson = (r: ItemRow) => ({
   exemptionReasonCode: r.exemption_reason_code,
   barcode: r.barcode,
   favorite: r.favorite,
+  /** The price before GST for wholesale customers; null: the usual price. */
+  wholesalePrice: r.wholesale_price === null || r.wholesale_price === undefined ? null : trimDecimal(r.wholesale_price),
   /** In stock now; null when stock is not tracked. */
   stock: r.stock_quantity === null || r.stock_quantity === undefined ? null : Number(r.stock_quantity),
   archived: Boolean(r.archived_at),
   createdAt: new Date(r.created_at).toISOString(),
 });
 
-type ItemBody = { name: string; description?: string; sellerCode?: string; unitCode: string; unitPrice: string; gstCategory: 'S' | 'Z' | 'E'; exemptionReasonCode?: string; barcode?: string; favorite?: boolean };
+type ItemBody = { name: string; description?: string; sellerCode?: string; unitCode: string; unitPrice: string; gstCategory: 'S' | 'Z' | 'E'; exemptionReasonCode?: string; barcode?: string; favorite?: boolean; wholesalePrice?: string | null };
 
 /** A LIKE pattern matching q anywhere, with LIKE's special characters escaped. */
 export const likePattern = (q: string) => `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
@@ -264,10 +270,10 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: PipelineDeps) 
     const b = request.body;
     const id = randomUUID();
     await db.query(
-      `insert into customers (id, tenant_id, name, tin, other_id_scheme, other_id_value, street, city, district_code, telephone, email)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+      `insert into customers (id, tenant_id, name, tin, other_id_scheme, other_id_value, street, city, district_code, telephone, email, price_list)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
       [id, request.tenantId, b.name, b.tin ?? null, b.otherId?.scheme ?? null, b.otherId?.value ?? null, b.address?.street ?? null,
-        b.address?.city ?? null, b.address?.districtCode ?? null, b.contact?.telephone ?? null, b.contact?.email ?? null],
+        b.address?.city ?? null, b.address?.districtCode ?? null, b.contact?.telephone ?? null, b.contact?.email ?? null, b.priceList ?? 'retail'],
     );
     return reply.code(201).send(customerJson(await loadCustomer(deps, request.tenantId, id)));
   });
@@ -347,10 +353,11 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: PipelineDeps) 
       requirePermission(request, 'catalog.manage');
       const b = request.body;
       const r = await db.query(
-        `update customers set name = $3, tin = $4, other_id_scheme = $5, other_id_value = $6, street = $7, city = $8, district_code = $9, telephone = $10, email = $11
+        `update customers set name = $3, tin = $4, other_id_scheme = $5, other_id_value = $6, street = $7, city = $8, district_code = $9, telephone = $10, email = $11,
+           price_list = coalesce($12, price_list)
          where id = $1 and tenant_id = $2 returning id`,
         [request.params.id, request.tenantId, b.name, b.tin ?? null, b.otherId?.scheme ?? null, b.otherId?.value ?? null, b.address?.street ?? null,
-          b.address?.city ?? null, b.address?.districtCode ?? null, b.contact?.telephone ?? null, b.contact?.email ?? null],
+          b.address?.city ?? null, b.address?.districtCode ?? null, b.contact?.telephone ?? null, b.contact?.email ?? null, b.priceList ?? null],
       );
       if (!r.rows.length) throw notFound('Customer');
       return customerJson(await loadCustomer(deps, request.tenantId, request.params.id));
@@ -374,9 +381,9 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: PipelineDeps) 
       if (b.gstCategory === 'E' && !b.exemptionReasonCode) throw new ApiError(422, 'invalid_document', 'An exempt item needs an exemptionReasonCode');
       const id = randomUUID();
       await withBarcodeCheck(() => db.query(
-        `insert into items (id, tenant_id, name, description, seller_code, unit_code, unit_price, gst_category, exemption_reason_code, barcode, favorite)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-        [id, request.tenantId, b.name, b.description ?? b.name, b.sellerCode ?? null, b.unitCode, b.unitPrice, b.gstCategory, b.exemptionReasonCode ?? null, b.barcode ?? null, b.favorite ?? false],
+        `insert into items (id, tenant_id, name, description, seller_code, unit_code, unit_price, gst_category, exemption_reason_code, barcode, favorite, wholesale_price)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+        [id, request.tenantId, b.name, b.description ?? b.name, b.sellerCode ?? null, b.unitCode, b.unitPrice, b.gstCategory, b.exemptionReasonCode ?? null, b.barcode ?? null, b.favorite ?? false, b.wholesalePrice ?? null],
       ));
       return reply.code(201).send((await loadItems(deps, request.tenantId, [id])).get(id));
     },
@@ -391,10 +398,13 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: PipelineDeps) 
       const b = request.body;
       if (b.gstCategory === 'E' && !b.exemptionReasonCode) throw new ApiError(422, 'invalid_document', 'An exempt item needs an exemptionReasonCode');
       const r = await withBarcodeCheck(() => db.query(
-        `update items set name = $3, description = $4, seller_code = $5, unit_code = $6, unit_price = $7, gst_category = $8, exemption_reason_code = $9, barcode = $10, favorite = $11
+        `update items set name = $3, description = $4, seller_code = $5, unit_code = $6, unit_price = $7, gst_category = $8, exemption_reason_code = $9, barcode = $10, favorite = $11,
+           wholesale_price = case when $12::boolean then $13::numeric else wholesale_price end
          where id = $1 and tenant_id = $2 returning id`,
         [request.params.id, request.tenantId, b.name, b.description ?? b.name, b.sellerCode ?? null, b.unitCode, b.unitPrice, b.gstCategory,
-          b.gstCategory === 'E' ? (b.exemptionReasonCode ?? null) : null, b.barcode ?? null, b.favorite ?? false],
+          b.gstCategory === 'E' ? (b.exemptionReasonCode ?? null) : null, b.barcode ?? null, b.favorite ?? false,
+          // Left out: the wholesale price stays as it was; null clears it.
+          b.wholesalePrice !== undefined, b.wholesalePrice ?? null],
       ));
       if (!r.rows.length) throw notFound('Item');
       return (await loadItems(deps, request.tenantId, [request.params.id])).get(request.params.id);

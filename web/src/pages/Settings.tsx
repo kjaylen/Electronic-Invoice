@@ -761,6 +761,17 @@ function describe(t: T, e: AuditEvent): string {
     'webhook.updated': t('Changed the webhook {target}', { target }),
     'webhook.deleted': t('Removed the webhook {target}', { target }),
     'webhook.secret_rotated': t('Made a new secret for the webhook {target}', { target }),
+    'business.daily_summary_on': t('Turned on the daily summary email'),
+    'business.daily_summary_off': t('Turned off the daily summary email'),
+    'counter.settings': t('Changed the counter settings'),
+    'items.imported': t('Imported items from a spreadsheet'),
+    'customers.imported': t('Imported customers from a spreadsheet'),
+    'template.saved': t('Saved the template {target}', { target }),
+    'template.reverted': t('Put back the default template {target}', { target }),
+    'template.email_language': t('Changed the language of customer emails'),
+    'template.image_added': t('Uploaded the image {target}', { target }),
+    'template.image_deleted': t('Deleted the image {target}', { target }),
+    'template.logo_set': t('Changed the logo'),
   };
   return texts[e.action] ?? e.action;
 }

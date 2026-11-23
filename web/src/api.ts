@@ -152,6 +152,8 @@ export interface Customer {
   otherId: { scheme: string; value: string } | null;
   address: { street: string; city: string; districtCode: string } | null;
   contact: { telephone: string | null; email: string | null };
+  /** Wholesale customers pay items' wholesale prices. */
+  priceList?: 'retail' | 'wholesale';
   archived?: boolean;
 }
 
@@ -166,6 +168,8 @@ export interface Item {
   exemptionReasonCode: string | null;
   barcode: string | null;
   favorite: boolean;
+  /** The price before GST for wholesale customers; null: the usual price. */
+  wholesalePrice?: string | null;
   /** In stock now; null when stock is not tracked. */
   stock?: number | null;
 }
