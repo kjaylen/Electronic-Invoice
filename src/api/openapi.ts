@@ -162,6 +162,7 @@ const SUMMARIES: Record<string, string> = {
   'DELETE /v1/customers/{id}': 'Archive a customer',
   'GET /v1/items': 'List and search catalog items (q, barcode code, favorites, category)',
   'GET /v1/items/price-list.pdf': 'The price list as a PDF, by category (retail or wholesale, with or without GST)',
+  'GET /v1/items/{id}/summary': 'An item at a glance: sales by period and month, margin, stock and days of cover, suppliers and costs',
   'GET /v1/items/categories': 'Item categories in use, with how many items each has',
   'POST /v1/items/reprice': 'Change many prices at once (by percent, by amount, or to a price; a category or every item; dryRun to preview)',
   'POST /v1/items': 'Add a catalog item',

@@ -62,6 +62,7 @@ import { registerTimeclockRoutes } from './timeclock.ts';
 import { registerPriceListRoutes } from './price-list.ts';
 import { registerRecurringExpenseRoutes } from './recurring-expenses.ts';
 import { registerAccountLinkRoutes, registerPublicAccountRoutes } from './accounts.ts';
+import { registerItemSummaryRoutes } from './item-summary.ts';
 import { registerShiftRoutes } from './shifts.ts';
 import { registerPosAdminRoutes, registerPosDeviceRoutes, SESSION_TOKEN_PREFIX, tillMayUse, touchDevice } from './pos.ts';
 import { lookupSession } from '../db/users.ts';
@@ -361,6 +362,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     registerPriceListRoutes(tenant, deps);
     registerRecurringExpenseRoutes(tenant, deps);
     registerAccountLinkRoutes(tenant, deps, ctx);
+    registerItemSummaryRoutes(tenant, deps);
     registerShiftRoutes(tenant, deps);
     registerPosAdminRoutes(tenant, deps);
     registerTemplateRoutes(tenant, deps);

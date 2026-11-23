@@ -56,6 +56,7 @@ const Shifts = page(() => import('./pages/Shifts'), 'Shifts');
 const ShiftDetail = page(() => import('./pages/Shifts'), 'ShiftDetail');
 const ReceiveStock = page(() => import('./pages/Inventory'), 'ReceiveStock');
 const CustomerAccount = page(() => import('./pages/Account'), 'CustomerAccount');
+const ItemDetail = page(() => import('./pages/ItemDetail'), 'ItemDetail');
 const PurchaseOrderEditor = page(() => import('./pages/PurchaseOrders'), 'PurchaseOrderEditor');
 const PurchaseOrderDetail = page(() => import('./pages/PurchaseOrders'), 'PurchaseOrderDetail');
 const SupplierDetail = page(() => import('./pages/SupplierDetail'), 'SupplierDetail');
@@ -347,6 +348,7 @@ function BusinessApp() {
         <Route path="/products/new" element={<ProductEditor />} />
         <Route path="/products/:id" element={<ProductEditor />} />
         <Route path="/items" element={<Navigate to="/products?tab=items" replace />} />
+        <Route path="/items/:id" element={<ItemDetail />} />
         <Route path="/reports" element={<Allowed permission="reports.view"><Reports /></Allowed>} />
         <Route path="/receivables" element={<Allowed permission="payments.record"><Receivables /></Allowed>} />
         <Route path="/expenses" element={<Allowed permission="expenses.manage"><Expenses /></Allowed>} />

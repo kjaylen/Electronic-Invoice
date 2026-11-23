@@ -259,7 +259,7 @@ export function Items() {
                     <td className="star-cell">
                       <button className={`star ${it.favorite ? 'on' : ''}`} aria-pressed={it.favorite} aria-label={t('Quick button for {name}', { name: it.name })} disabled={!manage} onClick={() => void toggleFavorite(it)}>★</button>
                     </td>
-                    <td data-label={t('Item')}><strong>{it.name}</strong>{it.bundle && <span className="badge test bundle-badge">{t('Bundle')}</span>}{it.description !== it.name && <div className="small muted">{it.description}</div>}</td>
+                    <td data-label={t('Item')}><Link className="strong-link" to={`/items/${it.id}`} viewTransition>{it.name}</Link>{it.bundle && <span className="badge test bundle-badge">{t('Bundle')}</span>}{it.description !== it.name && <div className="small muted">{it.description}</div>}</td>
                     <td data-label={t('Category')}>{it.category ? <button type="button" className="cat-tag" onClick={() => setCategory(it.category!)}>{it.category}</button> : <span className="muted">—</span>}</td>
                     <td data-label={t('Code')} className="mono">{[it.sellerCode, it.barcode].filter(Boolean).join(' · ') || '—'}</td>
                     <td data-label={t('Unit')}>{unitName(t, it.unitCode)}</td>
