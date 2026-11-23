@@ -108,11 +108,14 @@ export function OpenShiftModal({ onClose, onDone, atTill }: { onClose: () => voi
     setRegisters(r.data);
     setRegisterId(r.data.find((x) => !x.openBy)?.id ?? '');
   }).catch(setError), []);
-  const submit = async (e: FormEvent) => {
+  const submit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    // What the field holds as the button is pressed (a quick tap can come before the typed amount reaches state).
+    const typed = String(new FormData(e.currentTarget).get('float') ?? float).trim();
+    if (typed !== '' && !MONEY.test(typed)) return;
     setBusy(true);
     try {
-      await api('/v1/shifts', { method: 'POST', body: { openingFloat: float.trim() || '0', ...(registerId && !atTill && { registerId }) } });
+      await api('/v1/shifts', { method: 'POST', body: { openingFloat: typed || '0', ...(registerId && !atTill && { registerId }) } });
       toast(t('Shift open'));
       onDone();
     } catch (err) {
@@ -131,7 +134,7 @@ export function OpenShiftModal({ onClose, onDone, atTill }: { onClose: () => voi
           </Field>
         )}
         <Field label={t('Cash in the drawer to start (float)')} hint={t('Count it now; it is what the drawer should still hold at the end, plus cash sales.')}>
-          <input inputMode="decimal" placeholder="0.00" value={float} onChange={(e) => setFloat(e.target.value.trim())} autoFocus />
+          <input name="float" inputMode="decimal" placeholder="0.00" value={float} onChange={(e) => setFloat(e.target.value.trim())} autoFocus />
         </Field>
         <ErrorText error={error} />
         <div className="row"><button type="button" className="secondary" onClick={onClose}>{t('Cancel')}</button><span className="spacer" /><button disabled={busy || (float !== '' && !MONEY.test(float))}>{t('Open shift')}</button></div>

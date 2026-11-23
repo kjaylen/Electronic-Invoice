@@ -556,6 +556,7 @@ test('till: set a PIN, add a till and pair it from the link, sign in, open a shi
 
   await till.getByRole('button', { name: 'Open shift' }).click();
   await till.getByLabel('Cash in the drawer to start (float)').fill('50');
+  await expect(till.getByLabel('Cash in the drawer to start (float)')).toHaveValue('50');
   await till.getByRole('dialog').getByRole('button', { name: 'Open shift' }).click();
   await expect(till.locator('.shift-bar.open')).toContainText('Cash expected BZ$50.00');
 
