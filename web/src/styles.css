@@ -1790,3 +1790,22 @@ h1 .badge.price-list { font-family: var(--sans); letter-spacing: 0; position: re
 .quick-cash { display: flex; flex-wrap: wrap; gap: 0.35rem; }
 .quick-cash button { background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.22); color: #fff; min-height: 0; padding: 0.3rem 0.65rem; font-size: 0.82rem; font-weight: 600; border-radius: 8px; box-shadow: none; font-variant-numeric: tabular-nums; }
 .quick-cash button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.14); border-color: rgba(255, 255, 255, 0.45); color: #fff; }
+
+/* Item categories: the filter beside the search, chips in the list, counter tabs, the report's share bars. */
+.items-filter { flex-wrap: nowrap; }
+.items-filter input[type='search'] { flex: 1; min-width: 0; }
+.items-filter .select { flex: 0 0 15rem; width: 15rem; }
+button.cat-tag { display: inline-block; min-height: 0; padding: 0.12rem 0.55rem; border-radius: 999px; border: 1px solid var(--brand-line); background: var(--brand-soft); color: var(--brand-ink); font-size: 0.78rem; font-weight: 600; box-shadow: none; white-space: nowrap; }
+button.cat-tag:hover:not(:disabled) { background: var(--brand); border-color: var(--brand); color: #fff; }
+.quick-tabs { display: flex; gap: 0.4rem; overflow-x: auto; scrollbar-width: none; padding-bottom: 0.1rem; }
+.quick-tabs::-webkit-scrollbar { display: none; }
+.quick-tabs button { flex: none; min-height: 0; padding: 0.35rem 0.85rem; border-radius: 999px; font-size: 0.85rem; font-weight: 600; background: var(--sheet); color: var(--ink-2); border: 1px solid var(--hairline-strong); box-shadow: none; }
+.quick-tabs button:hover:not(:disabled) { border-color: var(--brand); color: var(--ink); background: var(--sheet); }
+.quick-tabs button[aria-pressed='true'], .quick-tabs button[aria-pressed='true']:hover:not(:disabled) { background: var(--ink); border-color: var(--ink); color: #fff; }
+.reprice-preview { max-height: 16rem; overflow-y: auto; }
+.share { display: flex; align-items: center; gap: 0.5rem; min-width: 8rem; }
+.share-bar { display: block; height: 0.5rem; border-radius: 999px; background: var(--brand); min-width: 2px; }
+@media (max-width: 640px) {
+  .items-filter { flex-wrap: wrap; }
+  .items-filter .select { flex: 1 1 100%; width: 100%; }
+}

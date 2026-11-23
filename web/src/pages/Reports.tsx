@@ -25,6 +25,7 @@ function presetRange(p: Exclude<Preset, 'custom'>): [string, string] {
 
 interface CustomerRow { name: string; tin: string | null; documents: number; net: string; gst: string; total: string }
 interface ItemRow { description: string; unitCode: string; quantity: string; net: string; gst: string; total: string }
+interface CategoryRow { name: string | null; sales: number; net: string; total: string }
 interface StaffRow { name: string | null; documents: number; total: string; discounts: string; receipts: number; averageReceipt: string | null }
 interface HourRow { hour: number; documents: number; total: string }
 
@@ -148,6 +149,7 @@ export function Reports() {
   const [customers, setCustomers] = useState<CustomerRow[]>([]);
   const [items, setItems] = useState<ItemRow[]>([]);
   const [staff, setStaff] = useState<StaffRow[]>([]);
+  const [categories, setCategories] = useState<CategoryRow[]>([]);
   const [hours, setHours] = useState<HourRow[]>([]);
   const [error, setError] = useState<unknown>(null);
   const [archiving, setArchiving] = useState(false);
@@ -165,12 +167,14 @@ export function Reports() {
       api<{ data: ItemRow[] }>(`/v1/reports/items?${qs}`),
       api<{ data: StaffRow[] }>(`/v1/reports/staff?${qs}`),
       api<{ data: HourRow[] }>(`/v1/reports/hours?${qs}`),
-    ]).then(([s, c, i, st, h]) => {
+      api<{ data: CategoryRow[] }>(`/v1/reports/categories?${qs}`),
+    ]).then(([s, c, i, st, h, cat]) => {
       setSummary(s);
       setCustomers(c.data);
       setItems(i.data);
       setStaff(st.data);
       setHours(h.data);
+      setCategories(cat.data);
     }).catch(setError);
   }, [from, to, qs]);
 
@@ -318,8 +322,38 @@ export function Reports() {
               {hours.length === 0 ? <div className="empty">{t('No sales in this period.')}</div> : <HoursChart hours={hours} />}
             </section>
           </div>
+          {categories.some((c) => c.name !== null) && <CategoryPanel rows={categories} qs={qs} />}
         </>
       )}
     </div>
+  );
+}
+
+/** Sales by item category, each with its share of the period's sales. */
+function CategoryPanel(props: { rows: CategoryRow[]; qs: string }) {
+  const t = useT();
+  const sum = props.rows.reduce((a, r) => a + Math.max(0, Number(r.total)), 0);
+  return (
+    <section className="card">
+      <div className="row"><h2>{t('Sales by category')}</h2><span className="spacer" /><a className="button secondary" href={link(`/v1/reports/categories?${props.qs}&format=csv`)} download>CSV</a></div>
+      <div className="table-wrap">
+        <table className="responsive category-report">
+          <thead><tr><th scope="col">{t('Category')}</th><th scope="col" className="right">{t('Sales')}</th><th scope="col">{t('Share')}</th><th scope="col" className="right">{t('Total')}</th></tr></thead>
+          <tbody>
+            {props.rows.map((r) => {
+              const share = sum > 0 ? Math.max(0, Number(r.total)) / sum : 0;
+              return (
+                <tr key={r.name ?? '-'}>
+                  <td data-label={t('Category')}>{r.name ?? <span className="muted">{t('No category')}</span>}</td>
+                  <td data-label={t('Sales')} className="right">{r.sales}</td>
+                  <td data-label={t('Share')}><span className="share"><span className="share-bar" style={{ width: `${(share * 100).toFixed(1)}%` }} /><span className="small muted num">{Math.round(share * 100)}%</span></span></td>
+                  <td data-label={t('Total')} className="right">{money(r.total)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 }

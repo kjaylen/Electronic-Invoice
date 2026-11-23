@@ -170,6 +170,8 @@ export interface Item {
   favorite: boolean;
   /** The price before GST for wholesale customers; null: the usual price. */
   wholesalePrice?: string | null;
+  /** A group such as Coffee or Bakery: tabs at the counter, a filter, sales by category. */
+  category?: string | null;
   /** In stock now; null when stock is not tracked. */
   stock?: number | null;
 }

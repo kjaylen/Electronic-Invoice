@@ -46,12 +46,12 @@ export function registerImportRoutes(app: FastifyInstance, deps: PipelineDeps) {
 
   app.get('/items/export.csv', async (request, reply) => {
     requirePermission(request, 'catalog.manage');
-    const rows = (await db.query<{ name: string; description: string; seller_code: string | null; barcode: string | null; unit_price: string; wholesale_price: string | null; gst_category: string; exemption_reason_code: string | null; unit_code: string; stock_quantity: string | null; low_stock: string | null; favorite: boolean }>(
-      `select name, description, seller_code, barcode, unit_price::text, wholesale_price::text, gst_category, exemption_reason_code, unit_code, stock_quantity::text, low_stock::text, favorite
+    const rows = (await db.query<{ name: string; description: string; seller_code: string | null; barcode: string | null; unit_price: string; wholesale_price: string | null; gst_category: string; exemption_reason_code: string | null; unit_code: string; stock_quantity: string | null; low_stock: string | null; favorite: boolean; category: string | null }>(
+      `select name, description, seller_code, barcode, unit_price::text, wholesale_price::text, gst_category, exemption_reason_code, unit_code, stock_quantity::text, low_stock::text, favorite, category
        from items where tenant_id = $1 and archived_at is null order by name limit 20000`, [request.tenantId],
     )).rows;
-    const csv = toCsv(['Name', 'Code', 'Barcode', 'Price', 'Wholesale price', 'GST', 'Exemption reason', 'Unit', 'Stock', 'Low stock', 'Quick button', 'Description'],
-      rows.map((r) => [text(r.name), text(r.seller_code), text(r.barcode), number(price(r.unit_price)),
+    const csv = toCsv(['Name', 'Code', 'Barcode', 'Category', 'Price', 'Wholesale price', 'GST', 'Exemption reason', 'Unit', 'Stock', 'Low stock', 'Quick button', 'Description'],
+      rows.map((r) => [text(r.name), text(r.seller_code), text(r.barcode), text(r.category), number(price(r.unit_price)),
         number(price(r.wholesale_price)), text(r.gst_category), text(r.exemption_reason_code), text(r.unit_code),
         number(trim(r.stock_quantity)), number(trim(r.low_stock)), text(r.favorite ? 'yes' : ''), text(r.description === r.name ? '' : r.description)]));
     return reply.type('text/csv; charset=utf-8').header('Content-Disposition', 'attachment; filename="items.csv"').send(csv);

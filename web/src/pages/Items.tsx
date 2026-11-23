@@ -7,14 +7,17 @@ import { useToast } from '../toast';
 import { ErrorText, Field, GST_CATEGORIES, Modal, money, Select, unitName, UNITS, useDebounced, usePageTitle } from '../ui';
 import { ImportDialog } from './ImportDialog';
 
-type Form = { name: string; description: string; sellerCode: string; barcode: string; unitCode: string; unitPrice: string; wholesalePrice: string; gstCategory: string; exemptionReasonCode: string; favorite: boolean };
-const EMPTY: Form = { name: '', description: '', sellerCode: '', barcode: '', unitCode: 'H87', unitPrice: '', wholesalePrice: '', gstCategory: 'S', exemptionReasonCode: '', favorite: false };
+type Form = { name: string; description: string; sellerCode: string; barcode: string; category: string; unitCode: string; unitPrice: string; wholesalePrice: string; gstCategory: string; exemptionReasonCode: string; favorite: boolean };
+const EMPTY: Form = { name: '', description: '', sellerCode: '', barcode: '', category: '', unitCode: 'H87', unitPrice: '', wholesalePrice: '', gstCategory: 'S', exemptionReasonCode: '', favorite: false };
+
+export interface Category { name: string; items: number }
 
 const toForm = (i: Item): Form => ({
   name: i.name,
   description: i.description === i.name ? '' : i.description,
   sellerCode: i.sellerCode ?? '',
   barcode: i.barcode ?? '',
+  category: i.category ?? '',
   unitCode: i.unitCode,
   unitPrice: i.unitPrice,
   wholesalePrice: i.wholesalePrice ?? '',
@@ -28,6 +31,7 @@ const itemBody = (f: Form) => ({
   ...(f.description.trim() && { description: f.description.trim() }),
   ...(f.sellerCode.trim() && { sellerCode: f.sellerCode.trim() }),
   ...(f.barcode.trim() && { barcode: f.barcode.trim() }),
+  category: f.category.trim() || null,
   unitCode: f.unitCode,
   unitPrice: f.unitPrice,
   wholesalePrice: f.wholesalePrice.trim() || null,
@@ -36,7 +40,7 @@ const itemBody = (f: Form) => ({
   favorite: f.favorite,
 });
 
-function ItemForm(props: { initial?: Item; onSaved: (i: Item) => void; onCancel: () => void }) {
+function ItemForm(props: { initial?: Item; categories: Category[]; onSaved: (i: Item) => void; onCancel: () => void }) {
   const t = useT();
   const [form, setForm] = useState<Form>(props.initial ? toForm(props.initial) : EMPTY);
   const [error, setError] = useState<unknown>(null);
@@ -66,6 +70,10 @@ function ItemForm(props: { initial?: Item; onSaved: (i: Item) => void; onCancel:
       <div className="form-grid">
         <Field label={t('Your code')} hint={t('SKU, optional. Type it at the counter to add the item.')}><input value={form.sellerCode} onChange={set('sellerCode')} /></Field>
         <Field label={t('Barcode')} hint={t('Scan it into this box.')}><input inputMode="numeric" pattern="[0-9A-Za-z\-]{1,64}" value={form.barcode} onChange={set('barcode')} /></Field>
+        <Field label={t('Category')} hint={t('Coffee, Bakery, Hardware… Groups the counter buttons and reports.')}>
+          <input list="item-categories" maxLength={80} value={form.category} onChange={set('category')} />
+        </Field>
+        <datalist id="item-categories">{props.categories.map((c) => <option key={c.name} value={c.name} />)}</datalist>
       </div>
       <div className="form-grid">
         <Field label={t('Unit')}><Select value={form.unitCode} onChange={set('unitCode')}>{UNITS.map(([c, n]) => <option key={c} value={c}>{t(n)}</option>)}</Select></Field>
@@ -98,11 +106,20 @@ export function Items() {
   const [editing, setEditing] = useState<Item | 'new' | null>(null);
   const [importing, setImporting] = useState(false);
   const [archiving, setArchiving] = useState<Item | null>(null);
+  const [repricing, setRepricing] = useState(false);
+  const [categories, setCategories] = useState<Category[]>([]);
+  // '' every item, '\u0000' items without a category, otherwise that category.
+  const [category, setCategory] = useState('');
   const [error, setError] = useState<unknown>(null);
 
+  const loadCategories = () => api<{ data: Category[] }>('/v1/items/categories').then((r) => setCategories(r.data)).catch(() => {});
+  useEffect(() => {
+    void loadCategories();
+  }, []);
   const load = async (after?: string) => {
     try {
-      const r = await api<Page<Item>>(`/v1/items?limit=50${query ? `&q=${encodeURIComponent(query)}` : ''}${after ? `&cursor=${after}` : ''}`);
+      const filter = category === '' ? '' : `&category=${category === '\u0000' ? '' : encodeURIComponent(category)}`;
+      const r = await api<Page<Item>>(`/v1/items?limit=50${query ? `&q=${encodeURIComponent(query)}` : ''}${filter}${after ? `&cursor=${after}` : ''}`);
       setList(after ? [...(list ?? []), ...r.data] : r.data);
       setCursor(r.nextCursor);
     } catch (e) {
@@ -113,7 +130,7 @@ export function Items() {
   useEffect(() => {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query]);
+  }, [query, category]);
 
   const toggleFavorite = async (it: Item) => {
     try {
@@ -143,16 +160,26 @@ export function Items() {
         <Link className="button secondary" to="/labels" viewTransition>{t('Print labels')}</Link>
         {manage && <a className="button secondary" href={link('/v1/items/export.csv')} download>{t('Export')}</a>}
         {manage && <button type="button" className="secondary" onClick={() => setImporting(true)}>{t('Import')}</button>}
+        {manage && <button type="button" className="secondary" onClick={() => setRepricing(true)}>{t('Change prices')}</button>}
         {manage && <button onClick={() => setEditing('new')}>{t('Add item')}</button>}
       </div>
       <p className="muted small">{t('Everything you sell at the counter and on invoices, including each variant of your products. Star an item to make it a quick button at the counter.')}</p>
-      <input type="search" placeholder={t('Search by name, code or barcode')} value={q} onChange={(e) => setQ(e.target.value)} aria-label={t('Search items')} />
+      <div className="row items-filter">
+        <input type="search" placeholder={t('Search by name, code or barcode')} value={q} onChange={(e) => setQ(e.target.value)} aria-label={t('Search items')} />
+        {categories.length > 0 && (
+          <Select aria-label={t('Category')} value={category} onChange={(e) => setCategory(e.target.value)}>
+            <option value="">{t('Every category')}</option>
+            {categories.map((c) => <option key={c.name} value={c.name}>{c.name} ({c.items})</option>)}
+            <option value={'\u0000'}>{t('No category')}</option>
+          </Select>
+        )}
+      </div>
       <ErrorText error={error} />
       <section className="card">
         {list === null ? <div className="stack"><div className="skeleton" /><div className="skeleton" /></div> : list.length === 0 ? <div className="empty">{query ? t('No items match your search.') : t('No items yet.')}</div> : (
           <div className="table-wrap">
             <table className="responsive">
-              <thead><tr><th scope="col"><span className="sr-only">{t('Quick button')}</span></th><th scope="col">{t('Item')}</th><th scope="col">{t('Code')}</th><th scope="col">{t('Unit')}</th><th scope="col" className="right">{t('Price')}</th><th scope="col">GST</th><th scope="col"><span className="sr-only">{t('Actions')}</span></th></tr></thead>
+              <thead><tr><th scope="col"><span className="sr-only">{t('Quick button')}</span></th><th scope="col">{t('Item')}</th><th scope="col">{t('Category')}</th><th scope="col">{t('Code')}</th><th scope="col">{t('Unit')}</th><th scope="col" className="right">{t('Price')}</th><th scope="col">GST</th><th scope="col"><span className="sr-only">{t('Actions')}</span></th></tr></thead>
               <tbody>
                 {list.map((it) => (
                   <tr key={it.id}>
@@ -160,6 +187,7 @@ export function Items() {
                       <button className={`star ${it.favorite ? 'on' : ''}`} aria-pressed={it.favorite} aria-label={t('Quick button for {name}', { name: it.name })} disabled={!manage} onClick={() => void toggleFavorite(it)}>★</button>
                     </td>
                     <td data-label={t('Item')}><strong>{it.name}</strong>{it.description !== it.name && <div className="small muted">{it.description}</div>}</td>
+                    <td data-label={t('Category')}>{it.category ? <button type="button" className="cat-tag" onClick={() => setCategory(it.category!)}>{it.category}</button> : <span className="muted">—</span>}</td>
                     <td data-label={t('Code')} className="mono">{[it.sellerCode, it.barcode].filter(Boolean).join(' · ') || '—'}</td>
                     <td data-label={t('Unit')}>{unitName(t, it.unitCode)}</td>
                     <td data-label={t('Price')} className="right">{money(it.unitPrice)}</td>
@@ -177,16 +205,30 @@ export function Items() {
         {cursor && <button className="secondary" onClick={() => void load(cursor)}>{t('Load more')}</button>}
       </section>
 
-      {importing && <ImportDialog kind="items" onClose={() => setImporting(false)} onDone={() => void load()} />}
+      {importing && <ImportDialog kind="items" onClose={() => setImporting(false)} onDone={() => { void load(); void loadCategories(); }} />}
+      {repricing && (
+        <RepriceDialog
+          categories={categories}
+          initialCategory={category}
+          onClose={() => setRepricing(false)}
+          onDone={(n) => {
+            toast(t('{n} prices changed', { n }));
+            setRepricing(false);
+            void load();
+          }}
+        />
+      )}
       {editing && (
         <Modal wide title={editing === 'new' ? t('Add item') : t('Edit {name}', { name: editing.name })} onClose={() => setEditing(null)}>
           <ItemForm
             {...(editing !== 'new' && { initial: editing })}
+            categories={categories}
             onCancel={() => setEditing(null)}
             onSaved={(i) => {
               toast(editing === 'new' ? t('{name} added', { name: i.name }) : t('{name} saved', { name: i.name }));
               setEditing(null);
               void load();
+              void loadCategories();
             }}
           />
         </Modal>
@@ -202,5 +244,115 @@ export function Items() {
         </Modal>
       )}
     </div>
+  );
+}
+
+interface RepriceResult { dryRun: boolean; matched: number; changed: number; changes: Array<{ id: string; name: string; from: string | null; to: string }> }
+
+/** Change many prices at once: up or down by a percentage or an amount, or to one price; for a category or every item. */
+function RepriceDialog(props: { categories: Category[]; initialCategory: string; onClose: () => void; onDone: (changed: number) => void }) {
+  const t = useT();
+  const [category, setCategory] = useState(props.initialCategory);
+  const [mode, setMode] = useState<'percent' | 'amount' | 'set'>('percent');
+  const [value, setValue] = useState('');
+  const [price, setPrice] = useState<'retail' | 'wholesale'>('retail');
+  const [roundTo, setRoundTo] = useState('');
+  const [preview, setPreview] = useState<RepriceResult | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const valid = /^-?\d{1,9}(\.\d{1,6})?$/.test(value.trim()) && !(mode === 'set' && value.trim().startsWith('-'));
+  const body = (dryRun: boolean) => ({
+    ...(category !== '' && { category: category === '\u0000' ? null : category }),
+    mode, value: value.trim(), price, dryRun,
+    ...(roundTo && { roundTo }),
+  });
+  // A fresh preview whenever the change does.
+  useEffect(() => {
+    setPreview(null);
+    if (!valid) return;
+    const timer = setTimeout(() => {
+      api<RepriceResult>('/v1/items/reprice', { method: 'POST', body: body(true) }).then(setPreview).catch(setError);
+    }, 300);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [category, mode, value, price, roundTo]);
+  const apply = async (e: FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await api<RepriceResult>('/v1/items/reprice', { method: 'POST', body: body(false) });
+      props.onDone(r.changed);
+    } catch (err) {
+      setError(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal wide title={t('Change prices')} onClose={props.onClose}>
+      <form className="stack" onSubmit={apply}>
+        <div className="form-grid">
+          <Field label={t('Items')}>
+            <Select value={category} onChange={(e) => setCategory(e.target.value)}>
+              <option value="">{t('Every item')}</option>
+              {props.categories.map((c) => <option key={c.name} value={c.name}>{c.name} ({c.items})</option>)}
+              <option value={'\u0000'}>{t('No category')}</option>
+            </Select>
+          </Field>
+          <Field label={t('Price')}>
+            <Select value={price} onChange={(e) => setPrice(e.target.value as 'retail' | 'wholesale')}>
+              <option value="retail">{t('Price')}</option>
+              <option value="wholesale">{t('Wholesale price')}</option>
+            </Select>
+          </Field>
+        </div>
+        <div className="form-grid">
+          <Field label={t('Change')}>
+            <Select value={mode} onChange={(e) => setMode(e.target.value as 'percent' | 'amount' | 'set')}>
+              <option value="percent">{t('By a percentage')}</option>
+              <option value="amount">{t('By an amount (BZ$)')}</option>
+              <option value="set">{t('To one price (BZ$)')}</option>
+            </Select>
+          </Field>
+          <Field label={mode === 'percent' ? t('Percent') : t('Amount')} hint={mode === 'set' ? t('Before GST.') : t('Negative lowers prices, e.g. -10.')}>
+            <input required autoFocus inputMode="decimal" value={value} onChange={(e) => setValue(e.target.value)} placeholder={mode === 'percent' ? '5' : '0.50'} />
+          </Field>
+          <Field label={t('Round up to')}>
+            <Select value={roundTo} onChange={(e) => setRoundTo(e.target.value)}>
+              <option value="">{t('The cent')}</option>
+              <option value="0.05">{t('5 cents')}</option>
+              <option value="0.25">{t('25 cents')}</option>
+              <option value="1.00">{t('A whole dollar')}</option>
+            </Select>
+          </Field>
+        </div>
+        {preview && (
+          preview.changed === 0 ? <p className="muted">{t('No price would change.')}</p> : (
+            <div className="stack">
+              <p className="small">{t('{n} of {m} items change:', { n: preview.changed, m: preview.matched })}</p>
+              <div className="table-wrap reprice-preview">
+                <table>
+                  <thead><tr><th scope="col">{t('Item')}</th><th scope="col" className="right">{t('Now')}</th><th scope="col" className="right">{t('New')}</th></tr></thead>
+                  <tbody>
+                    {preview.changes.slice(0, 50).map((c) => (
+                      <tr key={c.id}><td>{c.name}</td><td className="right muted num">{c.from === null ? '—' : money(c.from)}</td><td className="right num"><strong>{money(c.to)}</strong></td></tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {preview.changed > 50 && <p className="small muted">{t('And {n} more.', { n: preview.changed - 50 })}</p>}
+            </div>
+          )
+        )}
+        <p className="small muted">{t('Documents already issued keep their prices.')}</p>
+        <ErrorText error={error} />
+        <div className="row">
+          <span className="spacer" />
+          <button type="button" className="secondary" onClick={props.onClose}>{t('Cancel')}</button>
+          <button type="submit" disabled={busy || !preview || preview.changed === 0}>{busy ? t('Saving…') : preview?.changed ? t('Change {n} prices', { n: preview.changed }) : t('Change prices')}</button>
+        </div>
+      </form>
+    </Modal>
   );
 }

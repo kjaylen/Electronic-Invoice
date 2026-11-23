@@ -81,6 +81,8 @@ export interface IssueRequest {
   note?: string;
   prepaidAmount?: string;
   payableRoundingAmount?: string;
+  /** The catalog item each line was sold from (null for a line typed in), kept with the line for reports. */
+  lineItemIds?: Array<string | null>;
 }
 
 export type DocumentStatus =
@@ -290,10 +292,10 @@ async function prepare(
     for (const line of totals.lines) {
       await tx.query(
         `insert into document_lines (document_id, tenant_id, line_number, description, quantity, unit_code, unit_price,
-           net_cents, gst_category, gst_cents, tax_cents, line_total_cents)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+           net_cents, gst_category, gst_cents, tax_cents, line_total_cents, item_id)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
         [documentId, ctx.tenantId, line.lineNumber, line.description, line.quantity, line.unitCode, line.unitPrice,
-          line.netAmount, line.gstCategory, line.gstAmount, line.taxAmount, line.lineTotal],
+          line.netAmount, line.gstCategory, line.gstAmount, line.taxAmount, line.lineTotal, req.lineItemIds?.[line.lineNumber - 1] ?? null],
       );
     }
     await tx.query(`update series set next_serial = $1, last_sequence_hash = $2 where id = $3`, [serial + 1, ubl.sequenceInfoThisEtd, series.id]);

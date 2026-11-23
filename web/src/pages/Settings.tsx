@@ -765,6 +765,7 @@ function describe(t: T, e: AuditEvent): string {
     'business.daily_summary_off': t('Turned off the daily summary email'),
     'counter.settings': t('Changed the counter settings'),
     'items.imported': t('Imported items from a spreadsheet'),
+    'items.repriced': t('Changed prices'),
     'customers.imported': t('Imported customers from a spreadsheet'),
     'template.saved': t('Saved the template {target}', { target }),
     'template.reverted': t('Put back the default template {target}', { target }),

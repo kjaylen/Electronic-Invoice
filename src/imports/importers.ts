@@ -7,6 +7,7 @@
 
 import { randomUUID } from 'node:crypto';
 import type { Queryable } from '../db/database.ts';
+import { spelledCategory } from '../inventory/categories.ts';
 import { moveStock, stockQuantity } from '../inventory/stock.ts';
 import { amount, columns, CsvError, parseCsv, truthy } from './csv.ts';
 
@@ -47,6 +48,7 @@ const ITEM_COLUMNS = {
   lowStock: ['lowstock', 'reorderlevel', 'reorderpoint', 'minstock', 'minimumstock'],
   favorite: ['quickbutton', 'favorite', 'favourite', 'star', 'starred'],
   wholesale: ['wholesaleprice', 'wholesale', 'tradeprice', 'pricewholesale'],
+  category: ['category', 'categoria', 'department', 'group', 'section'],
 };
 
 export async function importItems(db: Queryable, tenantId: string, csv: string, options: { dryRun: boolean; userId: string | null }): Promise<ImportResult> {
@@ -87,6 +89,7 @@ export async function importItems(db: Queryable, tenantId: string, csv: string, 
     }
     if (price === null) { fail(`"${get(r, 'price') || get(r, 'priceWithGst')}" is not a price`); continue; }
     const wholesale = get(r, 'wholesale') ? amount(get(r, 'wholesale')) : null;
+    const category = await spelledCategory(db, tenantId, get(r, 'category'));
     if (get(r, 'wholesale') && wholesale === null) { fail(`Wholesale price "${get(r, 'wholesale')}" is not a price`); continue; }
     const unit = unitCode(get(r, 'unit'));
     if (!unit) { fail(`Unit "${get(r, 'unit')}" is not one we know (each, kg, lb, litre, box, hour…)`); continue; }
@@ -121,16 +124,16 @@ export async function importItems(db: Queryable, tenantId: string, csv: string, 
     if (match) {
       await db.query(
         `update items set name = $3, description = $4, seller_code = coalesce($5, seller_code), unit_code = $6, unit_price = $7, gst_category = $8,
-           exemption_reason_code = $9, barcode = coalesce($10, barcode), favorite = coalesce($11, favorite), wholesale_price = coalesce($12, wholesale_price)${lowStock !== null ? ', low_stock = $13' : ''}
+           exemption_reason_code = $9, barcode = coalesce($10, barcode), favorite = coalesce($11, favorite), wholesale_price = coalesce($12, wholesale_price), category = coalesce($13, category)${lowStock !== null ? ', low_stock = $14' : ''}
          where id = $1 and tenant_id = $2`,
-        [match.id, tenantId, name, description, code, unit, price, gst, gst === 'E' ? exemption : null, barcode, favorite, wholesale, ...(lowStock !== null ? [lowStock] : [])],
+        [match.id, tenantId, name, description, code, unit, price, gst, gst === 'E' ? exemption : null, barcode, favorite, wholesale, category, ...(lowStock !== null ? [lowStock] : [])],
       );
     } else {
       id = randomUUID();
       await db.query(
-        `insert into items (id, tenant_id, name, description, seller_code, unit_code, unit_price, gst_category, exemption_reason_code, barcode, favorite, low_stock, wholesale_price)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
-        [id, tenantId, name, description, code, unit, price, gst, gst === 'E' ? exemption : null, barcode, favorite ?? false, lowStock, wholesale],
+        `insert into items (id, tenant_id, name, description, seller_code, unit_code, unit_price, gst_category, exemption_reason_code, barcode, favorite, low_stock, wholesale_price, category)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+        [id, tenantId, name, description, code, unit, price, gst, gst === 'E' ? exemption : null, barcode, favorite ?? false, lowStock, wholesale, category],
       );
       if (code) byCode.set(code.toLowerCase(), { id, seller_code: code, barcode, name });
       if (barcode) byBarcode.set(barcode, { id, seller_code: code, barcode, name });

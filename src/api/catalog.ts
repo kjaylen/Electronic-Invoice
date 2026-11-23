@@ -15,6 +15,7 @@ import { certificateSchema, customerSchema, itemSchema, listQuery, uuid } from '
 import { assertFeature, getSubscription } from '../billing/billing.ts';
 import { PLANS } from '../billing/plans.ts';
 import type { Queryable } from '../db/database.ts';
+import { spelledCategory } from '../inventory/categories.ts';
 import { openReceivables } from '../receivables/receivables.ts';
 import { formatCents } from '../engine/decimal.ts';
 import { toBigInt } from '../db/database.ts';
@@ -119,6 +120,7 @@ interface ItemRow {
   barcode: string | null;
   favorite: boolean;
   wholesale_price?: string | null;
+  category?: string | null;
   stock_quantity?: string | null;
   archived_at: string | Date | null;
   created_at: string | Date;
@@ -140,13 +142,14 @@ const itemJson = (r: ItemRow) => ({
   favorite: r.favorite,
   /** The price before GST for wholesale customers; null: the usual price. */
   wholesalePrice: r.wholesale_price === null || r.wholesale_price === undefined ? null : trimDecimal(r.wholesale_price),
+  category: r.category ?? null,
   /** In stock now; null when stock is not tracked. */
   stock: r.stock_quantity === null || r.stock_quantity === undefined ? null : Number(r.stock_quantity),
   archived: Boolean(r.archived_at),
   createdAt: new Date(r.created_at).toISOString(),
 });
 
-type ItemBody = { name: string; description?: string; sellerCode?: string; unitCode: string; unitPrice: string; gstCategory: 'S' | 'Z' | 'E'; exemptionReasonCode?: string; barcode?: string; favorite?: boolean; wholesalePrice?: string | null };
+type ItemBody = { name: string; description?: string; sellerCode?: string; unitCode: string; unitPrice: string; gstCategory: 'S' | 'Z' | 'E'; exemptionReasonCode?: string; barcode?: string; favorite?: boolean; wholesalePrice?: string | null; category?: string | null };
 
 /** A LIKE pattern matching q anywhere, with LIKE's special characters escaped. */
 export const likePattern = (q: string) => `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
@@ -380,10 +383,11 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: PipelineDeps) 
       const b = request.body;
       if (b.gstCategory === 'E' && !b.exemptionReasonCode) throw new ApiError(422, 'invalid_document', 'An exempt item needs an exemptionReasonCode');
       const id = randomUUID();
+      const category = await spelledCategory(db, request.tenantId, b.category);
       await withBarcodeCheck(() => db.query(
-        `insert into items (id, tenant_id, name, description, seller_code, unit_code, unit_price, gst_category, exemption_reason_code, barcode, favorite, wholesale_price)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-        [id, request.tenantId, b.name, b.description ?? b.name, b.sellerCode ?? null, b.unitCode, b.unitPrice, b.gstCategory, b.exemptionReasonCode ?? null, b.barcode ?? null, b.favorite ?? false, b.wholesalePrice ?? null],
+        `insert into items (id, tenant_id, name, description, seller_code, unit_code, unit_price, gst_category, exemption_reason_code, barcode, favorite, wholesale_price, category)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+        [id, request.tenantId, b.name, b.description ?? b.name, b.sellerCode ?? null, b.unitCode, b.unitPrice, b.gstCategory, b.exemptionReasonCode ?? null, b.barcode ?? null, b.favorite ?? false, b.wholesalePrice ?? null, category],
       ));
       return reply.code(201).send((await loadItems(deps, request.tenantId, [id])).get(id));
     },
@@ -397,14 +401,17 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: PipelineDeps) 
       requirePermission(request, 'catalog.manage');
       const b = request.body;
       if (b.gstCategory === 'E' && !b.exemptionReasonCode) throw new ApiError(422, 'invalid_document', 'An exempt item needs an exemptionReasonCode');
+      const category = await spelledCategory(db, request.tenantId, b.category, request.params.id);
       const r = await withBarcodeCheck(() => db.query(
         `update items set name = $3, description = $4, seller_code = $5, unit_code = $6, unit_price = $7, gst_category = $8, exemption_reason_code = $9, barcode = $10, favorite = $11,
-           wholesale_price = case when $12::boolean then $13::numeric else wholesale_price end
+           wholesale_price = case when $12::boolean then $13::numeric else wholesale_price end,
+           category = case when $14::boolean then $15::text else category end
          where id = $1 and tenant_id = $2 returning id`,
         [request.params.id, request.tenantId, b.name, b.description ?? b.name, b.sellerCode ?? null, b.unitCode, b.unitPrice, b.gstCategory,
           b.gstCategory === 'E' ? (b.exemptionReasonCode ?? null) : null, b.barcode ?? null, b.favorite ?? false,
           // Left out: the wholesale price stays as it was; null clears it.
-          b.wholesalePrice !== undefined, b.wholesalePrice ?? null],
+          b.wholesalePrice !== undefined, b.wholesalePrice ?? null,
+          b.category !== undefined, category],
       ));
       if (!r.rows.length) throw notFound('Item');
       return (await loadItems(deps, request.tenantId, [request.params.id])).get(request.params.id);
@@ -419,9 +426,68 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: PipelineDeps) 
     return reply.code(204).send();
   });
 
-  app.get<{ Querystring: { limit?: string; cursor?: string; q?: string; favorite?: 'true'; code?: string } }>(
+  // The categories in use, with how many items each has.
+  app.get('/items/categories', async (request) => {
+    const rows = (await db.query<{ name: string; n: number }>(
+      `select min(category) as name, count(*)::int as n from items where tenant_id = $1 and archived_at is null and category is not null
+       group by lower(category) order by lower(category)`, [request.tenantId],
+    )).rows;
+    return { data: rows.map((r) => ({ name: r.name, items: r.n })) };
+  });
+
+  // Change many prices at once: by a percentage, by an amount, or to a price; for a category (or every item); rounded up to 5 cents, 25 cents or a dollar.
+  app.post<{ Body: { category?: string | null; mode: 'percent' | 'amount' | 'set'; value: string; price?: 'retail' | 'wholesale'; roundTo?: '0.05' | '0.25' | '1.00'; dryRun?: boolean } }>(
+    '/items/reprice',
+    {
+      schema: {
+        body: {
+          type: 'object', required: ['mode', 'value'], additionalProperties: false,
+          properties: {
+            category: { anyOf: [{ type: 'string', minLength: 1, maxLength: 80 }, { type: 'null' }] },
+            mode: { type: 'string', enum: ['percent', 'amount', 'set'] },
+            value: { type: 'string', pattern: '^-?\\d{1,9}(\\.\\d{1,6})?$' },
+            price: { type: 'string', enum: ['retail', 'wholesale'] },
+            roundTo: { type: 'string', enum: ['0.05', '0.25', '1.00'] },
+            dryRun: { type: 'boolean' },
+          },
+        },
+      },
+    },
+    async (request) => {
+      requirePermission(request, 'catalog.manage');
+      const b = request.body;
+      const column = b.price === 'wholesale' ? 'wholesale_price' : 'unit_price';
+      const params: unknown[] = [request.tenantId];
+      let where = 'tenant_id = $1 and archived_at is null';
+      if (b.category === null) where += ' and category is null';
+      else if (b.category) {
+        params.push(b.category);
+        where += ` and lower(category) = lower($${params.length})`;
+      }
+      if (column === 'wholesale_price' && b.mode !== 'set') where += ' and wholesale_price is not null';
+      const items = (await db.query<{ id: string; name: string; price: string | null }>(`select id, name, ${column}::text as price from items where ${where} order by name limit 5000`, params)).rows;
+      const value = Number(b.value);
+      const step = b.roundTo ? Number(b.roundTo) : 0.01;
+      const changes = items.map((it) => {
+        const from = it.price === null ? null : Number(it.price);
+        let to = b.mode === 'set' ? value : b.mode === 'percent' ? (from ?? 0) * (1 + value / 100) : (from ?? 0) + value;
+        // Rounded up to the step (prices end in .x5 or whole dollars), never below zero.
+        to = Math.max(0, Math.ceil(Math.round(to * 1e6) / 1e6 / step - 1e-9) * step);
+        return { id: it.id, name: it.name, from: from === null ? null : from.toFixed(2), to: to.toFixed(2) };
+      }).filter((c) => c.from !== c.to);
+      if (!b.dryRun && changes.length) {
+        await db.transaction(async (tx) => {
+          for (const c of changes) await tx.query(`update items set ${column} = $3 where id = $1 and tenant_id = $2`, [c.id, request.tenantId, c.to]);
+        });
+        await audit(db, { tenantId: request.tenantId, userId: request.userId || null, action: 'items.repriced', target: b.category ?? 'all items', details: { mode: b.mode, value: b.value, price: b.price ?? 'retail', items: changes.length }, ip: request.ip });
+      }
+      return { dryRun: Boolean(b.dryRun), matched: items.length, changed: changes.length, changes: changes.slice(0, 500) };
+    },
+  );
+
+  app.get<{ Querystring: { limit?: string; cursor?: string; q?: string; favorite?: 'true'; code?: string; category?: string } }>(
     '/items',
-    { schema: { querystring: listQuery({ q: { type: 'string', maxLength: 100 }, favorite: { type: 'string', enum: ['true'] }, code: { type: 'string', maxLength: 100 } }) } },
+    { schema: { querystring: listQuery({ q: { type: 'string', maxLength: 100 }, favorite: { type: 'string', enum: ['true'] }, code: { type: 'string', maxLength: 100 }, category: { type: 'string', maxLength: 80 } }) } },
     async (request) => {
     const page = parsePage(request.query);
     const params: unknown[] = [request.tenantId];
@@ -431,6 +497,14 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: PipelineDeps) 
       where += ` and (name ilike $${params.length} or description ilike $${params.length} or seller_code ilike $${params.length} or barcode like $${params.length})`;
     }
     if (request.query.favorite) where += ' and favorite';
+    // ?category=Coffee, or ?category= (empty) for items without one.
+    if (request.query.category !== undefined) {
+      if (request.query.category === '') where += ' and category is null';
+      else {
+        params.push(request.query.category);
+        where += ` and lower(category) = lower($${params.length})`;
+      }
+    }
     // Exact match on barcode or your own code: what a scanner or a quick code entry sends.
     if (request.query.code) {
       params.push(request.query.code);

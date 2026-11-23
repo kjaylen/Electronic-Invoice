@@ -190,6 +190,23 @@ export function registerReportRoutes(app: FastifyInstance, deps: PipelineDeps) {
     return { data };
   });
 
+  // Sales by item category (lines sold from the catalog; others under "No category"). Credit notes subtract.
+  app.get<PeriodQuery>('/reports/categories', { schema: { querystring: periodQuery } }, async (request, reply) => {
+    const q = request.query;
+    requirePermission(request, 'reports.view');
+    checkPeriod(q);
+    const rows = (await db.query<{ name: string | null; sales: number; net: string; total: string }>(
+      `select min(i.category) as name, count(distinct d.id) filter (where d.etd_type <> '04')::int as sales, ${signed('l.net_cents')} as net, ${signed('l.line_total_cents')} as total
+       from document_lines l join documents d on d.id = l.document_id left join items i on i.id = l.item_id
+       where ${base} group by lower(i.category) order by total desc nulls last limit 500`, args(request.tenantId, q),
+    )).rows;
+    const data = rows.map((r) => ({ name: r.name, sales: r.sales, net: cents(r.net), total: cents(r.total) }));
+    if (q.format === 'csv') {
+      return sendCsv(reply, 'sales-by-category', q.from, q.to, toCsv(['Category', 'Sales', 'Net (BZD)', 'Total (BZD)'], rows.map((r) => [txt(r.name ?? 'No category'), num(r.sales), money(r.net), money(r.total)])));
+    }
+    return { data };
+  });
+
   // When customers buy: sales and documents by hour of the day (invoices and receipts, Belize time).
   app.get<PeriodQuery>('/reports/hours', { schema: { querystring: periodQuery } }, async (request) => {
     const q = request.query;

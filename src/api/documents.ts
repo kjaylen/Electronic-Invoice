@@ -239,6 +239,7 @@ export async function toIssueRequest(deps: PipelineDeps, tenantId: string, body:
 
   return {
     etdType: body.type,
+    lineItemIds: body.lines.map((l) => l.itemId ?? null),
     ...(body.series !== undefined && { seriesNumber: body.series }),
     ...(customer && { customer }),
     ...(body.customerId && { customerId: body.customerId }),

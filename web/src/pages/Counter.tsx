@@ -166,6 +166,10 @@ export function CounterPanel(props: {
   });
   const [held, setHeld] = useState<HeldSale[]>(() => store.get<HeldSale[]>(heldKey) ?? []);
   const [favorites, setFavorites] = useState<Item[]>([]);
+  // Category tabs over the quick buttons: null shows the quick buttons, a name that category's items.
+  const [categories, setCategories] = useState<string[]>([]);
+  const [tab, setTab] = useState<string | null>(null);
+  const [tabItems, setTabItems] = useState<Item[] | null>(null);
   const [preview, setPreview] = useState<{ totals: DocumentInfo['totals']; lines: Array<{ net: string }> } | null>(null);
   const [last, setLast] = useState<{ doc: DocumentInfo; change: string | null; email?: string | null } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -189,7 +193,16 @@ export function CounterPanel(props: {
     void api<Page<Item>>('/v1/items?favorite=true&limit=24').then(async (r) => {
       setFavorites(r.data.length ? r.data : (await api<Page<Item>>('/v1/items?limit=12')).data);
     }).catch(() => {});
+    void api<{ data: Array<{ name: string }> }>('/v1/items/categories').then((r) => setCategories(r.data.map((c) => c.name))).catch(() => {});
   }, []);
+  useEffect(() => {
+    setTabItems(null);
+    if (tab === null) return;
+    let live = true;
+    void api<Page<Item>>(`/v1/items?category=${encodeURIComponent(tab)}&limit=60`).then((r) => { if (live) setTabItems(r.data); }).catch(() => { if (live) setTabItems([]); });
+    return () => { live = false; };
+  }, [tab]);
+  const buttons = tab === null ? favorites : tabItems ?? [];
 
   const set = (patch: Partial<Sale>) => setSale((s) => ({ ...s, ...patch }));
   const wholesale = sale.customer?.priceList === 'wholesale';
@@ -440,9 +453,17 @@ export function CounterPanel(props: {
               <span><kbd>Enter</kbd> {t('add')}</span> <span><kbd>+</kbd> <kbd>−</kbd> {t('quantity')}</span> <span><kbd>Del</kbd> {t('remove last')}</span> <span><kbd>F2</kbd> {t('issue')}</span>
             </p>
           </div>
-          {favorites.length > 0 && (
-            <div className="quick-grid" role="group" aria-label={t('Quick buttons')}>
-              {favorites.map((it) => (
+          {categories.length > 0 && (
+            <div className="quick-tabs" role="group" aria-label={t('Categories')}>
+              <button type="button" aria-pressed={tab === null} onClick={() => setTab(null)}>★ {t('Quick')}</button>
+              {categories.map((c) => <button key={c} type="button" aria-pressed={tab === c} onClick={() => setTab(c)}>{c}</button>)}
+            </div>
+          )}
+          {tab !== null && tabItems === null && <div className="quick-grid"><div className="skeleton" /><div className="skeleton" /><div className="skeleton" /></div>}
+          {tab !== null && tabItems?.length === 0 && <p className="small muted">{t('No items in this category.')}</p>}
+          {buttons.length > 0 && (
+            <div className="quick-grid" role="group" aria-label={tab ?? t('Quick buttons')}>
+              {buttons.map((it) => (
                 <button key={it.id} type="button" className="quick" onClick={() => { add(fromItem(it, '1', wholesale)); focusSearch(); }}>
                   <span className="name">{it.name}</span>
                   <span className="price num">{money(it.unitPrice)}</span>
