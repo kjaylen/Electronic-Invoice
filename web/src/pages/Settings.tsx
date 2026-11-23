@@ -766,6 +766,7 @@ function describe(t: T, e: AuditEvent): string {
     'counter.settings': t('Changed the counter settings'),
     'items.imported': t('Imported items from a spreadsheet'),
     'items.repriced': t('Changed prices'),
+    'timeclock.corrected': t('Corrected someone’s hours'),
     'purchase_order.created': t('Created a purchase order'),
     'purchase_order.sent': t('Sent a purchase order'),
     'purchase_order.cancelled': t('Cancelled a purchase order'),

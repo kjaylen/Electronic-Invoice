@@ -1834,3 +1834,10 @@ button.cat-tag:hover:not(:disabled) { background: var(--brand); border-color: va
 @media (max-width: 640px) { .bundle-part { grid-template-columns: 1fr 6rem; } .bundle-part > .link { grid-column: 1 / -1; justify-self: start; } }
 .bundle-badge { margin-left: 0.4rem; vertical-align: 1px; }
 .bundle-badge::before { display: none; }
+.slow-note { margin: 0 0 0.6rem; }
+
+/* The time clock. */
+.clock-pill { display: inline-flex; align-items: center; gap: 0.5rem; }
+.clock-pill button { min-height: 0; padding: 0.35rem 0.8rem; font-size: 0.85rem; }
+.clock-pill.on .small { color: var(--lime-ink); font-weight: 600; }
+.clock-badge { margin-left: 0.4rem; }

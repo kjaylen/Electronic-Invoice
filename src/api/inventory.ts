@@ -3,7 +3,7 @@
  * stock received from suppliers (optionally recording the bill as an
  * expense in the same step).
  *
- *   GET  /v1/inventory                    items with stock, value, low and out (filter, search)
+ *   GET  /v1/inventory                    items with stock, value, low and out (filter, search); filter=slow: in stock, nothing sold in 60 days
  *   GET  /v1/inventory.csv
  *   GET  /v1/inventory/:itemId            one item with its movements
  *   POST /v1/inventory/:itemId/adjust     { mode: change | set, quantity, reason, note? }
@@ -44,6 +44,7 @@ interface StockRow {
   low_stock: string | null;
   average_cost: string | null;
   last_movement: Date | string | null;
+  last_sold?: Date | string | null;
 }
 
 function stockJson(r: StockRow) {
@@ -65,19 +66,26 @@ function stockJson(r: StockRow) {
     averageCost: cost === null ? null : cost.toFixed(2),
     value: stock !== null && stock > 0 && cost !== null ? formatCents(roundToCents(mul(parseDecimal(r.stock!), parseDecimal(r.average_cost!)))) : '0.00',
     lastMovement: r.last_movement ? new Date(r.last_movement).toISOString() : null,
+    lastSold: r.last_sold ? new Date(r.last_sold).toISOString() : null,
   };
 }
 
 const STOCK_COLUMNS = `i.id, i.name, i.seller_code, i.barcode, i.unit_code, i.unit_price::text as unit_price, i.product_id, i.stock_quantity::text as stock,
-  i.low_stock::text as low_stock, i.average_cost::text as average_cost, (select max(m.created_at) from stock_movements m where m.item_id = i.id) as last_movement`;
+  i.low_stock::text as low_stock, i.average_cost::text as average_cost, (select max(m.created_at) from stock_movements m where m.item_id = i.id) as last_movement,
+  (select max(m.created_at) from stock_movements m where m.item_id = i.id and m.reason in ('sale', 'order')) as last_sold`;
 
-type Filter = 'tracked' | 'low' | 'out' | 'untracked' | 'all';
+type Filter = 'tracked' | 'low' | 'out' | 'untracked' | 'slow' | 'all';
+/** Not selling: nothing sold or ordered in this many days (for stock held at least that long). */
+const SLOW_DAYS = 60;
 function filterSql(f: Filter): string {
   switch (f) {
     case 'tracked': return 'i.stock_quantity is not null';
     case 'low': return 'i.stock_quantity is not null and (i.stock_quantity <= 0 or (i.low_stock is not null and i.stock_quantity <= i.low_stock))';
     case 'out': return 'i.stock_quantity is not null and i.stock_quantity <= 0';
     case 'untracked': return 'i.stock_quantity is null';
+    case 'slow': return `i.stock_quantity > 0
+      and exists (select 1 from stock_movements m where m.item_id = i.id and m.created_at < now() - interval '${SLOW_DAYS} days')
+      and not exists (select 1 from stock_movements m where m.item_id = i.id and m.reason in ('sale', 'order') and m.created_at >= now() - interval '${SLOW_DAYS} days')`;
     default: return 'true';
   }
 }
@@ -105,7 +113,7 @@ export function registerInventoryRoutes(app: FastifyInstance, deps: PipelineDeps
 
   const listQuery = {
     type: 'object', additionalProperties: false,
-    properties: { filter: { type: 'string', enum: ['tracked', 'low', 'out', 'untracked', 'all'] }, q: { type: 'string', maxLength: 100 }, limit: { type: 'string', pattern: '^[1-9][0-9]{0,3}$' } },
+    properties: { filter: { type: 'string', enum: ['tracked', 'low', 'out', 'untracked', 'slow', 'all'] }, q: { type: 'string', maxLength: 100 }, limit: { type: 'string', pattern: '^[1-9][0-9]{0,3}$' } },
   } as const;
   // Query strings arrive as text (no type coercion): the limit is digits.
   type ListQuery = { filter?: Filter; q?: string; limit?: string };
@@ -120,7 +128,7 @@ export function registerInventoryRoutes(app: FastifyInstance, deps: PipelineDeps
     params.push(Math.min(query.limit ? Number(query.limit) : max, max));
     return (await db.query<StockRow>(
       `select ${STOCK_COLUMNS} from items i where ${where}
-       order by case when i.stock_quantity is null then 2 when i.stock_quantity <= 0 then 0 when i.low_stock is not null and i.stock_quantity <= i.low_stock then 0 else 1 end, lower(i.name)
+       order by ${query.filter === 'slow' ? 'i.stock_quantity * coalesce(i.average_cost, 0) desc,' : 'case when i.stock_quantity is null then 2 when i.stock_quantity <= 0 then 0 when i.low_stock is not null and i.stock_quantity <= i.low_stock then 0 else 1 end,'} lower(i.name)
        limit $${params.length}`,
       params,
     )).rows.map(stockJson);

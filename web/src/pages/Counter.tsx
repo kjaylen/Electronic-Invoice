@@ -24,6 +24,7 @@ import { useSession } from '../session';
 import { useToast } from '../toast';
 import { belizeDate, Combobox, CountUp, ErrorText, fromCents, Modal, money, Segmented, StatusBadge, store, toCents, useDebounced, usePageTitle } from '../ui';
 import { searchItems } from './NewDocument';
+import { ClockButton } from './TimeClock';
 
 interface LineDiscount { kind: 'percent' | 'amount'; value: string }
 
@@ -128,6 +129,7 @@ export function Counter() {
         <div className="row">
           <div><span className="kicker">{t('Tax receipts')}</span><h1>{t('Counter')}</h1></div>
           <span className="spacer" />
+          <ClockButton />
           <label className="row small"><input type="checkbox" checked={autoPrint} onChange={(e) => setAutoPrint(e.target.checked)} /> {t('Print each receipt automatically')}</label>
         </div>
       )}

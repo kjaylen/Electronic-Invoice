@@ -4,6 +4,8 @@ import { useI18n, useT } from '../i18n';
 import { belizeToday, ErrorText, Field, fromCents, Modal, money, Segmented, toCents, usePageTitle } from '../ui';
 import { useSearchParams } from 'react-router';
 import { GstReturnView, ProfitView } from './Accounting';
+import { useSession } from '../session';
+import { HoursWorkedPanel } from './TimeClock';
 
 type Preset = 'month' | 'last-month' | 'quarter' | 'year' | 'custom';
 
@@ -140,6 +142,7 @@ export function SalesChart({ summary }: { summary: Summary }) {
 
 export function Reports() {
   const t = useT();
+  const { can } = useSession();
   usePageTitle(t('Reports'));
   const [params, setParams] = useSearchParams();
   const view = (params.get('view') as 'sales' | 'gst' | 'profit' | null) ?? 'sales';
@@ -323,6 +326,7 @@ export function Reports() {
             </section>
           </div>
           {categories.some((c) => c.name !== null) && <CategoryPanel rows={categories} qs={qs} />}
+          {can('documents.adjust') && <HoursWorkedPanel from={from} to={to} />}
         </>
       )}
     </div>

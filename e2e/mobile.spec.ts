@@ -9,7 +9,7 @@ test('phone layout: every page fits the screen and the menu opens', async ({ pag
   await page.getByRole('button', { name: /^Log in/ }).click();
   await expect(page.locator('.biz-card')).toContainText('Corner Store');
 
-  for (const path of ['/', '/counter', '/documents', '/documents/new?type=01', '/orders', '/products', '/customers', '/reports', '/settings', '/shop', '/shop/products/reef-hoodie', '/shop/checkout']) {
+  for (const path of ['/', '/counter', '/documents', '/documents/new?type=01', '/orders', '/products', '/customers', '/reports', '/reports?view=profit', '/inventory', '/inventory?filter=orders', '/inventory/orders/new', '/inventory/receive', '/expenses?tab=suppliers', '/settings', '/shop', '/shop/products/reef-hoodie', '/shop/checkout']) {
     await page.goto(`/corner-store${path === '/' ? '' : path}`);
     await expect(page.locator('h1')).toBeVisible();
     const [scroll, width] = await page.evaluate(() => [document.documentElement.scrollWidth, window.innerWidth]);

@@ -6,6 +6,7 @@ import { type CounterCart, CounterPanel, SCAN_EVENT } from '../pages/Counter';
 import { useToast } from '../toast';
 import { useKeyboardScanner } from './hardware';
 import { TillShiftBar } from './ShiftPanel';
+import { ClockButton } from '../pages/TimeClock';
 import { useTill } from './TillApp';
 
 const lineAmount = (quantity: string, unitPrice: string) => {
@@ -51,7 +52,7 @@ export function Sell() {
         display?.update({ business, lines: [], total: doc.totals.payable, change: sale.change, message: t('Thank you!') });
       }}
       print={(doc) => void till.printDocument(doc.id).catch(problem)}
-      extraButtons={scanWithCamera && (
+      extraButtons={<>{scanWithCamera && (
         <button
           type="button"
           className="secondary"
@@ -62,7 +63,7 @@ export function Sell() {
         >
           {t('Scan with the camera')}
         </button>
-      )}
+      )}<ClockButton /></>}
       onCart={onCart}
     />
   );

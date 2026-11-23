@@ -23,6 +23,7 @@ interface StockItem {
   averageCost: string | null;
   value: string;
   lastMovement: string | null;
+  lastSold?: string | null;
 }
 
 interface StockTotals { tracked: number; untracked: number; low: number; out: number; value: string }
@@ -61,7 +62,7 @@ export function Inventory() {
   usePageTitle(t('Inventory'));
   const { can } = useSession();
   const [params, setParams] = useSearchParams();
-  const filter = (params.get('filter') as 'tracked' | 'low' | 'untracked' | 'deliveries' | 'orders' | null) ?? 'tracked';
+  const filter = (params.get('filter') as 'tracked' | 'low' | 'untracked' | 'slow' | 'deliveries' | 'orders' | null) ?? 'tracked';
   const [q, setQ] = useState('');
   const search = useDebounced(q, 250);
   const [data, setData] = useState<{ data: StockItem[]; totals: StockTotals } | null>(null);
@@ -96,7 +97,7 @@ export function Inventory() {
         <div className="card kpi"><span className="kpi-head">{t('Items tracked')}</span><span className="kpi-value">{tt ? tt.tracked : '—'}</span><span className="kpi-note">{tt ? t('{n} not tracked', { n: tt.untracked }) : ' '}</span></div>
       </div>
       <div className="row">
-        <Segmented switches label={t('Show')} value={filter} onChange={(v) => setParams({ filter: v }, { replace: true })} options={[['tracked', t('Tracked')], ['low', t('Low or out')], ['untracked', t('Not tracked')], ['deliveries', t('Deliveries')], ['orders', t('Orders')]]} />
+        <Segmented switches label={t('Show')} value={filter} onChange={(v) => setParams({ filter: v }, { replace: true })} options={[['tracked', t('Tracked')], ['low', t('Low or out')], ['untracked', t('Not tracked')], ['slow', t('Not selling')], ['deliveries', t('Deliveries')], ['orders', t('Orders')]]} />
         <span className="spacer" />
         {filter === 'low' && manage && data && data.data.length > 0 && <Link className="button secondary" to="/inventory/orders/new?suggest=1" viewTransition>{t('Order what is running low')}</Link>}
         {filter !== 'deliveries' && filter !== 'orders' && <input type="search" className="search-input" placeholder={t('Name, code or barcode')} value={q} onChange={(e) => setQ(e.target.value)} aria-label={t('Search items')} />}
@@ -105,17 +106,20 @@ export function Inventory() {
       {filter === 'orders' ? <PurchaseOrderList /> : filter === 'deliveries' ? <Deliveries /> : (
         <section className="card">
           {!data ? <div className="skeleton" style={{ height: '10rem' }} /> : data.data.length === 0 ? (
-            <div className="empty">{filter === 'tracked' ? t('No stock tracked yet. Receive a delivery, or open an item and track its stock: every sale then takes it off.') : filter === 'low' ? t('Nothing is running low.') : t('Every item is tracked.')}</div>
+            <div className="empty">{filter === 'tracked' ? t('No stock tracked yet. Receive a delivery, or open an item and track its stock: every sale then takes it off.') : filter === 'low' ? t('Nothing is running low.') : filter === 'slow' ? t('Everything in stock has sold in the last 60 days.') : t('Every item is tracked.')}</div>
           ) : (
             <div className="table-wrap">
+              {filter === 'slow' && <p className="small muted slow-note">{t('{amount} at cost is tied up in stock that has not sold in 60 days. Think about a discount, a bundle, or not reordering.', { amount: money(fromCents(data.data.reduce((a, s) => a + toCents(s.value), 0n))) })}</p>}
               <table className="responsive">
-                <thead><tr><th scope="col">{t('Item')}</th><th scope="col" className="right">{t('In stock')}</th><th scope="col" className="right">{t('Low at')}</th><th scope="col" className="right">{t('Average cost')}</th><th scope="col" className="right">{t('Value')}</th><th scope="col">{t('Status')}</th></tr></thead>
+                <thead><tr><th scope="col">{t('Item')}</th><th scope="col" className="right">{t('In stock')}</th><th scope="col" className="right">{filter === 'slow' ? t('Last sold') : t('Low at')}</th><th scope="col" className="right">{t('Average cost')}</th><th scope="col" className="right">{t('Value')}</th><th scope="col">{t('Status')}</th></tr></thead>
                 <tbody>
                   {data.data.map((s) => (
                     <tr key={s.itemId} className="clickable" onClick={() => setOpen(s.itemId)}>
                       <td data-label={t('Item')}><strong>{s.name}</strong>{s.sellerCode && <span className="small muted mono"> · {s.sellerCode}</span>}</td>
                       <td data-label={t('In stock')} className={`right strong ${s.state === 'out' ? 'late' : ''}`}>{qtyText(s.stock)} <span className="small muted">{s.tracked ? unitName(t, s.unitCode).toLowerCase() : ''}</span></td>
-                      <td data-label={t('Low at')} className="right">{qtyText(s.lowStock)}</td>
+                      {filter === 'slow'
+                        ? <td data-label={t('Last sold')} className="right">{s.lastSold ? s.lastSold.slice(0, 10) : t('Never')}</td>
+                        : <td data-label={t('Low at')} className="right">{qtyText(s.lowStock)}</td>}
                       <td data-label={t('Average cost')} className="right">{s.averageCost ? money(s.averageCost) : '—'}</td>
                       <td data-label={t('Value')} className="right">{toCents(s.value) > 0n ? money(s.value) : '—'}</td>
                       <td data-label={t('Status')}><StockBadge state={s.state} /></td>
