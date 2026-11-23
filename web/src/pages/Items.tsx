@@ -4,13 +4,15 @@ import { api, link, type Item, type Page } from '../api';
 import { useT } from '../i18n';
 import { useSession } from '../session';
 import { useToast } from '../toast';
-import { ErrorText, Field, GST_CATEGORIES, Modal, money, Select, unitName, UNITS, useDebounced, usePageTitle } from '../ui';
+import { Combobox, ErrorText, Field, GST_CATEGORIES, Modal, money, Select, unitName, UNITS, useDebounced, usePageTitle } from '../ui';
 import { ImportDialog } from './ImportDialog';
 
 type Form = { name: string; description: string; sellerCode: string; barcode: string; category: string; unitCode: string; unitPrice: string; wholesalePrice: string; gstCategory: string; exemptionReasonCode: string; favorite: boolean };
 const EMPTY: Form = { name: '', description: '', sellerCode: '', barcode: '', category: '', unitCode: 'H87', unitPrice: '', wholesalePrice: '', gstCategory: 'S', exemptionReasonCode: '', favorite: false };
 
 export interface Category { name: string; items: number }
+interface Part { key: number; item: { id: string; name: string } | null; quantity: string }
+let partKey = 0;
 
 const toForm = (i: Item): Form => ({
   name: i.name,
@@ -49,7 +51,7 @@ function ItemForm(props: { initial?: Item; categories: Category[]; onSaved: (i: 
   const [cost, setCost] = useState<number | null>(null);
   useEffect(() => {
     if (!props.initial) return;
-    api<{ averageCost: string | null }>(`/v1/inventory/${props.initial.id}`).then((r) => setCost(r.averageCost === null ? null : Number(r.averageCost))).catch(() => {});
+    api<{ averageCost: string | null }>(`/v1/inventory/${props.initial.id}`).then((r) => { if (r.averageCost !== null) setCost(Number(r.averageCost)); }).catch(() => {});
   }, [props.initial]);
   const marginHint = (price: string) => {
     if (cost === null || !/^\d+(\.\d{1,6})?$/.test(price) || Number(price) <= 0) return null;
@@ -57,6 +59,21 @@ function ItemForm(props: { initial?: Item; categories: Category[]; onSaved: (i: 
     return pct < 0 ? t('Below its cost of {cost}: a loss of {pct}% on each sale.', { cost: money(cost.toFixed(2)), pct: Math.abs(pct) }) : t('Costs {cost} on average: a {pct}% margin.', { cost: money(cost.toFixed(2)), pct });
   };
   const set = (k: keyof Form) => (e: { target: { value: string } }) => setForm({ ...form, [k]: e.target.value });
+  // A bundle: the items it is made of (selling it takes them off the shelf).
+  const [parts, setParts] = useState<Part[]>([]);
+  const [hadParts, setHadParts] = useState(false);
+  const [bundle, setBundle] = useState(false);
+  useEffect(() => {
+    if (!props.initial) return;
+    api<{ data: Array<{ itemId: string; name: string; quantity: string }>; cost: string | null }>(`/v1/items/${props.initial.id}/components`).then((r) => {
+      if (!r.data.length) return;
+      setParts(r.data.map((c) => ({ key: ++partKey, item: { id: c.itemId, name: c.name }, quantity: c.quantity })));
+      setHadParts(true);
+      setBundle(true);
+      if (r.cost !== null) setCost(Number(r.cost));
+    }).catch(() => {});
+  }, [props.initial]);
+  const filledParts = parts.filter((p) => p.item);
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setBusy(true);
@@ -65,6 +82,9 @@ function ItemForm(props: { initial?: Item; categories: Category[]; onSaved: (i: 
       const saved = props.initial
         ? await api<Item>(`/v1/items/${props.initial.id}`, { method: 'PUT', body: itemBody(form) })
         : await api<Item>('/v1/items', { method: 'POST', body: itemBody(form) });
+      if (bundle || hadParts) {
+        await api(`/v1/items/${saved.id}/components`, { method: 'PUT', body: { components: bundle ? filledParts.map((p) => ({ itemId: p.item!.id, quantity: p.quantity || '1' })) : [] } });
+      }
       props.onSaved(saved);
     } catch (err) {
       setError(err);
@@ -94,6 +114,31 @@ function ItemForm(props: { initial?: Item; categories: Category[]; onSaved: (i: 
         {form.gstCategory === 'E' && <Field label={t('Exemption reason code')}><input required value={form.exemptionReasonCode} onChange={set('exemptionReasonCode')} /></Field>}
       </div>
       <label className="row small"><input type="checkbox" checked={form.favorite} onChange={(e) => setForm({ ...form, favorite: e.target.checked })} /> {t('Show as a quick button at the counter')}</label>
+      <label className="row small"><input type="checkbox" checked={bundle} onChange={(e) => { setBundle(e.target.checked); if (e.target.checked && !parts.length) setParts([{ key: ++partKey, item: null, quantity: '1' }]); }} /> {t('A bundle of other items (a combo, a gift basket)')}</label>
+      {bundle && (
+        <fieldset className="stack bundle-parts">
+          <legend>{t('Made up of')}</legend>
+          {parts.map((p, i) => (
+            <div key={p.key} className="bundle-part">
+              <Combobox<Item>
+                label={t('Item {n}', { n: i + 1 })}
+                placeholder={t('Search your items')}
+                search={(q) => api<Page<Item>>(`/v1/items?limit=8&q=${encodeURIComponent(q)}`).then((r) => r.data.filter((it) => it.id !== props.initial?.id))}
+                render={(it) => <><strong>{it.name}</strong> <span className="muted">· {money(it.unitPrice)}</span></>}
+                value={p.item?.name ?? ''}
+                onText={() => setParts((ps) => ps.map((x) => (x.key === p.key ? { ...x, item: null } : x)))}
+                onPick={(it) => setParts((ps) => ps.map((x) => (x.key === p.key ? { ...x, item: { id: it.id, name: it.name } } : x)))}
+              />
+              <Field label={t('Quantity')}><input inputMode="decimal" pattern="\d{1,9}(\.\d{1,3})?" value={p.quantity} onChange={(e) => setParts((ps) => ps.map((x) => (x.key === p.key ? { ...x, quantity: e.target.value.trim() } : x)))} /></Field>
+              <button type="button" className="link" onClick={() => setParts((ps) => ps.filter((x) => x.key !== p.key))}>{t('Remove')}</button>
+            </div>
+          ))}
+          <div className="row">
+            <button type="button" className="secondary" onClick={() => setParts([...parts, { key: ++partKey, item: null, quantity: '1' }])}>+ {t('Add item')}</button>
+          </div>
+          <p className="small muted">{t('Selling the bundle takes its items off the shelf; its cost is theirs added up.')}</p>
+        </fieldset>
+      )}
       <ErrorText error={error} />
       <div className="row">
         <span className="spacer" />
@@ -197,7 +242,7 @@ export function Items() {
                     <td className="star-cell">
                       <button className={`star ${it.favorite ? 'on' : ''}`} aria-pressed={it.favorite} aria-label={t('Quick button for {name}', { name: it.name })} disabled={!manage} onClick={() => void toggleFavorite(it)}>★</button>
                     </td>
-                    <td data-label={t('Item')}><strong>{it.name}</strong>{it.description !== it.name && <div className="small muted">{it.description}</div>}</td>
+                    <td data-label={t('Item')}><strong>{it.name}</strong>{it.bundle && <span className="badge test bundle-badge">{t('Bundle')}</span>}{it.description !== it.name && <div className="small muted">{it.description}</div>}</td>
                     <td data-label={t('Category')}>{it.category ? <button type="button" className="cat-tag" onClick={() => setCategory(it.category!)}>{it.category}</button> : <span className="muted">—</span>}</td>
                     <td data-label={t('Code')} className="mono">{[it.sellerCode, it.barcode].filter(Boolean).join(' · ') || '—'}</td>
                     <td data-label={t('Unit')}>{unitName(t, it.unitCode)}</td>

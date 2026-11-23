@@ -2507,4 +2507,11 @@ export const ES: Record<string, string> = {
   "The most they may owe on invoices. Empty: no limit.": "Lo máximo que puede deber en facturas. Vacío: sin límite.",
   "Below its cost of {cost}: a loss of {pct}% on each sale.": "Por debajo de su costo de {cost}: una pérdida de {pct}% en cada venta.",
   "Costs {cost} on average: a {pct}% margin.": "Cuesta {cost} en promedio: un margen de {pct}%.",
+  "Sale held. Recall it from Held sales, at any till.": "Venta en espera. Recupérela desde Ventas en espera, en cualquier caja.",
+  "held by {name}": "dejada por {name}",
+  "A bundle of other items (a combo, a gift basket)": "Un paquete de otros artículos (un combo, una canasta de regalo)",
+  "Made up of": "Compuesto por",
+  "Search your items": "Busque sus artículos",
+  "Selling the bundle takes its items off the shelf; its cost is theirs added up.": "Vender el paquete descuenta sus artículos del inventario; su costo es la suma de los de ellos.",
+  "Bundle": "Paquete",
 };

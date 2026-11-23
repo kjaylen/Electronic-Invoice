@@ -62,7 +62,7 @@ interface Sale {
   dueDays?: number;
 }
 
-interface HeldSale { id: string; at: string; label: string; total: string; count: number; sale: Sale }
+interface HeldSale { id: string; at: string; label: string; total: string; count: number; sale: Sale; heldBy?: string | null }
 
 /** A barcode scanned outside the search box (a CustomEvent<string> on window). */
 export const SCAN_EVENT = 'etd:scan';
@@ -157,14 +157,15 @@ export function CounterPanel(props: {
   const toast = useToast();
   const { me, session, can } = useSession();
   const storageKey = `etd.counter.${session?.business.id}.${session?.user.id}`;
-  // Held sales stay on this device for anyone selling at it (cashiers share a counter).
+  // Held sales are shared by every till of the business (they used to stay on the device: those are moved up once).
   const heldKey = `etd.counter.held.${session?.business.id}`;
   const [sale, setSale] = useState<Sale>(() => {
     const saved = store.get<Sale>(storageKey);
     if (saved?.lines) key = Math.max(key, ...saved.lines.map((l) => l.key), 0);
     return saved?.lines ? saved : newSale();
   });
-  const [held, setHeld] = useState<HeldSale[]>(() => store.get<HeldSale[]>(heldKey) ?? []);
+  const [held, setHeld] = useState<HeldSale[]>([]);
+  const loadHeld = useCallback(() => api<{ data: HeldSale[] }>('/v1/held-sales').then((r) => setHeld(r.data)).catch(() => {}), []);
   const [favorites, setFavorites] = useState<Item[]>([]);
   // Category tabs over the quick buttons: null shows the quick buttons, a name that category's items.
   const [categories, setCategories] = useState<string[]>([]);
@@ -182,8 +183,22 @@ export function CounterPanel(props: {
     store.set(storageKey, sale);
   }, [sale, storageKey]);
   useEffect(() => {
-    store.set(heldKey, held);
-  }, [held, heldKey]);
+    void (async () => {
+      const local = store.get<HeldSale[]>(heldKey) ?? [];
+      for (const h of local.reverse()) {
+        try {
+          await api('/v1/held-sales', { method: 'POST', body: { label: h.label, total: h.total, count: Math.max(1, h.count), sale: h.sale } });
+        } catch {
+          break;
+        }
+      }
+      if (local.length) store.remove(heldKey);
+      await loadHeld();
+    })();
+    // Other tills hold and recall too: keep the count fresh.
+    const timer = setInterval(() => void loadHeld(), 30_000);
+    return () => clearInterval(timer);
+  }, [heldKey, loadHeld]);
   // Ready to scan as soon as the page opens.
   useEffect(() => {
     const timer = setTimeout(() => search.current?.focus(), 120);
@@ -340,32 +355,47 @@ export function CounterPanel(props: {
 
   // ---------- holding sales ----------
 
-  const holdCurrent = (label: string) => {
+  const putOnHold = (label: string, s: Sale) => api<HeldSale>('/v1/held-sales', { method: 'POST', body: { label: label.trim(), total: totals ? total : fromCents(fullPrice), count: s.lines.length, sale: s } });
+  const holdCurrent = async (label: string) => {
     if (!sale.lines.length) return;
-    const entry: HeldSale = {
-      id: crypto.randomUUID(), at: new Date().toISOString(), label: label.trim(),
-      total: totals ? total : fromCents(fullPrice), count: sale.lines.length, sale,
-    };
-    setHeld((h) => [entry, ...h].slice(0, 30));
+    try {
+      await putOnHold(label, sale);
+    } catch (e) {
+      setError(e);
+      return;
+    }
     setSale(newSale());
     setDiscountFor(null);
     setLast(null);
-    toast(t('Sale held. Recall it from Held sales.'));
+    toast(t('Sale held. Recall it from Held sales, at any till.'));
+    void loadHeld();
     focusSearch();
   };
-  const recall = (h: HeldSale) => {
-    setHeld((list) => {
-      const rest = list.filter((x) => x.id !== h.id);
+  const recall = async (h: HeldSale) => {
+    let got: HeldSale;
+    try {
       // A sale in progress is held in its place, not lost.
-      return sale.lines.length ? [{ id: crypto.randomUUID(), at: new Date().toISOString(), label: '', total: totals ? total : fromCents(fullPrice), count: sale.lines.length, sale }, ...rest].slice(0, 30) : rest;
-    });
-    key = Math.max(key, ...h.sale.lines.map((l) => l.key), 0);
+      if (sale.lines.length) await putOnHold('', sale);
+      got = await api<HeldSale>(`/v1/held-sales/${h.id}/recall`, { method: 'POST' });
+    } catch (e) {
+      setError(e);
+      setDialog(null);
+      void loadHeld();
+      return;
+    }
+    key = Math.max(key, ...got.sale.lines.map((l) => l.key), 0);
     // A fresh key: the held sale was never sent.
-    setSale({ ...h.sale, idempotencyKey: crypto.randomUUID() });
+    setSale({ ...got.sale, idempotencyKey: crypto.randomUUID() });
     setDialog(null);
     setLast(null);
     if (sale.lines.length) toast(t('The sale you had open is held.'), 'info');
+    void loadHeld();
     focusSearch();
+  };
+  const deleteHeld = async (h: HeldSale) => {
+    setHeld((list) => list.filter((x) => x.id !== h.id));
+    await api(`/v1/held-sales/${h.id}`, { method: 'DELETE' }).catch(() => {});
+    void loadHeld();
   };
 
   // Shortcuts: F2 or Ctrl+Enter issues; in the empty search box, + and - change the last line's quantity and Delete removes it.
@@ -476,7 +506,7 @@ export function CounterPanel(props: {
             <button type="button" className="secondary" onClick={() => void repeatLast()}>{t('Repeat last sale')}</button>
             <button type="button" className="secondary" onClick={() => add({ key: ++key, name: '', quantity: '1', unitCode: 'H87', unitPrice: '', gstCategory: 'S', custom: true })}>+ {t('Custom item')}</button>
             <button type="button" className="secondary" disabled={!sale.lines.length} onClick={() => setDialog('hold')}>{t('Hold sale')}</button>
-            <button type="button" className="secondary" disabled={!held.length} onClick={() => setDialog('held')}>
+            <button type="button" className="secondary" disabled={!held.length} onClick={() => { void loadHeld(); setDialog('held'); }}>
               {t('Held sales')}{held.length > 0 && <span className="chip">{held.length}</span>}
             </button>
             {props.extraButtons}
@@ -606,12 +636,12 @@ export function CounterPanel(props: {
         </form>
       </div>
 
-      {dialog === 'hold' && <HoldDialog onHold={(label) => { holdCurrent(label); setDialog(null); }} onClose={() => setDialog(null)} />}
+      {dialog === 'hold' && <HoldDialog onHold={(label) => { void holdCurrent(label); setDialog(null); }} onClose={() => setDialog(null)} />}
       {dialog === 'held' && (
         <HeldDialog
           held={held}
           onRecall={recall}
-          onDelete={(h) => setHeld((list) => list.filter((x) => x.id !== h.id))}
+          onDelete={(h) => void deleteHeld(h)}
           onClose={() => setDialog(null)}
         />
       )}
@@ -743,7 +773,7 @@ function HeldDialog({ held, onRecall, onDelete, onClose }: { held: HeldSale[]; o
             <li key={h.id}>
               <div>
                 <strong>{h.label || t('Sale at {time}', { time: time(h.at) })}</strong>
-                <span className="muted small">{h.count === 1 ? t('1 item') : t('{n} items', { n: h.count })} · {money(h.total)}{h.label ? ` · ${time(h.at)}` : ''}{h.sale.customer ? ` · ${h.sale.customer.name}` : ''}</span>
+                <span className="muted small">{h.count === 1 ? t('1 item') : t('{n} items', { n: h.count })} · {money(h.total)}{h.label ? ` · ${time(h.at)}` : ''}{h.sale.customer ? ` · ${h.sale.customer.name}` : ''}{h.heldBy ? ` · ${t('held by {name}', { name: h.heldBy })}` : ''}</span>
               </div>
               <span className="spacer" />
               <button type="button" className="icon-button" aria-label={t('Delete {name}', { name: h.label || t('this sale') })} onClick={() => onDelete(h)}>×</button>

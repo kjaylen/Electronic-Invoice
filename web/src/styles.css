@@ -1827,3 +1827,10 @@ button.cat-tag:hover:not(:disabled) { background: var(--brand); border-color: va
 .margin-sum > div { display: grid; gap: 0.15rem; padding: 0.7rem 0.85rem; border-radius: var(--radius); background: var(--sheet-2); border: 1px solid var(--hairline); }
 .margin-sum strong { font-size: 1.15rem; }
 @media (max-width: 640px) { .margin-sum { grid-template-columns: 1fr; } }
+
+/* Bundles: the items a bundle is made of. */
+.bundle-parts { border: 1px dashed var(--hairline-strong); border-radius: var(--radius); padding: 0.75rem 0.9rem; }
+.bundle-part { display: grid; grid-template-columns: minmax(0, 1fr) 7rem auto; gap: 0.6rem; align-items: end; }
+@media (max-width: 640px) { .bundle-part { grid-template-columns: 1fr 6rem; } .bundle-part > .link { grid-column: 1 / -1; justify-self: start; } }
+.bundle-badge { margin-left: 0.4rem; vertical-align: 1px; }
+.bundle-badge::before { display: none; }

@@ -125,6 +125,7 @@ interface ItemRow {
   favorite: boolean;
   wholesale_price?: string | null;
   category?: string | null;
+  is_bundle?: boolean;
   stock_quantity?: string | null;
   archived_at: string | Date | null;
   created_at: string | Date;
@@ -147,6 +148,8 @@ const itemJson = (r: ItemRow) => ({
   /** The price before GST for wholesale customers; null: the usual price. */
   wholesalePrice: r.wholesale_price === null || r.wholesale_price === undefined ? null : trimDecimal(r.wholesale_price),
   category: r.category ?? null,
+  /** Made of other items (in lists). */
+  ...(r.is_bundle !== undefined && { bundle: r.is_bundle }),
   /** In stock now; null when stock is not tracked. */
   stock: r.stock_quantity === null || r.stock_quantity === undefined ? null : Number(r.stock_quantity),
   archived: Boolean(r.archived_at),
@@ -435,6 +438,62 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: PipelineDeps) 
     return reply.code(204).send();
   });
 
+  // A bundle's components (empty for an ordinary item).
+  app.get<{ Params: { id: string } }>('/items/:id/components', { schema: { params: { type: 'object', required: ['id'], properties: { id: uuid } } } }, async (request) => {
+    const item = (await db.query<{ id: string }>('select id from items where id = $1 and tenant_id = $2', [request.params.id, request.tenantId])).rows[0];
+    if (!item) throw notFound('Item');
+    const rows = (await db.query<{ component_id: string; name: string; quantity: string; unit_code: string; average_cost: string | null; stock: string | null }>(
+      `select c.component_id, i.name, c.quantity::text as quantity, i.unit_code, i.average_cost::text as average_cost, i.stock_quantity::text as stock
+       from item_components c join items i on i.id = c.component_id where c.item_id = $1 order by i.name`, [item.id],
+    )).rows;
+    const costs = rows.map((r) => (r.average_cost === null ? null : Number(r.quantity) * Number(r.average_cost)));
+    return {
+      data: rows.map((r) => ({ itemId: r.component_id, name: r.name, quantity: String(Number(r.quantity)), unitCode: r.unit_code, stock: r.stock === null ? null : Number(r.stock) })),
+      // What the bundle costs, when every component has a cost.
+      cost: rows.length && costs.every((c) => c !== null) ? costs.reduce((a, c) => a + c!, 0).toFixed(2) : null,
+    };
+  });
+
+  app.put<{ Params: { id: string }; Body: { components: Array<{ itemId: string; quantity: string }> } }>(
+    '/items/:id/components',
+    {
+      schema: {
+        params: { type: 'object', required: ['id'], properties: { id: uuid } },
+        body: {
+          type: 'object', required: ['components'], additionalProperties: false,
+          properties: { components: { type: 'array', maxItems: 30, items: { type: 'object', required: ['itemId', 'quantity'], additionalProperties: false, properties: { itemId: uuid, quantity: { type: 'string', pattern: '^\\d{1,9}(\\.\\d{1,3})?$' } } } } },
+        },
+      },
+    },
+    async (request) => {
+      requirePermission(request, 'catalog.manage');
+      const id = request.params.id;
+      const list = request.body.components;
+      const item = (await db.query<{ id: string }>('select id from items where id = $1 and tenant_id = $2 and archived_at is null', [id, request.tenantId])).rows[0];
+      if (!item) throw notFound('Item');
+      if (new Set(list.map((c) => c.itemId)).size !== list.length) throw new ApiError(422, 'invalid_bundle', 'Each component once');
+      if (list.some((c) => c.itemId === id)) throw new ApiError(422, 'invalid_bundle', 'A bundle cannot contain itself');
+      if (list.some((c) => Number(c.quantity) <= 0)) throw new ApiError(422, 'invalid_bundle', 'Quantities must be more than zero');
+      if (list.length) {
+        const found = (await db.query<{ id: string; is_bundle: boolean }>(
+          `select i.id, exists (select 1 from item_components c where c.item_id = i.id) as is_bundle from items i
+           where i.tenant_id = $1 and i.id = any($2::uuid[]) and i.archived_at is null`, [request.tenantId, list.map((c) => c.itemId)],
+        )).rows;
+        if (found.length !== list.length) throw new ApiError(422, 'invalid_bundle', 'A component is not in your catalog');
+        if (found.some((f) => f.is_bundle)) throw new ApiError(422, 'invalid_bundle', 'A bundle cannot contain another bundle');
+        // Nor can an item that is itself in a bundle become one.
+        const used = (await db.query('select 1 from item_components where component_id = $1 limit 1', [id])).rows.length;
+        if (used) throw new ApiError(422, 'invalid_bundle', 'This item is part of another bundle, so it cannot be a bundle itself');
+      }
+      await db.transaction(async (tx) => {
+        await tx.query('delete from item_components where item_id = $1', [id]);
+        for (const c of list) await tx.query('insert into item_components (item_id, component_id, quantity) values ($1, $2, $3)', [id, c.itemId, c.quantity]);
+      });
+      await audit(db, { tenantId: request.tenantId, userId: request.userId || null, action: 'item.bundle_changed', target: id, details: { components: list.length }, ip: request.ip });
+      return { components: list.length };
+    },
+  );
+
   // The categories in use, with how many items each has.
   app.get('/items/categories', async (request) => {
     const rows = (await db.query<{ name: string; n: number }>(
@@ -524,7 +583,7 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: PipelineDeps) 
       where += ` and (created_at, id) < ($${params.length - 1}::timestamptz, $${params.length}::uuid)`;
     }
     params.push(page.limit + 1);
-    const rows = (await db.query<ItemRow>(`select * from items where ${where} order by created_at desc, id desc limit $${params.length}`, params)).rows;
+    const rows = (await db.query<ItemRow>(`select *, exists (select 1 from item_components c where c.item_id = items.id) as is_bundle from items where ${where} order by created_at desc, id desc limit $${params.length}`, params)).rows;
     const { items, nextCursor: next } = nextCursor(rows, page.limit);
     return { data: items.map(itemJson), nextCursor: next };
   });

@@ -99,10 +99,25 @@ export async function takeForOrder(db: Queryable, tenantId: string, itemId: stri
 /** Take a document's sold items off the shelf (tracked items only). */
 export async function recordSale(db: Queryable, tenantId: string, documentId: string, lines: Array<{ itemId?: string | null; quantity: string }>, userId: string | null): Promise<number> {
   let moved = 0;
+  const ids = [...new Set(lines.map((l) => l.itemId).filter((x): x is string => Boolean(x)))];
+  // A bundle sells its components (each its quantity per bundle), not itself.
+  const parts = new Map<string, Array<{ id: string; quantity: number }>>();
+  if (ids.length) {
+    for (const c of (await db.query<{ item_id: string; component_id: string; quantity: string }>(
+      'select c.item_id, c.component_id, c.quantity::text as quantity from item_components c join items i on i.id = c.item_id where i.tenant_id = $1 and c.item_id = any($2::uuid[])', [tenantId, ids],
+    )).rows) {
+      const list = parts.get(c.item_id) ?? [];
+      list.push({ id: c.component_id, quantity: Number(c.quantity) });
+      parts.set(c.item_id, list);
+    }
+  }
   for (const l of lines) {
     if (!l.itemId || !/^\d{1,12}(\.\d{1,6})?$/.test(l.quantity)) continue;
-    const qty = (Math.round(Number(l.quantity) * 1000) / 1000).toFixed(3);
-    if (await moveStock(db, { tenantId, itemId: l.itemId, quantity: `-${qty}`, reason: 'sale', documentId, userId })) moved++;
+    const take = parts.get(l.itemId)?.map((p) => ({ id: p.id, quantity: Number(l.quantity) * p.quantity })) ?? [{ id: l.itemId, quantity: Number(l.quantity) }];
+    for (const t of take) {
+      const qty = (Math.round(t.quantity * 1000) / 1000).toFixed(3);
+      if (await moveStock(db, { tenantId, itemId: t.id, quantity: `-${qty}`, reason: 'sale', documentId, userId })) moved++;
+    }
   }
   return moved;
 }

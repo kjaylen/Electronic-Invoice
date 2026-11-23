@@ -294,7 +294,10 @@ async function prepare(
         `insert into document_lines (document_id, tenant_id, line_number, description, quantity, unit_code, unit_price,
            net_cents, gst_category, gst_cents, tax_cents, line_total_cents, item_id, unit_cost)
          values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
-           (select average_cost from items where id = $13::uuid and tenant_id = $2::uuid))`,
+           coalesce(
+             (select case when bool_and(ci.average_cost is not null) then sum(c.quantity * ci.average_cost) end
+              from item_components c join items ci on ci.id = c.component_id where c.item_id = $13::uuid having count(*) > 0),
+             (select average_cost from items where id = $13::uuid and tenant_id = $2::uuid and not exists (select 1 from item_components c where c.item_id = $13::uuid))))`,
         [documentId, ctx.tenantId, line.lineNumber, line.description, line.quantity, line.unitCode, line.unitPrice,
           line.netAmount, line.gstCategory, line.gstAmount, line.taxAmount, line.lineTotal, req.lineItemIds?.[line.lineNumber - 1] ?? null],
       );

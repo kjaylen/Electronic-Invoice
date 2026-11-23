@@ -314,6 +314,10 @@ export function Combobox<T extends { id: string }>(props: {
             if (showList && active >= 0) {
               e.preventDefault();
               pick(results[active]!);
+            } else if (!props.onEnter && showList && results.length) {
+              // Nothing highlighted: the first match (rather than submitting the form around it).
+              e.preventDefault();
+              pick(results[0]!);
             } else if (props.onEnter && text.trim()) {
               e.preventDefault();
               const value = text.trim();
