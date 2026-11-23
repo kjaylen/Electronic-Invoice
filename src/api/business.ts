@@ -35,6 +35,7 @@ interface BusinessRow {
   environment: string;
   require_two_factor: boolean;
   daily_summary: boolean;
+  sells: 'products' | 'services' | 'both';
 }
 
 const businessJson = (r: BusinessRow) => ({
@@ -48,6 +49,7 @@ const businessJson = (r: BusinessRow) => ({
   environment: r.environment,
   requireTwoFactor: r.require_two_factor,
   dailySummary: r.daily_summary,
+  sells: r.sells,
 });
 
 type BusinessBody = {
@@ -96,6 +98,18 @@ export function registerBusinessRoutes(app: FastifyInstance, deps: PipelineDeps,
   );
 
   // The morning summary email to owners and admins (src/notify/daily.ts).
+  // What the business sells: products, services or both. The app leaves out what does not apply.
+  app.put<{ Body: { sells: 'products' | 'services' | 'both' } }>(
+    '/business/sells',
+    { schema: { body: { type: 'object', required: ['sells'], additionalProperties: false, properties: { sells: { type: 'string', enum: ['products', 'services', 'both'] } } } } },
+    async (request) => {
+      requirePermission(request, 'business.manage');
+      await db.query('update tenants set sells = $2 where id = $1', [request.tenantId, request.body.sells]);
+      await audit(db, { tenantId: request.tenantId, userId: request.userId || null, action: 'business.sells_changed', target: request.body.sells, ip: request.ip });
+      return businessJson(await load(request.tenantId));
+    },
+  );
+
   app.put<{ Body: { dailySummary: boolean } }>(
     '/business/daily-summary',
     { schema: { body: { type: 'object', required: ['dailySummary'], additionalProperties: false, properties: { dailySummary: { type: 'boolean' } } } } },

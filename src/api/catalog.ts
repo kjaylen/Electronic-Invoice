@@ -209,8 +209,8 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: PipelineDeps) 
   const { db } = deps;
 
   app.get('/me', async (request) => {
-    const t = (await db.query<{ id: string; legal_name: string; trade_name: string | null; tin: string; environment: string; cashier_discount_limit: string | null }>(
-      'select id, legal_name, trade_name, tin, environment, cashier_discount_limit::text from tenants where id = $1', [request.tenantId],
+    const t = (await db.query<{ id: string; legal_name: string; trade_name: string | null; tin: string; environment: string; cashier_discount_limit: string | null; sells: 'products' | 'services' | 'both' }>(
+      'select id, legal_name, trade_name, tin, environment, cashier_discount_limit::text, sells from tenants where id = $1', [request.tenantId],
     )).rows[0]!;
     const period = (await db.query<{ started_at: string | Date; reason: string }>(
       'select started_at, reason from contingency_periods where tenant_id = $1 and ended_at is null', [request.tenantId],
@@ -224,6 +224,8 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: PipelineDeps) 
       tradeName: t.trade_name,
       tin: t.tin,
       environment: t.environment,
+      /** What the business sells: products, services or both. */
+      sells: t.sells,
       certificate: await certificateSummary(deps, request.tenantId),
       billing: await billingBanner(db, request.tenantId),
       contingency: { active: Boolean(period), since: period ? new Date(period.started_at).toISOString() : null, reason: period?.reason ?? null, queued },

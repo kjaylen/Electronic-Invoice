@@ -29,10 +29,11 @@ function withGst(price: string, gst: string): string {
 
 export function Products() {
   const t = useT();
-  usePageTitle(t('Products'));
-  const { can, session } = useSession();
+  const { can, session, me } = useSession();
+  const servicesOnly = me?.sells === 'services';
+  usePageTitle(servicesOnly ? t('Services') : t('Products'));
   const [params, setParams] = useSearchParams();
-  const tab = params.get('tab') === 'items' ? 'items' : 'products';
+  const tab = servicesOnly || params.get('tab') === 'items' ? 'items' : 'products';
   const [list, setList] = useState<ProductSummary[] | null>(null);
   const [q, setQ] = useState('');
   const [error, setError] = useState<unknown>(null);
@@ -41,6 +42,19 @@ export function Products() {
     void api<{ data: ProductSummary[] }>(`/v1/products${q ? `?q=${encodeURIComponent(q)}` : ''}`).then((r) => setList(r.data)).catch(setError);
   }, [tab, q]);
   const shop = `/${session?.business.slug}/shop`;
+
+  if (servicesOnly) {
+    return (
+      <div className="stack">
+        <div>
+          <span className="kicker">{t('Catalog')}</span>
+          <h1>{t('Services')}</h1>
+          <p className="muted">{t('What you charge for, by the hour, the day or the job, with its GST. They fill in the rate on invoices, quotes and logged work.')}</p>
+        </div>
+        <Items />
+      </div>
+    );
+  }
 
   return (
     <div className="stack">

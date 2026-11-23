@@ -62,7 +62,9 @@ export function Dashboard() {
   const today = belizeToday();
   const [todayDocs, setTodayDocs] = useState<DocumentInfo[]>([]);
   const reports = can('reports.view');
-  const stockKeeper = can('catalog.manage');
+  const stockKeeper = can('catalog.manage') && me?.sells !== 'services';
+  const biller = can('documents.issue') && me?.sells !== 'products';
+  const [work, setWork] = useState<{ customers: number; amount: string } | null>(null);
   const payer = can('expenses.manage');
 
   const load = useCallback(() => {
@@ -75,7 +77,8 @@ export function Dashboard() {
     if (stockKeeper) void api<{ totals: { low: number; out: number } }>('/v1/inventory?filter=low&limit=1').then((r) => setStock(r.totals)).catch(() => {});
     if (stockKeeper) void api<{ data: Array<{ late: boolean }> }>('/v1/purchase-orders?status=open').then((r) => setLateOrders(r.data.filter((o) => o.late).length)).catch(() => {});
     if (payer) void api<{ totals: { overdue: string } }>('/v1/expenses?status=unpaid').then((r) => setBills(r.totals)).catch(() => {});
-  }, [today, reports, stockKeeper, payer]);
+    if (biller) void api<{ toInvoice: Array<{ amount: string }> }>('/v1/work?status=unbilled').then((r) => setWork({ customers: r.toInvoice.length, amount: r.toInvoice.reduce((a, x) => a + Number(x.amount), 0).toFixed(2) })).catch(() => {});
+  }, [today, reports, stockKeeper, payer, biller]);
   useEffect(() => {
     load();
   }, [load]);
@@ -102,6 +105,7 @@ export function Dashboard() {
     ...(stock && stock.out ? [{ to: '/inventory?filter=low', tone: 'warn' as const, text: stock.out === 1 ? t('1 item out of stock') : t('{n} items out of stock', { n: stock.out }) }] : []),
     ...(stock && stock.low ? [{ to: '/inventory?filter=low', tone: 'warn' as const, text: stock.low === 1 ? t('1 item running low') : t('{n} items running low', { n: stock.low }) }] : []),
     ...(lateOrders ? [{ to: '/inventory?filter=orders', tone: 'warn' as const, text: lateOrders === 1 ? t('1 purchase order is late') : t('{n} purchase orders are late', { n: lateOrders }) }] : []),
+    ...(work && work.customers ? [{ to: '/work', tone: 'warn' as const, text: work.customers === 1 ? t('{amount} of work to invoice for 1 customer', { amount: money(work.amount) }) : t('{amount} of work to invoice for {n} customers', { amount: money(work.amount), n: work.customers }) }] : []),
     ...(bills && bills.overdue !== '0.00' ? [{ to: '/expenses?tab=bills', tone: 'warn' as const, text: t('{amount} of supplier bills overdue', { amount: money(bills.overdue) }) }] : []),
     ...(pending.length ? [{ to: '/documents?status=pending', tone: 'warn' as const, text: pending.length === 1 ? t('1 document still waiting for BTS') : t('{n} documents still waiting for BTS', { n: pending.length }) }] : []),
   ];

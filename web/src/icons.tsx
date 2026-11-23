@@ -35,5 +35,6 @@ export const Icons = {
   wallet: () => <Svg><path d="M3.5 6.5a2 2 0 0 1 2-2h9a1 1 0 0 1 1 1V7" /><rect x="3.5" y="6.5" width="13" height="9.5" rx="1.8" /><path d="M16.5 10h-3a1.5 1.5 0 0 0 0 3h3" /><circle cx="13.6" cy="11.5" r=".4" /></Svg>,
   alert: () => <Svg><path d="M10 3 2.5 16.5h15L10 3Z" /><path d="M10 8.5v3.5M10 14.3v.2" /></Svg>,
   templates: () => <Svg><rect x="2.5" y="3.5" width="15" height="13" rx="2" /><path d="M2.5 7h15" /><path d="m8 10-2 2 2 2M12 10l2 2-2 2" /></Svg>,
+  clock: () => <Svg><circle cx="10" cy="10" r="7" /><path d="M10 6v4.2l2.8 1.8" /></Svg>,
   check: () => <Svg><circle cx="10" cy="10" r="7" /><path d="m7 10 2 2 4-4" /></Svg>,
 };

@@ -65,6 +65,7 @@ const SupplierDetail = page(() => import('./pages/SupplierDetail'), 'SupplierDet
 const ExpenseEditor = page(() => import('./pages/Expenses'), 'ExpenseEditor');
 const PayInvoice = page(() => import('./pages/Pay'), 'PayInvoice');
 const Quotes = page(() => import('./pages/Quotes'), 'Quotes');
+const Work = page(() => import('./pages/Work'), 'Work');
 const QuoteDetail = page(() => import('./pages/Quotes'), 'QuoteDetail');
 const RecurringList = page(() => import('./pages/Quotes'), 'RecurringList');
 const RecurringDetail = page(() => import('./pages/Quotes'), 'RecurringDetail');
@@ -151,6 +152,8 @@ function Layout() {
     return () => document.removeEventListener('keydown', onKey);
   }, [open]);
 
+  // What the business sells: services-only businesses do without stock and the store's products.
+  const sells = me?.sells ?? 'both';
   const groups: Array<[string, NavItem[]]> = [
     [t('Sell'), [
       { to: '/', label: t('Overview'), icon: Icons.overview },
@@ -158,7 +161,8 @@ function Layout() {
       { to: '/shifts', label: t('Cash register'), icon: Icons.register, permission: 'documents.issue' },
       { to: '/documents/new?type=01', label: t('New invoice'), icon: Icons.invoice, permission: 'documents.issue' },
       { to: '/quotes', label: t('Quotes'), icon: Icons.quote, permission: 'documents.issue' },
-      { to: '/orders', label: t('Orders'), icon: Icons.orders, badge: ordersToDo },
+      ...(sells !== 'products' ? [{ to: '/work', label: t('Time and jobs'), icon: Icons.clock, permission: 'documents.issue' as Permission }] : []),
+      ...(sells !== 'services' ? [{ to: '/orders', label: t('Orders'), icon: Icons.orders, badge: ordersToDo }] : []),
     ]],
     [t('Records'), [
       { to: '/documents', label: t('Documents'), icon: Icons.documents },
@@ -166,8 +170,8 @@ function Layout() {
       { to: '/receivables', label: t('Getting paid'), icon: Icons.wallet, permission: 'payments.record' },
       { to: '/expenses', label: t('Expenses'), icon: Icons.expense, permission: 'expenses.manage' },
       { to: '/customers', label: t('Customers'), icon: Icons.customers },
-      { to: '/products', label: t('Products'), icon: Icons.products },
-      { to: '/inventory', label: t('Inventory'), icon: Icons.inventory, permission: 'catalog.manage' },
+      sells === 'services' ? { to: '/products?tab=items', label: t('Services'), icon: Icons.products } : { to: '/products', label: t('Products'), icon: Icons.products },
+      ...(sells !== 'services' ? [{ to: '/inventory', label: t('Inventory'), icon: Icons.inventory, permission: 'catalog.manage' as Permission }] : []),
       { to: '/reports', label: t('Reports'), icon: Icons.reports, permission: 'reports.view' },
     ]],
     [t('Business'), [
@@ -391,6 +395,7 @@ function BusinessApp() {
         <Route path="/expenses/:id" element={<Allowed permission="expenses.manage"><ExpenseEditor /></Allowed>} />
         <Route path="/suppliers/:id" element={<Allowed permission="expenses.manage"><SupplierDetail /></Allowed>} />
         <Route path="/quotes" element={<Allowed permission="documents.issue"><Quotes /></Allowed>} />
+        <Route path="/work" element={<Work />} />
         <Route path="/quotes/new" element={<QuoteEditor />} />
         <Route path="/quotes/:id" element={<Allowed permission="documents.issue"><QuoteDetail /></Allowed>} />
         <Route path="/quotes/:id/edit" element={<QuoteEditor />} />

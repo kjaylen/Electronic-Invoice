@@ -209,7 +209,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: PipelineDeps, opt
 
   // A business never chooses its address (slug): it is made from its name.
   const { environment: _env, slug: _slug, ...businessProperties } = tenantSchema.properties;
-  app.post<{ Body: { business: Omit<NewTenant, 'environment'>; owner: { name: string; email: string; password: string } } }>(
+  app.post<{ Body: { business: Omit<NewTenant, 'environment'>; owner: { name: string; email: string; password: string }; sells?: 'products' | 'services' | 'both' } }>(
     '/signup',
     {
       schema: {
@@ -226,6 +226,8 @@ export function registerAuthRoutes(app: FastifyInstance, deps: PipelineDeps, opt
               additionalProperties: false,
               properties: { name: { type: 'string', minLength: 1, maxLength: 200 }, email: { type: 'string', minLength: 3, maxLength: 254 }, password: passwordField },
             },
+            // What the business sells: goods, services or both (the app adapts).
+            sells: { type: 'string', enum: ['products', 'services', 'both'] },
           },
         },
       },
@@ -239,6 +241,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: PipelineDeps, opt
       if (dup.rows.length) throw new ApiError(409, 'conflict', 'A business with this TIN is already registered. Ask its owner to create an account for you.');
       const { user, slug } = await db.transaction(async (tx) => {
         const tenantId = await createTenant(tx, { ...business, environment: 'test' });
+        if (request.body.sells) await tx.query('update tenants set sells = $2 where id = $1', [tenantId, request.body.sells]);
         const created = await createUser(tx, { tenantId, name: owner.name, email: owner.email, password: owner.password, role: 'owner' });
         await audit(tx, { tenantId, userId: created.id, action: 'business.created', ip: request.ip });
         const s = (await tx.query<{ slug: string }>('select slug from tenants where id = $1', [tenantId])).rows[0]!.slug;

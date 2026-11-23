@@ -6,7 +6,7 @@ import { api, ApiError, type SessionInfo } from '../api';
 import { AuthPage } from '../scene/AuthShell';
 import { forgetBusiness, goToBusiness, recentBusinesses } from '../business';
 import { useT } from '../i18n';
-import { DISTRICTS, ErrorText, Field, Select, useDebounced, usePageTitle } from '../ui';
+import { DISTRICTS, ErrorText, Field, Segmented, Select, useDebounced, usePageTitle } from '../ui';
 
 /** The page's card, in the shared sign-in frame (the living panel is AuthShell's). */
 function Layout(props: { children: React.ReactNode; wide?: boolean }) {
@@ -98,6 +98,7 @@ export function CreateBusiness() {
   const t = useT();
   usePageTitle(t('Create a business'));
   const [form, setForm] = useState({ legalName: '', tradeName: '', tin: '', street: '', city: '', districtCode: '1', telephone: '', email: '', slug: '', name: '', ownerEmail: '', password: '' });
+  const [sells, setSells] = useState<'products' | 'services' | 'both'>('both');
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   const set = (k: keyof typeof form) => (e: { target: { value: string } }) => setForm((f) => ({ ...f, [k]: e.target.value }));
@@ -125,6 +126,7 @@ export function CreateBusiness() {
             contact: { telephone: form.telephone, email: form.email },
           },
           owner: { name: form.name, email: form.ownerEmail || form.email, password: form.password },
+          sells,
         },
       });
       goToBusiness(s.business.slug, '/setup');
@@ -143,6 +145,11 @@ export function CreateBusiness() {
         <p className="lead">{t('Register the business and create the owner account. You add your team afterwards, each with their own login and role.')}</p>
       </div>
       <form className="stack" onSubmit={submit}>
+        <fieldset className="stack">
+          <legend>{t('What do you sell?')}</legend>
+          <Segmented label={t('What do you sell?')} value={sells} onChange={setSells} options={[['products', t('Products')], ['services', t('Services')], ['both', t('Both')]]} />
+          <p className="small muted">{sells === 'services' ? t('For consultants, repairs, salons, clinics and the like: invoice by the hour or the job, without stock.') : sells === 'products' ? t('For shops: stock, the counter and an online store.') : t('Everything: products with stock, and services by the hour or the job.')}</p>
+        </fieldset>
         <fieldset className="stack">
           <legend>{t('Business')}</legend>
           <div className="form-grid">

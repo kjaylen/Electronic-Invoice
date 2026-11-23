@@ -47,7 +47,8 @@ const itemBody = (f: Form) => ({
 
 function ItemForm(props: { initial?: Item; categories: Category[]; onSaved: (i: Item) => void; onCancel: () => void }) {
   const t = useT();
-  const [form, setForm] = useState<Form>(props.initial ? toForm(props.initial) : EMPTY);
+  const { me } = useSession();
+  const [form, setForm] = useState<Form>(props.initial ? toForm(props.initial) : me?.sells === 'services' ? { ...EMPTY, unitCode: 'E48' } : EMPTY);
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   // What the item costs on average (from stock received), for the margin at the price typed.
@@ -168,7 +169,9 @@ function ItemForm(props: { initial?: Item; categories: Category[]; onSaved: (i: 
 export function Items() {
   const t = useT();
   const toast = useToast();
-  const { can } = useSession();
+  const { can, me } = useSession();
+  // A business that sells services: the same list, in its words (no price tags, no barcodes).
+  const services = me?.sells === 'services';
   const manage = can('catalog.manage');
   const [q, setQ] = useState('');
   const query = useDebounced(q, 250);
@@ -227,18 +230,18 @@ export function Items() {
   return (
     <div className="stack">
       <div className="row">
-        <div><h2>{t('All items')}</h2></div>
+        {!services && <div><h2>{t('All items')}</h2></div>}
         <span className="spacer" />
-        <Link className="button secondary" to="/labels" viewTransition>{t('Print labels')}</Link>
+        {!services && <Link className="button secondary" to="/labels" viewTransition>{t('Print labels')}</Link>}
         <button type="button" className="secondary" onClick={() => setPriceList(true)}>{t('Price list')}</button>
         {manage && <a className="button secondary" href={link('/v1/items/export.csv')} download>{t('Export')}</a>}
         {manage && <button type="button" className="secondary" onClick={() => setImporting(true)}>{t('Import')}</button>}
         {manage && <button type="button" className="secondary" onClick={() => setRepricing(true)}>{t('Change prices')}</button>}
-        {manage && <button onClick={() => setEditing('new')}>{t('Add item')}</button>}
+        {manage && <button onClick={() => setEditing('new')}>{services ? t('Add a service') : t('Add item')}</button>}
       </div>
-      <p className="muted small">{t('Everything you sell at the counter and on invoices, including each variant of your products. Star an item to make it a quick button at the counter.')}</p>
+      {!services && <p className="muted small">{t('Everything you sell at the counter and on invoices, including each variant of your products. Star an item to make it a quick button at the counter.')}</p>}
       <div className="row items-filter">
-        <input type="search" placeholder={t('Search by name, code or barcode')} value={q} onChange={(e) => setQ(e.target.value)} aria-label={t('Search items')} />
+        <input type="search" placeholder={services ? t('Search services') : t('Search by name, code or barcode')} value={q} onChange={(e) => setQ(e.target.value)} aria-label={t('Search items')} />
         {categories.length > 0 && (
           <Select aria-label={t('Category')} value={category} onChange={(e) => setCategory(e.target.value)}>
             <option value="">{t('Every category')}</option>

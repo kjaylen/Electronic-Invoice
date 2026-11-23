@@ -51,6 +51,7 @@ import { type GatewayExtras, gatewayOptions, registerPaymentAccountRoutes, regis
 import { registerPayRoutes, registerReceivableRoutes } from './receivables.ts';
 import { registerBillPayBankRoutes, registerBillPaySettingsRoutes } from './billpay.ts';
 import { registerPublicQuoteRoutes, registerQuoteRoutes } from './quotes.ts';
+import { registerWorkRoutes } from './work.ts';
 import { registerRecurringRoutes } from './recurring.ts';
 import { registerExpenseRoutes } from './expenses.ts';
 import { registerAccountingRoutes } from './accounting.ts';
@@ -354,6 +355,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     registerReceivableRoutes(tenant, deps, ctx, { ...(options.ekyash && { ekyash: options.ekyash }) });
     registerBillPaySettingsRoutes(tenant, deps, ctx);
     registerQuoteRoutes(tenant, deps, ctx, { ...(options.ekyash && { ekyash: options.ekyash }) });
+    registerWorkRoutes(tenant, deps, ctx, { ...(options.ekyash && { ekyash: options.ekyash }) });
     registerRecurringRoutes(tenant, deps, ctx, { ...(options.ekyash && { ekyash: options.ekyash }) });
     registerExpenseRoutes(tenant, deps, ctx);
     registerAccountingRoutes(tenant, deps);

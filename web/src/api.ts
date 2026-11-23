@@ -138,6 +138,8 @@ export interface Me {
   tradeName: string | null;
   tin: string;
   environment: 'test' | 'production';
+  /** What the business sells: the app leaves out what does not apply. */
+  sells?: 'products' | 'services' | 'both';
   certificate: { id: string; tin: string; validFrom: string; validTo: string; daysLeft: number; status: string } | null;
   contingency: { active: boolean; since: string | null; reason: string | null; queued: number };
   /** Notices from the platform (maintenance, a BTS outage, news). */
@@ -328,6 +330,7 @@ export interface BusinessProfile {
   requireTwoFactor: boolean;
   /** The morning summary email to owners and admins. */
   dailySummary?: boolean;
+  sells?: 'products' | 'services' | 'both';
 }
 
 export interface Summary {

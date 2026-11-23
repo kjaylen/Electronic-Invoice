@@ -2066,3 +2066,9 @@ button.cat-tag:hover:not(:disabled) { background: var(--brand); border-color: va
 .danger-zone h2 { color: var(--coral-ink); }
 /* Stat cards written with spans (the console): one line each. */
 .card.stat > span { display: block; }
+/* Time and jobs */
+.work-numbers { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.timer { font-variant-numeric: tabular-nums; }
+.timer.running { border-color: var(--brand-line); color: var(--brand-ink); background: var(--brand-soft); }
+.work-pick { max-height: 18rem; overflow-y: auto; }
+.work-pick label { gap: 0.6rem; align-items: baseline; }

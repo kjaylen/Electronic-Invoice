@@ -28,9 +28,12 @@ export const UNITS: Array<[string, string]> = [
   ['GLI', 'Imperial gallon'],
   ['MTR', 'Metre'],
   ['FOT', 'Foot'],
+  ['E48', 'Service'],
   ['HUR', 'Hour'],
   ['DAY', 'Day'],
+  ['WEE', 'Week'],
   ['MON', 'Month'],
+  ['ANN', 'Year'],
 ];
 
 export const GST_CATEGORIES: Array<[string, string]> = [

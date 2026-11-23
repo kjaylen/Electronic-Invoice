@@ -265,6 +265,29 @@ function SecurityRules({ profile, onSaved }: { profile: BusinessProfile; onSaved
   );
 }
 
+/** What the business sells: the app leaves out what does not apply. */
+function SellsCard({ profile, onSaved }: { profile: BusinessProfile; onSaved: () => void }) {
+  const t = useT();
+  const toast = useToast();
+  const { refreshMe } = useSession();
+  const save = useAction(async (sells: 'products' | 'services' | 'both') => {
+    await api('/v1/business/sells', { method: 'PUT', body: { sells } });
+    await refreshMe();
+    toast(t('Saved'));
+    onSaved();
+  });
+  return (
+    <section className="card stack">
+      <div>
+        <h2>{t('What you sell')}</h2>
+        <p className="small muted">{t('Services: no stock or online store products; time and jobs to invoice instead. You can change it any time; nothing is lost.')}</p>
+      </div>
+      <Segmented label={t('What you sell')} value={profile.sells ?? 'both'} onChange={(v) => void save.run(v)} options={[['products', t('Products')], ['services', t('Services')], ['both', t('Both')]]} />
+      <ErrorText error={save.error} />
+    </section>
+  );
+}
+
 /** The morning email to owners and admins: yesterday at a glance. */
 function DailySummaryCard({ profile, onSaved }: { profile: BusinessProfile; onSaved: () => void }) {
   const t = useT();
@@ -408,6 +431,7 @@ function BusinessTab() {
         )}
         {profile.environment === 'test' && <p className="small muted">{t('Moving to production is done by our team once BTS has approved your business.')}</p>}
       </section>
+      {editable && <SellsCard profile={profile} onSaved={() => void load()} />}
       {editable && <DailySummaryCard profile={profile} onSaved={() => void load()} />}
       {editable && <LoyaltyCard />}
       {editable && <SecurityRules profile={profile} onSaved={() => void load()} />}

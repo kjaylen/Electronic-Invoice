@@ -27,7 +27,7 @@ const longDate = (iso: string) => new Date(`${iso}T12:00:00Z`).toLocaleDateStrin
 export function CustomerDetail() {
   const t = useT();
   const { id } = useParams();
-  const { can } = useSession();
+  const { can, me } = useSession();
   const [s, setS] = useState<Summary | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [statement, setStatement] = useState(false);
@@ -63,6 +63,7 @@ export function CustomerDetail() {
         </div>
         <span className="spacer" />
         <div className="row">
+          {can('documents.issue') && me?.sells !== 'products' && <Link className="button secondary" to={`/work?customer=${c.id}`} viewTransition>{t('Log work')}</Link>}
           {can('documents.issue') && <Link className="button" to={`/documents/new?type=01&customer=${c.id}`} viewTransition>{t('New invoice')}</Link>}
           {can('payments.record') && <button type="button" className="secondary" onClick={() => setStatement(true)}>{t('Statement')}</button>}
           <Link className="button secondary" to={`/documents?customerId=${c.id}`} viewTransition>{t('All documents')}</Link>
