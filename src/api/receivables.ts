@@ -56,6 +56,8 @@ export interface ReceivableSettings {
   payOnline: boolean;
   /** How to pay otherwise (bank details, where to bring a cheque): on statements and reminders. */
   instructions: string;
+  /** Email each customer who owes their statement at the start of every month. */
+  monthlyStatements: boolean;
 }
 
 export const DEFAULT_OFFSETS = [-3, 3, 14, 30];
@@ -66,6 +68,7 @@ export async function receivableSettings(db: Queryable, tenantId: string): Promi
     reminders: { enabled: Boolean(raw.reminders?.enabled), offsets: raw.reminders?.offsets?.length ? [...raw.reminders.offsets].sort((a, b) => a - b) : DEFAULT_OFFSETS },
     payOnline: raw.payOnline ?? true,
     instructions: raw.instructions ?? '',
+    monthlyStatements: raw.monthlyStatements ?? false,
   };
 }
 
@@ -192,7 +195,83 @@ export async function runReminders(deps: PipelineDeps, ctx: ServerContext, optio
       }
     }
   }
+  const statements = await runMonthlyStatements(deps, ctx, options);
+  result.sent += statements.sent;
+  result.failed += statements.failed;
   return result;
+}
+
+/**
+ * Monthly statements: in the first week of each month, every customer who owes (with an email)
+ * gets their statement, once that month (claimed in notifications_sent first).
+ */
+export async function runMonthlyStatements(deps: PipelineDeps, ctx: ServerContext, options: { perBusiness?: number; ekyash?: { sandboxUrl?: string; liveUrl?: string }; today?: string } = {}): Promise<{ sent: number; failed: number }> {
+  const result = { sent: 0, failed: 0 };
+  if (!ctx.mailConfigured) return result;
+  const today = options.today ?? belizeToday();
+  if (Number(today.slice(8, 10)) > 7) return result;
+  const month = today.slice(0, 7);
+  const tenants = (await deps.db.query<{ id: string }>("select id from tenants where receivable_settings #>> '{monthlyStatements}' = 'true'")).rows;
+  for (const t of tenants) {
+    let budget = options.perBusiness ?? 100;
+    const owing = new Map<string, string>();
+    for (const r of await openReceivables(deps.db, t.id)) {
+      if (r.balanceCents > 0n && r.customer.email && r.customer.key !== 'walk-in') owing.set(r.customer.key, r.customer.email);
+    }
+    for (const [customerKey, email] of owing) {
+      if (budget <= 0) break;
+      const key = `statement:${customerKey}:${month}`;
+      const claimed = await deps.db.query('insert into notifications_sent (key, tenant_id) values ($1, $2) on conflict do nothing returning key', [key, t.id]);
+      if (!claimed.rows.length) continue;
+      budget--;
+      try {
+        await sendStatement(deps, ctx, options.ekyash ? { ekyash: options.ekyash } : {}, t.id, customerKey, email, null);
+        result.sent++;
+      } catch {
+        await deps.db.query('delete from notifications_sent where key = $1', [key]);
+        result.failed++;
+      }
+    }
+  }
+  return result;
+}
+
+/** Email a customer their statement (what they owe, pay links, their account page), with the PDF. */
+export async function sendStatement(deps: PipelineDeps, ctx: ServerContext, extras: { ekyash?: { sandboxUrl?: string; liveUrl?: string } }, tenantId: string, customerKey: string, to: string, userId: string | null): Promise<void> {
+  const db = deps.db;
+  let s;
+  try {
+    s = await statement(db, tenantId, customerKey);
+  } catch (e) {
+    if (e instanceof ReceivableError) throw new ApiError(404, 'not_found', e.message);
+    throw e;
+  }
+  const settings = await receivableSettings(db, tenantId);
+  const biz = await businessContext(db, tenantId);
+  const provider = ctx.publicUrl ? await invoiceProvider(db, tenantId, settings, extras) : null;
+  const lang = await emailLanguage(db, tenantId);
+  const open = [];
+  for (const r of s.open.filter((x) => x.balanceCents > 0n).slice(0, 30)) {
+    const link = provider ? (await createShareLink(db, ctx, tenantId, r.documentId, userId)).payUrl : null;
+    open.push({
+      label: `${PHRASES[lang].receivable(r.type)} ${r.number}`, type: PHRASES[lang].receivable(r.type), number: r.number, issue_date: r.issueDate, due_date: r.dueDate, days_overdue: r.daysOverdue,
+      total: r.total, paid: r.paid, credited: r.credited, balance: r.balance, pay_url: link,
+    });
+  }
+  const mail = await renderEmail(db, tenantId, 'email.statement', {
+    business: biz, customer: { name: s.customer.name, tin: s.customer.tin ?? null, email: to },
+    statement: {
+      as_of: s.asOf, open, total_due: s.totalDue, overdue: s.overdue, note: settings.instructions.trim() || null,
+      // Their account page, for a saved customer: everything owed and paid, any time.
+      account_url: ctx.publicUrl && customerKey.startsWith('c:') ? (await createAccountLink(db, ctx, tenantId, customerKey.slice(2), userId).catch(() => null))?.url ?? null : null,
+    },
+  }, { publicUrl: ctx.publicUrl, lang });
+  const pdf = await statementPdf(db, tenantId, s, settings);
+  await ctx.mailer.send({
+    to, replyTo: biz.email, subject: mail.subject, text: mail.text, html: mail.html,
+    attachments: [{ filename: `statement-${s.asOf}.pdf`, content: pdf, contentType: 'application/pdf' }],
+  });
+  await audit(db, { tenantId, userId, action: 'statement.sent', target: s.customer.name, details: { to, ...(userId ? {} : { automatic: true }) } });
 }
 
 /** The latest reminder step an invoice has reached today (days from its due date), or null. Steps on or before the issue day never count. */
@@ -380,32 +459,7 @@ export function registerReceivableRoutes(app: FastifyInstance, deps: PipelineDep
       const to = request.body.to ?? s.customer.email;
       if (!to) throw new ApiError(422, 'no_email', 'This customer has no email address; enter one');
       if (await overLimit(db, `statement|${request.tenantId}|${request.body.customer}`, 10, 24 * 3600_000)) throw new ApiError(429, 'too_many_statements', 'Enough statements for this customer today');
-      const settings = await receivableSettings(db, request.tenantId);
-      const biz = await businessContext(db, request.tenantId);
-      const provider = ctx.publicUrl ? await invoiceProvider(db, request.tenantId, settings, extras) : null;
-      const lang = await emailLanguage(db, request.tenantId);
-      const open = [];
-      for (const r of s.open.filter((x) => x.balanceCents > 0n).slice(0, 30)) {
-        const link = provider ? (await createShareLink(db, ctx, request.tenantId, r.documentId, request.userId || null)).payUrl : null;
-        open.push({
-          label: `${PHRASES[lang].receivable(r.type)} ${r.number}`, type: PHRASES[lang].receivable(r.type), number: r.number, issue_date: r.issueDate, due_date: r.dueDate, days_overdue: r.daysOverdue,
-          total: r.total, paid: r.paid, credited: r.credited, balance: r.balance, pay_url: link,
-        });
-      }
-      const mail = await renderEmail(db, request.tenantId, 'email.statement', {
-        business: biz, customer: { name: s.customer.name, tin: s.customer.tin ?? null, email: to },
-        statement: {
-          as_of: s.asOf, open, total_due: s.totalDue, overdue: s.overdue, note: settings.instructions.trim() || null,
-          // Their account page, for a saved customer: everything owed and paid, any time.
-          account_url: ctx.publicUrl && request.body.customer.startsWith('c:') ? (await createAccountLink(db, ctx, request.tenantId, request.body.customer.slice(2), request.userId || null).catch(() => null))?.url ?? null : null,
-        },
-      }, { publicUrl: ctx.publicUrl, lang });
-      const pdf = await statementPdf(db, request.tenantId, s, settings);
-      await ctx.mailer.send({
-        to, replyTo: biz.email, subject: mail.subject, text: mail.text, html: mail.html,
-        attachments: [{ filename: `statement-${s.asOf}.pdf`, content: pdf, contentType: 'application/pdf' }],
-      });
-      await audit(db, { tenantId: request.tenantId, userId: request.userId || null, action: 'statement.sent', target: s.customer.name, details: { to }, ip: request.ip });
+      await sendStatement(deps, ctx, extras, request.tenantId, request.body.customer, to, request.userId || null);
       return { sent: true, to };
     },
   );
@@ -417,7 +471,7 @@ export function registerReceivableRoutes(app: FastifyInstance, deps: PipelineDep
     return { ...settings, onlineProvider: providers[0] ?? null, onlineProviders: providers };
   });
 
-  app.put<{ Body: ReceivableSettings }>(
+  app.put<{ Body: Omit<ReceivableSettings, 'monthlyStatements'> & { monthlyStatements?: boolean } }>(
     '/receivable-settings',
     {
       schema: {
@@ -432,6 +486,7 @@ export function registerReceivableRoutes(app: FastifyInstance, deps: PipelineDep
             },
             payOnline: { type: 'boolean' },
             instructions: { type: 'string', maxLength: 1000 },
+            monthlyStatements: { type: 'boolean' },
           },
         },
       },
@@ -439,9 +494,14 @@ export function registerReceivableRoutes(app: FastifyInstance, deps: PipelineDep
     async (request) => {
       requirePermission(request, 'business.manage');
       const b = request.body;
-      const value: ReceivableSettings = { reminders: { enabled: b.reminders.enabled, offsets: [...b.reminders.offsets].sort((x, y) => x - y) }, payOnline: b.payOnline, instructions: b.instructions.trim() };
+      const before = await receivableSettings(db, request.tenantId);
+      const value: ReceivableSettings = {
+        reminders: { enabled: b.reminders.enabled, offsets: [...b.reminders.offsets].sort((x, y) => x - y) }, payOnline: b.payOnline, instructions: b.instructions.trim(),
+        // Left out: as it was.
+        monthlyStatements: b.monthlyStatements ?? before.monthlyStatements,
+      };
       await db.query('update tenants set receivable_settings = $2 where id = $1', [request.tenantId, JSON.stringify(value)]);
-      await audit(db, { tenantId: request.tenantId, userId: request.userId || null, action: 'receivables.settings_changed', details: { reminders: value.reminders.enabled, offsets: value.reminders.offsets, payOnline: value.payOnline }, ip: request.ip });
+      await audit(db, { tenantId: request.tenantId, userId: request.userId || null, action: 'receivables.settings_changed', details: { reminders: value.reminders.enabled, offsets: value.reminders.offsets, payOnline: value.payOnline, monthlyStatements: value.monthlyStatements }, ip: request.ip });
       const providers = await invoiceProviders(db, request.tenantId, { ...value, payOnline: true }, extras);
       return { ...value, onlineProvider: providers[0] ?? null, onlineProviders: providers };
     },

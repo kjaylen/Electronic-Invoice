@@ -45,6 +45,7 @@ interface StockRow {
   average_cost: string | null;
   last_movement: Date | string | null;
   last_sold?: Date | string | null;
+  waiting?: number;
 }
 
 function stockJson(r: StockRow) {
@@ -67,12 +68,15 @@ function stockJson(r: StockRow) {
     value: stock !== null && stock > 0 && cost !== null ? formatCents(roundToCents(mul(parseDecimal(r.stock!), parseDecimal(r.average_cost!)))) : '0.00',
     lastMovement: r.last_movement ? new Date(r.last_movement).toISOString() : null,
     lastSold: r.last_sold ? new Date(r.last_sold).toISOString() : null,
+    /** Store buyers waiting to be told it is back. */
+    waiting: r.waiting ?? 0,
   };
 }
 
 const STOCK_COLUMNS = `i.id, i.name, i.seller_code, i.barcode, i.unit_code, i.unit_price::text as unit_price, i.product_id, i.stock_quantity::text as stock,
   i.low_stock::text as low_stock, i.average_cost::text as average_cost, (select max(m.created_at) from stock_movements m where m.item_id = i.id) as last_movement,
-  (select max(m.created_at) from stock_movements m where m.item_id = i.id and m.reason in ('sale', 'order')) as last_sold`;
+  (select max(m.created_at) from stock_movements m where m.item_id = i.id and m.reason in ('sale', 'order')) as last_sold,
+  (select count(*)::int from stock_alerts a where a.item_id = i.id and a.notified_at is null) as waiting`;
 
 type Filter = 'tracked' | 'low' | 'out' | 'untracked' | 'slow' | 'all';
 /** Not selling: nothing sold or ordered in this many days (for stock held at least that long). */

@@ -24,6 +24,7 @@ interface StockItem {
   value: string;
   lastMovement: string | null;
   lastSold?: string | null;
+  waiting?: number;
 }
 
 interface StockTotals { tracked: number; untracked: number; low: number; out: number; value: string }
@@ -122,7 +123,7 @@ export function Inventory() {
                         : <td data-label={t('Low at')} className="right">{qtyText(s.lowStock)}</td>}
                       <td data-label={t('Average cost')} className="right">{s.averageCost ? money(s.averageCost) : '—'}</td>
                       <td data-label={t('Value')} className="right">{toCents(s.value) > 0n ? money(s.value) : '—'}</td>
-                      <td data-label={t('Status')}><StockBadge state={s.state} /></td>
+                      <td data-label={t('Status')}><StockBadge state={s.state} />{(s.waiting ?? 0) > 0 && <span className="small waiting-note">{s.waiting === 1 ? t('1 buyer waiting') : t('{n} buyers waiting', { n: s.waiting ?? 0 })}</span>}</td>
                     </tr>
                   ))}
                 </tbody>

@@ -89,19 +89,25 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
     };
   });
 
-  app.get<{ Params: { slug: string }; Querystring: { q?: string } }>(
+  app.get<{ Params: { slug: string }; Querystring: { q?: string; category?: string } }>(
     '/:slug/products',
-    { schema: { params: { type: 'object', required: ['slug'], properties: slugParams }, querystring: { type: 'object', additionalProperties: false, properties: { q: { type: 'string', maxLength: 100 } } } } },
+    { schema: { params: { type: 'object', required: ['slug'], properties: slugParams }, querystring: { type: 'object', additionalProperties: false, properties: { q: { type: 'string', maxLength: 100 }, category: { type: 'string', maxLength: 80 } } } } },
     async (request) => {
       const s = await store(request);
       const params: unknown[] = [s.tenantId];
       let where = `p.tenant_id = $1 and p.status = 'active'`;
       if (request.query.q?.trim()) {
         params.push(`%${request.query.q.trim().replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
-        where += ` and (p.title ilike $2 or p.description ilike $2)`;
+        where += ` and (p.title ilike $${params.length} or p.description ilike $${params.length})`;
       }
-      const rows = (await db.query<{ id: string; handle: string; title: string; image_id: string | null; prices: Array<{ price: string; gst: 'S' | 'Z' | 'E'; stock: number | null }> | null }>(
-        `select p.id, p.handle, p.title,
+      // A product's category is its variants' (the items' categories).
+      const category = `(select min(i.category) from items i where i.product_id = p.id and i.archived_at is null and i.category is not null)`;
+      if (request.query.category) {
+        params.push(request.query.category);
+        where += ` and lower(${category}) = lower($${params.length})`;
+      }
+      const rows = (await db.query<{ id: string; handle: string; title: string; image_id: string | null; category: string | null; prices: Array<{ price: string; gst: 'S' | 'Z' | 'E'; stock: number | null }> | null }>(
+        `select p.id, p.handle, p.title, ${category} as category,
            (select g.id from product_images g where g.product_id = p.id order by g.position, g.created_at limit 1) as image_id,
            (select json_agg(json_build_object('price', i.unit_price::text, 'gst', i.gst_category, 'stock', i.stock_quantity::float8)) from items i where i.product_id = p.id and i.archived_at is null) as prices
          from products p where ${where} order by p.created_at desc limit 500`,
@@ -119,6 +125,7 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
             price: min.toFixed(2),
             priceVaries: min !== max,
             soldOut: r.prices!.every((x) => x.stock !== null && x.stock <= 0),
+            category: r.category,
           };
         }),
       };

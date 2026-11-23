@@ -268,6 +268,8 @@ export interface ReceivableSettingsInfo {
   reminders: { enabled: boolean; offsets: number[] };
   payOnline: boolean;
   instructions: string;
+  /** Statements emailed to customers who owe, at the start of every month. */
+  monthlyStatements?: boolean;
   onlineProvider: string | null;
   onlineProviders?: string[];
 }

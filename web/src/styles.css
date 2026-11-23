@@ -1859,3 +1859,5 @@ button.cat-tag:hover:not(:disabled) { background: var(--brand); border-color: va
 /* Loyalty points at the counter. */
 .tender.points { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; font-size: 0.9rem; }
 .tender.points button.secondary { min-height: 0; padding: 0.3rem 0.75rem; font-size: 0.85rem; }
+.waiting-note { display: block; color: var(--brand-ink); font-weight: 600; margin-top: 0.2rem; }
+.shop-categories { margin: 0.6rem 0 0.4rem; }

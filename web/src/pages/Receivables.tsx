@@ -285,7 +285,7 @@ function ReceivableSettingsForm({ onSaved }: { onSaved: () => void }) {
     setBusy(true);
     setError(null);
     try {
-      const saved = await api<ReceivableSettingsInfo>('/v1/receivable-settings', { method: 'PUT', body: { reminders: s.reminders, payOnline: s.payOnline, instructions: s.instructions } });
+      const saved = await api<ReceivableSettingsInfo>('/v1/receivable-settings', { method: 'PUT', body: { reminders: s.reminders, payOnline: s.payOnline, instructions: s.instructions, monthlyStatements: Boolean(s.monthlyStatements) } });
       setS(saved);
       toast(t('Saved'));
       onSaved();
@@ -314,6 +314,7 @@ function ReceivableSettingsForm({ onSaved }: { onSaved: () => void }) {
             ))}
           </div>
         </div>
+        <label className="row"><input type="checkbox" checked={Boolean(s.monthlyStatements)} onChange={(e) => setS({ ...s, monthlyStatements: e.target.checked })} /> {t('Email each customer who owes their statement at the start of every month')}</label>
       </section>
       <section className="card stack">
         <div>

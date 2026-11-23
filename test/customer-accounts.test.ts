@@ -7,6 +7,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { LightMyRequestResponse } from 'fastify';
 import { buildApp } from '../src/api/app.ts';
+import { runMonthlyStatements } from '../src/api/receivables.ts';
 import { createUser } from '../src/db/users.ts';
 import { memoryMailer } from '../src/mail/mailer.ts';
 import { SUBMIT_PATHS } from '../src/engine/transport.ts';
@@ -87,6 +88,49 @@ test('account links: what a customer owes, their documents, their statement', as
     assert.equal(revoked.revoked, 3);
     assert.equal((await app.inject({ method: 'GET', url: `/v1/account/${token}` })).statusCode, 404);
     assert.equal((await app.inject({ method: 'GET', url: '/v1/account/not-a-token' })).statusCode, 404);
+  } finally {
+    await app.close();
+    await f.close();
+  }
+});
+
+test('monthly statements: each customer who owes, once a month, in its first week', async () => {
+  const f = await setupPipeline();
+  f.bts.script(SUBMIT_PATHS['01'], AUTHORIZED);
+  const mailer = memoryMailer();
+  const app = await buildApp({ pipeline: f.deps, cookieSecure: true, mailer, publicUrl: 'https://app.example.test' });
+  try {
+    const slug = (await f.db.query<{ slug: string }>('select slug from tenants where id = $1', [f.tenantA])).rows[0]!.slug;
+    await createUser(f.db, { tenantId: f.tenantA, name: 'Olive', email: 'olive@biz.example', role: 'owner', password: PASSWORD });
+    const login = await app.inject({ method: 'POST', url: '/v1/auth/login', headers: CSRF, payload: { business: slug, login: 'olive@biz.example', password: PASSWORD } });
+    const owner = { ...CSRF, cookie: cookieFrom(login), 'x-business': slug };
+    const address = { street: '1 Main St', city: 'Belize City', districtCode: '1' };
+    const shop = (await app.inject({ method: 'POST', url: '/v1/customers', headers: owner, payload: { name: 'Corner Shop', tin: '111222', address, contact: { email: 'accounts@corner.example' } } })).json() as { id: string };
+    const quiet = (await app.inject({ method: 'POST', url: '/v1/customers', headers: owner, payload: { name: 'No Email Ltd', tin: '555666', address } })).json() as { id: string };
+    for (const c of [shop.id, quiet.id]) {
+      const r = await app.inject({ method: 'POST', url: '/v1/documents', headers: owner, payload: { type: '01', customerId: c, lines: [{ description: 'Rice', quantity: '1', unitCode: 'H87', unitPrice: '100.00', gstCategory: 'Z' }], payment: { meansCode: '30', dueDate: '2099-12-31' } } });
+      assert.equal(r.statusCode, 201, r.body);
+    }
+    const ctx = { mailer, mailConfigured: true, publicUrl: 'https://app.example.test', cookieSecure: true, allowSignup: true };
+    // Off by default.
+    assert.deepEqual(await runMonthlyStatements(f.deps, ctx as never, { today: '2026-12-01' }), { sent: 0, failed: 0 });
+    const settings = (await app.inject({ method: 'GET', url: '/v1/receivable-settings', headers: owner })).json();
+    const on = await app.inject({ method: 'PUT', url: '/v1/receivable-settings', headers: owner, payload: { reminders: settings.reminders, payOnline: settings.payOnline, instructions: 'Belize Bank 000-111', monthlyStatements: true } });
+    assert.equal(on.json().monthlyStatements, true);
+    // A setting saved without it keeps it.
+    const kept = await app.inject({ method: 'PUT', url: '/v1/receivable-settings', headers: owner, payload: { reminders: settings.reminders, payOnline: settings.payOnline, instructions: 'Belize Bank 000-111' } });
+    assert.equal(kept.json().monthlyStatements, true);
+
+    // Mid-month: nothing. The 1st: one statement (the customer without an email is skipped). Again: nothing.
+    assert.deepEqual(await runMonthlyStatements(f.deps, ctx as never, { today: '2026-12-15' }), { sent: 0, failed: 0 });
+    assert.deepEqual(await runMonthlyStatements(f.deps, ctx as never, { today: '2026-12-01' }), { sent: 1, failed: 0 });
+    const mail = mailer.sent.at(-1)!;
+    assert.equal(mail.to, 'accounts@corner.example');
+    assert.match(mail.subject, /Statement of account/);
+    assert.equal(mail.attachments?.[0]?.contentType, 'application/pdf');
+    assert.deepEqual(await runMonthlyStatements(f.deps, ctx as never, { today: '2026-12-03' }), { sent: 0, failed: 0 }, 'once a month');
+    // Next month, again.
+    assert.deepEqual(await runMonthlyStatements(f.deps, ctx as never, { today: '2027-01-02' }), { sent: 1, failed: 0 });
   } finally {
     await app.close();
     await f.close();

@@ -2642,4 +2642,8 @@ export const ES: Record<string, string> = {
   "On its way": "En camino",
   "We will email {email} once, when it is back.": "Le escribiremos a {email} una sola vez, cuando vuelva a estar disponible.",
   "Email me when it is back": "Avísenme cuando vuelva",
+  "1 buyer waiting": "1 comprador esperando",
+  "{n} buyers waiting": "{n} compradores esperando",
+  "Email each customer who owes their statement at the start of every month": "Enviar por correo a cada cliente que debe su estado de cuenta al inicio de cada mes",
+  "Everything": "Todo",
 };

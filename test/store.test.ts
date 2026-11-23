@@ -540,6 +540,9 @@ test('back in stock: buyers waiting on a sold-out variant are emailed once when 
     assert.equal((await c.app.inject({ method: 'POST', url: `/v1/store/${c.slug}/products/nope/notify`, payload: { variantId: small!.id, email: 'a@b.example' } })).statusCode, 404);
     const waiting = (await c.f.db.query<{ n: number }>('select count(*)::int as n from stock_alerts where notified_at is null')).rows[0]!.n;
     assert.equal(waiting, 1);
+    // The stock list shows who is waiting.
+    const stock = (await c.app.inject({ method: 'GET', url: '/v1/inventory?q=TEE-S', headers: c.owner })).json().data as Array<{ itemId: string; waiting: number }>;
+    assert.equal(stock.find((x) => x.itemId === small!.id)?.waiting, 1);
 
     // Still sold out: nothing. Restocked: one email, then never again.
     assert.deepEqual(await runStockAlerts(c.f.db, { mailer: c.mail, publicUrl: 'https://app.example.test' }), { sent: 0 });
@@ -551,4 +554,22 @@ test('back in stock: buyers waiting on a sold-out variant are emailed once when 
     assert.ok(mail.text.includes(`https://app.example.test/${c.slug}/shop/products/${p.handle}`));
     assert.match(mail.text, /BZ\$45\.00/);
     assert.deepEqual(await runStockAlerts(c.f.db, { mailer: c.mail, publicUrl: 'https://app.example.test' }), { sent: 0 }, 'once');
+  }));
+
+test('store categories: products carry their items category, and the list filters by it', () =>
+  withStore(async (c) => {
+    await openStore(c);
+    const tee = await createProduct(c);
+    const mug = await createProduct(c, { ...TEE, title: 'Clay mug', variants: [{ price: '20.00', gstCategory: 'S', sellerCode: 'MUG' }] });
+    await createProduct(c, { ...TEE, title: 'Gift card', variants: [{ price: '50.00', gstCategory: 'S', sellerCode: 'GIFT' }] });
+    await c.f.db.query("update items set category = 'Clothing' where product_id = $1", [tee.id]);
+    await c.f.db.query("update items set category = 'Kitchen' where product_id = $1", [mug.id]);
+    const all = (await c.app.inject({ method: 'GET', url: `/v1/store/${c.slug}/products` })).json().data as Array<{ title: string; category: string | null }>;
+    assert.equal(all.length, 3);
+    assert.equal(all.find((x) => x.title === 'Clay mug')?.category, 'Kitchen');
+    assert.equal(all.find((x) => x.title === 'Gift card')?.category, null);
+    const kitchen = (await c.app.inject({ method: 'GET', url: `/v1/store/${c.slug}/products?category=kitchen` })).json().data as Array<{ title: string }>;
+    assert.deepEqual(kitchen.map((x) => x.title), ['Clay mug']);
+    const both = (await c.app.inject({ method: 'GET', url: `/v1/store/${c.slug}/products?category=Clothing&q=island` })).json().data as Array<{ title: string }>;
+    assert.deepEqual(both.map((x) => x.title), ['Island T-shirt']);
   }));

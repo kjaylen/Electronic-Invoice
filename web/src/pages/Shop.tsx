@@ -41,6 +41,7 @@ interface ProductCard {
   price: string;
   priceVaries: boolean;
   soldOut: boolean;
+  category?: string | null;
 }
 
 interface ProductPage {
@@ -210,6 +211,10 @@ export function ShopHome() {
   usePageTitle(info.tagline ? info.tagline : '', info.name);
   const [products, setProducts] = useState<ProductCard[] | null>(null);
   const [q, setQ] = useState('');
+  // Browse by category (the items' categories), when the store uses them.
+  const [category, setCategory] = useState<string | null>(null);
+  const categories = [...new Set((products ?? []).map((p) => p.category).filter((c): c is string => Boolean(c)))].sort((a, b) => a.localeCompare(b));
+  const shown = (products ?? []).filter((p) => !category || p.category === category);
   useEffect(() => {
     const timer = setTimeout(() => void api<{ data: ProductCard[] }>(shopApi(`/products${q.trim() ? `?q=${encodeURIComponent(q.trim())}` : ''}`)).then((r) => setProducts(r.data)), q ? 250 : 0);
     return () => clearTimeout(timer);
@@ -226,11 +231,17 @@ export function ShopHome() {
       </div>
       <ThemeSection html={info.theme?.home ?? ''} className="shop-home-section" />
       <input type="search" className="shop-search" placeholder={t('Search the store')} aria-label={t('Search the store')} value={q} onChange={(e) => setQ(e.target.value)} />
-      {products === null ? <div className="shop-grid">{[0, 1, 2, 3].map((i) => <div key={i} className="skeleton" style={{ height: '16rem' }} />)}</div> : products.length === 0 ? (
+      {categories.length > 1 && (
+        <div className="quick-tabs shop-categories" role="group" aria-label={t('Categories')}>
+          <button type="button" aria-pressed={category === null} onClick={() => setCategory(null)}>{t('Everything')}</button>
+          {categories.map((c) => <button key={c} type="button" aria-pressed={category === c} onClick={() => setCategory(c)}>{c}</button>)}
+        </div>
+      )}
+      {products === null ? <div className="shop-grid">{[0, 1, 2, 3].map((i) => <div key={i} className="skeleton" style={{ height: '16rem' }} />)}</div> : shown.length === 0 ? (
         <div className="shop-empty"><p className="muted">{q ? t('Nothing matches your search.') : t('No products yet. Check back soon.')}</p></div>
       ) : (
         <div className="shop-grid">
-          {products.map((p) => (
+          {shown.map((p) => (
             <Link key={p.handle} to={`/shop/products/${p.handle}`} className={`shop-card ${p.soldOut ? 'sold-out' : ''}`} viewTransition>
               <div className="shop-thumb">{p.imageId ? <img src={imageUrl(p.imageId)} alt="" loading="lazy" /> : <span aria-hidden="true">◇</span>}{p.soldOut && <span className="sold-tag">{t('Sold out')}</span>}</div>
               <span className="shop-card-title">{p.title}</span>
