@@ -11,7 +11,7 @@ import { assignableRoles, ROLE_DESCRIPTION, ROLE_LABEL } from '../permissions';
 import { useSession } from '../session';
 import { useToast } from '../toast';
 import { CodeForm, RecoveryCodes, SetupSteps, type TwoFactorSetupInfo } from '../twofactor';
-import { DISTRICTS, ErrorText, Field, Modal, Segmented, usePageTitle } from '../ui';
+import { DISTRICTS, ErrorText, Field, Modal, Segmented, Select, usePageTitle } from '../ui';
 import { PlanTab, UpgradeNotice } from './Billing';
 import { WebhooksPanel } from './Webhooks';
 import { IntegrationsTab } from './Integrations';
@@ -314,7 +314,7 @@ function BusinessTab() {
           <div className="form-grid">
             <Field label={t('Street')}><input required value={form.street} onChange={set('street')} /></Field>
             <Field label={t('City or town')}><input required value={form.city} onChange={set('city')} /></Field>
-            <Field label={t('District')}><select value={form.districtCode} onChange={set('districtCode')}>{DISTRICTS.map(([c, n]) => <option key={c} value={c}>{n}</option>)}</select></Field>
+            <Field label={t('District')}><Select value={form.districtCode} onChange={set('districtCode')}>{DISTRICTS.map(([c, n]) => <option key={c} value={c}>{n}</option>)}</Select></Field>
           </div>
           <div className="form-grid">
             <Field label={t('Telephone')}><input required type="tel" value={form.telephone} onChange={set('telephone')} /></Field>
@@ -366,9 +366,9 @@ function RoleSelect({ value, onChange, actor, label }: { value: Role; onChange: 
   const roles = assignableRoles(actor);
   return (
     <Field label={label} hint={t(ROLE_DESCRIPTION[value])}>
-      <select value={value} onChange={(e) => onChange(e.target.value as Role)}>
+      <Select value={value} onChange={(e) => onChange(e.target.value as Role)}>
         {roles.map((r) => <option key={r} value={r}>{t(ROLE_LABEL[r])}</option>)}
-      </select>
+      </Select>
     </Field>
   );
 }
@@ -903,8 +903,9 @@ export function Settings() {
       <div className="row">
         <div><span className="kicker">{session.business.tradeName ?? session.business.legalName}</span><h1>{t('Settings')}</h1></div>
         <span className="spacer" />
-        <Segmented label={t('Settings')} value={tab} onChange={(v) => setParams({ tab: v }, { replace: true })} options={tabs} />
+        <Segmented label={t('Settings')} value={tab} switches onChange={(v) => setParams({ tab: v }, { replace: true })} options={tabs} />
       </div>
+      <div className="tab-panel stack">
       {tab === 'account' && <AccountTab />}
       {tab === 'business' && <BusinessTab />}
       {tab === 'plan' && <PlanTab />}
@@ -920,6 +921,7 @@ export function Settings() {
           {me?.billing && !me.billing.features.includes('webhooks') ? <UpgradeNotice feature="webhooks" /> : <WebhooksPanel />}
         </div>
       ))}
+      </div>
     </div>
   );
 }

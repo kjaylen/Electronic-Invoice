@@ -17,7 +17,7 @@ import { useT } from '../i18n';
 import { printPdf } from '../print';
 import { useSession } from '../session';
 import { useToast } from '../toast';
-import { Combobox, ErrorText, fromCents, money, PAYMENT_MEANS, Segmented, StatusBadge, store, toCents, useDebounced, usePageTitle } from '../ui';
+import { Combobox, CountUp, ErrorText, fromCents, money, PAYMENT_MEANS, Segmented, StatusBadge, store, toCents, useDebounced, usePageTitle } from '../ui';
 import { searchItems } from './NewDocument';
 
 interface CartLine {
@@ -369,7 +369,7 @@ export function CounterPanel(props: {
           )}
           <div><span>{t('Subtotal')}</span><span>{money(totals?.lineExtension ?? '0.00')}</span></div>
           <div><span>GST</span><span>{money(totals?.gst ?? '0.00')}</span></div>
-          <div className="grand"><span>{t('Total')}</span><span aria-live="polite">{money(total)}</span></div>
+          <div className="grand"><span>{t('Total')}</span><span aria-live="polite"><CountUp value={Number(toCents(total))} duration={420} format={(n) => money(fromCents(BigInt(Math.round(n))))} /></span></div>
           <Segmented label={t('Payment')} value={sale.meansCode} onChange={(v) => set({ meansCode: v })} options={PAYMENT_MEANS.slice(0, 3).map(([c, n]) => [c, t(n)])} />
           {sale.meansCode === '10' && (
             <div className="tender">

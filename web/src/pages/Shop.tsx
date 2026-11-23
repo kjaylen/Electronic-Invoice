@@ -11,7 +11,7 @@ import { BUSINESS } from '../business';
 import { LanguageToggle, useT } from '../i18n';
 import { PROVIDER_NOTE, WalletPay, type WalletInfo } from '../wallet';
 import { store } from '../storage';
-import { DISTRICTS, ErrorText, Field, money, usePageTitle, whatsappNumber } from '../ui';
+import { DISTRICTS, ErrorText, Field, money, Select, usePageTitle, whatsappNumber } from '../ui';
 
 // ---------- data ----------
 
@@ -445,7 +445,7 @@ export function ShopCheckout() {
               <Field label={t('Street')}><input required autoComplete="street-address" value={address.street} onChange={(e) => setAddress({ ...address, street: e.target.value })} /></Field>
               <div className="form-grid">
                 <Field label={t('City or town')}><input required autoComplete="address-level2" value={address.city} onChange={(e) => setAddress({ ...address, city: e.target.value })} /></Field>
-                <Field label={t('District')}><select value={address.districtCode} onChange={(e) => setAddress({ ...address, districtCode: e.target.value })}>{DISTRICTS.map(([c, n]) => <option key={c} value={c}>{n}</option>)}</select></Field>
+                <Field label={t('District')}><Select value={address.districtCode} onChange={(e) => setAddress({ ...address, districtCode: e.target.value })}>{DISTRICTS.map(([c, n]) => <option key={c} value={c}>{n}</option>)}</Select></Field>
               </div>
             </div>
           )}

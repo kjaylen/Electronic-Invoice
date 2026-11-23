@@ -3,7 +3,7 @@ import { api, type Item, type Page } from '../api';
 import { useT } from '../i18n';
 import { useSession } from '../session';
 import { useToast } from '../toast';
-import { ErrorText, Field, GST_CATEGORIES, Modal, money, UNITS, unitName, useDebounced, usePageTitle } from '../ui';
+import { ErrorText, Field, GST_CATEGORIES, Modal, money, Select, unitName, UNITS, useDebounced, usePageTitle } from '../ui';
 
 type Form = { name: string; description: string; sellerCode: string; barcode: string; unitCode: string; unitPrice: string; gstCategory: string; exemptionReasonCode: string; favorite: boolean };
 const EMPTY: Form = { name: '', description: '', sellerCode: '', barcode: '', unitCode: 'H87', unitPrice: '', gstCategory: 'S', exemptionReasonCode: '', favorite: false };
@@ -64,9 +64,9 @@ function ItemForm(props: { initial?: Item; onSaved: (i: Item) => void; onCancel:
         <Field label={t('Barcode')} hint={t('Scan it into this box.')}><input inputMode="numeric" pattern="[0-9A-Za-z\-]{1,64}" value={form.barcode} onChange={set('barcode')} /></Field>
       </div>
       <div className="form-grid">
-        <Field label={t('Unit')}><select value={form.unitCode} onChange={set('unitCode')}>{UNITS.map(([c, n]) => <option key={c} value={c}>{t(n)}</option>)}</select></Field>
+        <Field label={t('Unit')}><Select value={form.unitCode} onChange={set('unitCode')}>{UNITS.map(([c, n]) => <option key={c} value={c}>{t(n)}</option>)}</Select></Field>
         <Field label={t('Price (BZ$, before GST)')}><input required inputMode="decimal" pattern="\d+(\.\d{1,6})?" value={form.unitPrice} onChange={set('unitPrice')} /></Field>
-        <Field label="GST"><select value={form.gstCategory} onChange={set('gstCategory')}>{GST_CATEGORIES.map(([c, n]) => <option key={c} value={c}>{t(n)}</option>)}</select></Field>
+        <Field label="GST"><Select value={form.gstCategory} onChange={set('gstCategory')}>{GST_CATEGORIES.map(([c, n]) => <option key={c} value={c}>{t(n)}</option>)}</Select></Field>
         {form.gstCategory === 'E' && <Field label={t('Exemption reason code')}><input required value={form.exemptionReasonCode} onChange={set('exemptionReasonCode')} /></Field>}
       </div>
       <label className="row small"><input type="checkbox" checked={form.favorite} onChange={(e) => setForm({ ...form, favorite: e.target.checked })} /> {t('Show as a quick button at the counter')}</label>

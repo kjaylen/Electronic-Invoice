@@ -2,6 +2,7 @@
 
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
+import '@fontsource-variable/inter/opsz.css';
 import '@fontsource-variable/inter-tight';
 import '@fontsource-variable/geist-mono';
 import '../styles.css';
@@ -10,8 +11,10 @@ import { ErrorBoundary } from '../ErrorBoundary';
 import { I18nProvider } from '../i18n';
 import { ToastProvider } from '../toast';
 import { TillApp } from './TillApp';
+import { installIndicators } from '../motion';
 
 document.body.classList.add('till-body');
+installIndicators();
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <I18nProvider>

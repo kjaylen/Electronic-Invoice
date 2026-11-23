@@ -9,7 +9,7 @@ import { api, type Account } from '../api';
 import { useT } from '../i18n';
 import { qrSvg } from '../pos/ticket';
 import { useToast } from '../toast';
-import { ErrorText, Field, Modal } from '../ui';
+import { ErrorText, Field, Modal, Select } from '../ui';
 
 interface TillHardware {
   device?: string;
@@ -154,10 +154,10 @@ function RegisterSelect({ value, onChange, tills, current }: { value: string; on
   const taken = new Set(tills.filter((x) => x.register.id !== current).map((x) => x.register.id));
   return (
     <Field label={t('Cash drawer')} hint={t('Each till sells into its own drawer, counted at the end of each shift.')}>
-      <select value={value} onChange={(e) => onChange(e.target.value)}>
+      <Select value={value} onChange={(e) => onChange(e.target.value)}>
         <option value="">{current ? t('Keep the current drawer') : t('A new drawer named like the till')}</option>
         {registers.filter((r) => !taken.has(r.id) && r.id !== current).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-      </select>
+      </Select>
     </Field>
   );
 }

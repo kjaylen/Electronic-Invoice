@@ -18,6 +18,7 @@ import { Sell } from './Sell';
 import { ShiftPanel } from './ShiftPanel';
 import { type DocumentView, documentTicket, type Ticket } from './ticket';
 import { CameraScanner } from './CameraScanner';
+import { withTransition } from '../motion';
 
 export interface TillInfo {
   business: { slug: string; name: string; tin: string; environment: string };
@@ -578,7 +579,7 @@ function SignedInTill(props: {
           <header className="till-bar">
             <div className="till-where"><strong>{till.business.name}</strong><span className="muted"> · {till.device.name}</span></div>
             <nav className="till-tabs" aria-label={t('Till')}>
-              {tabs.map(([k, label]) => <button key={k} type="button" className={tab === k ? 'active' : ''} aria-current={tab === k ? 'page' : undefined} onClick={() => setTab(k)}>{label}</button>)}
+              {tabs.map(([k, label]) => <button key={k} type="button" className={tab === k ? 'active' : ''} aria-current={tab === k ? 'page' : undefined} onClick={() => k !== tab && withTransition(() => setTab(k))}>{label}</button>)}
             </nav>
             <span className="spacer" />
             <span className="till-user"><span className="avatar" aria-hidden="true">{initials(session.user.name)}</span>{session.user.name}</span>

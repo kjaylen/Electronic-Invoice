@@ -6,11 +6,11 @@ import { type CSSProperties, useEffect, useRef, useState } from 'react';
 export function BrandMark() {
   return (
     <svg viewBox="0 0 32 32" aria-hidden="true">
-      <rect x="1" y="1" width="30" height="30" rx="8" fill="#160923" />
-      <path d="M9 7.5h10l5 5V24.5a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1v-16a1 1 0 0 1 1-1Z" fill="#fbf8f1" />
-      <path d="M19 7.5v5h5" fill="#e7dcc6" />
+      <rect x="1" y="1" width="30" height="30" rx="8" fill="#0f1117" />
+      <path d="M9 7.5h10l5 5V24.5a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1v-16a1 1 0 0 1 1-1Z" fill="#ffffff" />
+      <path d="M19 7.5v5h5" fill="#dfe2e8" />
       <path d="M11.5 18.2l3 3 6-6.4" fill="none" stroke="#6d2d93" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
-      <circle cx="25" cy="25" r="4.2" fill="#7bf583" stroke="#160923" strokeWidth="1.6" />
+      <circle cx="25" cy="25" r="4.2" fill="#7bf583" stroke="#0f1117" strokeWidth="1.6" />
     </svg>
   );
 }

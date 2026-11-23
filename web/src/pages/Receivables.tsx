@@ -13,7 +13,7 @@ import { useT } from '../i18n';
 import { Icons } from '../icons';
 import { useSession } from '../session';
 import { useToast } from '../toast';
-import { belizeToday, ErrorText, Field, Modal, money, PAYMENT_METHOD_TEXT, PaymentBadge, Segmented, toCents, TYPE_NAMES, usePageTitle } from '../ui';
+import { belizeToday, ErrorText, Field, Modal, money, PAYMENT_METHOD_TEXT, PaymentBadge, Segmented, Select, toCents, TYPE_NAMES, usePageTitle } from '../ui';
 
 const BUCKET_LABEL: Record<AgeBucket, string> = { current: 'Not yet due', '1-30': '1–30 days', '31-60': '31–60 days', '61-90': '61–90 days', '90+': 'Over 90 days' };
 const RECORDABLE: InvoicePaymentMethod[] = ['cash', 'bank_transfer', 'cheque', 'card', 'online', 'other'];
@@ -85,7 +85,7 @@ export function Receivables() {
         </div>
       </div>
 
-      <Segmented label={t('View')} value={tab} options={tabs} onChange={(v) => setParams({ tab: v }, { replace: true })} />
+      <Segmented switches label={t('View')} value={tab} options={tabs} onChange={(v) => setParams({ tab: v }, { replace: true })} />
 
       {tab === 'customers' && (
         <section className="card">
@@ -146,7 +146,7 @@ function OpenInvoices() {
   }, [status]);
   return (
     <section className="card stack">
-      <Segmented label={t('Show')} value={status} options={[['open', t('Owed')], ['overdue', t('Overdue')], ['all', t('All, including paid')]]} onChange={setStatus} />
+      <Segmented switches label={t('Show')} value={status} options={[['open', t('Owed')], ['overdue', t('Overdue')], ['all', t('All, including paid')]]} onChange={setStatus} />
       <ErrorText error={error} />
       {!rows ? <div className="skeleton" style={{ height: '10rem' }} /> : rows.length === 0 ? <div className="empty">{t('Nothing here.')}</div> : (
         <div className="table-wrap">
@@ -433,9 +433,9 @@ function RecordPaymentModal({ invoice, onClose, onDone }: { invoice: Receivable;
           <Field label={t('Paid on')}><input type="date" required value={paidOn} min={invoice.issueDate} max={belizeToday()} onChange={(e) => setPaidOn(e.target.value)} /></Field>
         </div>
         <Field label={t('Method')}>
-          <select value={method} onChange={(e) => setMethod(e.target.value as InvoicePaymentMethod)}>
+          <Select value={method} onChange={(e) => setMethod(e.target.value as InvoicePaymentMethod)}>
             {RECORDABLE.map((m) => <option key={m} value={m}>{t(PAYMENT_METHOD_TEXT[m])}</option>)}
-          </select>
+          </Select>
         </Field>
         <Field label={t('Reference')} hint={t('Optional: cheque number, transfer reference, receipt number.')}><input maxLength={100} value={reference} onChange={(e) => setReference(e.target.value)} /></Field>
         <Field label={t('Note')} hint={t('Optional; only you see it.')}><input maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} /></Field>

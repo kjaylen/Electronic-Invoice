@@ -6,7 +6,7 @@
 import { type FormEvent, useEffect, useState } from 'react';
 import { useT } from '../i18n';
 import { useToast } from '../toast';
-import { Field, Modal } from '../ui';
+import { Field, Modal, Select } from '../ui';
 import { type HardwareConfig, newPrinter, openDrawer, type PrinterConfig, printerWhere, printTicket, useKeyboardScanner } from './hardware';
 import type { BluetoothPrinter, PrinterConnection, SystemPrinter } from './platform';
 import { testTicket } from './ticket';
@@ -102,10 +102,10 @@ export function HardwareSettings({ onError }: { onError: (e: unknown) => void })
           <div><dt>{t('App')}</dt><dd>{till.platform.kind} {till.platform.appVersion}</dd></div>
         </dl>
         <Field label={t('Lock the till after')}>
-          <select value={hw.lockAfterMinutes} onChange={(e) => save({ lockAfterMinutes: Number(e.target.value) })}>
+          <Select value={hw.lockAfterMinutes} onChange={(e) => save({ lockAfterMinutes: Number(e.target.value) })}>
             {[2, 5, 10, 30, 60].map((m) => <option key={m} value={m}>{t('{n} minutes without use', { n: m })}</option>)}
             <option value={0}>{t('Never')}</option>
-          </select>
+          </Select>
         </Field>
         <p className="small muted">{t('Rename the till or move it to another cash drawer in the web app: Settings → Tills.')}</p>
         <div className="row"><button type="button" className="danger" onClick={() => setConfirmUnpair(true)}>{t('Unpair this till')}</button></div>
@@ -158,42 +158,42 @@ function PrinterEditor({ printer, onClose, onSave }: { printer: PrinterConfig; o
         )}
         {p.connection === 'bluetooth' && (
           <Field label={t('Bluetooth printer')} hint={t('Pair the printer in the device’s Bluetooth settings first (the PIN is often 0000 or 1234).')}>
-            <select value={p.address ?? ''} onChange={(e) => set({ address: e.target.value, name: p.name || bluetooth?.find((b) => b.address === e.target.value)?.name || '' })} required>
+            <Select value={p.address ?? ''} onChange={(e) => set({ address: e.target.value, name: p.name || bluetooth?.find((b) => b.address === e.target.value)?.name || '' })} required>
               <option value="">{bluetooth ? t('Choose…') : t('Looking for paired printers…')}</option>
               {bluetooth?.map((b) => <option key={b.address} value={b.address}>{b.name} ({b.address})</option>)}
-            </select>
+            </Select>
           </Field>
         )}
         {p.connection === 'system' && (
           <Field label={t('Printer')} hint={t('Install the printer’s driver on this computer first. Set its paper size to the roll width.')}>
-            <select value={p.systemName ?? ''} onChange={(e) => set({ systemName: e.target.value, name: p.name || e.target.value })}>
+            <Select value={p.systemName ?? ''} onChange={(e) => set({ systemName: e.target.value, name: p.name || e.target.value })}>
               <option value="">{t('The default printer')}</option>
               {system?.map((s) => <option key={s.name} value={s.name}>{s.name}{s.isDefault ? ` (${t('default')})` : ''}</option>)}
-            </select>
+            </Select>
           </Field>
         )}
         <div className="form-grid">
           <Field label={t('Paper width')}>
-            <select value={p.paperWidth} onChange={(e) => set({ paperWidth: Number(e.target.value) as 58 | 80 })}>
+            <Select value={p.paperWidth} onChange={(e) => set({ paperWidth: Number(e.target.value) as 58 | 80 })}>
               <option value={80}>80 mm</option>
               <option value={58}>58 mm</option>
-            </select>
+            </Select>
           </Field>
           {raw && (
             <Field label={t('Accented letters')} hint={t('Print a test page: if á or ñ come out wrong, try another setting.')}>
-              <select value={p.codepage} onChange={(e) => set({ codepage: e.target.value as PrinterConfig['codepage'] })}>
+              <Select value={p.codepage} onChange={(e) => set({ codepage: e.target.value as PrinterConfig['codepage'] })}>
                 <option value="ascii">{t('Plain letters (works on every printer)')}</option>
                 <option value="cp850">{t('Code page 850')}</option>
                 <option value="cp1252">{t('Windows-1252')}</option>
-              </select>
+              </Select>
             </Field>
           )}
           {raw && (
             <Field label={t('QR code')}>
-              <select value={p.qr} onChange={(e) => set({ qr: e.target.value as PrinterConfig['qr'] })}>
+              <Select value={p.qr} onChange={(e) => set({ qr: e.target.value as PrinterConfig['qr'] })}>
                 <option value="native">{t('Drawn by the printer')}</option>
                 <option value="image">{t('Sent as a picture (older printers)')}</option>
-              </select>
+              </Select>
             </Field>
           )}
         </div>

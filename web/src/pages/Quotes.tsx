@@ -67,7 +67,7 @@ export function Quotes() {
         <Link className="button" to="/quotes/new" viewTransition>{t('New quote')}<span className="chip" aria-hidden="true">+</span></Link>
       </div>
       <div className="row">
-        <Segmented label={t('Show')} value={status} onChange={(v) => setParams({ status: v }, { replace: true })} options={[['open', t('Open')], ['accepted', t('Accepted')], ['invoiced', t('Invoiced')], ['all', t('All')]]} />
+        <Segmented switches label={t('Show')} value={status} onChange={(v) => setParams({ status: v }, { replace: true })} options={[['open', t('Open')], ['accepted', t('Accepted')], ['invoiced', t('Invoiced')], ['all', t('All')]]} />
         <span className="spacer" />
         <input type="search" className="search-input" placeholder={t('Customer or quote number')} value={q} onChange={(e) => setQ(e.target.value)} aria-label={t('Search quotes')} />
       </div>

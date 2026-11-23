@@ -6,7 +6,7 @@ import { api, link, type Product, type ProductSummary, type Variant } from '../a
 import { useT } from '../i18n';
 import { useSession } from '../session';
 import { useToast } from '../toast';
-import { ErrorText, Field, GST_CATEGORIES, Modal, money, Segmented, UNITS, usePageTitle } from '../ui';
+import { ErrorText, Field, GST_CATEGORIES, Modal, money, Segmented, Select, UNITS, usePageTitle } from '../ui';
 import { Items } from './Items';
 
 const STATUS_LABEL = { draft: 'Draft', active: 'On sale', archived: 'Archived' } as const;
@@ -47,7 +47,7 @@ export function Products() {
       <div className="row">
         <div><span className="kicker">{t('Catalog')}</span><h1>{t('Products')}</h1></div>
         <span className="spacer" />
-        <Segmented label={t('Catalog')} value={tab} onChange={(v) => setParams(v === 'items' ? { tab: 'items' } : {}, { replace: true })} options={[['products', t('Online store')], ['items', t('All items')]]} />
+        <Segmented switches label={t('Catalog')} value={tab} onChange={(v) => setParams(v === 'items' ? { tab: 'items' } : {}, { replace: true })} options={[['products', t('Online store')], ['items', t('All items')]]} />
       </div>
       {tab === 'items' ? <Items /> : (
         <>
@@ -249,11 +249,11 @@ export function ProductEditor() {
                   <Field label={t('Price (BZ$, before GST)')} hint={v.price ? t('Buyers pay {amount}', { amount: money(withGst(v.price, v.gstCategory)) }) : undefined}>
                     <input required inputMode="decimal" pattern="\d+(\.\d{1,6})?" value={v.price} onChange={(e) => setVariant(i, { price: e.target.value })} />
                   </Field>
-                  <Field label="GST"><select value={v.gstCategory} onChange={(e) => setVariant(i, { gstCategory: e.target.value as Variant['gstCategory'] })}>{GST_CATEGORIES.map(([c, n]) => <option key={c} value={c}>{t(n)}</option>)}</select></Field>
+                  <Field label="GST"><Select value={v.gstCategory} onChange={(e) => setVariant(i, { gstCategory: e.target.value as Variant['gstCategory'] })}>{GST_CATEGORIES.map(([c, n]) => <option key={c} value={c}>{t(n)}</option>)}</Select></Field>
                   <Field label={t('Stock')} hint={t('Empty: not tracked.')}><input inputMode="numeric" pattern="\d*" value={v.stock ?? ''} onChange={(e) => setVariant(i, { stock: e.target.value === '' ? null : Number(e.target.value.replace(/\D/g, '')) })} /></Field>
                   <Field label={t('Your code')}><input value={v.sellerCode ?? ''} onChange={(e) => setVariant(i, { sellerCode: e.target.value })} /></Field>
                   <Field label={t('Barcode')}><input inputMode="numeric" value={v.barcode ?? ''} onChange={(e) => setVariant(i, { barcode: e.target.value })} /></Field>
-                  <Field label={t('Unit')}><select value={v.unitCode} onChange={(e) => setVariant(i, { unitCode: e.target.value })}>{UNITS.map(([c, n]) => <option key={c} value={c}>{t(n)}</option>)}</select></Field>
+                  <Field label={t('Unit')}><Select value={v.unitCode} onChange={(e) => setVariant(i, { unitCode: e.target.value })}>{UNITS.map(([c, n]) => <option key={c} value={c}>{t(n)}</option>)}</Select></Field>
                   {v.gstCategory === 'E' && <Field label={t('Exemption reason code')}><input required value={v.exemptionReasonCode ?? ''} onChange={(e) => setVariant(i, { exemptionReasonCode: e.target.value })} /></Field>}
                   {hasOptions && variants.length > 1 && <button type="button" className="link danger-link remove-variant" aria-label={t('Remove variant {n}', { n: i + 1 })} onClick={() => setVariants((vs) => vs.filter((_, j) => j !== i))}>{t('Remove')}</button>}
                 </div>

@@ -4,7 +4,7 @@ import { type FormEvent, useEffect, useState } from 'react';
 import { api, type StoreSettings } from '../api';
 import { useT } from '../i18n';
 import { useToast } from '../toast';
-import { ErrorText, Field, money } from '../ui';
+import { ErrorText, Field, money, Select } from '../ui';
 import { type Accounts, BelizeBankConnect, DiscountCodes, EKyashConnect, PayPalConnect, StoreDomains } from './StoreExtras';
 
 const feeWithGst = (fee: string) => (/^\d+(\.\d{1,2})?$/.test(fee) ? (Math.round(Number(fee) * 100 * 1.125) / 100).toFixed(2) : '');
@@ -114,12 +114,12 @@ export function StoreSettingsTab() {
           <label className="row toggle"><input type="checkbox" checked={s.payments.online.enabled} onChange={(e) => setS({ ...s, payments: { ...s.payments, online: { ...s.payments.online, enabled: e.target.checked } } })} /> <strong>{t('Pay online at checkout')}</strong></label>
           {s.payments.online.enabled && (
             <Field label={t('Through')}>
-              <select value={s.payments.online.provider} onChange={(e) => setS({ ...s, payments: { ...s.payments, online: { ...s.payments.online, provider: e.target.value as StoreSettings['payments']['online']['provider'] } } })}>
+              <Select value={s.payments.online.provider} onChange={(e) => setS({ ...s, payments: { ...s.payments, online: { ...s.payments.online, provider: e.target.value as StoreSettings['payments']['online']['provider'] } } })}>
                 {(connected.belizebank || s.payments.online.provider === 'belizebank') && <option value="belizebank">{t('Belize Bank cards (BZ$)')}</option>}
                 {(connected.ekyash || s.payments.online.provider === 'ekyash') && <option value="ekyash">E-Kyash</option>}
                 <option value="paypal">PayPal</option>
                 {testAvailable && <option value="test">{t('Test payments (BTS test environment, no money moves)')}</option>}
-              </select>
+              </Select>
             </Field>
           )}
           <BelizeBankConnect onChanged={() => setAccountsVersion((v) => v + 1)} />

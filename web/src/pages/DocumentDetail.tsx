@@ -196,7 +196,7 @@ export function DocumentDetail() {
       <div className="doc-layout">
         <div className="doc-main">
           <div className="paper-toolbar">
-            <Segmented label={t('View')} value={variant} onChange={chooseVariant} options={[['sheet', t('Sheet')], ['receipt', t('Receipt')]]} />
+            <Segmented switches label={t('View')} value={variant} onChange={chooseVariant} options={[['sheet', t('Sheet')], ['receipt', t('Receipt')]]} />
             <span className="spacer" />
             {printable && (
               <>

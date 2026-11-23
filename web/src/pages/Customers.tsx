@@ -4,7 +4,7 @@ import { api, type Customer, type Page } from '../api';
 import { useT } from '../i18n';
 import { useSession } from '../session';
 import { useToast } from '../toast';
-import { DISTRICTS, ErrorText, Field, Modal, useDebounced, usePageTitle } from '../ui';
+import { DISTRICTS, ErrorText, Field, Modal, Select, useDebounced, usePageTitle } from '../ui';
 
 type Form = { name: string; tin: string; street: string; city: string; districtCode: string; telephone: string; email: string };
 const EMPTY: Form = { name: '', tin: '', street: '', city: '', districtCode: '1', telephone: '', email: '' };
@@ -57,7 +57,7 @@ function CustomerForm(props: { initial?: Customer; onSaved: (c: Customer) => voi
       <div className="form-grid">
         <Field label={t('Street')}><input value={form.street} onChange={set('street')} /></Field>
         <Field label={t('City or town')}><input value={form.city} onChange={set('city')} /></Field>
-        <Field label={t('District')}><select value={form.districtCode} onChange={set('districtCode')}>{DISTRICTS.map(([c, n]) => <option key={c} value={c}>{n}</option>)}</select></Field>
+        <Field label={t('District')}><Select value={form.districtCode} onChange={set('districtCode')}>{DISTRICTS.map(([c, n]) => <option key={c} value={c}>{n}</option>)}</Select></Field>
       </div>
       <div className="form-grid">
         <Field label={t('Telephone')} hint={t('Used to send documents by WhatsApp.')}><input type="tel" value={form.telephone} onChange={set('telephone')} /></Field>

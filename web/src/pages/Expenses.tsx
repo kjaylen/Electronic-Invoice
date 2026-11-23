@@ -6,7 +6,7 @@ import { api, link } from '../api';
 import { useT } from '../i18n';
 import { useSession } from '../session';
 import { useToast } from '../toast';
-import { belizeDate, belizeToday, Combobox, ErrorText, Field, Modal, money, PAYMENT_METHOD_TEXT, Segmented, toCents, fromCents, useDebounced, usePageTitle } from '../ui';
+import { belizeDate, belizeToday, Combobox, ErrorText, Field, fromCents, Modal, money, PAYMENT_METHOD_TEXT, Segmented, Select, toCents, useDebounced, usePageTitle } from '../ui';
 
 type Treatment = 'standard' | 'zero' | 'exempt' | 'none';
 type Method = 'cash' | 'cheque' | 'bank_transfer' | 'card' | 'online' | 'other';
@@ -93,7 +93,7 @@ export function Expenses() {
           <span className="kpi-note">{t('GST on sales less GST you can claim')}</span>
         </Link>
       </div>
-      <Segmented label={t('View')} value={tab} onChange={(v) => setParams({ tab: v }, { replace: true })} options={[['expenses', t('Expenses')], ['bills', t('Bills to pay')], ['suppliers', t('Suppliers')]]} />
+      <Segmented switches label={t('View')} value={tab} onChange={(v) => setParams({ tab: v }, { replace: true })} options={[['expenses', t('Expenses')], ['bills', t('Bills to pay')], ['suppliers', t('Suppliers')]]} />
       {tab === 'expenses' && <ExpenseList key={version} />}
       {tab === 'bills' && <BillsToPay onChange={changed} />}
       {tab === 'suppliers' && <Suppliers />}
@@ -157,17 +157,17 @@ function ExpenseList() {
   return (
     <section className="card stack">
       <div className="row filters">
-        <Segmented label={t('Period')} value={preset} onChange={(p) => { setPreset(p); if (p !== 'custom') setRange(monthRange(p === 'month' ? 0 : -1)); }} options={[['month', t('This month')], ['last-month', t('Last month')], ['custom', t('Custom')]]} />
+        <Segmented switches label={t('Period')} value={preset} onChange={(p) => { setPreset(p); if (p !== 'custom') setRange(monthRange(p === 'month' ? 0 : -1)); }} options={[['month', t('This month')], ['last-month', t('Last month')], ['custom', t('Custom')]]} />
         {preset === 'custom' && (
           <>
             <Field label={t('From')}><input type="date" value={from} max={to} onChange={(e) => setRange([e.target.value, to])} /></Field>
             <Field label={t('To')}><input type="date" value={to} min={from} onChange={(e) => setRange([from, e.target.value])} /></Field>
           </>
         )}
-        <select value={category} onChange={(e) => setCategory(e.target.value)} aria-label={t('Category')}>
+        <Select value={category} onChange={(e) => setCategory(e.target.value)} aria-label={t('Category')}>
           <option value="">{t('All categories')}</option>
           {categories.map((c) => <option key={c} value={c}>{t(c)}</option>)}
-        </select>
+        </Select>
         <input type="search" className="search-input" placeholder={t('Supplier, reference or note')} value={q} onChange={(e) => setQ(e.target.value)} aria-label={t('Search expenses')} />
         <span className="spacer" />
         <a className="button secondary" href={link(`/v1/expenses.csv?${qs}`)} download>CSV</a>
@@ -230,7 +230,7 @@ function PayBillModal({ expense, onClose, onDone }: { expense: Expense; onClose:
       <form className="stack" onSubmit={(e) => void submit(e)}>
         <div className="form-grid">
           <Field label={t('Paid on')}><input type="date" required value={paidOn} min={expense.date} max={belizeToday()} onChange={(e) => setPaidOn(e.target.value)} autoFocus /></Field>
-          <Field label={t('Method')}><select value={method} onChange={(e) => setMethod(e.target.value as Method)}>{METHODS.map((m) => <option key={m} value={m}>{t(PAYMENT_METHOD_TEXT[m])}</option>)}</select></Field>
+          <Field label={t('Method')}><Select value={method} onChange={(e) => setMethod(e.target.value as Method)}>{METHODS.map((m) => <option key={m} value={m}>{t(PAYMENT_METHOD_TEXT[m])}</option>)}</Select></Field>
         </div>
         <ErrorText error={error} />
         <div className="row"><button type="button" className="secondary" onClick={onClose}>{t('Cancel')}</button><span className="spacer" /><button disabled={busy}>{t('Mark paid')}</button></div>
@@ -479,9 +479,9 @@ export function ExpenseEditor() {
             <div className="form-grid">
               <Field label={t('Total paid (BZ$)')}><input inputMode="decimal" required placeholder="0.00" value={total} onChange={(e) => setTotal(e.target.value.trim())} /></Field>
               <Field label="GST">
-                <select value={treatment} onChange={(e) => setTreatment(e.target.value as Treatment)}>
+                <Select value={treatment} onChange={(e) => setTreatment(e.target.value as Treatment)}>
                   {(Object.keys(TREATMENT) as Treatment[]).map((k) => <option key={k} value={k}>{t(TREATMENT[k])}</option>)}
-                </select>
+                </Select>
               </Field>
               {treatment === 'standard' && <Field label={t('GST on the receipt (BZ$)')} hint={t('Worked out at 12.5%: {amount}. Change it if the receipt shows another figure.', { amount: money(fromCents(autoGst)) })}><input inputMode="decimal" placeholder={fromCents(autoGst)} value={gstOverride} onChange={(e) => setGstOverride(e.target.value.trim())} /></Field>}
             </div>
@@ -497,7 +497,7 @@ export function ExpenseEditor() {
               {isPaid ? (
                 <>
                   <Field label={t('Paid on')}><input type="date" required min={date} max={belizeToday()} value={paidOn} onChange={(e) => setPaidOn(e.target.value)} /></Field>
-                  <Field label={t('Method')}><select value={method} onChange={(e) => setMethod(e.target.value as Method)}>{METHODS.map((m) => <option key={m} value={m}>{t(PAYMENT_METHOD_TEXT[m])}</option>)}</select></Field>
+                  <Field label={t('Method')}><Select value={method} onChange={(e) => setMethod(e.target.value as Method)}>{METHODS.map((m) => <option key={m} value={m}>{t(PAYMENT_METHOD_TEXT[m])}</option>)}</Select></Field>
                 </>
               ) : (
                 <Field label={t('Due on')}><input type="date" required min={date} value={dueDate} onChange={(e) => setDueDate(e.target.value)} /></Field>

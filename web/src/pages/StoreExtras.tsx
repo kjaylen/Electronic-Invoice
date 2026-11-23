@@ -4,7 +4,7 @@ import { type FormEvent, useCallback, useEffect, useState } from 'react';
 import { api } from '../api';
 import { useT } from '../i18n';
 import { useToast } from '../toast';
-import { ErrorText, Field, Modal, money } from '../ui';
+import { ErrorText, Field, Modal, money, Select } from '../ui';
 
 // ---------- PayPal ----------
 
@@ -69,10 +69,10 @@ export function BelizeBankConnect({ onChanged }: { onChanged: () => void }) {
             <Field label={t('Password')} hint={a.connected ? t('Leave empty to keep the current one.') : undefined}><input type="password" autoComplete="new-password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></Field>
           </div>
           <Field label={t('Mode')}>
-            <select value={form.mode} onChange={(e) => setForm({ ...form, mode: e.target.value as 'sandbox' | 'live' })}>
+            <Select value={form.mode} onChange={(e) => setForm({ ...form, mode: e.target.value as 'sandbox' | 'live' })}>
               <option value="sandbox">{t('Sandbox (test money)')}</option>
               <option value="live">{t('Live (real money)')}</option>
-            </select>
+            </Select>
           </Field>
           <ErrorText error={error} />
           <div className="row"><span className="spacer" /><button type="button" className="secondary" onClick={() => setEditing(false)}>{t('Cancel')}</button><button type="button" disabled={busy || !form.userName} onClick={() => void save()}>{busy ? t('Checking with the bank…') : t('Save')}</button></div>
@@ -144,10 +144,10 @@ export function EKyashConnect({ onChanged }: { onChanged: () => void }) {
             <Field label={t('API password')} hint={keep}><input type="password" autoComplete="new-password" value={form.apiPassword} onChange={(e) => setForm({ ...form, apiPassword: e.target.value.trim() })} /></Field>
           </div>
           <Field label={t('Mode')}>
-            <select value={form.mode} onChange={(e) => setForm({ ...form, mode: e.target.value as 'sandbox' | 'live' })}>
+            <Select value={form.mode} onChange={(e) => setForm({ ...form, mode: e.target.value as 'sandbox' | 'live' })}>
               {a.available.sandbox && <option value="sandbox">{t('Sandbox (test money)')}</option>}
               {a.available.live && <option value="live">{t('Live (real money)')}</option>}
-            </select>
+            </Select>
           </Field>
           <ErrorText error={error} />
           <div className="row"><span className="spacer" /><button type="button" className="secondary" onClick={() => setEditing(false)}>{t('Cancel')}</button><button type="button" disabled={busy || !form.sid} onClick={() => void save()}>{busy ? t('Checking with E-Kyash…') : t('Save')}</button></div>
@@ -211,10 +211,10 @@ export function PayPalConnect({ onChanged }: { onChanged: () => void }) {
             <Field label={t('Secret')} hint={accounts.paypal.connected ? t('Leave empty to keep the current one.') : undefined}><input type="password" autoComplete="off" required={!accounts.paypal.connected} value={form.secret} onChange={(e) => setForm({ ...form, secret: e.target.value.trim() })} /></Field>
           </div>
           <Field label={t('Mode')}>
-            <select value={form.mode} onChange={(e) => setForm({ ...form, mode: e.target.value as 'sandbox' | 'live' })}>
+            <Select value={form.mode} onChange={(e) => setForm({ ...form, mode: e.target.value as 'sandbox' | 'live' })}>
               <option value="sandbox">{t('Sandbox (test money)')}</option>
               <option value="live">{t('Live (real money)')}</option>
-            </select>
+            </Select>
           </Field>
           <ErrorText error={error} />
           <div className="row"><span className="spacer" /><button type="button" className="secondary" onClick={() => setEditing(false)}>{t('Cancel')}</button><button type="button" disabled={busy} onClick={(e) => void save(e as unknown as FormEvent)}>{busy ? t('Checking with PayPal…') : t('Save')}</button></div>
@@ -306,11 +306,11 @@ export function DiscountCodes() {
             <Field label={t('Code')} hint={t('What buyers type, e.g. REEF10. Letters, digits and dashes.')}><input required autoFocus minLength={3} maxLength={32} pattern="[A-Za-z0-9_\-]+" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value.toUpperCase() })} /></Field>
             <div className="form-grid">
               <Field label={t('Kind')}>
-                <select value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value as Discount['kind'] })}>
+                <Select value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value as Discount['kind'] })}>
                   <option value="percent">{t('Percent off')}</option>
                   <option value="amount">{t('BZ$ off (GST included)')}</option>
                   <option value="free_delivery">{t('Free delivery')}</option>
-                </select>
+                </Select>
               </Field>
               {form.kind !== 'free_delivery' && <Field label={form.kind === 'percent' ? t('Percent') : t('Amount (BZ$)')}><input required inputMode="decimal" pattern="\d+(\.\d{1,2})?" value={form.value} onChange={(e) => setForm({ ...form, value: e.target.value })} /></Field>}
             </div>

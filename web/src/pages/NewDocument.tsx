@@ -5,7 +5,7 @@ import { DocumentPaper, type PaperParty, type PaperView } from '../paper';
 import { useT } from '../i18n';
 import { useSession } from '../session';
 import { useToast } from '../toast';
-import { belizeDate, belizeToday, Combobox, DISTRICTS, ErrorText, Field, GST_CATEGORIES, Modal, money, PAYMENT_MEANS, Segmented, store, toCents, TYPE_NAMES, UNITS, useDebounced, usePageTitle } from '../ui';
+import { belizeDate, belizeToday, Combobox, DISTRICTS, ErrorText, Field, GST_CATEGORIES, Modal, money, PAYMENT_MEANS, Segmented, Select, store, toCents, TYPE_NAMES, UNITS, useDebounced, usePageTitle } from '../ui';
 
 type DocType = '01' | '02' | '03' | '04';
 
@@ -490,20 +490,20 @@ export function NewDocument({ mode = 'issue' }: { mode?: FormMode } = {}) {
             <Field label={t('Repeat every')}>
               <div className="row nowrap">
                 <input inputMode="numeric" style={{ maxWidth: '4.5rem' }} value={intervalCount} onChange={(e) => setIntervalCount(e.target.value.replace(/\D/g, '').slice(0, 2))} aria-label={t('How many')} />
-                <select value={frequency} onChange={(e) => setFrequency(e.target.value as typeof frequency)} aria-label={t('Period')}>
+                <Select value={frequency} onChange={(e) => setFrequency(e.target.value as typeof frequency)} aria-label={t('Period')}>
                   <option value="weekly">{t('week(s)')}</option>
                   <option value="monthly">{t('month(s)')}</option>
                   <option value="yearly">{t('year(s)')}</option>
-                </select>
+                </Select>
               </div>
             </Field>
             <Field label={editId ? t('Next invoice on') : t('First invoice on')}><input type="date" required min={belizeToday()} value={startDate} onChange={(e) => setStartDate(e.target.value)} /></Field>
             <Field label={t('Ends')}>
-              <select value={endMode} onChange={(e) => setEndMode(e.target.value as typeof endMode)}>
+              <Select value={endMode} onChange={(e) => setEndMode(e.target.value as typeof endMode)}>
                 <option value="never">{t('Never (until you stop it)')}</option>
                 <option value="count">{t('After a number of invoices')}</option>
                 <option value="date">{t('On a date')}</option>
-              </select>
+              </Select>
             </Field>
             {endMode === 'count' && <Field label={t('Invoices left')}><input inputMode="numeric" value={endCount} onChange={(e) => setEndCount(e.target.value.replace(/\D/g, '').slice(0, 3))} /></Field>}
             {endMode === 'date' && <Field label={t('Last invoice on or before')}><input type="date" required min={startDate} value={endDate} onChange={(e) => setEndDate(e.target.value)} /></Field>}
@@ -564,9 +564,9 @@ export function NewDocument({ mode = 'issue' }: { mode?: FormMode } = {}) {
               <Field label={t('Street')}><input required={needsCustomer} value={newCustomer.street} onChange={(e) => setNewCustomer({ ...newCustomer, street: e.target.value })} /></Field>
               <Field label={t('City or town')}><input required={needsCustomer} value={newCustomer.city} onChange={(e) => setNewCustomer({ ...newCustomer, city: e.target.value })} /></Field>
               <Field label={t('District')}>
-                <select value={newCustomer.districtCode} onChange={(e) => setNewCustomer({ ...newCustomer, districtCode: e.target.value })}>
+                <Select value={newCustomer.districtCode} onChange={(e) => setNewCustomer({ ...newCustomer, districtCode: e.target.value })}>
                   {DISTRICTS.map(([code, name]) => <option key={code} value={code}>{name}</option>)}
-                </select>
+                </Select>
               </Field>
             </div>
             <div className="form-grid">
@@ -609,16 +609,16 @@ export function NewDocument({ mode = 'issue' }: { mode?: FormMode } = {}) {
             </div>
             <Field label={t('Qty')}><input inputMode="decimal" value={l.quantity} aria-invalid={l.quantity !== '' && !DECIMAL.test(l.quantity)} onChange={(e) => updateLine(l.key, { quantity: e.target.value })} /></Field>
             <Field label={t('Unit')}>
-              <select value={l.unitCode} onChange={(e) => updateLine(l.key, { unitCode: e.target.value })}>
+              <Select value={l.unitCode} onChange={(e) => updateLine(l.key, { unitCode: e.target.value })}>
                 {UNITS.map(([code, name]) => <option key={code} value={code}>{t(name)}</option>)}
                 {!UNITS.some(([c]) => c === l.unitCode) && <option value={l.unitCode}>{l.unitCode}</option>}
-              </select>
+              </Select>
             </Field>
             <Field label={t('Price (BZ$)')}><input inputMode="decimal" placeholder="0.00" value={l.unitPrice} aria-invalid={l.unitPrice !== '' && !DECIMAL.test(l.unitPrice)} onChange={(e) => updateLine(l.key, { unitPrice: e.target.value, itemId: undefined })} /></Field>
             <Field label="GST">
-              <select value={l.gstCategory} onChange={(e) => updateLine(l.key, { gstCategory: e.target.value as Line['gstCategory'] })}>
+              <Select value={l.gstCategory} onChange={(e) => updateLine(l.key, { gstCategory: e.target.value as Line['gstCategory'] })}>
                 {GST_CATEGORIES.map(([code, name]) => <option key={code} value={code}>{t(name)}</option>)}
-              </select>
+              </Select>
             </Field>
             <Field label={t('Disc. %')}><input inputMode="decimal" placeholder="0" value={l.discountPercent} onChange={(e) => updateLine(l.key, { discountPercent: e.target.value })} /></Field>
             <div className="row" style={{ alignSelf: 'end', paddingBottom: '0.3rem' }}>
@@ -637,9 +637,9 @@ export function NewDocument({ mode = 'issue' }: { mode?: FormMode } = {}) {
         <fieldset className="stack">
           <legend>{t('Payment')}</legend>
           <Field label={t('Method')}>
-            <select value={meansCode} onChange={(e) => setMeansCode(e.target.value)}>
+            <Select value={meansCode} onChange={(e) => setMeansCode(e.target.value)}>
               {PAYMENT_MEANS.map(([code, name]) => <option key={code} value={code}>{t(name)}</option>)}
-            </select>
+            </Select>
           </Field>
           {!template && type !== '02' && <Field label={t('Due date')}><input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} /></Field>}
           {template && type === '01' && <Field label={t('Payment due (days after the invoice)')}><input inputMode="numeric" value={dueDays} onChange={(e) => setDueDays(e.target.value.replace(/\D/g, '').slice(0, 3))} /></Field>}

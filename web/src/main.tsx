@@ -1,6 +1,7 @@
 import { lazy, StrictMode, Suspense, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { BrowserRouter, Navigate, NavLink, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router';
+import { BrowserRouter, Link, Navigate, NavLink, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router';
+import '@fontsource-variable/inter/opsz.css';
 import '@fontsource-variable/inter-tight';
 import '@fontsource-variable/geist-mono';
 import './styles.css';
@@ -13,6 +14,7 @@ import { I18nProvider, LanguageToggle, useI18n } from './i18n';
 import { ROLE_LABEL } from './permissions';
 import { SessionProvider, useSession } from './session';
 import { ToastProvider } from './toast';
+import { installIndicators } from './motion';
 
 // Each page is its own chunk, loaded when first visited.
 const page = <K extends string>(load: () => Promise<Record<K, React.ComponentType>>, name: K) => lazy(() => load().then((m) => ({ default: m[name] })));
@@ -102,6 +104,8 @@ function Layout() {
   const mainRef = useRef<HTMLElement>(null);
   const navRef = useRef<HTMLElement>(null);
   const first = useRef(true);
+  // Only the first page after loading plays the staggered entrance; later pages arrive by view transition.
+  const [firstPage, setFirstPage] = useState(true);
   const close = () => setOpen(false);
 
   // Move focus to the new page after navigating, so keyboard and screen-reader users start at the top of it.
@@ -111,6 +115,7 @@ function Layout() {
       first.current = false;
       return;
     }
+    setFirstPage(false);
     window.scrollTo({ top: 0 });
     // Leave focus alone when the new page put it somewhere on purpose (e.g. the counter's search box).
     const main = mainRef.current;
@@ -195,11 +200,11 @@ function Layout() {
               <div className="nav-group" key={group}>
                 <span className="nav-label">{group}</span>
                 {visible.map((i) => (
-                  <NavLink key={i.to} to={i.to} viewTransition className={isActive(i.to) ? 'active' : ''} aria-current={isActive(i.to) ? 'page' : undefined}>
+                  <Link key={i.to} to={i.to} viewTransition className={isActive(i.to) ? 'active' : ''} aria-current={isActive(i.to) ? 'page' : undefined}>
                     <i.icon />
                     <span className="nav-text">{i.label}</span>
                     {i.badge ? <span className="nav-badge" aria-label={t('{n} to do', { n: i.badge })}>{i.badge}</span> : null}
-                  </NavLink>
+                  </Link>
                 ))}
                 {group === t('Business') && (
                   <a href={`/${session!.business.slug}/shop`} target="_blank" rel="noreferrer">
@@ -258,8 +263,9 @@ function Layout() {
           </div>
         )}
         <main id="main" ref={mainRef} tabIndex={-1}>
-          {/* Keyed by route, so every page plays its entrance and a crash stays inside one page. */}
-          <div className="page stack" key={location.pathname + location.search}>
+          {/* Keyed by page, so a crash stays inside one page. Tabs and filters (the query) keep the page:
+              what stays the same stays still. Editors start fresh for each query (a new invoice, a credit note). */}
+          <div className={`page stack${firstPage ? ' entering' : ''}`} key={location.pathname + (/\/(new|edit)$/.test(location.pathname) ? location.search : '')}>
             <ErrorBoundary>
               <Suspense fallback={<PageSkeleton />}>
                 <Outlet />
@@ -397,6 +403,7 @@ function PublicApp() {
   );
 }
 
+installIndicators();
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <BrowserRouter {...(BUSINESS && !STORE_DOMAIN && { basename: `/${BUSINESS}` })}>

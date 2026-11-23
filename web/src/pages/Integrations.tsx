@@ -6,7 +6,7 @@ import { api } from '../api';
 import { useT } from '../i18n';
 import { useSession } from '../session';
 import { useToast } from '../toast';
-import { ErrorText, Field, TYPE_NAMES } from '../ui';
+import { ErrorText, Field, Select, TYPE_NAMES } from '../ui';
 import { UpgradeNotice } from './Billing';
 
 interface QuickBooksState {
@@ -112,10 +112,10 @@ export function IntegrationsTab() {
               <div className="form-grid">
                 {(['S', 'Z', 'E'] as const).map((c) => (
                   <Field key={c} label={c === 'S' ? t('Standard rate (12.5%)') : c === 'Z' ? t('Zero-rated') : t('Exempt')}>
-                    <select value={map[c]} onChange={(e) => setMap({ ...map, [c]: e.target.value })} disabled={!codes}>
+                    <Select value={map[c]} onChange={(e) => setMap({ ...map, [c]: e.target.value })} disabled={!codes}>
                       <option value="">{t('Not mapped')}</option>
                       {(codes ?? []).map((tc) => <option key={tc.id} value={tc.id}>{tc.name}</option>)}
-                    </select>
+                    </Select>
                   </Field>
                 ))}
               </div>

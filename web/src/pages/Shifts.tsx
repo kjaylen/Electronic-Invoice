@@ -7,7 +7,7 @@ import { useT } from '../i18n';
 import { printPdf } from '../print';
 import { useSession } from '../session';
 import { useToast } from '../toast';
-import { ErrorText, Field, fromCents, Modal, money, toCents, usePageTitle } from '../ui';
+import { ErrorText, Field, fromCents, Modal, money, Select, toCents, usePageTitle } from '../ui';
 
 type Means = 'cash' | 'card' | 'bank_transfer' | 'cheque' | 'other';
 const MEANS: Array<[Means, string]> = [['cash', 'Cash'], ['card', 'Card'], ['bank_transfer', 'Bank transfer'], ['cheque', 'Cheque'], ['other', 'Other']];
@@ -124,9 +124,9 @@ export function OpenShiftModal({ onClose, onDone, atTill }: { onClose: () => voi
       <form className="stack" onSubmit={(e) => void submit(e)}>
         {!atTill && registers && registers.length > 1 && (
           <Field label={t('Register')}>
-            <select value={registerId} onChange={(e) => setRegisterId(e.target.value)} required>
+            <Select value={registerId} onChange={(e) => setRegisterId(e.target.value)} required>
               {registers.map((r) => <option key={r.id} value={r.id} disabled={Boolean(r.openBy)}>{r.name}{r.openBy ? ` (${t('open by {name}', { name: r.openBy })})` : ''}</option>)}
-            </select>
+            </Select>
           </Field>
         )}
         <Field label={t('Cash in the drawer to start (float)')} hint={t('Count it now; it is what the drawer should still hold at the end, plus cash sales.')}>

@@ -60,7 +60,7 @@ export function Orders() {
         <a className="button secondary" href={`/${session?.business.slug}/shop`} target="_blank" rel="noreferrer">{t('View store')}<span className="chip" aria-hidden="true">↗</span></a>
       </div>
       <div className="row">
-        <Segmented
+        <Segmented switches
           label={t('Orders')}
           value={view}
           onChange={(v) => setParams(v === 'to_do' ? {} : { view: v }, { replace: true })}

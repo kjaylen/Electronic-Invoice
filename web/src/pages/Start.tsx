@@ -6,7 +6,7 @@ import { api, ApiError, type SessionInfo } from '../api';
 import { AuthArt } from '../art';
 import { forgetBusiness, goToBusiness, recentBusinesses } from '../business';
 import { LanguageToggle, useT } from '../i18n';
-import { DISTRICTS, ErrorText, Field, useDebounced, usePageTitle } from '../ui';
+import { DISTRICTS, ErrorText, Field, Select, useDebounced, usePageTitle } from '../ui';
 
 function Layout(props: { art: { kicker: string; title: string; text: string }; children: React.ReactNode; wide?: boolean }) {
   return (
@@ -153,7 +153,7 @@ export function CreateBusiness() {
             <Field label={t('Street')}><input required value={form.street} onChange={set('street')} /></Field>
             <Field label={t('City or town')}><input required value={form.city} onChange={set('city')} /></Field>
             <Field label={t('District')}>
-              <select value={form.districtCode} onChange={set('districtCode')}>{DISTRICTS.map(([code, name]) => <option key={code} value={code}>{name}</option>)}</select>
+              <Select value={form.districtCode} onChange={set('districtCode')}>{DISTRICTS.map(([code, name]) => <option key={code} value={code}>{name}</option>)}</Select>
             </Field>
           </div>
           <div className="form-grid">

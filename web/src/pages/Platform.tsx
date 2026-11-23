@@ -11,7 +11,7 @@ import { useT } from '../i18n';
 import { useToast } from '../toast';
 import { CodeForm, RecoveryCodes, SetupSteps, type TwoFactorChallenge } from '../twofactor';
 import { type BillingInfo, type BillingInvoice, StatusPill } from './Billing';
-import { ErrorText, Field, Modal, money, Segmented, usePageTitle } from '../ui';
+import { ErrorText, Field, Modal, money, Segmented, Select, usePageTitle } from '../ui';
 
 interface StaffAdmin {
   id: string;
@@ -617,11 +617,11 @@ function PlanSection({ tenantId, billing, onChanged }: { tenantId: string; billi
         {billing.amountDue !== '0.00' && <> · <strong>{t('{amount} due', { amount: money(billing.amountDue) })}</strong></>}
       </p>
       <div className="row">
-        <select aria-label={t('Plan')} value={plan} onChange={(e) => setPlan(e.target.value as typeof plan)} style={{ maxWidth: 180 }}>
+        <Select aria-label={t('Plan')} value={plan} onChange={(e) => setPlan(e.target.value as typeof plan)} style={{ maxWidth: 180 }}>
           <option value="starter">Starter</option>
           <option value="business">Business</option>
           <option value="pro">Pro</option>
-        </select>
+        </Select>
         <button className="secondary" disabled={plan === billing.plan} onClick={() => void save({ plan }, t('Plan changed'))}>{t('Set plan')}</button>
         <span className="spacer" />
         <input aria-label={t('Trial days')} type="number" min={1} max={365} value={trialDays} onChange={(e) => setTrialDays(e.target.value)} style={{ width: '5rem' }} />

@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router';
 import { api, type Customer, type DocumentInfo, link, type Page } from '../api';
 import { useSession } from '../session';
 import { useT } from '../i18n';
-import { belizeDate, belizeToday, Field, Segmented, useDebounced, usePageTitle } from '../ui';
+import { belizeDate, belizeToday, Field, Segmented, Select, useDebounced, usePageTitle } from '../ui';
 import { DocumentTable, usePollWhile } from './Dashboard';
 
 const PAGE = 25;
@@ -89,17 +89,17 @@ export function Documents() {
           <Field label={t('From')}><input type="date" value={from} onChange={(e) => update('from', e.target.value)} /></Field>
           <Field label={t('To')}><input type="date" value={to} onChange={(e) => update('to', e.target.value)} /></Field>
           <Field label={t('Type')}>
-            <select value={type} onChange={(e) => update('type', e.target.value)}>
+            <Select value={type} onChange={(e) => update('type', e.target.value)}>
               <option value="">{t('All types')}</option>
               <option value="01">{t('Tax invoices')}</option>
               <option value="02">{t('Tax receipts')}</option>
               <option value="03">{t('Debit notes')}</option>
               <option value="04">{t('Credit notes')}</option>
-            </select>
+            </Select>
           </Field>
         </div>
         <div className="row">
-          <Segmented
+          <Segmented switches
             label={t('Status')}
             value={status}
             onChange={(v) => update('status', v)}

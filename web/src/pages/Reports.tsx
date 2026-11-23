@@ -75,7 +75,7 @@ export function SalesChart({ summary }: { summary: Summary }) {
               onFocus={() => setHover(i)}
               onBlur={() => setHover(null)}
             >
-              <span className="bar" style={{ height: `${pct(d.total)}%` }} />
+              <span className="bar" style={{ height: `${pct(d.total)}%`, '--i': i } as React.CSSProperties} />
             </button>
           ))}
         </div>
@@ -153,7 +153,7 @@ export function Reports() {
         </Modal>
       )}
       <div className="card row filters">
-        <Segmented
+        <Segmented switches
           label={t('Period')}
           value={preset}
           onChange={choose}
@@ -169,7 +169,7 @@ export function Reports() {
         <span className="small muted num">{from} → {to}</span>
       </div>
       <ErrorText error={error} />
-      <Segmented label={t('Report')} value={view} onChange={(v) => setParams(v === 'sales' ? {} : { view: v }, { replace: true })} options={[['sales', t('Sales')], ['gst', t('GST return')], ['profit', t('Profit and loss')]]} />
+      <Segmented switches label={t('Report')} value={view} onChange={(v) => setParams(v === 'sales' ? {} : { view: v }, { replace: true })} options={[['sales', t('Sales')], ['gst', t('GST return')], ['profit', t('Profit and loss')]]} />
       {view === 'gst' && <GstReturnView from={from} to={to} />}
       {view === 'profit' && <ProfitView from={from} to={to} />}
 

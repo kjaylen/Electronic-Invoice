@@ -181,7 +181,10 @@ test('documents: search, filter, and the overview totals', async ({ page }) => {
   await expect(page).toHaveURL(/q=placencia/);
   await page.getByRole('button', { name: 'Clear filters' }).click();
   await expect(page.locator('tbody tr')).toHaveCount(2);
-  await page.getByLabel('Type').selectOption('02');
+  // The type menu: open it, pick an option (keyboard works too).
+  await page.getByRole('combobox', { name: 'Type' }).click();
+  await page.getByRole('option', { name: 'Tax receipts' }).click();
+  await expect(page.getByRole('combobox', { name: 'Type' })).toHaveText('Tax receipts');
   await expect(page.locator('tbody tr')).toHaveCount(1);
   await expect(page.locator('tbody tr')).toContainText('Tax receipt');
 });

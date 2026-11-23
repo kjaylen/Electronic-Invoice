@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { api, type DocumentInfo, type Page, type Summary } from '../api';
-import { Crystals } from '../art';
 import { type T, useI18n, useT } from '../i18n';
 import { Icons } from '../icons';
 import { useSession } from '../session';
-import { belizeDate, belizeToday, fromCents, money, PaymentBadge, StatusBadge, toCents, TYPE_NAMES, usePageTitle } from '../ui';
+import { belizeDate, belizeToday, CountUp, fromCents, money, PaymentBadge, StatusBadge, toCents, TYPE_NAMES, usePageTitle } from '../ui';
 import { SalesChart } from './Reports';
 
 export function customerLabel(t: T, d: DocumentInfo): string {
@@ -103,7 +102,6 @@ export function Dashboard() {
   return (
     <div className="stack dash">
       <section className="hero welcome">
-        <Crystals count={2} />
         <div>
           <span className="kicker">{longDate}</span>
           <h1>{greeting}, {firstName}</h1>
@@ -114,8 +112,8 @@ export function Dashboard() {
         </div>
         {can('documents.issue') && (
           <div className="actions">
-            <Link className="button big lime" to="/counter" viewTransition>{t('Quick sale')}<span className="chip" aria-hidden="true">→</span></Link>
-            <Link className="button secondary on-dark" to="/documents/new?type=01" viewTransition>{t('New invoice')}</Link>
+            <Link className="button secondary" to="/documents/new?type=01" viewTransition>{t('New invoice')}</Link>
+            <Link className="button" to="/counter" viewTransition>{t('Quick sale')}<span className="chip" aria-hidden="true">→</span></Link>
           </div>
         )}
       </section>
@@ -123,22 +121,22 @@ export function Dashboard() {
       <div className="kpis">
         <div className="card kpi good">
           <span className="kpi-head"><Icons.counter />{t('Sales today')}</span>
-          <span className="kpi-value">{money(fromCents(todayTotal))}</span>
+          <span className="kpi-value"><CountUp value={Number(todayTotal)} format={(n) => money(fromCents(BigInt(Math.round(n))))} /></span>
           <span className="kpi-note">{weekTotal !== null ? t('Last 7 days: {amount}', { amount: money(fromCents(weekTotal)) }) : t('GST included')}</span>
         </div>
         <div className="card kpi">
           <span className="kpi-head"><Icons.documents />{t('Issued today')}</span>
-          <span className="kpi-value">{counted.length}</span>
+          <span className="kpi-value"><CountUp value={counted.length} format={(n) => String(Math.round(n))} /></span>
           <span className="kpi-note">{t('Invoices, receipts and notes')}</span>
         </div>
         <Link to="/orders" className={`card kpi ${ordersToDo ? 'alert' : ''}`} viewTransition>
           <span className="kpi-head"><Icons.orders />{t('Orders to handle')}</span>
-          <span className="kpi-value">{orders ? ordersToDo : '—'}</span>
+          <span className="kpi-value">{orders ? <CountUp value={ordersToDo} format={(n) => String(Math.round(n))} /> : '—'}</span>
           <span className="kpi-note">{orders && (orders.unpaid || orders.unfulfilled) ? t('{a} unpaid · {b} to deliver', { a: orders.unpaid, b: orders.unfulfilled }) : t('From your online store')}</span>
         </Link>
         <Link to={rejected.length ? '/documents?status=rejected' : '/documents'} className={`card kpi ${attention ? 'alert' : ''}`} viewTransition>
           <span className="kpi-head"><Icons.alert />{t('Need attention')}</span>
-          <span className="kpi-value">{attention}</span>
+          <span className="kpi-value"><CountUp value={attention} format={(n) => String(Math.round(n))} /></span>
           <span className="kpi-note">{attention ? t('{a} rejected · {b} waiting', { a: rejected.length, b: pending.length }) : t('Every document is settled')}</span>
         </Link>
       </div>

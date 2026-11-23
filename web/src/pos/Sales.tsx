@@ -4,7 +4,7 @@ import { type FormEvent, useCallback, useEffect, useState } from 'react';
 import { api, type DocumentDetailInfo, type DocumentInfo, type Page } from '../api';
 import { useT } from '../i18n';
 import { useToast } from '../toast';
-import { ErrorText, Field, fromCents, Modal, money, PAYMENT_MEANS, StatusBadge, toCents } from '../ui';
+import { ErrorText, Field, fromCents, Modal, money, PAYMENT_MEANS, Select, StatusBadge, toCents } from '../ui';
 import { useTill } from './TillApp';
 
 const SALE_TYPES = new Set(['02', '04', '01']);
@@ -182,9 +182,9 @@ function Refund({ doc, onClose, onDone }: { doc: DocumentDetailInfo; onClose: ()
         <div className="form-grid">
           <Field label={t('Reason')}><input required minLength={3} maxLength={200} value={reason} onChange={(e) => setReason(e.target.value)} placeholder={t('e.g. Returned, wrong size')} autoFocus /></Field>
           <Field label={t('Paid back by')}>
-            <select value={meansCode} onChange={(e) => setMeansCode(e.target.value)}>
+            <Select value={meansCode} onChange={(e) => setMeansCode(e.target.value)}>
               {PAYMENT_MEANS.slice(0, 3).map(([c, n]) => <option key={c} value={c}>{t(n)}</option>)}
-            </select>
+            </Select>
           </Field>
         </div>
         <p className="strong">{t('About {amount} back to the customer', { amount: money(fromCents(estimate)) })}</p>

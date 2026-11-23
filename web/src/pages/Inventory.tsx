@@ -6,7 +6,7 @@ import { api, type Item, link, type Page } from '../api';
 import { type T, useT } from '../i18n';
 import { useSession } from '../session';
 import { useToast } from '../toast';
-import { belizeDate, belizeToday, Combobox, ErrorText, Field, fromCents, Modal, money, PAYMENT_METHOD_TEXT, Segmented, toCents, unitName, useDebounced, usePageTitle } from '../ui';
+import { belizeDate, belizeToday, Combobox, ErrorText, Field, fromCents, Modal, money, PAYMENT_METHOD_TEXT, Segmented, Select, toCents, unitName, useDebounced, usePageTitle } from '../ui';
 
 interface StockItem {
   itemId: string;
@@ -93,7 +93,7 @@ export function Inventory() {
         <div className="card kpi"><span className="kpi-head">{t('Items tracked')}</span><span className="kpi-value">{tt ? tt.tracked : '—'}</span><span className="kpi-note">{tt ? t('{n} not tracked', { n: tt.untracked }) : ' '}</span></div>
       </div>
       <div className="row">
-        <Segmented label={t('Show')} value={filter} onChange={(v) => setParams({ filter: v }, { replace: true })} options={[['tracked', t('Tracked')], ['low', t('Low or out')], ['untracked', t('Not tracked')], ['deliveries', t('Deliveries')]]} />
+        <Segmented switches label={t('Show')} value={filter} onChange={(v) => setParams({ filter: v }, { replace: true })} options={[['tracked', t('Tracked')], ['low', t('Low or out')], ['untracked', t('Not tracked')], ['deliveries', t('Deliveries')]]} />
         <span className="spacer" />
         {filter !== 'deliveries' && <input type="search" className="search-input" placeholder={t('Name, code or barcode')} value={q} onChange={(e) => setQ(e.target.value)} aria-label={t('Search items')} />}
       </div>
@@ -200,7 +200,7 @@ function ItemStockModal({ itemId, onClose, onChange }: { itemId: string; onClose
                 <Segmented label={t('Adjust')} value={mode} onChange={setMode} options={[['change', t('Add or take off')], ['set', t('Set to a count')]]} />
                 <div className="form-grid">
                   <Field label={mode === 'change' ? t('Change (e.g. -2 or 5)') : t('Counted')}><input inputMode="decimal" required value={quantity} onChange={(e) => setQuantity(e.target.value)} /></Field>
-                  <Field label={t('Reason')}><select value={reason} onChange={(e) => setReason(e.target.value)}>{ADJUST.map(([k, v]) => <option key={k} value={k}>{t(v)}</option>)}</select></Field>
+                  <Field label={t('Reason')}><Select value={reason} onChange={(e) => setReason(e.target.value)}>{ADJUST.map(([k, v]) => <option key={k} value={k}>{t(v)}</option>)}</Select></Field>
                   <Field label={t('Note')} hint={t('Optional.')}><input maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} /></Field>
                 </div>
                 <button disabled={busy || !quantity.trim()}>{t('Save')}</button>
@@ -430,21 +430,21 @@ export function ReceiveStock() {
               {recordBill && (
                 <div className="form-grid">
                   <Field label="GST">
-                    <select value={treatment} onChange={(e) => setTreatment(e.target.value as typeof treatment)}>
+                    <Select value={treatment} onChange={(e) => setTreatment(e.target.value as typeof treatment)}>
                       <option value="standard">{t('Standard rate: 12.5% on top of the cost')}</option>
                       <option value="zero">{t('Zero-rated')}</option>
                       <option value="exempt">{t('Exempt')}</option>
                       <option value="none">{t('No GST (supplier not registered)')}</option>
-                    </select>
+                    </Select>
                   </Field>
                   <Field label={t('Payment')}>
-                    <select value={paidNow ? 'paid' : 'bill'} onChange={(e) => setPaidNow(e.target.value === 'paid')}>
+                    <Select value={paidNow ? 'paid' : 'bill'} onChange={(e) => setPaidNow(e.target.value === 'paid')}>
                       <option value="bill">{t('A bill to pay later')}</option>
                       <option value="paid">{t('Paid on delivery')}</option>
-                    </select>
+                    </Select>
                   </Field>
                   {paidNow
-                    ? <Field label={t('Method')}><select value={method} onChange={(e) => setMethod(e.target.value as typeof method)}>{(['bank_transfer', 'cash', 'cheque', 'card', 'online', 'other'] as const).map((m) => <option key={m} value={m}>{t(PAYMENT_METHOD_TEXT[m])}</option>)}</select></Field>
+                    ? <Field label={t('Method')}><Select value={method} onChange={(e) => setMethod(e.target.value as typeof method)}>{(['bank_transfer', 'cash', 'cheque', 'card', 'online', 'other'] as const).map((m) => <option key={m} value={m}>{t(PAYMENT_METHOD_TEXT[m])}</option>)}</Select></Field>
                     : <Field label={t('Due on')}><input type="date" min={receivedOn} value={dueDate} onChange={(e) => setDueDate(e.target.value)} /></Field>}
                 </div>
               )}
