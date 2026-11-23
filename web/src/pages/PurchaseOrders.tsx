@@ -172,7 +172,22 @@ export function PurchaseOrderEditor() {
   useEffect(() => {
     // From a supplier's page: that supplier, with what is low from them.
     const from = params.get('supplier');
-    if (!id && from) {
+    const itemId = params.get('item');
+    if (!id && itemId) {
+      // From an item's page: that item, from the supplier it last came from, at its last cost.
+      void api<{ item: Item; suppliers: Array<{ id: string | null; name: string; lastCost: string | null }> }>(`/v1/items/${itemId}/summary`).then(async (r) => {
+        const last = r.suppliers[0];
+        setLines([{ key: ++lineKey, item: { id: r.item.id, name: r.item.name }, quantity: '', unitCost: last?.lastCost ?? '' }]);
+        if (last?.id) {
+          const s = await api<{ supplier: SupplierLite & { email: string | null } }>(`/v1/suppliers/${last.id}/summary`).catch(() => null);
+          if (s) {
+            setSupplier(s.supplier);
+            setSupplierName(s.supplier.name);
+            if (s.supplier.email) setEmail(s.supplier.email);
+          }
+        } else if (last) setSupplierName(last.name);
+      }).catch(setError);
+    } else if (!id && from) {
       void api<{ supplier: SupplierLite & { email: string | null } }>(`/v1/suppliers/${from}/summary`).then((r) => {
         setSupplier(r.supplier);
         setSupplierName(r.supplier.name);

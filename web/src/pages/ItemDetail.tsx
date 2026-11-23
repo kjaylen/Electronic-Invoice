@@ -63,7 +63,7 @@ export function ItemDetail() {
         </div>
         <span className="spacer" />
         <div className="row">
-          {can('catalog.manage') && s.stock.tracked && <Link className="button" to="/inventory/orders/new?suggest=1" viewTransition>{t('Order more')}</Link>}
+          {can('catalog.manage') && <Link className="button" to={`/inventory/orders/new?item=${it.id}`} viewTransition>{t('Order more')}</Link>}
           <Link className="button secondary" to="/labels" viewTransition>{t('Print labels')}</Link>
         </div>
       </div>
