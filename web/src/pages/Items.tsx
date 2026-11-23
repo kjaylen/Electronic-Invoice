@@ -178,6 +178,7 @@ export function Items() {
   const [importing, setImporting] = useState(false);
   const [archiving, setArchiving] = useState<Item | null>(null);
   const [repricing, setRepricing] = useState(false);
+  const [priceList, setPriceList] = useState(false);
   const [categories, setCategories] = useState<Category[]>([]);
   // '' every item, '\u0000' items without a category, otherwise that category.
   const [category, setCategory] = useState('');
@@ -229,6 +230,7 @@ export function Items() {
         <div><h2>{t('All items')}</h2></div>
         <span className="spacer" />
         <Link className="button secondary" to="/labels" viewTransition>{t('Print labels')}</Link>
+        <button type="button" className="secondary" onClick={() => setPriceList(true)}>{t('Price list')}</button>
         {manage && <a className="button secondary" href={link('/v1/items/export.csv')} download>{t('Export')}</a>}
         {manage && <button type="button" className="secondary" onClick={() => setImporting(true)}>{t('Import')}</button>}
         {manage && <button type="button" className="secondary" onClick={() => setRepricing(true)}>{t('Change prices')}</button>}
@@ -277,6 +279,7 @@ export function Items() {
       </section>
 
       {importing && <ImportDialog kind="items" onClose={() => setImporting(false)} onDone={() => { void load(); void loadCategories(); }} />}
+      {priceList && <PriceListDialog categories={categories} onClose={() => setPriceList(false)} />}
       {repricing && (
         <RepriceDialog
           categories={categories}
@@ -424,6 +427,49 @@ function RepriceDialog(props: { categories: Category[]; initialCategory: string;
           <button type="submit" disabled={busy || !preview || preview.changed === 0}>{busy ? t('Saving…') : preview?.changed ? t('Change {n} prices', { n: preview.changed }) : t('Change prices')}</button>
         </div>
       </form>
+    </Modal>
+  );
+}
+
+/** The price list as a PDF: retail or wholesale, with or without GST, one category or all. */
+function PriceListDialog(props: { categories: Category[]; onClose: () => void }) {
+  const t = useT();
+  const [prices, setPrices] = useState<'retail' | 'wholesale'>('retail');
+  const [gst, setGst] = useState<'include' | 'exclude'>('include');
+  const [category, setCategory] = useState('');
+  const url = link(`/v1/items/price-list.pdf?prices=${prices}&gst=${gst}${category ? `&category=${encodeURIComponent(category)}` : ''}`);
+  return (
+    <Modal title={t('Price list')} onClose={props.onClose}>
+      <div className="stack">
+        <div className="form-grid">
+          <Field label={t('Prices')}>
+            <Select value={prices} onChange={(e) => setPrices(e.target.value as 'retail' | 'wholesale')}>
+              <option value="retail">{t('Retail')}</option>
+              <option value="wholesale">{t('Wholesale')}</option>
+            </Select>
+          </Field>
+          <Field label="GST">
+            <Select value={gst} onChange={(e) => setGst(e.target.value as 'include' | 'exclude')}>
+              <option value="include">{t('Prices include GST')}</option>
+              <option value="exclude">{t('Prices before GST')}</option>
+            </Select>
+          </Field>
+        </div>
+        {props.categories.length > 0 && (
+          <Field label={t('Category')}>
+            <Select value={category} onChange={(e) => setCategory(e.target.value)}>
+              <option value="">{t('Every category')}</option>
+              {props.categories.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
+            </Select>
+          </Field>
+        )}
+        <p className="small muted">{t('Items by category, with quantity prices. Send it to your wholesale customers or print it for the counter.')}</p>
+        <div className="row">
+          <span className="spacer" />
+          <button type="button" className="secondary" onClick={props.onClose}>{t('Close')}</button>
+          <a className="button" href={url} target="_blank" rel="noreferrer">{t('Open the PDF')}</a>
+        </div>
+      </div>
     </Modal>
   );
 }

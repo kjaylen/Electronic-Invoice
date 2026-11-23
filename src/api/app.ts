@@ -59,6 +59,7 @@ import { registerPurchasingRoutes } from './purchasing.ts';
 import { registerSupplierSummaryRoutes } from './supplier-summary.ts';
 import { registerHeldSaleRoutes } from './held.ts';
 import { registerTimeclockRoutes } from './timeclock.ts';
+import { registerPriceListRoutes } from './price-list.ts';
 import { registerShiftRoutes } from './shifts.ts';
 import { registerPosAdminRoutes, registerPosDeviceRoutes, SESSION_TOKEN_PREFIX, tillMayUse, touchDevice } from './pos.ts';
 import { lookupSession } from '../db/users.ts';
@@ -355,6 +356,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     registerSupplierSummaryRoutes(tenant, deps);
     registerHeldSaleRoutes(tenant, deps);
     registerTimeclockRoutes(tenant, deps);
+    registerPriceListRoutes(tenant, deps);
     registerShiftRoutes(tenant, deps);
     registerPosAdminRoutes(tenant, deps);
     registerTemplateRoutes(tenant, deps);

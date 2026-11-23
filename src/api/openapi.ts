@@ -154,6 +154,7 @@ const SUMMARIES: Record<string, string> = {
   'PUT /v1/customers/{id}': 'Replace a customer\'s details',
   'DELETE /v1/customers/{id}': 'Archive a customer',
   'GET /v1/items': 'List and search catalog items (q, barcode code, favorites, category)',
+  'GET /v1/items/price-list.pdf': 'The price list as a PDF, by category (retail or wholesale, with or without GST)',
   'GET /v1/items/categories': 'Item categories in use, with how many items each has',
   'POST /v1/items/reprice': 'Change many prices at once (by percent, by amount, or to a price; a category or every item; dryRun to preview)',
   'POST /v1/items': 'Add a catalog item',

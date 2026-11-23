@@ -2546,4 +2546,8 @@ export const ES: Record<string, string> = {
   "From a quantity of": "Desde una cantidad de",
   "Price each (BZ$, before GST)": "Precio por unidad (BZ$, antes del GST)",
   "Add a quantity price": "Agregar un precio por cantidad",
+  "Price list": "Lista de precios",
+  "Prices include GST": "Precios con GST",
+  "Prices before GST": "Precios antes del GST",
+  "Items by category, with quantity prices. Send it to your wholesale customers or print it for the counter.": "Artículos por categoría, con precios por cantidad. Envíela a sus clientes mayoristas o imprímala para el mostrador.",
 };

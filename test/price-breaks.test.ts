@@ -55,6 +55,14 @@ test('quantity prices on items and documents', async () => {
     const lines = (await call('GET', `/v1/documents/${sale.json().id}/view`)).json().view.lines as Array<{ unitPrice: string }>;
     assert.deepEqual(lines.map((l) => Number(l.unitPrice)), [2.5, 3]);
 
+    // The price list PDF, retail with GST and wholesale before GST.
+    for (const qs of ['', '?prices=wholesale&gst=exclude', '?category=Drinks']) {
+      const pdf = await call('GET', `/v1/items/price-list.pdf${qs}`);
+      assert.equal(pdf.statusCode, 200, pdf.body);
+      assert.equal(pdf.headers['content-type'], 'application/pdf');
+      assert.equal(pdf.rawPayload.subarray(0, 5).toString(), '%PDF-');
+    }
+
     // An edit without them keeps them; an empty list removes them.
     const kept = (await call('PUT', `/v1/items/${soda.id}`, { name: 'Soda', unitCode: 'H87', unitPrice: '3.25', gstCategory: 'S' })).json();
     assert.equal(kept.priceBreaks.length, 2);
