@@ -1843,3 +1843,10 @@ button.cat-tag:hover:not(:disabled) { background: var(--brand); border-color: va
 .clock-badge { margin-left: 0.4rem; }
 .bundle-part.break-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; }
 @media (max-width: 640px) { .bundle-part.break-row { grid-template-columns: 1fr 1fr; } }
+
+/* A customer's account page. */
+.account-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.5rem; }
+.account-list li { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; padding: 0.6rem 0; border-bottom: 1px solid var(--hairline); }
+.account-list li > div { display: grid; gap: 0.1rem; min-width: 0; }
+.account-list li button { min-height: 0; padding: 0.35rem 0.8rem; font-size: 0.88rem; }
+.account-list li:last-child { border-bottom: 0; }

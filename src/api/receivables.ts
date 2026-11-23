@@ -222,6 +222,11 @@ async function statementPdf(db: Queryable, tenantId: string, s: Awaited<ReturnTy
   return (await templateStatementPdf(db, tenantId, input)) ?? renderStatement({ ...input, ...(logo && { logo }) });
 }
 
+/** A customer's statement PDF with the business's own settings (their account page uses it). */
+export async function statementPdfFor(db: Queryable, tenantId: string, s: Awaited<ReturnType<typeof statement>>): Promise<Buffer> {
+  return statementPdf(db, tenantId, s, await receivableSettings(db, tenantId));
+}
+
 const customerKey = { type: 'string', minLength: 3, maxLength: 310, pattern: '^(c:[0-9a-fA-F-]{36}|t:\\d{6}|n:.+|walk-in)$' } as const;
 const fileSafe = (s: string) => s.replace(/[^A-Za-z0-9-]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'customer';
 

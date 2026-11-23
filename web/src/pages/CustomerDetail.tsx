@@ -5,11 +5,12 @@
  */
 
 import { useEffect, useState } from 'react';
+import { useToast } from '../toast';
 import { Link, useParams } from 'react-router';
 import { api, type Customer, type DocStatus } from '../api';
 import { useT } from '../i18n';
 import { useSession } from '../session';
-import { DISTRICTS, ErrorText, fromCents, money, StatusBadge, toCents, TYPE_NAMES, usePageTitle } from '../ui';
+import { DISTRICTS, ErrorText, fromCents, Modal, money, StatusBadge, toCents, TYPE_NAMES, usePageTitle } from '../ui';
 import { StatementModal } from './Receivables';
 
 interface Summary {
@@ -30,6 +31,7 @@ export function CustomerDetail() {
   const [s, setS] = useState<Summary | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [statement, setStatement] = useState(false);
+  const [accountLink, setAccountLink] = useState(false);
   usePageTitle(s?.customer.name ?? t('Customer'));
   useEffect(() => {
     void api<Summary>(`/v1/customers/${id}/summary`).then(setS).catch(setError);
@@ -57,6 +59,7 @@ export function CustomerDetail() {
           {can('documents.issue') && <Link className="button" to={`/documents/new?type=01&customer=${c.id}`} viewTransition>{t('New invoice')}</Link>}
           {can('payments.record') && <button type="button" className="secondary" onClick={() => setStatement(true)}>{t('Statement')}</button>}
           <Link className="button secondary" to={`/documents?customerId=${c.id}`} viewTransition>{t('All documents')}</Link>
+          {(can('payments.record') || can('catalog.manage')) && <button type="button" className="secondary" onClick={() => setAccountLink(true)}>{t('Account link')}</button>}
         </div>
       </div>
 
@@ -121,7 +124,54 @@ export function CustomerDetail() {
         </div>
       </div>
       {statement && <StatementModal customerKey={s.key} onClose={() => setStatement(false)} />}
+      {accountLink && <AccountLinkModal customer={c} onClose={() => setAccountLink(false)} />}
     </div>
+  );
+}
+
+/** A private link to the customer's account page: copy it, or email it to them; or stop the old ones. */
+function AccountLinkModal({ customer, onClose }: { customer: Customer; onClose: () => void }) {
+  const t = useT();
+  const toast = useToast();
+  const [url, setUrl] = useState<string | null>(null);
+  const [to, setTo] = useState(customer.contact.email ?? '');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const run = async (fn: () => Promise<void>) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await fn();
+    } catch (e) {
+      setError(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal title={t('Account link for {name}', { name: customer.name })} onClose={onClose}>
+      <div className="stack">
+        <p className="small muted">{t('A private page where they see what they owe, pay online, and download their invoices and statement. It works for a year.')}</p>
+        {url ? (
+          <div className="row nowrap">
+            <input readOnly value={url} aria-label={t('Account link')} onFocus={(e) => e.target.select()} />
+            <button type="button" className="secondary" onClick={() => void navigator.clipboard.writeText(url).then(() => toast(t('Link copied')))}>{t('Copy')}</button>
+          </div>
+        ) : (
+          <button type="button" className="secondary" disabled={busy} onClick={() => void run(async () => setUrl((await api<{ url: string }>(`/v1/customers/${customer.id}/account-link`, { method: 'POST' })).url))}>{t('Make a link to copy')}</button>
+        )}
+        <form className="row nowrap" onSubmit={(e) => { e.preventDefault(); void run(async () => { const r = await api<{ to: string }>(`/v1/customers/${customer.id}/account-link/send`, { method: 'POST', body: { to: to.trim() } }); toast(t('Sent to {email}', { email: r.to })); onClose(); }); }}>
+          <input type="email" required placeholder={t('Their email')} value={to} onChange={(e) => setTo(e.target.value)} aria-label={t('Their email')} />
+          <button type="submit" disabled={busy || !to.trim()}>{t('Email it')}</button>
+        </form>
+        <ErrorText error={error} />
+        <div className="row">
+          <button type="button" className="link danger-link" disabled={busy} onClick={() => void run(async () => { const r = await api<{ revoked: number }>(`/v1/customers/${customer.id}/account-links`, { method: 'DELETE' }); setUrl(null); toast(t('{n} links stopped', { n: r.revoked })); })}>{t('Stop all their links')}</button>
+          <span className="spacer" />
+          <button type="button" className="secondary" onClick={onClose}>{t('Close')}</button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 

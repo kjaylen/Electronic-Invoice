@@ -50,7 +50,7 @@ interface TenantRow {
 
 /** First path segments the app itself uses, so no business can take them. */
 export const RESERVED_SLUGS = new Set([
-  'v1', 'd', 'api', 'app', 'admin', 'assets', 'static', 'health', 'signup', 'login', 'logout', 'register', 'new', 'www', 'mail',
+  'v1', 'd', 'a', 'api', 'app', 'admin', 'assets', 'static', 'health', 'signup', 'login', 'logout', 'register', 'new', 'www', 'mail',
   'help', 'support', 'docs', 'status', 'about', 'pricing', 'terms', 'privacy', 'security', 'settings', 'account', 'businesses',
   'developers', 'legal', 'billing', 'plans', 'webhooks', 'shop', 'store', 'checkout', 'pay', 'receivables', 'q', 'quote', 'quotes', 'recurring',
 ]);

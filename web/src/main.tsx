@@ -55,6 +55,7 @@ const Inventory = page(() => import('./pages/Inventory'), 'Inventory');
 const Shifts = page(() => import('./pages/Shifts'), 'Shifts');
 const ShiftDetail = page(() => import('./pages/Shifts'), 'ShiftDetail');
 const ReceiveStock = page(() => import('./pages/Inventory'), 'ReceiveStock');
+const CustomerAccount = page(() => import('./pages/Account'), 'CustomerAccount');
 const PurchaseOrderEditor = page(() => import('./pages/PurchaseOrders'), 'PurchaseOrderEditor');
 const PurchaseOrderDetail = page(() => import('./pages/PurchaseOrders'), 'PurchaseOrderDetail');
 const SupplierDetail = page(() => import('./pages/SupplierDetail'), 'SupplierDetail');
@@ -403,6 +404,8 @@ function PublicApp() {
         <Route path="/signup" element={<CreateBusiness />} />
         {/* A customer paying an invoice from its email. */}
         <Route path="/pay/:token" element={<PayInvoice />} />
+        {/* A customer's account: what they owe, paying, their documents. */}
+        <Route path="/a/:token" element={<CustomerAccount />} />
         {/* A customer looking at a quote, to accept or decline it. */}
         <Route path="/q/:token" element={<QuoteView />} />
         {/* Our own staff: move businesses to BTS production. */}

@@ -61,6 +61,7 @@ import { registerHeldSaleRoutes } from './held.ts';
 import { registerTimeclockRoutes } from './timeclock.ts';
 import { registerPriceListRoutes } from './price-list.ts';
 import { registerRecurringExpenseRoutes } from './recurring-expenses.ts';
+import { registerAccountLinkRoutes, registerPublicAccountRoutes } from './accounts.ts';
 import { registerShiftRoutes } from './shifts.ts';
 import { registerPosAdminRoutes, registerPosDeviceRoutes, SESSION_TOKEN_PREFIX, tillMayUse, touchDevice } from './pos.ts';
 import { lookupSession } from '../db/users.ts';
@@ -359,6 +360,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     registerTimeclockRoutes(tenant, deps);
     registerPriceListRoutes(tenant, deps);
     registerRecurringExpenseRoutes(tenant, deps);
+    registerAccountLinkRoutes(tenant, deps, ctx);
     registerShiftRoutes(tenant, deps);
     registerPosAdminRoutes(tenant, deps);
     registerTemplateRoutes(tenant, deps);
@@ -397,6 +399,8 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     gatewayOptions: gatewayOptions(deps, slugOfTenant, paymentExtras),
     ...(options.ekyash && { ekyash: options.ekyash }),
   }), { prefix: '/v1/pay' });
+  // A customer's account page: what they owe, paying, their invoices (the link's token is the permission).
+  await app.register(async (a) => registerPublicAccountRoutes(a, deps, ctx, { ...(options.ekyash && { ekyash: options.ekyash }) }), { prefix: '/v1/account' });
   // A customer looking at a quote, accepting or declining it (the link's token is the permission).
   await app.register(async (q) => registerPublicQuoteRoutes(q, deps, ctx), { prefix: '/v1/quote' });
   // Belize Bank asking about and posting bill payments (bearer token per business).
