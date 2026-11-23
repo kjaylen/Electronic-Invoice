@@ -146,6 +146,7 @@ export interface ZReportData {
     refunds: Record<Means, string>;
     refundCount: number;
     voided: { count: number; total: string };
+    discounts?: { count: number; total: string };
     cash: { float: string; in: string; payIn: string; payOut: string; expected: string; counted: string | null; difference: string | null };
     movements: Array<{ kind: 'pay_in' | 'pay_out'; amount: string; reason: string; at: string }>;
   };
@@ -175,6 +176,7 @@ export function zReportTicket(z: ZReportData, now = new Date()): Ticket {
   for (const d of r.documents) pair(`${d.name} (${d.count})`, formatAmount(d.total));
   pair('GST', formatAmount(r.gst));
   if (r.voided.count) pair(`Cancelled (${r.voided.count})`, formatAmount(r.voided.total));
+  if (r.discounts?.count) pair(`Discounts given (${r.discounts.count})`, `-${formatAmount(r.discounts.total)}`);
   rule();
   text('TAKINGS BY PAYMENT', { bold: true });
   for (const m of means) if (r.takings[m] !== '0.00') pair(MEANS_NAME[m], formatAmount(r.takings[m]));

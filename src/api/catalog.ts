@@ -166,8 +166,8 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: PipelineDeps) 
   const { db } = deps;
 
   app.get('/me', async (request) => {
-    const t = (await db.query<{ id: string; legal_name: string; trade_name: string | null; tin: string; environment: string }>(
-      'select id, legal_name, trade_name, tin, environment from tenants where id = $1', [request.tenantId],
+    const t = (await db.query<{ id: string; legal_name: string; trade_name: string | null; tin: string; environment: string; cashier_discount_limit: string | null }>(
+      'select id, legal_name, trade_name, tin, environment, cashier_discount_limit::text from tenants where id = $1', [request.tenantId],
     )).rows[0]!;
     const period = (await db.query<{ started_at: string | Date; reason: string }>(
       'select started_at, reason from contingency_periods where tenant_id = $1 and ended_at is null', [request.tenantId],
@@ -184,8 +184,21 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: PipelineDeps) 
       certificate: await certificateSummary(deps, request.tenantId),
       billing: await billingBanner(db, request.tenantId),
       contingency: { active: Boolean(period), since: period ? new Date(period.started_at).toISOString() : null, reason: period?.reason ?? null, queued },
+      counter: { cashierDiscountLimit: t.cashier_discount_limit === null ? null : String(Number(t.cashier_discount_limit)) },
     };
   });
+
+  // How the counter and the tills work for this business (owners and admins).
+  app.put<{ Body: { cashierDiscountLimit: string | null } }>(
+    '/counter-settings',
+    { schema: { body: { type: 'object', required: ['cashierDiscountLimit'], additionalProperties: false, properties: { cashierDiscountLimit: { anyOf: [{ type: 'string', pattern: '^(100(\\.0{1,2})?|\\d{1,2}(\\.\\d{1,2})?)$' }, { type: 'null' }] } } } } },
+    async (request) => {
+      requirePermission(request, 'business.manage');
+      await db.query('update tenants set cashier_discount_limit = $2 where id = $1', [request.tenantId, request.body.cashierDiscountLimit]);
+      await audit(db, { tenantId: request.tenantId, userId: request.userId || null, action: 'counter.settings', details: { cashierDiscountLimit: request.body.cashierDiscountLimit }, ip: request.ip });
+      return { cashierDiscountLimit: request.body.cashierDiscountLimit === null ? null : String(Number(request.body.cashierDiscountLimit)) };
+    },
+  );
 
   // A business can install or renew its own certificate (owners only).
   app.put<{ Body: { certificatePem: string; privateKeyPem: string; passphrase?: string } }>('/certificate', { schema: { body: certificateSchema } }, async (request) => {

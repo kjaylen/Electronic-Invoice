@@ -34,6 +34,7 @@ interface BusinessRow {
   email: string;
   environment: string;
   require_two_factor: boolean;
+  daily_summary: boolean;
 }
 
 const businessJson = (r: BusinessRow) => ({
@@ -46,6 +47,7 @@ const businessJson = (r: BusinessRow) => ({
   contact: { telephone: r.telephone, email: r.email },
   environment: r.environment,
   requireTwoFactor: r.require_two_factor,
+  dailySummary: r.daily_summary,
 });
 
 type BusinessBody = {
@@ -90,6 +92,18 @@ export function registerBusinessRoutes(app: FastifyInstance, deps: PipelineDeps,
       const changed = Object.fromEntries((Object.keys(after) as Array<keyof BusinessRow>).filter((k) => before[k] !== after[k]).map((k) => [k, { from: before[k], to: after[k] }]));
       if (Object.keys(changed).length) await audit(db, { tenantId: request.tenantId, userId: request.userId || null, action: 'business.updated', details: changed, ip: request.ip });
       return businessJson(after);
+    },
+  );
+
+  // The morning summary email to owners and admins (src/notify/daily.ts).
+  app.put<{ Body: { dailySummary: boolean } }>(
+    '/business/daily-summary',
+    { schema: { body: { type: 'object', required: ['dailySummary'], additionalProperties: false, properties: { dailySummary: { type: 'boolean' } } } } },
+    async (request) => {
+      requirePermission(request, 'business.manage');
+      await db.query('update tenants set daily_summary = $2 where id = $1', [request.tenantId, request.body.dailySummary]);
+      await audit(db, { tenantId: request.tenantId, userId: request.userId || null, action: request.body.dailySummary ? 'business.daily_summary_on' : 'business.daily_summary_off', ip: request.ip });
+      return businessJson(await load(request.tenantId));
     },
   );
 

@@ -143,6 +143,13 @@ export const issueSchema = {
     note: text(1000),
     prepaidAmount: money,
     payableRoundingAmount: money,
+    // Tax receipts paid partly one way and partly another (cash and card): the parts, adding up to the total.
+    tenders: {
+      type: 'array',
+      minItems: 2,
+      maxItems: 6,
+      items: { type: 'object', required: ['meansCode', 'amount'], additionalProperties: false, properties: { meansCode: { type: 'string', pattern: '^\\d{1,3}$' }, amount: money } },
+    },
     // Tax invoices and debit notes: already paid in full when issued (recorded as a payment).
     paid: {
       type: 'object',

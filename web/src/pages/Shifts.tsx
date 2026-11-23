@@ -39,6 +39,7 @@ export interface ShiftReport {
   takings: Record<Means, string>;
   totalTakings: string;
   voided: { count: number; total: string };
+  discounts?: { count: number; total: string };
   cash: { float: string; in: string; payIn: string; payOut: string; expected: string; counted: string | null; difference: string | null };
   movements: Array<{ id: string; kind: 'pay_in' | 'pay_out'; amount: string; reason: string; at: string; by: string | null }>;
 }
@@ -270,6 +271,7 @@ export function ReportView({ report, shift }: { report: ShiftReport; shift: Shif
             {report.documents.map((d) => <tr key={d.type}><td>{t(d.name)} ({d.count})</td><td className="right mono">{money(d.total)}</td></tr>)}
             <tr><td>GST</td><td className="right mono">{money(report.gst)}</td></tr>
             {report.voided.count > 0 && <tr><td className="muted">{t('Cancelled ({n})', { n: report.voided.count })}</td><td className="right mono muted">{money(report.voided.total)}</td></tr>}
+            {report.discounts && report.discounts.count > 0 && <tr><td className="muted">{t('Discounts given ({n} sales, before GST)', { n: report.discounts.count })}</td><td className="right mono muted">−{money(report.discounts.total)}</td></tr>}
           </tbody>
         </table>
       </section>

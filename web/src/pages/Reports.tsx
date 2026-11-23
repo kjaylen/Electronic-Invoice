@@ -25,6 +25,49 @@ function presetRange(p: Exclude<Preset, 'custom'>): [string, string] {
 
 interface CustomerRow { name: string; tin: string | null; documents: number; net: string; gst: string; total: string }
 interface ItemRow { description: string; unitCode: string; quantity: string; net: string; gst: string; total: string }
+interface StaffRow { name: string | null; documents: number; total: string; discounts: string; receipts: number; averageReceipt: string | null }
+interface HourRow { hour: number; documents: number; total: string }
+
+/** Sales by hour of the day, from the first hour with a sale to the last (at least 7 am to 7 pm). */
+function HoursChart({ hours }: { hours: HourRow[] }) {
+  const t = useT();
+  const [hover, setHover] = useState<number | null>(null);
+  const first = Math.min(7, ...hours.map((h) => h.hour));
+  const last = Math.max(19, ...hours.map((h) => h.hour));
+  const data = Array.from({ length: last - first + 1 }, (_, i) => {
+    const h = hours.find((x) => x.hour === first + i);
+    return { hour: first + i, total: h ? toCents(h.total) : 0n, documents: h?.documents ?? 0 };
+  });
+  const max = data.reduce((m, d) => (d.total > m ? d.total : m), 0n);
+  const pct = (v: bigint) => (max > 0n && v > 0n ? Math.max(Number((v * 1000n) / max) / 10, 1.5) : 0);
+  const label = (h: number) => `${((h + 11) % 12) + 1}${h < 12 ? 'am' : 'pm'}`;
+  const active = hover !== null ? data[hover] : null;
+  return (
+    <figure className="chart">
+      <figcaption className="sr-only">{t('Sales by hour of the day, in BZ$.')}</figcaption>
+      <div className="chart-plot" onMouseLeave={() => setHover(null)}>
+        <span className="chart-max num">{money(fromCents(max))}</span>
+        <div className="chart-grid" aria-hidden="true"><span /><span /></div>
+        <div className="chart-bars">
+          {data.map((d, i) => (
+            <button key={d.hour} type="button" className={`bar-hit ${hover === i ? 'hover' : ''}`} aria-label={`${label(d.hour)}: ${money(fromCents(d.total))}, ${t('{n} documents', { n: d.documents })}`}
+              onMouseEnter={() => setHover(i)} onFocus={() => setHover(i)} onBlur={() => setHover(null)}>
+              <span className="bar" style={{ height: `${pct(d.total)}%`, '--i': i } as React.CSSProperties} />
+            </button>
+          ))}
+        </div>
+        {active && hover !== null && (
+          <div className="chart-tip" style={{ left: `${((hover + 0.5) / data.length) * 100}%` }} role="status">
+            <strong>{label(active.hour)}</strong>
+            <span className="num">{money(fromCents(active.total))}</span>
+            <span className="muted">{t('{n} documents', { n: active.documents })}</span>
+          </div>
+        )}
+      </div>
+      <div className="chart-axis" aria-hidden="true">{data.map((d, i) => <span key={d.hour}>{i % 2 === 0 ? label(d.hour) : ''}</span>)}</div>
+    </figure>
+  );
+}
 
 /** One bar per day (or per month for long periods), with the missing days filled in as zero. */
 function buckets(summary: Summary, lang: string): Array<{ key: string; label: string; total: bigint; documents: number }> {
@@ -104,6 +147,8 @@ export function Reports() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [customers, setCustomers] = useState<CustomerRow[]>([]);
   const [items, setItems] = useState<ItemRow[]>([]);
+  const [staff, setStaff] = useState<StaffRow[]>([]);
+  const [hours, setHours] = useState<HourRow[]>([]);
   const [error, setError] = useState<unknown>(null);
   const [archiving, setArchiving] = useState(false);
   const [withPdf, setWithPdf] = useState(true);
@@ -118,10 +163,14 @@ export function Reports() {
       api<Summary>(`/v1/reports/summary?${qs}`),
       api<{ data: CustomerRow[] }>(`/v1/reports/customers?${qs}`),
       api<{ data: ItemRow[] }>(`/v1/reports/items?${qs}`),
-    ]).then(([s, c, i]) => {
+      api<{ data: StaffRow[] }>(`/v1/reports/staff?${qs}`),
+      api<{ data: HourRow[] }>(`/v1/reports/hours?${qs}`),
+    ]).then(([s, c, i, st, h]) => {
       setSummary(s);
       setCustomers(c.data);
       setItems(i.data);
+      setStaff(st.data);
+      setHours(h.data);
     }).catch(setError);
   }, [from, to, qs]);
 
@@ -239,6 +288,34 @@ export function Reports() {
                   </table>
                 </div>
               )}
+            </section>
+          </div>
+
+          <div className="grid two">
+            <section className="card">
+              <div className="row"><h2>{t('Sales by staff')}</h2><span className="spacer" /><a className="button secondary" href={link(`/v1/reports/staff?${qs}&format=csv`)} download>CSV</a></div>
+              {staff.length === 0 ? <div className="empty">{t('No sales in this period.')}</div> : (
+                <div className="table-wrap">
+                  <table className="responsive">
+                    <thead><tr><th scope="col">{t('Person')}</th><th scope="col" className="right">{t('Documents')}</th><th scope="col" className="right">{t('Average receipt')}</th><th scope="col" className="right">{t('Discounts')}</th><th scope="col" className="right">{t('Total')}</th></tr></thead>
+                    <tbody>
+                      {staff.map((s) => (
+                        <tr key={s.name ?? '-'}>
+                          <td data-label={t('Person')}>{s.name ?? <span className="muted">{t('API and automatic')}</span>}</td>
+                          <td data-label={t('Documents')} className="right">{s.documents}</td>
+                          <td data-label={t('Average receipt')} className="right">{s.averageReceipt ? money(s.averageReceipt) : '—'}</td>
+                          <td data-label={t('Discounts')} className="right">{s.discounts !== '0.00' ? money(s.discounts) : '—'}</td>
+                          <td data-label={t('Total')} className="right">{money(s.total)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+            <section className="card">
+              <h2>{t('Busiest hours')}</h2>
+              {hours.length === 0 ? <div className="empty">{t('No sales in this period.')}</div> : <HoursChart hours={hours} />}
             </section>
           </div>
         </>

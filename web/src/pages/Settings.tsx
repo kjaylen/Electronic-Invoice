@@ -265,6 +265,28 @@ function SecurityRules({ profile, onSaved }: { profile: BusinessProfile; onSaved
   );
 }
 
+/** The morning email to owners and admins: yesterday at a glance. */
+function DailySummaryCard({ profile, onSaved }: { profile: BusinessProfile; onSaved: () => void }) {
+  const t = useT();
+  const toast = useToast();
+  const save = useAction(async (dailySummary: boolean) => {
+    await api('/v1/business/daily-summary', { method: 'PUT', body: { dailySummary } });
+    toast(dailySummary ? t('You will get a summary each morning.') : t('No more morning summaries.'));
+    onSaved();
+  });
+  return (
+    <section className="card stack">
+      <h2>{t('Daily summary')}</h2>
+      <label className="row small">
+        <input type="checkbox" checked={Boolean(profile.dailySummary)} disabled={save.busy} onChange={(e) => void save.run(e.target.checked)} />
+        {t('Email owners and admins a summary of the day before, each morning')}
+      </label>
+      <p className="small muted">{t('Sales and GST against the same day last week, how customers paid, best sellers, discounts given, cash drawer differences, what customers owe, what is running low, and anything BTS rejected. Quiet days send nothing.')}</p>
+      <ErrorText error={save.error} />
+    </section>
+  );
+}
+
 // ---------- business ----------
 
 function BusinessTab() {
@@ -352,6 +374,7 @@ function BusinessTab() {
         )}
         {profile.environment === 'test' && <p className="small muted">{t('Moving to production is done by our team once BTS has approved your business.')}</p>}
       </section>
+      {editable && <DailySummaryCard profile={profile} onSaved={() => void load()} />}
       {editable && <SecurityRules profile={profile} onSaved={() => void load()} />}
     </div>
   );

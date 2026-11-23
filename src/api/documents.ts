@@ -61,6 +61,34 @@ export interface IssueBody {
   prepaidAmount?: string;
   payableRoundingAmount?: string;
   paid?: { method: PaymentMethod; reference?: string };
+  tenders?: Array<{ meansCode: string; amount: string }>;
+}
+
+const MEANS_NAMES: Record<string, string> = { '10': 'cash', '20': 'cheque', '30': 'transfer', '31': 'transfer', '42': 'bank transfer', '48': 'card', '54': 'credit card', '55': 'debit card' };
+
+/**
+ * A receipt paid in parts: they must add up to its total. The document then names the largest
+ * part's means, and its terms list every part ("Paid BZ$20.00 cash, BZ$15.50 card").
+ */
+function splitPayment(req: IssueRequest, tenders: NonNullable<IssueBody['tenders']>, tax: PipelineDeps['tax']): { req: IssueRequest; parts: Array<{ means: string; cents: string }> } {
+  if (req.etdType !== '02') throw new ApiError(422, 'invalid_tenders', 'Only tax receipts are paid in parts');
+  const t = calculateDocument({ lines: req.lines, ...(req.prepaidAmount !== undefined && { prepaidAmount: req.prepaidAmount }), ...(req.payableRoundingAmount !== undefined && { payableRoundingAmount: req.payableRoundingAmount }) }, tax);
+  const parts = tenders.map((x) => ({ means: x.meansCode, cents: parseDecimalCents(x.amount) }));
+  if (parts.some((p) => p.cents <= 0n)) throw new ApiError(422, 'invalid_tenders', 'Each part of the payment must be more than zero');
+  const sum = parts.reduce((a, p) => a + p.cents, 0n);
+  if (sum !== t.payableAmount) throw new ApiError(422, 'invalid_tenders', `The parts add up to BZ$${formatCents(sum)}, not the total BZ$${formatCents(t.payableAmount)}`);
+  const largest = parts.reduce((a, p) => (p.cents > a.cents ? p : a));
+  const terms = `Paid ${parts.map((p) => `BZ$${formatCents(p.cents)} ${MEANS_NAMES[p.means] ?? 'other'}`).join(', ')}`;
+  return {
+    req: { ...req, payment: { ...req.payment, meansCode: largest.means, terms } },
+    parts: parts.map((p) => ({ means: p.means, cents: p.cents.toString() })),
+  };
+}
+
+/** "12.5" -> 1250n (amounts are validated as money by the schema). */
+function parseDecimalCents(amount: string): bigint {
+  const [whole = '0', fraction = ''] = amount.split('.');
+  return BigInt(whole) * 100n + BigInt((fraction + '00').slice(0, 2));
 }
 
 const DOC_COLUMNS = `d.id, d.etdui, d.etd_type, d.series_number, d.serial, d.issue_date::text as issue_date, d.issue_time::text as issue_time,
@@ -224,11 +252,38 @@ export async function toIssueRequest(deps: PipelineDeps, tenantId: string, body:
  * (credit notes never do), checks the customer's credit limit, signs and
  * sends it to BTS. Quotes and recurring invoices issue through here too.
  */
-export async function issueFromBody(deps: PipelineDeps, tenantId: string, body: IssueBody, userId: string | null, options: { deviceId?: string | null } = {}): Promise<IssueResult> {
-  const issueRequest = await toIssueRequest(deps, tenantId, body);
+/**
+ * A cashier's discounts stay within the business's limit (percent off each line, line and sale
+ * discounts together), measured on the engine's own line amounts.
+ */
+async function checkDiscountLimit(deps: PipelineDeps, tenantId: string, req: IssueRequest): Promise<void> {
+  const limit = (await deps.db.query<{ cashier_discount_limit: string | null }>('select cashier_discount_limit::text from tenants where id = $1', [tenantId])).rows[0]?.cashier_discount_limit;
+  if (limit === null || limit === undefined) return;
+  const withDiscounts = calculateDocument({ lines: req.lines }, deps.tax);
+  const fullPrice = calculateDocument({ lines: req.lines.map((l) => ({ ...l, allowanceCharges: (l.allowanceCharges ?? []).filter((a) => a.isCharge) })) }, deps.tax);
+  withDiscounts.lines.forEach((line, i) => {
+    const base = fullPrice.lines[i]!.netAmount;
+    if (base <= 0n) return;
+    const off = base - line.netAmount;
+    // In hundredths of a percent, with half a cent of rounding allowed.
+    if (off > 0n && (off * 10000n - 50n * 100n) > BigInt(Math.round(Number(limit) * 100)) * base) {
+      throw new ApiError(403, 'discount_over_limit', `Cashiers can take up to ${Number(limit)}% off a line. Ask a manager to make this sale.`);
+    }
+  });
+}
+
+export async function issueFromBody(deps: PipelineDeps, tenantId: string, body: IssueBody, userId: string | null, options: { deviceId?: string | null; limitDiscounts?: boolean } = {}): Promise<IssueResult> {
+  let issueRequest = await toIssueRequest(deps, tenantId, body);
+  if (options.limitDiscounts) await checkDiscountLimit(deps, tenantId, issueRequest);
+  // Paid in parts: checked against the total before anything is signed.
+  const split = body.tenders ? splitPayment(issueRequest, body.tenders, deps.tax) : null;
+  if (split) issueRequest = split.req;
   if (issueRequest.etdType !== '04') await assertCanIssue(deps.db, tenantId);
   await checkCreditLimit(deps, tenantId, issueRequest);
   const result = await issueDocument(deps, tenantId, issueRequest);
+  if (split) {
+    await deps.db.query('update documents set tenders = $3 where tenant_id = $1 and (id = $2 or supersedes_document_id = $2)', [tenantId, result.documentId, JSON.stringify(split.parts)]);
+  }
   // Who issued it, on which till and in which shift (not part of the signed record). Also on the contingency reissue, if there was one.
   if (userId) {
     await deps.db.query(
@@ -506,7 +561,7 @@ export function registerDocumentRoutes(app: FastifyInstance, deps: PipelineDeps,
 
     let documentId: string | undefined;
     try {
-      const result = await issueFromBody(deps, tenantId, request.body, request.userId || null, { deviceId: request.posDevice?.id ?? null });
+      const result = await issueFromBody(deps, tenantId, request.body, request.userId || null, { deviceId: request.posDevice?.id ?? null, limitDiscounts: request.principal === 'cashier' });
       documentId = result.documentId;
       // Paid on the spot: record it, once the invoice has legal value (a rejected one is never owed).
       const paid = request.body.paid;

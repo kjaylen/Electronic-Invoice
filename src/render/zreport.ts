@@ -26,6 +26,7 @@ export interface ZReportInput {
     refunds: Record<Means, string>;
     refundCount: number;
     voided: { count: number; total: string };
+    discounts?: { count: number; total: string };
     cash: { float: string; in: string; payIn: string; payOut: string; expected: string; counted: string | null; difference: string | null };
     movements: Array<{ kind: 'pay_in' | 'pay_out'; amount: string; reason: string; at: string; by: string | null }>;
   };
@@ -59,6 +60,7 @@ export function renderZReport(z: ZReportInput): Promise<Buffer> {
   for (const d of r.documents) line(`${d.name} (${d.count})`, formatAmount(d.total));
   line('GST', formatAmount(r.gst));
   if (r.voided.count) line(`Cancelled (${r.voided.count})`, formatAmount(r.voided.total));
+  if (r.discounts?.count) line(`Discounts given (${r.discounts.count})`, `-${formatAmount(r.discounts.total)}`);
   rule();
   title('Takings by payment');
   for (const m of means) if (r.takings[m] !== '0.00') line(MEANS_NAME[m], formatAmount(r.takings[m]));

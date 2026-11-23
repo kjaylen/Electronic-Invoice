@@ -6,6 +6,7 @@
 
 import { type FormEvent, useCallback, useEffect, useState } from 'react';
 import { api, type Account } from '../api';
+import { useSession } from '../session';
 import { useT } from '../i18n';
 import { qrSvg } from '../pos/ticket';
 import { useToast } from '../toast';
@@ -48,7 +49,60 @@ function ago(t: (s: string, v?: Record<string, string | number>) => string, iso:
   return new Date(iso).toLocaleDateString();
 }
 
+/** How selling at the counter and on tills works: for now, how much a cashier may take off. */
+function CounterSettingsCard() {
+  const t = useT();
+  const toast = useToast();
+  const { me, refreshMe } = useSession();
+  const current = me?.counter?.cashierDiscountLimit ?? null;
+  const [limit, setLimit] = useState(current ?? '');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  useEffect(() => setLimit(current ?? ''), [current]);
+  const valid = limit === '' || (/^\d{1,3}(\.\d{1,2})?$/.test(limit) && Number(limit) <= 100);
+  const save = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!valid) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api('/v1/counter-settings', { method: 'PUT', body: { cashierDiscountLimit: limit === '' ? null : limit } });
+      await refreshMe();
+      toast(limit === '' ? t('Cashiers can give any discount.') : t('Cashiers can take up to {n}% off.', { n: limit }));
+    } catch (err) {
+      setError(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <section className="card stack">
+      <div>
+        <h2>{t('Counter')}</h2>
+        <p className="small muted">{t('Discounts at the counter and on the tills. Managers, admins and owners can always give any discount; every discount shows on the receipt and in the shift report.')}</p>
+      </div>
+      <form className="row counter-settings" onSubmit={save}>
+        <Field label={t('Most a cashier can take off a line (%)')} hint={t('Empty: no limit')}>
+          <input inputMode="decimal" placeholder={t('No limit')} value={limit} onChange={(e) => setLimit(e.target.value)} />
+        </Field>
+        <button type="submit" disabled={!valid || busy || limit === (current ?? '')}>{busy ? t('Saving…') : t('Save')}</button>
+      </form>
+      {!valid && <p className="form-error">{t('0 to 100, or empty')}</p>}
+      <ErrorText error={error} />
+    </section>
+  );
+}
+
 export function TillsTab() {
+  return (
+    <div className="stack">
+      <CounterSettingsCard />
+      <TillsCard />
+    </div>
+  );
+}
+
+function TillsCard() {
   const t = useT();
   const toast = useToast();
   const [tills, setTills] = useState<Till[] | null>(null);

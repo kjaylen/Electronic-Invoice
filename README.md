@@ -260,6 +260,10 @@ A React + TypeScript app (Vite) served by the API server from `web/dist`. It's b
     - cash received and change, card or transfer, optional customer TIN
     - "repeat last sale", free-text items
     - optional automatic printing on an 80 mm receipt printer (the browser remembers the printer)
+    - discounts on a line (a percentage or an amount) or on the whole sale, shown on the receipt
+    - hold a sale (with a name: "Table 4") to serve the next customer, and recall it later; held sales stay on the device
+    - a saved customer on the receipt, or the sale charged to their account as a tax invoice due in 7, 15 or 30 days
+    - payment split between cash and a card or transfer: the parts must add up to the total before anything is signed, the receipt lists them, and the shift counts each in its place
     - the sale in progress survives a closed tab
   - **New invoice or receipt:**
     - pick a saved customer or add one, or sell to a walk-in on receipts
@@ -275,6 +279,8 @@ A React + TypeScript app (Vite) served by the API server from `web/dist`. It's b
   - **Settings:** my account (language, password, sign out everywhere); business (details, address, certificate); online store; users; activity; API keys.
   - **Templates:** the code behind every email, printed document and store section, in Liquid, with a live preview, and the business's images and logo (see "Templates" below).
   - **Products and Orders:** see "Online store" below.
+- **Daily summary** (opt-in, Settings → Business): each morning owners and admins get yesterday at a glance: sales and GST against the same day last week, how customers paid (split payments counted by part), best sellers, discounts given, cash drawer differences, what customers owe, what is running low and anything BTS rejected (`src/notify/daily.ts`). Quiet days send nothing.
+- **Counter controls** (Settings → Tills): the most a cashier may take off a line, checked by the server on the engine's own amounts; managers and above are not limited. Shift reports show the discounts given.
 - **Live status:** a bar at the top of the page appears while BTS is unreachable (with the queue count), when it comes back, and when the device is offline.
 - **Spanish:** every screen is in English and Spanish (`web/src/es.ts`). The choice is per device, defaulting to the browser's language. Customer emails go out in English or Spanish, as each business chooses under Templates (built-in text, subjects, dates and the lines the app writes); printed documents keep BTS's English names.
 - **Installable:** a web app manifest, icons and a service worker that caches the app shell (never API data), so it installs on phones and desktops and opens fast.

@@ -132,3 +132,55 @@ test('registers: one open shift per drawer; cashiers see their own shifts; manag
     assert.deepEqual([byManager.statusCode, byManager.json().shift.difference, byManager.json().shift.closedBy], [200, '0.00', 'Manny']);
     assert.equal((await c.app.inject({ method: 'DELETE', url: `/v1/registers/${bar.id}`, headers: c.owner })).statusCode, 409, 'an open drawer is not archived');
   }));
+
+test('a sale paid partly by card and partly in cash: the parts must add up, the receipt lists them, the drawer counts only the cash', () =>
+  withBusiness(async (c) => {
+    const shift = (await c.app.inject({ method: 'POST', url: '/v1/shifts', headers: c.owner, payload: { openingFloat: '0.00' } })).json().shift;
+    // 40.00 plus 12.5% GST is 45.00.
+    const sale = (tenders: Array<{ meansCode: string; amount: string }>, type = '02') =>
+      c.app.inject({ method: 'POST', url: '/v1/documents', headers: c.owner, payload: { type, lines: [line('40.00')], tenders, ...(type === '01' && { customer: { name: 'Island Logistics Ltd.', tin: '777888', address: { street: '4 Mile', city: 'Belize City', districtCode: '1' } } }) } });
+    const short = await sale([{ meansCode: '48', amount: '30.00' }, { meansCode: '10', amount: '10.00' }]);
+    assert.equal(short.statusCode, 422);
+    assert.equal(short.json().error.code, 'invalid_tenders');
+    assert.match(short.json().error.message, /BZ\$40\.00, not the total BZ\$45\.00/);
+    assert.equal((await sale([{ meansCode: '48', amount: '30.00' }, { meansCode: '10', amount: '15.00' }], '01')).statusCode, 422, 'only receipts');
+    assert.equal((await c.f.db.query("select count(*)::int as n from documents where etd_type = '02'")).rows[0]!.n, 0, 'nothing was signed');
+
+    const ok = await sale([{ meansCode: '48', amount: '30.00' }, { meansCode: '10', amount: '15.00' }]);
+    assert.equal(ok.statusCode, 201, ok.body);
+    const view = (await c.app.inject({ method: 'GET', url: `/v1/documents/${ok.json().id}/view`, headers: c.owner })).json();
+    assert.ok(view.printed.info.includes('Terms: Paid BZ$30.00 card, BZ$15.00 cash'), JSON.stringify(view.printed.info));
+
+    const report = (await c.app.inject({ method: 'GET', url: `/v1/shifts/${shift.id}`, headers: c.owner })).json().report;
+    assert.equal(report.sales.card, '30.00');
+    assert.equal(report.sales.cash, '15.00');
+    assert.equal(report.cash.expected, '15.00');
+    assert.equal(report.totalTakings, '45.00');
+  }));
+
+test('a cashier discounts within the limit the owner sets; managers and owners are not limited', () =>
+  withBusiness(async (c) => {
+    await createUser(c.f.db, { tenantId: c.f.tenantA, name: 'Cass', email: 'cass@biz.example', role: 'cashier', password: PASSWORD });
+    const cashier = await c.login('cass@biz.example');
+    assert.equal((await c.app.inject({ method: 'PUT', url: '/v1/counter-settings', headers: cashier, payload: { cashierDiscountLimit: '50' } })).statusCode, 403);
+    assert.equal((await c.app.inject({ method: 'PUT', url: '/v1/counter-settings', headers: c.owner, payload: { cashierDiscountLimit: '101' } })).statusCode, 400);
+    assert.equal((await c.app.inject({ method: 'PUT', url: '/v1/counter-settings', headers: c.owner, payload: { cashierDiscountLimit: '10' } })).statusCode, 200);
+    assert.equal((await c.app.inject({ method: 'GET', url: '/v1/me', headers: cashier })).json().counter.cashierDiscountLimit, '10');
+
+    const sale = (headers: Record<string, string>, allowanceCharges: unknown[]) => c.app.inject({
+      method: 'POST', url: '/v1/documents', headers,
+      payload: { type: '02', lines: [{ ...line('20.00'), allowanceCharges }], payment: { meansCode: '10', terms: 'Paid' } },
+    });
+    const over = await sale(cashier, [{ isCharge: false, reason: 'Discount', percent: '15' }]);
+    assert.equal(over.statusCode, 403);
+    assert.equal(over.json().error.code, 'discount_over_limit');
+    // A line discount and a sale discount count together: 5% + 6% is over 10%.
+    assert.equal((await sale(cashier, [{ isCharge: false, reason: 'Discount', percent: '5' }, { isCharge: false, reason: 'Sale discount 6%', percent: '6' }])).statusCode, 403);
+    assert.equal((await sale(cashier, [{ isCharge: false, reason: 'Discount', amount: '2.00' }])).statusCode, 201, 'BZ$2 off BZ$20 is 10%');
+    assert.equal((await sale(cashier, [{ isCharge: false, reason: 'Discount', percent: '10' }])).statusCode, 201);
+    assert.equal((await sale(c.owner, [{ isCharge: false, reason: 'Discount', percent: '50' }])).statusCode, 201);
+
+    // No limit again.
+    await c.app.inject({ method: 'PUT', url: '/v1/counter-settings', headers: c.owner, payload: { cashierDiscountLimit: null } });
+    assert.equal((await sale(cashier, [{ isCharge: false, reason: 'Discount', percent: '40' }])).statusCode, 201);
+  }));

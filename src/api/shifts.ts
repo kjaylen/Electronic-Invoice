@@ -79,8 +79,12 @@ export async function shiftReport(db: Queryable, tenantId: string, s: ShiftRow) 
      from documents where tenant_id = $1 and shift_id = $2 and status in ${COUNTED} group by etd_type order by etd_type`,
     [tenantId, s.id],
   )).rows;
+  // A receipt paid in parts counts each part under its own means.
   const receipts = (await db.query<{ payment_means: string | null; total: unknown }>(
-    `select payment_means, coalesce(sum(payable_cents), 0) as total from documents where tenant_id = $1 and shift_id = $2 and etd_type = '02' and status in ${COUNTED} group by payment_means`,
+    `select coalesce(t.part ->> 'means', d.payment_means) as payment_means, coalesce(sum(coalesce((t.part ->> 'cents')::bigint, d.payable_cents)), 0) as total
+     from documents d left join lateral jsonb_array_elements(coalesce(d.tenders, '[]'::jsonb)) as t(part) on true
+     where d.tenant_id = $1 and d.shift_id = $2 and d.etd_type = '02' and d.status in ${COUNTED}
+     group by 1`,
     [tenantId, s.id],
   )).rows;
   const refunds = (await db.query<{ payment_means: string | null; total: unknown; n: number }>(
@@ -94,6 +98,13 @@ export async function shiftReport(db: Queryable, tenantId: string, s: ShiftRow) 
     'select method, coalesce(sum(amount_cents), 0) as total, count(*)::int as n from invoice_payments where tenant_id = $1 and shift_id = $2 and voided_at is null group by method',
     [tenantId, s.id],
   )).rows;
+  // Discounts given on the shift's sales: each line's full price (quantity x price) less what it sold for, before GST.
+  const discounts = (await db.query<{ n: number; total: unknown }>(
+    `select count(distinct d.id)::int as n, coalesce(sum(greatest(round(l.quantity * l.unit_price * 100)::bigint - l.net_cents, 0)), 0) as total
+     from documents d join document_lines l on l.document_id = d.id and l.tenant_id = d.tenant_id
+     where d.tenant_id = $1 and d.shift_id = $2 and d.etd_type in ('01', '02') and d.status in ${COUNTED} and round(l.quantity * l.unit_price * 100)::bigint > l.net_cents`,
+    [tenantId, s.id],
+  )).rows[0]!;
   const voided = (await db.query<{ n: number; total: unknown }>(
     "select count(*)::int as n, coalesce(sum(payable_cents), 0) as total from documents where tenant_id = $1 and shift_id = $2 and status = 'cancelled'",
     [tenantId, s.id],
@@ -127,6 +138,7 @@ export async function shiftReport(db: Queryable, tenantId: string, s: ShiftRow) 
     takings: asMoney(takings),
     totalTakings: formatCents(MEANS.reduce((a, m) => a + takings[m], 0n)),
     voided: { count: voided.n, total: c(voided.total) },
+    discounts: { count: discounts.n, total: c(discounts.total) },
     cash: {
       float: formatCents(float),
       in: formatCents(takings.cash),

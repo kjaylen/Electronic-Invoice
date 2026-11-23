@@ -165,6 +165,43 @@ export function registerReportRoutes(app: FastifyInstance, deps: PipelineDeps) {
     return { data: rows.map((r) => ({ description: r.description, unitCode: r.unit_code, quantity: qty(r.quantity), net: cents(r.net), gst: cents(r.gst), total: cents(r.total) })) };
   });
 
+  // Who sold what: documents, sales and discounts given per person (API keys and automatic documents together).
+  app.get<PeriodQuery>('/reports/staff', { schema: { querystring: periodQuery } }, async (request, reply) => {
+    const q = request.query;
+    requirePermission(request, 'reports.view');
+    checkPeriod(q);
+    const rows = (await db.query<{ name: string | null; n: number; total: string; discounts: string; receipts: number; receipt_total: string }>(
+      `select u.name, count(*)::int as n, ${signed('d.tax_inclusive_cents')} as total,
+         coalesce(sum((select coalesce(sum(greatest(round(l.quantity * l.unit_price * 100)::bigint - l.net_cents, 0)), 0)
+                       from document_lines l where l.document_id = d.id and l.tenant_id = d.tenant_id)) filter (where d.etd_type in ('01', '02')), 0) as discounts,
+         (count(*) filter (where d.etd_type = '02'))::int as receipts,
+         coalesce(sum(d.tax_inclusive_cents) filter (where d.etd_type = '02'), 0) as receipt_total
+       from documents d left join users u on u.id = d.issued_by
+       where ${base} group by u.id, u.name order by total desc nulls last limit 200`, args(request.tenantId, q),
+    )).rows;
+    const data = rows.map((r) => ({
+      name: r.name, documents: r.n, total: cents(r.total), discounts: cents(r.discounts), receipts: r.receipts,
+      averageReceipt: r.receipts ? formatCents(toBigInt(r.receipt_total) / BigInt(r.receipts)) : null,
+    }));
+    if (q.format === 'csv') {
+      return sendCsv(reply, 'sales-by-staff', q.from, q.to, toCsv(['Person', 'Documents', 'Total (BZD)', 'Discounts given (BZD)', 'Receipts', 'Average receipt (BZD)'],
+        rows.map((r) => [txt(r.name ?? 'API and automatic'), num(r.n), money(r.total), money(r.discounts), num(r.receipts), r.receipts ? money(toBigInt(r.receipt_total) / BigInt(r.receipts)) : txt('')])));
+    }
+    return { data };
+  });
+
+  // When customers buy: sales and documents by hour of the day (invoices and receipts, Belize time).
+  app.get<PeriodQuery>('/reports/hours', { schema: { querystring: periodQuery } }, async (request) => {
+    const q = request.query;
+    requirePermission(request, 'reports.view');
+    checkPeriod(q);
+    const rows = (await db.query<{ hour: number; n: number; total: string }>(
+      `select extract(hour from d.issue_time)::int as hour, count(*)::int as n, coalesce(sum(d.tax_inclusive_cents), 0) as total
+       from documents d where ${base} and d.etd_type in ('01', '02') group by 1 order by 1`, args(request.tenantId, q),
+    )).rows;
+    return { data: rows.map((r) => ({ hour: r.hour, documents: r.n, total: cents(r.total) })) };
+  });
+
   /** The document register: every document of the period, any status (for the accountant, and in the archive). */
   const registerCsv = async (tenantId: string, q: { from: string; to: string }): Promise<string> => {
     const rows = (await db.query<{ issue_date: string; issue_time: string; etd_type: IssuedEtdType; series_number: number; serial: string; etdui: string; name: string | null; tin: string | null; net: string; gst: string; tax: string; total: string; status: string; protocol_number: string | null; referenced_etdui: string | null }>(

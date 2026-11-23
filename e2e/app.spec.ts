@@ -201,6 +201,39 @@ test('reports: totals, GST by rate, CSV download', async ({ page }) => {
   expect(file.suggestedFilename()).toMatch(/^documents-.*\.csv$/);
 });
 
+test('counter: a line discount, hold and recall, and a payment split between card and cash', async ({ page }) => {
+  await logIn(page);
+  await page.goto(p('/counter'));
+  const quick = page.getByRole('group', { name: 'Quick buttons' });
+  await quick.getByRole('button', { name: /Coconut water/ }).click();
+  await quick.getByRole('button', { name: /Coconut water/ }).click();
+  // 10% off 2 x 3.50: 6.30, GST 0.79, total 7.09.
+  await page.getByRole('button', { name: 'Discount on Coconut water' }).click();
+  await page.getByRole('button', { name: '10%', exact: true }).click();
+  await expect(page.locator('.cart-lines .line-discount')).toHaveText('10% off');
+  await expect(page.locator('.cart .grand')).toContainText('BZ$7.09');
+
+  // Hold it for later, then recall it.
+  await page.locator('.counter-actions').getByRole('button', { name: 'Hold sale' }).click();
+  await page.getByRole('dialog').getByLabel('Name it (optional)').fill('Table 4');
+  await page.getByRole('dialog').getByRole('button', { name: 'Hold sale' }).click();
+  await expect(page.locator('.cart-lines li')).toHaveCount(0);
+  await page.locator('.counter-actions').getByRole('button', { name: /Held sales/ }).click();
+  await expect(page.getByRole('dialog')).toContainText('Table 4');
+  await page.getByRole('dialog').getByRole('button', { name: 'Recall' }).click();
+  await expect(page.locator('.cart .grand')).toContainText('BZ$7.09');
+
+  // BZ$5 by card, the rest in cash.
+  await page.locator('.cart').getByRole('button', { name: 'Split' }).click();
+  await page.getByLabel('Amount by card or transfer').fill('5');
+  await expect(page.locator('.tender.split')).toContainText('Cash: BZ$2.09');
+  await page.getByLabel('Cash received').fill('5');
+  await expect(page.locator('.tender:not(.split)')).toContainText('Change BZ$2.91');
+  await page.keyboard.press('F2');
+  await expect(page.locator('.last-sale')).toContainText('Authorized');
+  await expect(page.locator('.last-sale')).toContainText('BZ$2.91');
+});
+
 test('users: the owner adds a cashier by email, who sets a password from the welcome link', async ({ page, browser }) => {
   await logIn(page);
   await page.getByRole('navigation').getByRole('link', { name: 'Settings' }).click();
