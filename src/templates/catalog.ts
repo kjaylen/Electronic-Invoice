@@ -137,6 +137,14 @@ export const TEMPLATES: TemplateDef[] = [
       { name: 'url', description: 'The link that puts the cart back and opens the checkout' }, { name: 'unsubscribe_url', description: 'The link to stop these emails (keep it in the email)' }, { name: 'reminder.number', description: '1 or 2' }, { name: 'reminder.last', description: 'Whether no other reminder follows' }],
   },
   {
+    key: 'email.sign-in-code', group: 'emails', name: 'Sign-in code', preview: 'email', language: 'html', file: 'email-sign-in-code.liquid',
+    description: 'Sent to a buyer signing in to their account at your online store: the six-digit code they type.',
+    subject: "{{ code }} is your sign-in code for {{ store.name }}",
+    subjectEs: "{{ code }} es su código para entrar a {{ store.name }}",
+    variables: [{ name: 'store.name', description: 'Your store name' }, { name: 'store.logo', description: "Your logo's address (empty when you have none)" }, IMAGES, { name: 'store.url', description: 'Your store' },
+      { name: 'code', description: 'The six-digit code (keep it in the email)' }, { name: 'minutes', description: 'How long the code works' }],
+  },
+  {
     key: 'document.invoice', group: 'documents', name: 'Invoice and notes (A4)', preview: 'a4', language: 'html', file: 'document-invoice.liquid',
     description: 'The printed copy of tax invoices, debit notes and credit notes, and the PDF you email.',
     requires: [BTS], variables: PRINTED,

@@ -55,6 +55,8 @@ export interface StoreSettings {
   };
   /** Emails to buyers who left at checkout: the first after some hours, optionally a second a day later. */
   reminders: { enabled: boolean; afterHours: number; second: boolean };
+  /** Buyers can sign in (with a code sent to their email) to see their orders and check out faster. */
+  accounts: { enabled: boolean };
 }
 
 export const DEFAULT_STORE_SETTINGS: StoreSettings = {
@@ -67,6 +69,7 @@ export const DEFAULT_STORE_SETTINGS: StoreSettings = {
   pickup: { enabled: true, instructions: '' },
   payments: { bankTransfer: { enabled: true, instructions: '' }, cashOnDelivery: { enabled: true }, payAtPickup: { enabled: true }, online: { enabled: false, provider: 'test' } },
   reminders: { enabled: true, afterHours: 1, second: true },
+  accounts: { enabled: true },
 };
 
 /** Stored settings over the defaults, so older or partial settings always have every field. */
@@ -88,6 +91,7 @@ export function withDefaults(stored: Partial<StoreSettings> | null | undefined):
       online: { enabled: s.payments?.online?.enabled ?? false, provider: s.payments?.online?.provider ?? 'test' },
     },
     reminders: { enabled: s.reminders?.enabled ?? d.reminders.enabled, afterHours: s.reminders?.afterHours ?? d.reminders.afterHours, second: s.reminders?.second ?? d.reminders.second },
+    accounts: { enabled: s.accounts?.enabled ?? d.accounts.enabled },
   };
 }
 
@@ -316,11 +320,13 @@ export interface OrderInput extends CheckoutChoice {
   note?: string;
   /** The checkout this order completes (checkout reminders). */
   checkoutId?: string;
+  /** Signed in: keep the delivery address in the buyer's account. */
+  saveAddress?: boolean;
 }
 
 const tokenHash = (token: string) => createHash('sha256').update(token, 'utf8').digest('hex');
 
-export async function placeOrder(db: Database, deps: Pick<PipelineDeps, 'tax'>, store: StoreRef, input: OrderInput): Promise<{ id: string; number: number; token: string; quote: Quote }> {
+export async function placeOrder(db: Database, deps: Pick<PipelineDeps, 'tax'>, store: StoreRef, input: OrderInput, options: { buyerId?: string } = {}): Promise<{ id: string; number: number; token: string; quote: Quote }> {
   if (!paymentMethodsFor(store.settings, input.fulfillment).includes(input.paymentMethod)) {
     throw new StoreError('invalid_order', 'This payment method is not available for this order');
   }
@@ -339,13 +345,13 @@ export async function placeOrder(db: Database, deps: Pick<PipelineDeps, 'tax'>, 
     const a = input.address;
     await tx.query(
       `insert into orders (id, tenant_id, number, token_hash, payment_method, fulfillment, delivery_zone, delivery_fee, customer_name, customer_email, customer_phone,
-         street, city, district_code, buyer_tin, buyer_name, note, line_extension_cents, gst_cents, total_cents, discount_code_id, discount_code, discount_cents)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)`,
+         street, city, district_code, buyer_tin, buyer_name, note, line_extension_cents, gst_cents, total_cents, discount_code_id, discount_code, discount_cents, buyer_id)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)`,
       [id, store.tenantId, number, tokenHash(token), input.paymentMethod, input.fulfillment, quote.delivery?.zone ?? null, quote.delivery?.fee ?? '0',
         input.customer.name.trim(), input.customer.email?.trim().toLowerCase() || null, input.customer.phone.trim(),
         a?.street ?? null, a?.city ?? null, a?.districtCode ?? null, input.business?.tin ?? null, input.business?.name.trim() ?? null, input.note?.trim() || null,
         String(quote.cents.lineExtension), String(quote.cents.gst), String(quote.cents.total),
-        quote.discount?.id ?? null, quote.discount?.code ?? null, String(quote.discount?.net ?? 0n)],
+        quote.discount?.id ?? null, quote.discount?.code ?? null, String(quote.discount?.net ?? 0n), options.buyerId ?? null],
     );
     let n = 0;
     for (const l of quote.lines) {
@@ -416,10 +422,13 @@ export interface OrderLineRow {
   discount_cents: unknown;
 }
 
-export async function loadOrder(db: Queryable, tenantId: string, where: { id: string } | { number: number; token: string }): Promise<{ order: OrderRow; lines: OrderLineRow[] } | null> {
+/** An order by id (staff), by number with the token from its link, or by number for the signed-in buyer it belongs to. */
+export async function loadOrder(db: Queryable, tenantId: string, where: { id: string } | { number: number; token: string } | { number: number; buyer: { id: string; email: string } }): Promise<{ order: OrderRow; lines: OrderLineRow[] } | null> {
   const order = 'id' in where
     ? (await db.query<OrderRow>('select * from orders where id = $1 and tenant_id = $2', [where.id, tenantId])).rows[0]
-    : (await db.query<OrderRow>('select * from orders where tenant_id = $1 and number = $2 and token_hash = $3', [tenantId, where.number, tokenHash(where.token)])).rows[0];
+    : 'buyer' in where
+      ? (await db.query<OrderRow>('select * from orders where tenant_id = $1 and number = $2 and (buyer_id = $3 or customer_email = $4)', [tenantId, where.number, where.buyer.id, where.buyer.email])).rows[0]
+      : (await db.query<OrderRow>('select * from orders where tenant_id = $1 and number = $2 and token_hash = $3', [tenantId, where.number, tokenHash(where.token)])).rows[0];
   if (!order) return null;
   const lines = (await db.query<OrderLineRow>(
     `select line_number, item_id, product_title, variant_title, seller_code, quantity::text as quantity, unit_code, unit_price::text as unit_price, gst_category, exemption_reason_code, total_cents, discount_cents

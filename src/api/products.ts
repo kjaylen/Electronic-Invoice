@@ -261,6 +261,7 @@ const settingsSchema = {
       },
     },
     reminders: { type: 'object', additionalProperties: false, properties: { enabled: { type: 'boolean' }, afterHours: { type: 'integer', enum: [1, 2, 3, 6, 12, 24] }, second: { type: 'boolean' } } },
+    accounts: { type: 'object', additionalProperties: false, properties: { enabled: { type: 'boolean' } } },
   },
 } as const;
 

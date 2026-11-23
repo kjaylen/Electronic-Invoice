@@ -350,6 +350,7 @@ export async function sampleContext(def: TemplateDef, biz: BusinessContext, lang
         total: '77.50', url: 'https://example.bz/shop/resume?t=example', unsubscribe_url: 'https://example.bz/shop/unsubscribe?t=example', reminder: { number: 1, last: false },
       },
     };
+    case 'email.sign-in-code': return { context: { store: { ...store, url: 'https://example.bz/shop' }, code: '482913', minutes: 10 } };
     case 'email.order-ready': return { context: { store, order: {
       number: 1042, customer_name: 'Maria Chan', delivery: false, address: null, pickup_address: '12 Burns Avenue, San Ignacio', pickup_instructions: es ? 'Toque el timbre en la puerta lateral.' : 'Ring the bell at the side door.',
       items: [{ name: 'Coffee beans 1lb', variant: 'Dark roast', quantity: 2 }, { name: 'Banana bread', variant: null, quantity: 1 }],

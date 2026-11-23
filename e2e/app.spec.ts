@@ -536,6 +536,45 @@ test('online store: a product with sizes and a photo, open the store, a buyer or
   await expect(buyer.getByText('Your receipt')).toBeVisible();
   const pdf = await buyer.request.get(await buyer.getByRole('link', { name: /Download PDF/ }).getAttribute('href') as string);
   expect(pdf.headers()['content-type']).toBe('application/pdf');
+
+  // She makes an account with the same email (a code by email, no password): her order is in it.
+  await buyer.getByRole('link', { name: 'Sign in', exact: true }).click();
+  const asked = Date.now();
+  await buyer.getByLabel('Email').fill('bea@buyer.test');
+  await buyer.getByRole('button', { name: 'Email me a code' }).click();
+  const code = /(\d{6}) is your sign-in code/.exec(await emailTo('bea@buyer.test', asked))![1]!;
+  await buyer.getByLabel('Code').fill(code);
+  await buyer.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await expect(buyer.getByRole('heading', { name: 'Hello, Bea' })).toBeVisible();
+  await buyer.locator('.account-orders').getByRole('link', { name: /Order #/ }).click();
+  await expect(buyer.getByText('Your receipt')).toBeVisible();
+  await buyer.getByRole('link', { name: /All your orders/ }).click();
+  await buyer.getByRole('button', { name: 'Add an address' }).click();
+  await buyer.getByLabel('Street').fill('7 Regent St');
+  await buyer.getByLabel('City or town').fill('Belize City');
+  await buyer.getByRole('button', { name: 'Save address' }).click();
+  await expect(buyer.locator('.account-addresses')).toContainText('7 Regent St');
+
+  // Buying again: checkout is filled in from the account.
+  await buyer.goto(p('/shop'));
+  await buyer.getByRole('link', { name: /Reef Hoodie/ }).click();
+  await buyer.getByRole('button', { name: 'M', exact: true }).click();
+  await buyer.getByRole('button', { name: /Add to cart/ }).click();
+  await buyer.getByRole('button', { name: 'View cart' }).click();
+  await buyer.getByRole('button', { name: /Check out/ }).click();
+  await expect(buyer.getByText('Signed in as bea@buyer.test')).toBeVisible();
+  await expect(buyer.getByLabel('Name', { exact: true })).toHaveValue('Bea Buyer');
+  await expect(buyer.getByLabel(/^Phone/)).toHaveValue('+501 600 1234');
+  await expect(buyer.getByRole('radio', { name: /7 Regent St/ })).toBeChecked();
+  await buyer.getByRole('button', { name: /Place order/ }).click();
+  await expect(buyer.getByRole('heading', { name: 'Thank you, Bea' })).toBeVisible();
+
+  // The store sees her account: two orders, one paid.
+  await page.goto(p('/orders?view=buyers'));
+  const row = page.getByRole('row', { name: /bea@buyer\.test/ });
+  await expect(row).toContainText('Bea Buyer');
+  await expect(row.getByRole('link', { name: '2' })).toBeVisible();
+  await expect(row).toContainText('BZ$67.50');
 });
 
 test('till: set a PIN, add a till and pair it from the link, sign in, open a shift, scan and sell, lock', async ({ page, browser }) => {

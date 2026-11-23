@@ -164,7 +164,7 @@ export function Privacy() {
           <li><strong>Businesses:</strong> registered and trade name, TIN, address, contact details, BTS certificate.</li>
           <li><strong>Accounts:</strong> names, email or username, role, password (stored as a one-way hash), two-step sign-in secret (encrypted), sign-in times and IP addresses.</li>
           <li><strong>Documents:</strong> what a business puts on its invoices and receipts, including its customers' names, TINs and addresses.</li>
-          <li><strong>Online store buyers:</strong> name, phone, email and address given at checkout, and what was ordered. If a buyer gives their email and leaves without ordering, the cart is kept for up to 30 days so the store can send a reminder (if it uses them); every reminder has a link to stop them.</li>
+          <li><strong>Online store buyers:</strong> name, phone, email and address given at checkout, and what was ordered. If a buyer gives their email and leaves without ordering, the cart is kept for up to 30 days so the store can send a reminder (if it uses them); every reminder has a link to stop them. A buyer who makes an account at a store (signing in with a code sent to their email) also keeps their addresses and, if they choose, their business's name and TIN there; they can change these or close the account at any time.</li>
           <li><strong>Security logs:</strong> an activity log of sign-ins and changes, kept so businesses can see who did what.</li>
         </ul>
         <h2>Why</h2>
@@ -181,7 +181,7 @@ export function Privacy() {
         <h2>How long we keep it</h2>
         <p>Tax documents are kept for as long as tax law requires businesses to keep them, and at least while the account is open. Other data is deleted when no longer needed. Businesses can download everything at any time.</p>
         <h2>Cookies and storage</h2>
-        <p>We use a cookie only to keep you signed in. Your browser also keeps your cart and unsent drafts on your device. There are no tracking or advertising cookies.</p>
+        <p>We use a cookie only to keep you signed in (to the app, or to your account at a store). Your browser also keeps your cart and unsent drafts on your device. There are no tracking or advertising cookies.</p>
         <h2>Your choices</h2>
         <p>You can ask to see, correct or export your personal data. Buyers should contact the business they bought from, which controls its store data; we help it respond. Some data must be kept by law (for example, issued tax documents).</p>
         <h2>Contact</h2>

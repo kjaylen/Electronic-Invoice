@@ -693,6 +693,23 @@ label.toggle { font-size: 1rem; }
 .shop-name { font-weight: 660; letter-spacing: -0.03em; font-size: 1.15rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .shop-tagline { font-size: 0.8rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cart-button { padding: 0.45rem 0.5rem 0.45rem 1rem; text-decoration: none; }
+.shop-account-link { color: var(--ink); text-decoration: none; font-weight: 540; font-size: 0.95rem; padding: 0.45rem 0.25rem; white-space: nowrap; }
+.shop-account-link:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
+.account-sign-in { max-width: 440px; display: grid; gap: 1rem; padding-top: clamp(0.5rem, 4vw, 2.5rem); }
+.account-sign-in h1 { margin-bottom: 0; }
+.code-input { font-family: var(--figures); font-size: 1.5rem; letter-spacing: 0.3em; text-align: center; }
+.account h2 { font-size: 1.1rem; margin: 0; }
+.account-orders, .account-addresses { list-style: none; margin: 0; padding: 0; }
+.account-orders li + li, .account-addresses li + li { border-top: 1px solid var(--hairline); }
+.account-orders a { display: flex; align-items: center; gap: 0.9rem; padding: 0.75rem 0.25rem; color: var(--ink); text-decoration: none; flex-wrap: wrap; border-radius: 8px; transition: background 160ms var(--ease); }
+.account-orders a:hover { background: var(--sheet-2); color: var(--ink); }
+.account-orders .grow, .account-addresses .grow { flex: 1; min-width: 10rem; display: flex; flex-direction: column; gap: 0.1rem; }
+.account-orders .num { min-width: 5.5rem; text-align: right; }
+.order-state { font-size: 0.82rem; color: var(--ink-2); }
+.order-state.done { color: var(--lime-ink); }
+.order-state.off { color: var(--muted); }
+.account-addresses li { display: flex; align-items: center; gap: 0.75rem; padding: 0.7rem 0; flex-wrap: wrap; }
+.address-form { border-top: 1px solid var(--hairline); padding-top: 1rem; }
 .shop-main { width: 100%; max-width: 1180px; margin: 0 auto; padding: 1.5rem clamp(1rem, 4vw, 2.5rem) 4rem; flex: 1; }
 .shop-hero { padding: clamp(1.5rem, 5vw, 3.5rem) 0 1rem; }
 .shop-hero h1 { font-size: clamp(2.1rem, 1.4rem + 3vw, 3.6rem); letter-spacing: -0.045em; margin-bottom: 0.4rem; }

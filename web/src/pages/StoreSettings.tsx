@@ -151,6 +151,11 @@ export function StoreSettingsTab() {
           </p>
         )}
       </section>
+      <section className="card stack">
+        <label className="row toggle"><input type="checkbox" checked={s.accounts.enabled} onChange={(e) => setS({ ...s, accounts: { enabled: e.target.checked } })} /> <strong>{t('Buyer accounts')}</strong></label>
+        <p className="small muted" style={{ margin: 0 }}>{t('Buyers can sign in with a code sent to their email (no password) to see their orders, keep their addresses and check out faster. Anyone can still check out without an account.')}</p>
+        {s.accounts.enabled && <p className="small" style={{ margin: 0 }}><Link to="/orders?view=buyers">{t('See buyers with an account')}</Link></p>}
+      </section>
       <div className="row"><span className="spacer" /><button type="submit" disabled={busy}>{busy ? t('Saving…') : t('Save store settings')}</button></div>
       <DiscountCodes />
       <StoreDomains />

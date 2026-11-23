@@ -1,7 +1,9 @@
 /**
- * The public storefront, at /<business>/shop. No sign-in: buyers browse,
- * fill a cart (kept on their device), check out, and follow their order on a
- * private page that later holds their BTS receipt.
+ * The public storefront, at /<business>/shop. No sign-in needed: buyers
+ * browse, fill a cart (kept on their device), check out, and follow their
+ * order on a private page that later holds their BTS receipt. Where the store
+ * has accounts, a buyer can also sign in (a code by email) to see all their
+ * orders, keep addresses and check out faster.
  */
 
 import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
@@ -29,6 +31,8 @@ interface StoreInfo {
   payments: { bankTransfer: boolean; cashOnDelivery: boolean; payAtPickup: boolean; online: 'paypal' | 'test' | 'belizebank' | 'ekyash' | null };
   /** The store may email a reminder to buyers who leave at checkout. */
   reminders?: boolean;
+  /** Buyers can sign in to an account at this store. */
+  accounts?: boolean;
   /** The business's theme (Settings, Templates), rendered and sanitized by the server. Empty strings: none. */
   theme?: StoreTheme;
 }
@@ -117,6 +121,38 @@ export function useCart() {
   };
 }
 
+// ---------- the buyer's account (stores with accounts) ----------
+
+interface BuyerAddress { id: string; street: string; city: string; districtCode: string; isDefault: boolean }
+interface BuyerAccount {
+  buyer: { email: string; name: string | null; phone: string | null; business: { tin: string; name: string } | null; createdAt: string };
+  addresses: BuyerAddress[];
+}
+// undefined: not known yet; null: no one is signed in.
+let accountCache: BuyerAccount | null | undefined;
+const accountListeners = new Set<() => void>();
+function setAccount(next: BuyerAccount | null) {
+  accountCache = next;
+  accountListeners.forEach((l) => l());
+}
+let accountLoading: Promise<void> | null = null;
+/** Who is signed in at this store: asked once, or again when `fresh`. */
+function loadAccount(fresh = false): Promise<void> {
+  if (!accountLoading || fresh) {
+    accountLoading = api<{ buyer: BuyerAccount['buyer'] | null; addresses: BuyerAddress[] }>(shopApi('/account'))
+      .then((r) => setAccount(r.buyer ? { buyer: r.buyer, addresses: r.addresses } : null))
+      .catch(() => setAccount(null));
+  }
+  return accountLoading;
+}
+function useAccount(): BuyerAccount | null | undefined {
+  return useSyncExternalStore((cb) => {
+    accountListeners.add(cb);
+    return () => accountListeners.delete(cb);
+  }, () => accountCache);
+}
+const districtName = (code: string) => DISTRICTS.find(([c]) => c === code)?.[1] ?? '';
+
 // ---------- theme ----------
 
 const THEME_PARTS = { 'store.theme': 'css', 'store.announcement': 'announcement', 'store.home': 'home', 'store.footer': 'footer' } as const;
@@ -174,6 +210,10 @@ export function ShopLayout() {
   useEffect(() => {
     void api<StoreInfo>(shopApi('')).then(setInfo).catch(setError);
   }, []);
+  const account = useAccount();
+  useEffect(() => {
+    if (info?.accounts) void loadAccount();
+  }, [info?.accounts]);
   useEffect(() => {
     window.scrollTo({ top: 0 });
   }, [location.pathname]);
@@ -198,6 +238,7 @@ export function ShopLayout() {
         </Link>
         <span className="spacer" />
         <LanguageToggle />
+        {info?.accounts && <Link to="/shop/account" className="shop-account-link" viewTransition>{account ? t('Account') : t('Sign in')}</Link>}
         <Link to="/shop/cart" className="button cart-button" viewTransition aria-label={t('Cart, {n} items', { n: count })}>
           {t('Cart')}<span className="chip" aria-hidden="true">{count}</span>
         </Link>
@@ -419,6 +460,7 @@ export function ShopCheckout() {
   const info = useStoreInfo();
   const navigate = useNavigate();
   const cart = useCart();
+  const account = useAccount();
   const [fulfillment, setFulfillment] = useState<'delivery' | 'pickup'>(() => {
     const p = store.get<Prefill>(PREFILL_KEY);
     return p?.fulfillment === 'pickup' && info.pickup.enabled ? 'pickup' : info.delivery.enabled ? 'delivery' : 'pickup';
@@ -433,6 +475,9 @@ export function ShopCheckout() {
   useEffect(() => store.remove(PREFILL_KEY), []);
   const [contact, setContact] = useState({ name: prefill?.name ?? '', email: prefill?.email ?? '', phone: '' });
   const [address, setAddress] = useState({ street: '', city: '', districtCode: '1' });
+  // Signed in: one of the account's addresses, or "new" (which can be saved to it).
+  const [addressChoice, setAddressChoice] = useState('new');
+  const [saveAddress, setSaveAddress] = useState(true);
   const [wantsInvoice, setWantsInvoice] = useState(false);
   const [business, setBusiness] = useState({ tin: '', name: '' });
   const [note, setNote] = useState('');
@@ -481,6 +526,24 @@ export function ShopCheckout() {
     return () => clearTimeout(timer);
   }, [info.reminders, validEmail, contact.email, contact.name, linesBody, fulfillment, zone, code]);
 
+  // Signed in: the account fills in what the buyer has not typed (once).
+  const [filled, setFilled] = useState(false);
+  useEffect(() => {
+    if (filled || !account) return;
+    setFilled(true);
+    const b = account.buyer;
+    setContact((c) => ({ name: c.name || b.name || '', email: c.email || b.email, phone: c.phone || b.phone || '' }));
+    const a = account.addresses.find((x) => x.isDefault) ?? account.addresses[0];
+    if (a) {
+      setAddressChoice(a.id);
+      setAddress({ street: a.street, city: a.city, districtCode: a.districtCode });
+    }
+    if (b.business) {
+      setBusiness(b.business);
+      setWantsInvoice(true);
+    }
+  }, [account, filled]);
+
   if (!cart.lines.length) return <div className="shop-empty"><h1>{t('Your cart is empty')}</h1><Link className="button" to="/shop">{t('Keep shopping')}</Link></div>;
   const needsAddress = fulfillment === 'delivery' || wantsInvoice;
 
@@ -504,9 +567,12 @@ export function ShopCheckout() {
           ...(note.trim() && { note: note.trim() }),
           ...(code && { discountCode: code }),
           ...(info.reminders && store.get<string>(CHECKOUT_KEY) && { checkoutId: store.get<string>(CHECKOUT_KEY) }),
+          ...(account && needsAddress && addressChoice === 'new' && saveAddress && { saveAddress: true }),
         },
       });
       cart.clear();
+      // The account may have kept a new address or details.
+      if (account) void loadAccount(true);
       store.remove(CHECKOUT_KEY);
       store.set(`etd.orderlinks.${slug}`, { ...(store.get<Record<string, string>>(`etd.orderlinks.${slug}`) ?? {}), [String(r.number)]: `/shop/orders/${r.number}?t=${r.token}` });
       // Paying online: on to the payment page (the provider's, or the test card page).
@@ -528,6 +594,10 @@ export function ShopCheckout() {
     <form className="shop-checkout" onSubmit={submit}>
       <div className="stack">
         <h1>{t('Check out')}</h1>
+        {info.accounts && account === null && (
+          <p className="small muted" style={{ margin: 0 }}>{t('Ordered here before?')} <Link to="/shop/account?next=checkout" viewTransition>{t('Sign in for faster checkout')}</Link></p>
+        )}
+        {account && <p className="small muted" style={{ margin: 0 }}>{t('Signed in as {email}', { email: account.buyer.email })}</p>}
         <fieldset className="stack">
           <legend>{t('Your details')}</legend>
           <Field label={t('Name')}><input required autoComplete="name" value={contact.name} onChange={(e) => setContact({ ...contact, name: e.target.value })} /></Field>
@@ -553,11 +623,28 @@ export function ShopCheckout() {
           </div>
           {needsAddress && (
             <div className="stack">
-              <Field label={t('Street')}><input required autoComplete="street-address" value={address.street} onChange={(e) => setAddress({ ...address, street: e.target.value })} /></Field>
-              <div className="form-grid">
-                <Field label={t('City or town')}><input required autoComplete="address-level2" value={address.city} onChange={(e) => setAddress({ ...address, city: e.target.value })} /></Field>
-                <Field label={t('District')}><Select value={address.districtCode} onChange={(e) => setAddress({ ...address, districtCode: e.target.value })}>{DISTRICTS.map(([c, n]) => <option key={c} value={c}>{n}</option>)}</Select></Field>
-              </div>
+              {account && account.addresses.length > 0 && (
+                <div className="choices" role="radiogroup" aria-label={t('Address')}>
+                  {account.addresses.map((a) => (
+                    <Radio key={a.id} name="address" value={a.id} checked={addressChoice === a.id} onChange={() => { setAddressChoice(a.id); setAddress({ street: a.street, city: a.city, districtCode: a.districtCode }); }}>
+                      <strong>{a.street}</strong><span className="small muted">{a.city}, {districtName(a.districtCode)}</span>
+                    </Radio>
+                  ))}
+                  <Radio name="address" value="new" checked={addressChoice === 'new'} onChange={() => { setAddressChoice('new'); setAddress({ street: '', city: '', districtCode: '1' }); }}>
+                    <strong>{t('Another address')}</strong>
+                  </Radio>
+                </div>
+              )}
+              {addressChoice === 'new' && (
+                <>
+                  <Field label={t('Street')}><input required autoComplete="street-address" value={address.street} onChange={(e) => setAddress({ ...address, street: e.target.value })} /></Field>
+                  <div className="form-grid">
+                    <Field label={t('City or town')}><input required autoComplete="address-level2" value={address.city} onChange={(e) => setAddress({ ...address, city: e.target.value })} /></Field>
+                    <Field label={t('District')}><Select value={address.districtCode} onChange={(e) => setAddress({ ...address, districtCode: e.target.value })}>{DISTRICTS.map(([c, n]) => <option key={c} value={c}>{n}</option>)}</Select></Field>
+                  </div>
+                  {account && <label className="row small"><input type="checkbox" checked={saveAddress} onChange={(e) => setSaveAddress(e.target.checked)} /> {t('Save this address to my account')}</label>}
+                </>
+              )}
             </div>
           )}
         </fieldset>
@@ -647,7 +734,10 @@ export function ShopOrder() {
   const [o, setO] = useState<BuyerOrder | null>(null);
   const [error, setError] = useState<unknown>(null);
   usePageTitle(t('Order #{n}', { n: number ?? '' }), useStoreInfo().name);
-  const load = useCallback(() => api<BuyerOrder>(shopApi(`/orders/${number}?t=${encodeURIComponent(token)}`)).then(setO).catch(setError), [number, token]);
+  // The order's link carries its token; from the account, the sign-in does instead.
+  const tq = token ? `?t=${encodeURIComponent(token)}` : '';
+  const info = useStoreInfo();
+  const load = useCallback(() => api<BuyerOrder>(shopApi(`/orders/${number}${tq}`)).then(setO).catch(setError), [number, tq]);
   const navigate = useNavigate();
   const paymentId = params.get('payment');
   const [confirming, setConfirming] = useState(Boolean(paymentId));
@@ -655,7 +745,7 @@ export function ShopOrder() {
   const [paying, setPaying] = useState(false);
   // Paying from a wallet app (E-Kyash): the QR code stays up while we wait.
   const [wallet, setWallet] = useState<(WalletInfo & { paymentId: string }) | null>(null);
-  const confirmUrl = useCallback((id: string) => shopApi(`/orders/${number}/payments/${id}/confirm?t=${encodeURIComponent(token)}`), [number, token]);
+  const confirmUrl = useCallback((id: string) => shopApi(`/orders/${number}/payments/${id}/confirm${tq}`), [number, tq]);
   useEffect(() => {
     // Back from the payment page: ask whether it went through, then load the order.
     if (!paymentId) {
@@ -669,7 +759,7 @@ export function ShopOrder() {
       .catch(() => null)
       .finally(() => {
         setConfirming(false);
-        navigate(`/shop/orders/${number}?t=${encodeURIComponent(token)}`, { replace: true });
+        navigate(`/shop/orders/${number}${tq}`, { replace: true });
         void load();
       });
   }, [load, paymentId, number, token, navigate, confirmUrl]);
@@ -692,8 +782,8 @@ export function ShopOrder() {
     setPaying(true);
     setPayError(null);
     try {
-      store.set(`etd.orderlinks.${slug}`, { ...(store.get<Record<string, string>>(`etd.orderlinks.${slug}`) ?? {}), [String(number)]: `/shop/orders/${number}?t=${token}` });
-      const r = await api<{ redirectUrl: string }>(shopApi(`/orders/${number}/pay?t=${encodeURIComponent(token)}`), { method: 'POST' });
+      if (token) store.set(`etd.orderlinks.${slug}`, { ...(store.get<Record<string, string>>(`etd.orderlinks.${slug}`) ?? {}), [String(number)]: `/shop/orders/${number}?t=${token}` });
+      const r = await api<{ redirectUrl: string }>(shopApi(`/orders/${number}/pay${tq}`), { method: 'POST' });
       if (/^https?:/.test(r.redirectUrl)) window.location.assign(r.redirectUrl);
       else navigate(r.redirectUrl.replace(/^\/[^/]+(?=\/shop\/)/, ''));
     } catch (e) {
@@ -707,7 +797,15 @@ export function ShopOrder() {
     const timer = setInterval(() => document.visibilityState === 'visible' && void load(), 15_000);
     return () => clearInterval(timer);
   }, [o, load]);
-  if (error) return <div className="shop-empty"><h1>{t('Order not found')}</h1><p className="muted">{t('Use the link from your confirmation.')}</p></div>;
+  if (error) {
+    return (
+      <div className="shop-empty">
+        <h1>{t('Order not found')}</h1>
+        <p className="muted">{t('Use the link from your confirmation.')}</p>
+        {!token && info.accounts && <Link className="button" to={`/shop/account?next=orders/${number}`}>{t('Sign in to see your orders')}</Link>}
+      </div>
+    );
+  }
   if (!o || confirming) return <div className="stack shop-narrow">{confirming && <p className="muted">{t('Checking your payment…')}</p>}<div className="skeleton" style={{ height: '20rem' }} /></div>;
 
   const steps: Array<[string, boolean]> = [
@@ -759,7 +857,7 @@ export function ShopOrder() {
             <div className="small muted">{t('Authorized by the Belize Tax Service')} · {o.document.series}-{o.document.number}</div>
           </div>
           <span className="spacer" />
-          <a className="button" href={shopApi(`/orders/${o.number}/document?t=${encodeURIComponent(token)}`)} target="_blank" rel="noreferrer">{t('Download PDF')}<span className="chip" aria-hidden="true">↓</span></a>
+          <a className="button" href={shopApi(`/orders/${o.number}/document${tq}`)} target="_blank" rel="noreferrer">{t('Download PDF')}<span className="chip" aria-hidden="true">↓</span></a>
         </section>
       )}
       {o.pickup && o.status === 'open' && <div className="banner info"><div><strong>{t('Pickup')}</strong>{o.pickup.address}{o.pickup.instructions && <><br />{o.pickup.instructions}</>}</div></div>}
@@ -778,7 +876,8 @@ export function ShopOrder() {
         {t('Questions about your order?')} {o.store.telephone}
         {wa && <> · <a href={`https://wa.me/${wa}?text=${encodeURIComponent(t('Hello, about my order #{n}', { n: o.number }))}`} target="_blank" rel="noreferrer">WhatsApp</a></>}
       </p>
-      <p className="small muted">{t('Keep this page’s link: it is how you get back to your order and receipt.')}</p>
+      {token ? <p className="small muted">{t('Keep this page’s link: it is how you get back to your order and receipt.')}</p>
+        : <p className="small"><Link to="/shop/account" viewTransition>← {t('All your orders')}</Link></p>}
     </div>
   );
 }
@@ -916,5 +1015,319 @@ export function ShopUnsubscribe() {
       )}
       <Link to="/shop">{t('Go to the store')}</Link>
     </div>
+  );
+}
+
+// ---------- the buyer's account ----------
+
+/** Where to go after signing in (from the checkout or an order's page). */
+function afterSignIn(next: string | null): string | null {
+  return next && /^(checkout|orders\/\d{1,9})$/.test(next) ? `/shop/${next}` : null;
+}
+
+/** /shop/account: sign in (or make the account), then the account. */
+export function ShopAccount() {
+  const t = useT();
+  const info = useStoreInfo();
+  const account = useAccount();
+  const [params] = useSearchParams();
+  const navigate = useNavigate();
+  usePageTitle(account ? t('Your account') : t('Sign in'), info.name);
+  useEffect(() => {
+    if (info.accounts) void loadAccount();
+  }, [info.accounts]);
+  if (!info.accounts) return <div className="shop-empty"><h1>{t('This store does not have accounts')}</h1><Link className="button" to="/shop">{t('Back to the store')}</Link></div>;
+  if (account === undefined) return <div className="shop-narrow"><div className="skeleton" style={{ height: '16rem' }} /></div>;
+  if (account === null) {
+    return <BuyerSignIn storeName={info.name} onDone={() => { const to = afterSignIn(params.get('next')); if (to) navigate(to, { replace: true, viewTransition: true }); }} />;
+  }
+  return <AccountHome account={account} />;
+}
+
+/** Email, then the six-digit code from it. */
+function BuyerSignIn({ storeName, onDone }: { storeName: string; onDone: () => void }) {
+  const t = useT();
+  const [email, setEmail] = useState('');
+  const [sent, setSent] = useState<{ challenge: string; minutes: number } | null>(null);
+  const [code, setCode] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const send = async (e?: FormEvent) => {
+    e?.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      setSent(await api<{ challenge: string; minutes: number }>(shopApi('/account/code'), { method: 'POST', body: { email: email.trim() } }));
+      setCode('');
+    } catch (err) {
+      setError(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const verify = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!sent) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await api<BuyerAccount>(shopApi('/account/verify'), { method: 'POST', body: { challenge: sent.challenge, code: code.replace(/\s/g, '') } });
+      setAccount({ buyer: r.buyer, addresses: r.addresses });
+      onDone();
+    } catch (err) {
+      setError(err);
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="shop-narrow account-sign-in">
+      <section className="card stack">
+        <div>
+          <span className="kicker">{storeName}</span>
+          <h1>{t('Sign in')}</h1>
+        </div>
+        {!sent ? (
+          <form className="stack" onSubmit={send}>
+            <p className="muted" style={{ margin: 0 }}>{t('We email you a code: there is no password to remember. The first time, this makes your account.')}</p>
+            <Field label={t('Email')}><input type="email" required autoComplete="email" autoFocus value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
+            <ErrorText error={error} />
+            <button type="submit" className="big" disabled={busy || !email.trim()}>{busy ? t('Sending…') : t('Email me a code')}</button>
+          </form>
+        ) : (
+          <form className="stack" onSubmit={verify}>
+            <p className="muted" style={{ margin: 0 }}>{t('We sent a 6-digit code to {email}. It works for {n} minutes.', { email: email.trim(), n: sent.minutes })}</p>
+            <Field label={t('Code')}>
+              <input className="code-input" required inputMode="numeric" autoComplete="one-time-code" pattern="[0-9 ]{6,7}" maxLength={7} autoFocus value={code} onChange={(e) => setCode(e.target.value.replace(/[^0-9 ]/g, ''))} />
+            </Field>
+            <ErrorText error={error} />
+            <button type="submit" className="big" disabled={busy || code.replace(/\s/g, '').length !== 6}>{busy ? t('Signing in…') : t('Sign in')}</button>
+            <div className="row small">
+              <button type="button" className="link" disabled={busy} onClick={() => void send()}>{t('Send a new code')}</button>
+              <span className="spacer" />
+              <button type="button" className="link" disabled={busy} onClick={() => { setSent(null); setError(null); }}>{t('Use another email')}</button>
+            </div>
+          </form>
+        )}
+      </section>
+      <p className="small muted">{t('Your account keeps your orders at this store, your addresses and your business details for tax invoices. You can still check out without one.')}</p>
+    </div>
+  );
+}
+
+interface AccountOrder {
+  number: number;
+  status: 'open' | 'cancelled';
+  paymentStatus: 'unpaid' | 'paid';
+  fulfillmentStatus: 'unfulfilled' | 'fulfilled';
+  fulfillment: 'delivery' | 'pickup';
+  ready: boolean;
+  items: number;
+  total: string;
+  refunded: string | null;
+  createdAt: string;
+}
+
+function orderState(o: AccountOrder, t: ReturnType<typeof useT>): string {
+  if (o.status === 'cancelled') return t('Cancelled');
+  if (o.fulfillmentStatus === 'fulfilled') return o.fulfillment === 'pickup' ? t('Picked up') : t('Delivered');
+  if (o.ready) return o.fulfillment === 'pickup' ? t('Ready for pickup') : t('On its way');
+  return o.paymentStatus === 'paid' ? t('Paid') : t('Ordered');
+}
+
+function AccountHome({ account }: { account: BuyerAccount }) {
+  const t = useT();
+  const navigate = useNavigate();
+  const [orders, setOrders] = useState<AccountOrder[] | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  const [closing, setClosing] = useState(false);
+  useEffect(() => {
+    void api<{ data: AccountOrder[] }>(shopApi('/account/orders')).then((r) => setOrders(r.data)).catch(setError);
+  }, []);
+  const signOut = async () => {
+    await api(shopApi('/account/sign-out'), { method: 'POST' }).catch(() => {});
+    setAccount(null);
+    navigate('/shop', { viewTransition: true });
+  };
+  const close = async () => {
+    try {
+      await api(shopApi('/account'), { method: 'DELETE' });
+      setAccount(null);
+      navigate('/shop', { viewTransition: true });
+    } catch (e) {
+      setError(e);
+      setClosing(false);
+    }
+  };
+  return (
+    <div className="stack shop-narrow account">
+      <div className="row">
+        <div>
+          <h1>{account.buyer.name ? t('Hello, {name}', { name: account.buyer.name.split(' ')[0] ?? '' }) : t('Your account')}</h1>
+          <p className="muted" style={{ margin: 0 }}>{account.buyer.email}</p>
+        </div>
+        <span className="spacer" />
+        <button type="button" className="secondary" onClick={() => void signOut()}>{t('Sign out')}</button>
+      </div>
+
+      <section className="card stack">
+        <h2>{t('Your orders')}</h2>
+        <ErrorText error={error} />
+        {orders === null ? <div className="skeleton" style={{ height: '5rem' }} /> : orders.length === 0 ? (
+          <p className="muted" style={{ margin: 0 }}>{t('No orders yet.')} <Link to="/shop" viewTransition>{t('Start shopping')}</Link></p>
+        ) : (
+          <ul className="account-orders">
+            {orders.map((o) => (
+              <li key={o.number}>
+                <Link to={`/shop/orders/${o.number}`} viewTransition>
+                  <span className="grow">
+                    <strong>{t('Order #{n}', { n: o.number })}</strong>
+                    <span className="small muted">{new Date(o.createdAt).toLocaleDateString(undefined, { dateStyle: 'medium' })} · {o.items === 1 ? t('1 item') : t('{n} items', { n: o.items })}</span>
+                  </span>
+                  <span className={`order-state ${o.status === 'cancelled' ? 'off' : o.fulfillmentStatus === 'fulfilled' ? 'done' : ''}`}>{orderState(o, t)}</span>
+                  <span className="num">{money(o.total)}</span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <AccountAddresses addresses={account.addresses} />
+      <AccountDetails account={account} />
+
+      <section className="card stack">
+        <h2>{t('Close your account')}</h2>
+        <p className="small muted" style={{ margin: 0 }}>{t('Your addresses and details are deleted and you are signed out. The store keeps its records of your orders, which it needs for its taxes.')}</p>
+        {closing ? (
+          <div className="row">
+            <button type="button" className="danger" onClick={() => void close()}>{t('Yes, close my account')}</button>
+            <button type="button" className="secondary" onClick={() => setClosing(false)}>{t('Keep it')}</button>
+          </div>
+        ) : <div><button type="button" className="secondary" onClick={() => setClosing(true)}>{t('Close my account')}</button></div>}
+      </section>
+    </div>
+  );
+}
+
+type AddressForm = { street: string; city: string; districtCode: string; isDefault: boolean };
+
+function AccountAddresses({ addresses }: { addresses: BuyerAddress[] }) {
+  const t = useT();
+  // The address being edited ('new' for one being added).
+  const [editing, setEditing] = useState<string | null>(null);
+  const [form, setForm] = useState<AddressForm>({ street: '', city: '', districtCode: '1', isDefault: false });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const open = (a?: BuyerAddress) => {
+    setEditing(a?.id ?? 'new');
+    setForm(a ? { street: a.street, city: a.city, districtCode: a.districtCode, isDefault: a.isDefault } : { street: '', city: '', districtCode: '1', isDefault: addresses.length === 0 });
+    setError(null);
+  };
+  const run = async (call: () => Promise<unknown>) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await call();
+      await loadAccount(true);
+      setEditing(null);
+    } catch (e) {
+      setError(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const save = (e: FormEvent) => {
+    e.preventDefault();
+    const body = { street: form.street.trim(), city: form.city.trim(), districtCode: form.districtCode, isDefault: form.isDefault };
+    void run(() => editing === 'new' ? api(shopApi('/account/addresses'), { method: 'POST', body }) : api(shopApi(`/account/addresses/${editing}`), { method: 'PUT', body }));
+  };
+  return (
+    <section className="card stack">
+      <div className="row">
+        <h2>{t('Addresses')}</h2>
+        <span className="spacer" />
+        {editing === null && addresses.length < 10 && <button type="button" className="secondary" onClick={() => open()}>{t('Add an address')}</button>}
+      </div>
+      {addresses.length === 0 && editing === null && <p className="muted" style={{ margin: 0 }}>{t('Addresses you keep here are offered at checkout.')}</p>}
+      <ul className="account-addresses">
+        {addresses.map((a) => editing === a.id ? null : (
+          <li key={a.id}>
+            <span className="grow">
+              <strong>{a.street}</strong>
+              <span className="small muted">{a.city}, {districtName(a.districtCode)}</span>
+            </span>
+            {a.isDefault ? <span className="badge authorized">{t('Default')}</span> : (
+              <button type="button" className="link small" disabled={busy} onClick={() => void run(() => api(shopApi(`/account/addresses/${a.id}`), { method: 'PUT', body: { street: a.street, city: a.city, districtCode: a.districtCode, isDefault: true } }))}>{t('Make default')}</button>
+            )}
+            <button type="button" className="link small" disabled={busy} onClick={() => open(a)}>{t('Edit')}</button>
+            <button type="button" className="link small" disabled={busy} onClick={() => void run(() => api(shopApi(`/account/addresses/${a.id}`), { method: 'DELETE' }))}>{t('Remove')}</button>
+          </li>
+        ))}
+      </ul>
+      {editing !== null && (
+        <form className="stack address-form" onSubmit={save}>
+          <Field label={t('Street')}><input required autoComplete="street-address" autoFocus value={form.street} onChange={(e) => setForm({ ...form, street: e.target.value })} /></Field>
+          <div className="form-grid">
+            <Field label={t('City or town')}><input required autoComplete="address-level2" value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })} /></Field>
+            <Field label={t('District')}><Select value={form.districtCode} onChange={(e) => setForm({ ...form, districtCode: e.target.value })}>{DISTRICTS.map(([c, n]) => <option key={c} value={c}>{n}</option>)}</Select></Field>
+          </div>
+          <label className="row small"><input type="checkbox" checked={form.isDefault} onChange={(e) => setForm({ ...form, isDefault: e.target.checked })} /> {t('Use this address first at checkout')}</label>
+          <div className="row">
+            <button type="submit" disabled={busy}>{busy ? t('Saving…') : t('Save address')}</button>
+            <button type="button" className="secondary" onClick={() => setEditing(null)}>{t('Cancel')}</button>
+          </div>
+        </form>
+      )}
+      <ErrorText error={error} />
+    </section>
+  );
+}
+
+function AccountDetails({ account }: { account: BuyerAccount }) {
+  const t = useT();
+  const b = account.buyer;
+  const [form, setForm] = useState({ name: b.name ?? '', phone: b.phone ?? '', invoice: Boolean(b.business), tin: b.business?.tin ?? '', businessName: b.business?.name ?? '' });
+  const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const save = async (e: FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    setSaved(false);
+    try {
+      const r = await api<BuyerAccount>(shopApi('/account'), {
+        method: 'PUT',
+        body: { name: form.name.trim(), phone: form.phone.trim(), business: form.invoice ? { tin: form.tin, name: form.businessName.trim() } : null },
+      });
+      setAccount({ buyer: r.buyer, addresses: r.addresses });
+      setSaved(true);
+    } catch (err) {
+      setError(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <form className="card stack" onSubmit={save}>
+      <h2>{t('Your details')}</h2>
+      <p className="small muted" style={{ margin: 0 }}>{t('Checkout fills these in for you.')}</p>
+      <div className="form-grid">
+        <Field label={t('Name')}><input autoComplete="name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Field>
+        <Field label={t('Phone')}><input type="tel" autoComplete="tel" pattern="[0-9+()\-\s]{7,30}" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></Field>
+      </div>
+      <label className="row small"><input type="checkbox" checked={form.invoice} onChange={(e) => setForm({ ...form, invoice: e.target.checked })} /> {t('I need tax invoices for my business (with my TIN)')}</label>
+      {form.invoice && (
+        <div className="form-grid">
+          <Field label={t('Business name')}><input required value={form.businessName} onChange={(e) => setForm({ ...form, businessName: e.target.value })} /></Field>
+          <Field label="TIN"><input required inputMode="numeric" pattern="\d{6}" maxLength={6} value={form.tin} onChange={(e) => setForm({ ...form, tin: e.target.value })} /></Field>
+        </div>
+      )}
+      <ErrorText error={error} />
+      <div className="row">
+        <button type="submit" disabled={busy}>{busy ? t('Saving…') : t('Save details')}</button>
+        {saved && <span className="small muted" role="status">{t('Saved')}</span>}
+      </div>
+    </form>
   );
 }

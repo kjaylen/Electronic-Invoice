@@ -4,6 +4,7 @@
  *   GET  /v1/orders                 list: view=to_do (default) | unpaid | unfulfilled | done | cancelled | all
  *   GET  /v1/orders/:id
  *   GET  /v1/store-checkouts        checkouts left unfinished (view=open|recovered|all) and the last 30 days' reminders and recovered sales
+ *   GET  /v1/store-buyers?q=        buyers with an account at the store: their orders and what they spent
  *   POST /v1/orders/:id/paid        payment received: issues the BTS receipt (or tax invoice) and emails it
  *   POST /v1/orders/:id/ready       ready for pickup or out for delivery { message?, notify? }: emails the buyer
  *   POST /v1/orders/:id/fulfilled   delivered or picked up
@@ -16,6 +17,7 @@ import { audit } from '../db/audit.ts';
 import { BELIZE_DISTRICTS } from '../engine/ubl.ts';
 import { cancelOrder, centsString, fulfillOrder, loadOrder, loadRefunds, markOrderPaid, type OrderLineRow, type OrderRow, refundable, refundOrder, type RefundRow, trimDecimal } from '../commerce/store.ts';
 import { checkoutSummary, listCheckouts } from '../commerce/checkouts.ts';
+import { listBuyers } from '../commerce/buyers.ts';
 import type { PipelineDeps } from '../pipeline/issue.ts';
 import type { ServerContext } from './context.ts';
 import { checkCreditLimit, sendDocumentEmail } from './documents.ts';
@@ -156,6 +158,16 @@ export function registerOrderRoutes(app: FastifyInstance, deps: PipelineDeps, ct
     async (request) => {
       requirePermission(request, 'orders.manage');
       return { data: await listCheckouts(db, request.tenantId, request.query.view ?? 'open'), summary: await checkoutSummary(db, request.tenantId) };
+    },
+  );
+
+  // Buyers with an account at the store.
+  app.get<{ Querystring: { q?: string } }>(
+    '/store-buyers',
+    { schema: { querystring: { type: 'object', additionalProperties: false, properties: { q: { type: 'string', maxLength: 100 } } } } },
+    async (request) => {
+      requirePermission(request, 'orders.manage');
+      return { data: await listBuyers(db, request.tenantId, request.query.q) };
     },
   );
 

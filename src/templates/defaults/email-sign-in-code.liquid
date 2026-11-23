@@ -1,0 +1,31 @@
+{%- comment -%}
+  The code a buyer types to sign in to their account at your online store.
+  Keep the code easy to see: buyers often read it on their phone.
+{% endcomment -%}
+<!doctype html>
+<html lang="en">
+<body style="margin:0;padding:0;background:#f4f5f7;font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;color:#0f1117">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f5f7;padding:32px 12px">
+    <tr><td align="center">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background:#ffffff;border:1px solid #e6e8ec;border-radius:14px">
+        <tr><td style="padding:28px 32px 6px">
+          {%- if store.logo %}
+          <img src="{{ store.logo }}" alt="{{ store.name }}" height="40" style="display:block;height:40px;width:auto;max-width:220px;border:0;margin:0 0 14px">
+          {%- else %}
+          <div style="font-size:13px;color:#646b7b">{{ store.name }}</div>
+          {%- endif %}
+          <h1 style="margin:6px 0 0;font-size:22px;line-height:1.25;letter-spacing:-0.02em">Your sign-in code</h1>
+        </td></tr>
+        <tr><td style="padding:14px 32px 4px;font-size:15px;line-height:1.6">
+          <p style="margin:0 0 16px">Type this code on {{ store.name }}'s website to sign in to your account.</p>
+          <div style="font-size:32px;font-weight:700;letter-spacing:0.18em;font-family:'SFMono-Regular',Consolas,'Courier New',monospace;padding:14px 0;text-align:center;background:#f4f5f7;border-radius:10px">{{ code }}</div>
+          <p style="margin:16px 0 0">It works for {{ minutes }} minutes, once.</p>
+        </td></tr>
+        <tr><td style="padding:22px 32px 28px;font-size:12px;line-height:1.6;color:#646b7b">
+          If you did not ask for this code, you can ignore this email: no one can sign in without it. Never share it; {{ store.name }} will never ask you for it.
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>

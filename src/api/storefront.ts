@@ -12,8 +12,10 @@
  *   POST /v1/store/:slug/products/:handle/notify { variantId, email }: email me when this sold-out variant is back
  *   POST /v1/store/:slug/quote                   price a cart, with delivery
  *   POST /v1/store/:slug/orders                  place an order
- *   GET  /v1/store/:slug/orders/:number?t=       the buyer's order page (the token from the order link)
+ *   GET  /v1/store/:slug/orders/:number?t=       the buyer's order page (the token from the order link,
+ *                                                or none for a buyer signed in to their account)
  *   GET  /v1/store/:slug/orders/:number/document?t=   the receipt or invoice PDF, once paid
+ *   .../account...                               buyer accounts (store-accounts.ts)
  *
  * Prices shown to buyers include GST. Totals come from the same calculation
  * that produces the e-invoice.
@@ -21,6 +23,9 @@
 
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { audit } from '../db/audit.ts';
+import { rememberFromOrder } from '../commerce/buyers.ts';
+import { accountsOffered, buyerFromRequest, registerStoreAccountRoutes } from './store-accounts.ts';
+import { requireCsrfHeader } from './auth.ts';
 import { type CheckoutInput, markOrdered, restoreCheckout, saveCheckout, unsubscribe } from '../commerce/checkouts.ts';
 import { loadOrder, loadStore, type OrderInput, paymentMethodsFor, placeOrder, priceWithGst, quoteCart, StoreError, type StoreRef, variantTitle } from '../commerce/store.ts';
 import { simpleHtml } from '../mail/mailer.ts';
@@ -89,6 +94,8 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
       payments: { bankTransfer: p.bankTransfer.enabled, cashOnDelivery: p.cashOnDelivery.enabled, payAtPickup: p.payAtPickup.enabled, online: p.online.enabled ? p.online.provider : null },
       // Buyers are told at checkout that they may get a reminder.
       reminders: s.settings.reminders.enabled,
+      // Buyers can sign in (a code by email) to see their orders and check out faster.
+      accounts: accountsOffered(s, ctx),
     };
   });
 
@@ -242,6 +249,7 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
             },
             note: { type: 'string', maxLength: 1000 },
             checkoutId: uuid,
+            saveAddress: { type: 'boolean' },
           },
         },
       },
@@ -249,7 +257,10 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
     async (request, reply) => {
       const s = await store(request);
       if (await overLimit(db, `order|${request.ip}|${s.slug}`, 20, HOUR_MS) || await overLimit(db, `order|${request.ip}`, 60, HOUR_MS)) throw new ApiError(429, 'too_many_orders', 'Too many orders from here in the last hour; contact the store');
-      const placed = await placeOrder(db, deps, s, request.body);
+      // Signed in: the order goes in the buyer's account, which remembers what was new in it.
+      const buyer = await buyerFromRequest(db, request, s);
+      const placed = await placeOrder(db, deps, s, request.body, { ...(buyer && { buyerId: buyer.id }) });
+      if (buyer) await rememberFromOrder(db, buyer, request.body).catch((e) => request.log.error({ err: e }, 'account not updated'));
       await markOrdered(db, s.tenantId, placed.id, request.body.checkoutId, request.body.customer.email).catch((e) => request.log.error({ err: e }, 'checkout not closed'));
       const path = `/${s.slug}/shop/orders/${placed.number}?t=${placed.token}`;
       await audit(db, { tenantId: s.tenantId, action: 'order.placed', target: `#${placed.number}`, details: { total: placed.quote.totals.total }, ip: request.ip });
@@ -310,16 +321,17 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
     },
   );
 
-  /** Create a checkout with the store's provider; returns where to send the buyer. */
-  async function beginPayment(s: StoreRef, orderId: string, number: number, token: string) {
+  /** Create a checkout with the store's provider; returns where to send the buyer (back to the order's link, or, signed in, its page in the account). */
+  async function beginPayment(s: StoreRef, orderId: string, number: number, token: string | undefined) {
     const gateway = await gatewayFor(db, s.tenantId, s.settings.payments.online.provider, await gatewaySettings(s.tenantId));
     const base = ctx.publicUrl?.replace(/\/$/, '') ?? '';
     if (gateway.provider !== 'test' && !base) throw new PaymentError('PUBLIC_URL is not set on this server, so the payment provider cannot send buyers back');
     const order = (await db.query<{ total_cents: unknown }>('select total_cents from orders where id = $1', [orderId])).rows[0]!;
-    const orderPage = `${base}/${s.slug}/shop/orders/${number}?t=${token}`;
+    const orderPage = `${base}/${s.slug}/shop/orders/${number}${token ? `?t=${token}` : ''}`;
+    const and = token ? '&' : '?';
     const started = await startPayment(db, gateway, {
       tenantId: s.tenantId, orderId, amountCents: toBigInt(order.total_cents), description: `${s.name} order #${number}`, invoiceRef: `${s.tenantId.slice(0, 8)}-${number}`,
-    }, { returnUrl: (paymentId) => `${orderPage}&payment=${paymentId}`, cancelUrl: `${orderPage}&cancelled=1` });
+    }, { returnUrl: (paymentId) => `${orderPage}${and}payment=${paymentId}`, cancelUrl: `${orderPage}${and}cancelled=1` });
     return { redirectUrl: started.redirectUrl, paymentId: started.paymentId };
   }
 
@@ -382,16 +394,26 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
   );
 
   const orderParams = { type: 'object', required: ['slug', 'number'], properties: { ...slugParams, number: { type: 'string', pattern: '^\\d{1,9}$' } } } as const;
-  const tokenQuery = { type: 'object', required: ['t'], additionalProperties: false, properties: { t: { type: 'string', minLength: 20, maxLength: 64 } } } as const;
+  // The token from the order's link; without one, the buyer signed in to their account.
+  const tokenQuery = { type: 'object', additionalProperties: false, properties: { t: { type: 'string', minLength: 20, maxLength: 64 } } } as const;
 
-  const buyerOrder = async (request: FastifyRequest<{ Params: { slug: string; number: string }; Querystring: { t: string } }>) => {
+  const buyerOrder = async (request: FastifyRequest<{ Params: { slug: string; number: string }; Querystring: { t?: string } }>) => {
     const s = await loadStore(db, request.params.slug, { requireOpen: false });
-    const loaded = await loadOrder(db, s.tenantId, { number: Number(request.params.number), token: request.query.t });
+    const number = Number(request.params.number);
+    let loaded = null;
+    if (request.query.t) {
+      loaded = await loadOrder(db, s.tenantId, { number, token: request.query.t });
+    } else {
+      // Signed in by cookie: changes need the CSRF header.
+      if (!['GET', 'HEAD'].includes(request.method)) requireCsrfHeader(request);
+      const buyer = await buyerFromRequest(db, request, s);
+      if (buyer) loaded = await loadOrder(db, s.tenantId, { number, buyer });
+    }
     if (!loaded) throw new StoreError('not_found', 'Order not found. Use the link from your confirmation.');
     return { s, ...loaded };
   };
 
-  app.get<{ Params: { slug: string; number: string }; Querystring: { t: string } }>(
+  app.get<{ Params: { slug: string; number: string }; Querystring: { t?: string } }>(
     '/:slug/orders/:number',
     { schema: { params: orderParams, querystring: tokenQuery } },
     async (request, reply) => {
@@ -427,7 +449,7 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
     },
   );
 
-  app.get<{ Params: { slug: string; number: string }; Querystring: { t: string } }>(
+  app.get<{ Params: { slug: string; number: string }; Querystring: { t?: string } }>(
     '/:slug/orders/:number/document',
     { schema: { params: orderParams, querystring: tokenQuery } },
     async (request, reply) => {
@@ -446,7 +468,7 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
     return { canPay, lastStatus: last?.status ?? null, lastProblem: last?.detail?.reason ?? last?.detail?.error ?? null, provider: last?.provider ?? null };
   }
 
-  app.post<{ Params: { slug: string; number: string }; Querystring: { t: string } }>(
+  app.post<{ Params: { slug: string; number: string }; Querystring: { t?: string } }>(
     '/:slug/orders/:number/pay',
     { schema: { params: orderParams, querystring: tokenQuery } },
     async (request) => {
@@ -463,7 +485,7 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
     },
   );
 
-  app.post<{ Params: { slug: string; number: string; paymentId: string }; Querystring: { t: string } }>(
+  app.post<{ Params: { slug: string; number: string; paymentId: string }; Querystring: { t?: string } }>(
     '/:slug/orders/:number/payments/:paymentId/confirm',
     { schema: { params: { ...orderParams, required: ['slug', 'number', 'paymentId'], properties: { ...orderParams.properties, paymentId: uuid } }, querystring: tokenQuery } },
     async (request) => {
@@ -492,6 +514,8 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
     const p = await testPayment(request.params.slug, request.params.id);
     return { store: p.store, orderNumber: p.number, amount: formatCents(toBigInt(p.amount_cents)), status: p.status, decided: Boolean(p.detail?.testDecision) };
   });
+  registerStoreAccountRoutes(app, deps, ctx, store);
+
   app.post<{ Params: { slug: string; id: string }; Body: { decision: 'approved' | 'declined' } }>(
     '/:slug/test-payments/:id',
     { schema: { params: testParams, body: { type: 'object', required: ['decision'], additionalProperties: false, properties: { decision: { type: 'string', enum: ['approved', 'declined'] } } } } },

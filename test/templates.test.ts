@@ -131,7 +131,7 @@ test('templates: list, open, save, preview, history and back to the default', as
   await withApp(async (c) => {
     const list = await c.app.inject({ method: 'GET', url: '/v1/templates', headers: c.owner });
     assert.equal(list.statusCode, 200);
-    assert.equal(list.json().data.length, 17);
+    assert.equal(list.json().data.length, 18);
     assert.ok(list.json().data.every((t: { custom: boolean }) => !t.custom));
 
     const one = (await c.app.inject({ method: 'GET', url: '/v1/templates/email.document', headers: c.owner })).json();

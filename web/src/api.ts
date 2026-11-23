@@ -66,7 +66,7 @@ async function failure(res: Response, path: string): Promise<ApiError> {
     data = undefined;
   }
   const e = data?.error ?? {};
-  if (res.status === 401 && !path.startsWith('/v1/auth/') && !path.startsWith('/v1/pos/')) window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
+  if (res.status === 401 && !path.startsWith('/v1/auth/') && !path.startsWith('/v1/pos/') && !path.startsWith('/v1/store/')) window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
   return new ApiError(res.status, e.code ?? 'error', e.message ?? `Request failed (${res.status})`, e.details);
 }
 
@@ -89,7 +89,7 @@ export async function api<T = unknown>(path: string, options: CallOptions = {}):
   }
   if (!res.ok) {
     const e = data?.error ?? {};
-    if (res.status === 401 && !path.startsWith('/v1/auth/') && !path.startsWith('/v1/pos/')) window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
+    if (res.status === 401 && !path.startsWith('/v1/auth/') && !path.startsWith('/v1/pos/') && !path.startsWith('/v1/store/')) window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
     throw new ApiError(res.status, e.code ?? 'error', e.message ?? `Request failed (${res.status})`, e.details);
   }
   return data as T;
@@ -396,6 +396,7 @@ export interface StoreSettings {
   pickup: { enabled: boolean; instructions: string };
   payments: { bankTransfer: { enabled: boolean; instructions: string }; cashOnDelivery: { enabled: boolean }; payAtPickup: { enabled: boolean }; online: { enabled: boolean; provider: 'paypal' | 'test' | 'belizebank' | 'ekyash' } };
   reminders: { enabled: boolean; afterHours: number; second: boolean };
+  accounts: { enabled: boolean };
   slug?: string;
 }
 
@@ -413,6 +414,19 @@ export interface StoreCheckout {
   order: { id: string; number: number; total: string } | null;
   createdAt: string;
   updatedAt: string;
+}
+/** A buyer with an account at the online store. */
+export interface StoreBuyer {
+  id: string;
+  email: string;
+  name: string | null;
+  phone: string | null;
+  business: string | null;
+  orders: number;
+  spent: string;
+  lastOrderAt: string | null;
+  lastSeenAt: string;
+  createdAt: string;
 }
 export interface CheckoutSummary { left: number; reminded: number; recovered: number; recoveredTotal: string }
 

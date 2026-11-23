@@ -21,6 +21,7 @@ import { runRecurringExpenses } from './recurring-expenses.ts';
 import { reverseVoidedLoyalty } from './loyalty.ts';
 import { runStockAlerts } from '../commerce/stock-alerts.ts';
 import { runCheckoutReminders } from '../commerce/checkouts.ts';
+import { sweepBuyerSignIns } from '../commerce/buyers.ts';
 
 export interface HousekeepingOptions {
   mailer?: Mailer;
@@ -83,6 +84,7 @@ export async function runHousekeepingOnce(db: Queryable, options: HousekeepingOp
   }
   result.sweptLimits = (await step('rate limits', () => sweepRateLimits(db))) ?? 0;
   await step('challenges', () => db.query('delete from login_challenges where expires_at < now()'));
+  await step('buyer sign-ins', () => sweepBuyerSignIns(db));
   // Webhook bookkeeping: handled outbox rows after a week, deliveries after 30 days.
   await step('outbox', () => db.query("delete from event_outbox where processed_at < now() - interval '7 days'"));
   await step('deliveries', () => db.query("delete from webhook_deliveries where status <> 'pending' and created_at < now() - interval '30 days'"));

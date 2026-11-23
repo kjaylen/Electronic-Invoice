@@ -2,7 +2,7 @@
 
 import { type FormEvent, useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
-import { api, type Order, type CheckoutSummary, type StoreCheckout } from '../api';
+import { api, type Order, type CheckoutSummary, type StoreBuyer, type StoreCheckout } from '../api';
 import { type T, useT } from '../i18n';
 import { useSession } from '../session';
 import { useToast } from '../toast';
@@ -41,11 +41,11 @@ export function Orders() {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const view = params.get('view') ?? 'to_do';
-  const [q, setQ] = useState('');
+  const [q, setQ] = useState(() => params.get('q') ?? '');
   const [data, setData] = useState<{ data: Order[]; counts: { unpaid: number; unfulfilled: number } } | null>(null);
   const [error, setError] = useState<unknown>(null);
   const load = useCallback(() => {
-    if (view === 'unfinished') return;
+    if (view === 'unfinished' || view === 'buyers') return;
     void api<{ data: Order[]; counts: { unpaid: number; unfulfilled: number } }>(`/v1/orders?view=${view}${q ? `&q=${encodeURIComponent(q)}` : ''}`).then(setData).catch(setError);
   }, [view, q]);
   useEffect(load, [load]);
@@ -73,13 +73,14 @@ export function Orders() {
             ['cancelled', t('Cancelled')],
             ['all', t('All')],
             ['unfinished', t('Unfinished')],
+            ['buyers', t('Buyers')],
           ]}
         />
         <span className="spacer" />
-        {view !== 'unfinished' && <input type="search" placeholder={t('Order number, name or phone')} aria-label={t('Search orders')} value={q} onChange={(e) => setQ(e.target.value)} style={{ maxWidth: 280 }} />}
+        {view !== 'unfinished' && <input type="search" placeholder={view === 'buyers' ? t('Name, email or phone') : t('Order number, name or phone')} aria-label={view === 'buyers' ? t('Search buyers') : t('Search orders')} value={q} onChange={(e) => setQ(e.target.value)} style={{ maxWidth: 280 }} />}
       </div>
       <ErrorText error={error} />
-      {view === 'unfinished' ? <UnfinishedCheckouts /> : (
+      {view === 'unfinished' ? <UnfinishedCheckouts /> : view === 'buyers' ? <BuyerAccounts q={q} /> : (
       <section className="card">
         {data === null ? <div className="stack"><div className="skeleton" /><div className="skeleton" /></div> : data.data.length === 0 ? (
           <div className="empty">{view === 'to_do' ? t('Nothing to do. New orders from your store appear here.') : t('No orders here.')}</div>
@@ -105,6 +106,44 @@ export function Orders() {
       </section>
       )}
     </div>
+  );
+}
+
+/** Buyers with an account at the store: what they ordered and spent. */
+function BuyerAccounts({ q }: { q: string }) {
+  const t = useT();
+  const [data, setData] = useState<StoreBuyer[] | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  useEffect(() => {
+    const timer = setTimeout(() => void api<{ data: StoreBuyer[] }>(`/v1/store-buyers${q.trim() ? `?q=${encodeURIComponent(q.trim())}` : ''}`).then((r) => setData(r.data)).catch(setError), q ? 250 : 0);
+    return () => clearTimeout(timer);
+  }, [q]);
+  return (
+    <section className="card stack">
+      <p className="small muted" style={{ margin: 0 }}>{t('Buyers sign in at your store with a code sent to their email. Their orders include any they placed as a guest with the same email.')}</p>
+      <ErrorText error={error} />
+      {data === null ? <div className="skeleton" style={{ height: '4rem' }} /> : data.length === 0 ? (
+        <div className="empty">{q ? t('No buyer matches your search.') : t('No buyer accounts yet. Buyers make one by signing in at your store (Account, at the top of the store).')}</div>
+      ) : (
+        <div className="table-wrap">
+          <table className="responsive">
+            <thead><tr><th scope="col">{t('Buyer')}</th><th scope="col">{t('Phone')}</th><th scope="col" className="right">{t('Orders')}</th><th scope="col" className="right">{t('Spent')}</th><th scope="col">{t('Last order')}</th><th scope="col">{t('Since')}</th></tr></thead>
+            <tbody>
+              {data.map((b) => (
+                <tr key={b.id}>
+                  <td data-label={t('Buyer')}>{b.name ?? '—'}{b.business && <span className="small muted"> · {b.business}</span>}<div className="small"><a href={`mailto:${b.email}`}>{b.email}</a></div></td>
+                  <td data-label={t('Phone')} className="small">{b.phone ?? '—'}</td>
+                  <td data-label={t('Orders')} className="right">{b.orders > 0 ? <Link to={`/orders?view=all&q=${encodeURIComponent(b.email)}`}>{b.orders}</Link> : 0}</td>
+                  <td data-label={t('Spent')} className="right num">{money(b.spent)}</td>
+                  <td data-label={t('Last order')} className="small">{b.lastOrderAt ? when(b.lastOrderAt) : '—'}</td>
+                  <td data-label={t('Since')} className="small">{new Date(b.createdAt).toLocaleDateString(undefined, { dateStyle: 'medium' })}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
   );
 }
 
