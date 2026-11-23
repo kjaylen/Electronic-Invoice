@@ -2701,4 +2701,9 @@ export const ES: Record<string, string> = {
   "Test documents, 30 days": "Documentos de prueba, 30 días",
   "Your open invoices": "Sus facturas abiertas",
   "Updated {time}": "Actualizado {time}",
+  "Sign in to continue to {name}.": "Inicie sesión para continuar en {name}.",
+  "Sign in to continue.": "Inicie sesión para continuar.",
+  "Hide password": "Ocultar contraseña",
+  "Show password": "Mostrar contraseña",
+  "Keep me signed in": "Mantener la sesión iniciada",
 };

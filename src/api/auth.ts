@@ -118,8 +118,9 @@ export async function sessionFromRequest(deps: PipelineDeps, request: FastifyReq
   return session && !session.device && (!slug || session.business.slug === slug) ? session : null;
 }
 
-function setSessionCookie(reply: FastifyReply, slug: string, token: string, options: AuthOptions) {
-  reply.header('set-cookie', `${sessionCookieName(slug)}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_MAX_MS / 1000}${options.cookieSecure ? '; Secure' : ''}`);
+/** The session cookie: kept across browser restarts, or (not "keep me signed in") gone when the browser closes. */
+function setSessionCookie(reply: FastifyReply, slug: string, token: string, options: AuthOptions, persistent = true) {
+  reply.header('set-cookie', `${sessionCookieName(slug)}=${token}; Path=/; HttpOnly; SameSite=Lax${persistent ? `; Max-Age=${SESSION_MAX_MS / 1000}` : ''}${options.cookieSecure ? '; Secure' : ''}`);
 }
 
 function clearSessionCookie(reply: FastifyReply, slug: string, options: AuthOptions) {
@@ -169,18 +170,18 @@ export function registerAuthRoutes(app: FastifyInstance, deps: PipelineDeps, opt
     if (!b) throw new ApiError(404, 'business_not_found', 'There is no business at this address. Check the link with your administrator.');
     return b;
   };
-  const startSession = async (reply: FastifyReply, user: User, slug: string) => {
+  const startSession = async (reply: FastifyReply, user: User, slug: string, remember = true) => {
     const { token } = await createSession(db, user.id);
-    setSessionCookie(reply, slug, token, options);
+    setSessionCookie(reply, slug, token, options, remember);
     const business = (await tenantBySlug(db, slug))!;
     return sessionBody({ user, business, twoFactor: await twoFactorFor(db, user) });
   };
   /** After the password: the session, or (when two-step sign-in is on) a challenge for the code. */
-  const passwordAccepted = async (reply: FastifyReply, user: User, slug: string) => {
+  const passwordAccepted = async (reply: FastifyReply, user: User, slug: string, remember = true) => {
     if ((await twoFactorStatus(db, 'user', user.id)).enabled) {
       return { twoFactorRequired: true, challenge: await createLoginChallenge(db, 'user', user.id) };
     }
-    return startSession(reply, user, slug);
+    return startSession(reply, user, slug, remember);
   };
 
   // ---------- addresses ----------
@@ -249,7 +250,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: PipelineDeps, opt
 
   // ---------- sign in and out ----------
 
-  app.post<{ Body: { business: string; login: string; password: string } }>(
+  app.post<{ Body: { business: string; login: string; password: string; remember?: boolean } }>(
     '/login',
     {
       schema: {
@@ -257,7 +258,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: PipelineDeps, opt
           type: 'object',
           required: ['business', 'login', 'password'],
           additionalProperties: false,
-          properties: { business: { type: 'string', minLength: 1, maxLength: 60 }, login: { type: 'string', minLength: 1, maxLength: 254 }, password: passwordField },
+          properties: { business: { type: 'string', minLength: 1, maxLength: 60 }, login: { type: 'string', minLength: 1, maxLength: 254 }, password: passwordField, remember: { type: 'boolean' } },
         },
       },
     },
@@ -276,15 +277,15 @@ export function registerAuthRoutes(app: FastifyInstance, deps: PipelineDeps, opt
         if (result.reason === 'disabled') throw new ApiError(403, 'account_disabled', 'This account is deactivated. Ask an administrator of this business.');
         throw new ApiError(401, 'invalid_credentials', 'Email, username or password is incorrect');
       }
-      const next = await passwordAccepted(reply, result.user, business.slug);
+      const next = await passwordAccepted(reply, result.user, business.slug, request.body.remember ?? true);
       if (!('twoFactorRequired' in next)) await audit(db, { tenantId: business.id, userId: result.user.id, action: 'login', ip: request.ip });
       return next;
     },
   );
 
-  app.post<{ Body: { challenge: string; code: string } }>(
+  app.post<{ Body: { challenge: string; code: string; remember?: boolean } }>(
     '/login/verify',
-    { schema: { body: { type: 'object', required: ['challenge', 'code'], additionalProperties: false, properties: { challenge: { type: 'string', maxLength: 100 }, code: { type: 'string', minLength: 6, maxLength: 20 } } } } },
+    { schema: { body: { type: 'object', required: ['challenge', 'code'], additionalProperties: false, properties: { challenge: { type: 'string', maxLength: 100 }, code: { type: 'string', minLength: 6, maxLength: 20 }, remember: { type: 'boolean' } } } } },
     async (request, reply) => {
       const ipKey = `2fa|${request.ip}`;
       if (await atLimit(db, ipKey, 30)) throw tooMany();
@@ -301,7 +302,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: PipelineDeps, opt
       await endLoginChallenge(db, request.body.challenge);
       await audit(db, { tenantId: user.tenantId, userId: user.id, action: 'login', details: { twoFactor: method }, ip: request.ip });
       const slug = (await db.query<{ slug: string }>('select slug from tenants where id = $1', [user.tenantId])).rows[0]!.slug;
-      return startSession(reply, user, slug);
+      return startSession(reply, user, slug, request.body.remember ?? true);
     },
   );
 

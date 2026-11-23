@@ -197,8 +197,8 @@ Issuing body:
 | Method and path | What it does |
 |---|---|
 | `POST /v1/auth/signup` | Create a business (test environment) and its first owner |
-| `POST /v1/auth/login` | `{ business: slug, login: email or username, password }`. With two-step sign-in on, answers `{ twoFactorRequired, challenge }` instead of a session |
-| `POST /v1/auth/login/verify` | `{ challenge, code }`: the 6-digit code from the authenticator app, or a recovery code. The challenge lasts 5 minutes and allows 5 tries; a code works once |
+| `POST /v1/auth/login` | `{ business: slug, login: email or username, password, remember? }`. With two-step sign-in on, answers `{ twoFactorRequired, challenge }` instead of a session. `remember: false` ("Keep me signed in" unticked) gives a cookie that ends when the browser closes |
+| `POST /v1/auth/login/verify` | `{ challenge, code, remember? }`: the 6-digit code from the authenticator app, or a recovery code. The challenge lasts 5 minutes and allows 5 tries; a code works once |
 | `GET /v1/auth/two-factor`, `POST .../setup`, `.../confirm`, `.../disable`, `.../recovery-codes` | Two-step sign-in for the signed-in person (TOTP, RFC 6238): setup needs the password and returns the secret and a QR code; confirming with a code returns ten single-use recovery codes |
 | `PUT /v1/business/security` | Owners: `{ requireTwoFactor }` for owners and admins (who must then set it up before anything else) |
 | `GET /v1/auth/session` | The account, its business and its permissions |
@@ -295,6 +295,7 @@ A React + TypeScript app (Vite) served by the API server from `web/dist`. It's b
 - **Spanish:** every screen is in English and Spanish (`web/src/es.ts`). The choice is per device, defaulting to the browser's language. Customer emails go out in English or Spanish, as each business chooses under Templates (built-in text, subjects, dates and the lines the app writes); printed documents keep BTS's English names.
 - **Installable:** a web app manifest, icons and a service worker that caches the app shell (never API data), so it installs on phones and desktops and opens fast.
 - **Accessibility:** a skip link; focus moves to each new page; dialogs trap focus and give it back; a keyboard-operable combobox; every control labelled; muted text at 5:1 contrast.
+- **Sign-in screens:** a white card (floating labels, show or hide the password, keep me signed in, a clear busy, success and error state) beside a living panel: slowly drifting aurora light, a real-time fluid on the GPU (WebGL; velocity, pressure and dye, stirred by the pointer or a finger, a splash on a click) and a faint particle network that moves aside for the pointer (`web/src/scene/`). It scales down on phones and small machines, falls back to the still gradient without WebGL, stands still with reduced motion, and pauses while the tab is hidden.
 - **Robustness:** each page loads on demand and crashes stay inside one page (with a reload button); an expired session returns to the login page; network errors say so plainly.
 - **Design:** "ledger and drafting table".
   - Warm grid paper, cream sheets with hairline edges, aubergine ink.

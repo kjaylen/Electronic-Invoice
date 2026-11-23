@@ -1,9 +1,10 @@
 /** Signing in to this business: log in, forgot password, set a password from a link, replace a temporary password. */
 
-import { type FormEvent, type ReactNode, useEffect, useState } from 'react';
+import { type FormEvent, type InputHTMLAttributes, type ReactNode, useEffect, useRef, useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate, useSearchParams } from 'react-router';
 import { api, ApiError, type SessionInfo } from '../api';
-import { AuthArt } from '../art';
+import { Brand, BrandMark } from '../art';
+import { AuthScene, useParallax } from '../scene/AuthScene';
 import { BUSINESS } from '../business';
 import { LanguageToggle, useT } from '../i18n';
 import { useSession } from '../session';
@@ -22,10 +23,29 @@ function useBusinessName(): { name: string | null; missing: boolean } {
   return state;
 }
 
+/**
+ * The sign-in screens: the living panel (aurora, fluid, particles) on one
+ * side with the headline, the white card on the other.
+ */
 function AuthLayout(props: { art: { kicker: string; title: string; text: string }; children: ReactNode }) {
+  const art = useRef<HTMLElement>(null);
+  useParallax(art);
   return (
     <div className="auth-page">
-      <AuthArt {...props.art} />
+      <aside className="auth-art lux-art" ref={art}>
+        <AuthScene />
+        <div className="brand"><Brand light /></div>
+        <div className="headline">
+          <span className="kicker">{props.art.kicker}</span>
+          <h2>{props.art.title}</h2>
+          <p>{props.art.text}</p>
+        </div>
+        <div className="facts">
+          <span>BTS e-invoicing</span>
+          <span>Signed &amp; authorized</span>
+          <span>Keeps working in outages</span>
+        </div>
+      </aside>
       <div className="auth-form">
         <div className="auth-lang"><LanguageToggle /></div>
         {props.children}
@@ -33,6 +53,29 @@ function AuthLayout(props: { art: { kicker: string; title: string; text: string 
     </div>
   );
 }
+
+/** A text field whose label floats up when it has focus or a value. */
+function FloatField({ id, label, trailing, invalid, ...input }: InputHTMLAttributes<HTMLInputElement> & { id: string; label: string; trailing?: ReactNode; invalid?: boolean }) {
+  return (
+    <div className={`lux-field${trailing ? ' has-trailing' : ''}`}>
+      <input id={id} placeholder=" " aria-invalid={invalid || undefined} {...input} />
+      <label htmlFor={id}>{label}</label>
+      {trailing}
+    </div>
+  );
+}
+
+function EyeIcon({ open }: { open: boolean }) {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M2.5 12s3.5-6.5 9.5-6.5 9.5 6.5 9.5 6.5-3.5 6.5-9.5 6.5S2.5 12 2.5 12Z" />
+      <circle cx="12" cy="12" r="2.8" />
+      {!open && <path d="M4 20 20 4" />}
+    </svg>
+  );
+}
+
+const reduceMotion = () => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 /** Submit handler with busy and error state. */
 function useSubmit(fn: () => Promise<void>) {
@@ -75,17 +118,41 @@ export function Login() {
   const location = useLocation();
   const [login, setLogin] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [remember, setRemember] = useState(true);
   const [challenge, setChallenge] = useState<TwoFactorChallenge | null>(null);
+  const [phase, setPhase] = useState<'idle' | 'busy' | 'done' | 'error'>('idle');
+  const [error, setError] = useState<unknown>(null);
+  const [shakes, setShakes] = useState(0);
   const enter = (s: SessionInfo) => {
     setSession(s);
     const from = (location.state as { from?: string } | null)?.from;
     navigate(from ?? '/', { replace: true, viewTransition: true });
   };
-  const { submit, error, busy } = useSubmit(async () => {
-    const r = await api<SessionInfo | TwoFactorChallenge>('/v1/auth/login', { method: 'POST', body: { business: BUSINESS, login, password } });
-    if (isChallenge(r)) setChallenge(r);
-    else enter(r);
-  });
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    setPhase('busy');
+    setError(null);
+    try {
+      const r = await api<SessionInfo | TwoFactorChallenge>('/v1/auth/login', { method: 'POST', body: { business: BUSINESS, login, password, remember } });
+      if (isChallenge(r)) {
+        setPhase('idle');
+        setChallenge(r);
+        return;
+      }
+      // A beat of success before the app opens.
+      setPhase('done');
+      await new Promise((done) => setTimeout(done, reduceMotion() ? 0 : 480));
+      enter(r);
+    } catch (err) {
+      setError(err);
+      setPhase('error');
+      setShakes((n) => n + 1);
+    }
+  };
+  const edited = () => {
+    if (phase === 'error') setPhase('idle');
+  };
   if (missing) return <NoSuchBusiness />;
   if (session) return <Navigate to="/" replace />;
   if (challenge) {
@@ -100,7 +167,7 @@ export function Login() {
           <CodeForm
             submitLabel={t('Log in')}
             onBack={() => { setChallenge(null); setPassword(''); }}
-            onSubmit={async (code) => enter(await api<SessionInfo>('/v1/auth/login/verify', { method: 'POST', body: { challenge: challenge.challenge, code } }))}
+            onSubmit={async (code) => enter(await api<SessionInfo>('/v1/auth/login/verify', { method: 'POST', body: { challenge: challenge.challenge, code, remember } }))}
           />
         </div>
       </AuthLayout>
@@ -109,17 +176,48 @@ export function Login() {
 
   return (
     <AuthLayout art={{ kicker: t('Electronic tax documents'), title: name ?? t('Issue it. Sign it. Get it authorized.'), text: t('Sign in with the email or username your administrator gave you.') }}>
-      <form className="card auth-card stack" onSubmit={submit}>
-        <div>
-          <span className="kicker">{name ?? '…'}</span>
-          <h1>{t('Log in')}</h1>
+      <form className={`card auth-card lux-login stack${shakes ? ` shake-${shakes % 2 ? 'a' : 'b'}` : ''}`} onSubmit={submit} aria-busy={phase === 'busy'}>
+        <div className="lux-card-head">
+          <span className="lux-mark" aria-hidden="true"><BrandMark /></span>
+          <h1>{t('Welcome back')}</h1>
+          <p className="muted">{name ? t('Sign in to continue to {name}.', { name }) : t('Sign in to continue.')}</p>
         </div>
-        <Field label={t('Email or username')}><input autoComplete="username" autoCapitalize="none" spellCheck={false} required value={login} onChange={(e) => setLogin(e.target.value)} /></Field>
-        <Field label={t('Password')}><input type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
-        <p className="small right"><Link to="/forgot-password" viewTransition>{t('Forgot your password?')}</Link></p>
+        <FloatField id="lux-login" label={t('Email or username')} autoComplete="username" autoCapitalize="none" spellCheck={false} required value={login} invalid={phase === 'error'} onChange={(e) => { setLogin(e.target.value); edited(); }} />
+        <FloatField
+          id="lux-password"
+          label={t('Password')}
+          type={showPassword ? 'text' : 'password'}
+          autoComplete="current-password"
+          required
+          value={password}
+          invalid={phase === 'error'}
+          onChange={(e) => { setPassword(e.target.value); edited(); }}
+          trailing={
+            <button type="button" className="lux-eye" aria-label={showPassword ? t('Hide password') : t('Show password')} aria-pressed={showPassword} aria-controls="lux-password" onClick={() => setShowPassword((v) => !v)}>
+              <EyeIcon open={!showPassword} />
+            </button>
+          }
+        />
+        <div className="lux-options">
+          <label className="lux-check"><input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} /><span>{t('Keep me signed in')}</span></label>
+          <Link to="/forgot-password" viewTransition>{t('Forgot your password?')}</Link>
+        </div>
         <ErrorText error={error} />
-        <button type="submit" className="big" disabled={busy}>{busy ? t('Logging in…') : t('Log in')}<span className="chip" aria-hidden="true">→</span></button>
-        <p className="small muted">{t('Not this business?')} <a href="/?choose=1">{t('Find yours')}</a></p>
+        <button type="submit" className={`lux-submit ${phase}`} disabled={phase === 'busy' || phase === 'done'}>
+          <span className="lux-submit-label">{phase === 'busy' ? t('Logging in…') : phase === 'done' ? t('Signed in') : t('Log in')}</span>
+          <span className="lux-submit-icon" aria-hidden="true">
+            {phase === 'busy' ? <span className="lux-spinner" /> : phase === 'done' ? (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path className="lux-check-path" d="m5 12.5 4.5 4.5L19 7.5" /></svg>
+            ) : (
+              <svg className="lux-arrow" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12h15M13 6l6 6-6 6" /></svg>
+            )}
+          </span>
+        </button>
+        <span className="sr-only" role="status">{phase === 'busy' ? t('Logging in…') : phase === 'done' ? t('Signed in') : ''}</span>
+        <p className="small lux-alt">
+          <span>{t('Not this business?')} <a href="/?choose=1">{t('Find yours')}</a></span>
+          <span>{t('New here?')} <a href="/signup">{t('Create a business')}</a></span>
+        </p>
       </form>
     </AuthLayout>
   );

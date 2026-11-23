@@ -271,7 +271,7 @@ test('users: the owner adds a cashier by email, who sets a password from the wel
   await page.getByRole('dialog').getByRole('button', { name: 'Deactivate' }).click();
   await expect(page.getByRole('row', { name: /Carlos Cashier/ })).toContainText('Deactivated');
   await cashier.reload();
-  await expect(cashier.getByRole('heading', { name: 'Log in' })).toBeVisible();
+  await expect(cashier.getByRole('heading', { name: 'Welcome back' })).toBeVisible();
   await cashier.getByLabel('Email or username').fill('carlos@cornerstore.test');
   await cashier.getByLabel(/^Password/).fill('cashier password 1');
   await cashier.getByRole('button', { name: /^Log in/ }).click();

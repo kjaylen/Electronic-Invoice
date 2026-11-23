@@ -133,6 +133,13 @@ test('log in at the business with email or username; other businesses do not kno
     assert.equal(wrong.statusCode, 401);
     assert.deepEqual(wrong.json(), unknown.json(), 'wrong password and unknown account look the same');
 
+    // Kept signed in by default (a lasting cookie); not when they untick it (gone when the browser closes).
+    assert.match(String(byUsername.headers['set-cookie']), /Max-Age=\d+/);
+    const brief = await app.inject({ method: 'POST', url: '/v1/auth/login', headers: CSRF, payload: { business: slug, login: 'till1', password: PASSWORD, remember: false } });
+    assert.equal(brief.statusCode, 200, brief.body);
+    assert.doesNotMatch(String(brief.headers['set-cookie']), /Max-Age/);
+    assert.equal((await app.inject({ method: 'GET', url: '/v1/auth/session', headers: { cookie: cookieFrom(brief) } })).statusCode, 200);
+
     const cookie = cookieFrom(byUsername);
     const out = await app.inject({ method: 'POST', url: '/v1/auth/logout', headers: { cookie, ...CSRF, 'x-business': slug } });
     assert.equal(out.statusCode, 204);

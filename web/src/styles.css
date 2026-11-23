@@ -1881,3 +1881,134 @@ button.cat-tag:hover:not(:disabled) { background: var(--brand); border-color: va
 .facts { display: grid; grid-template-columns: max-content 1fr; gap: 0.5rem 1rem; margin: 0; }
 .facts dt { color: var(--muted); }
 .facts dd { margin: 0; }
+
+/* ==========================================================================
+   Sign-in: the left panel's living backdrop (aurora, fluid, particles)
+   ========================================================================== */
+.lux-art {
+  isolation: isolate;
+  background:
+    radial-gradient(90% 70% at 88% 4%, rgba(255, 255, 255, 0.22) 0%, transparent 55%),
+    radial-gradient(80% 60% at 70% 100%, rgba(216, 180, 254, 0.28) 0%, transparent 60%),
+    linear-gradient(155deg, #8a4bb8 0%, #6d2d93 46%, #55217a 100%);
+}
+/* Keeps the white headline readable over the lighter panel. */
+.lux-art::after {
+  background:
+    linear-gradient(180deg, rgba(52, 16, 78, 0.28) 0%, transparent 24%, transparent 66%, rgba(52, 16, 78, 0.42) 100%),
+    radial-gradient(70% 55% at 22% 55%, rgba(52, 16, 78, 0.38), transparent 72%);
+}
+.lux-scene { position: absolute; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
+.lux-aurora { position: absolute; inset: -30%; filter: blur(90px); transform: translate3d(calc(var(--px, 0) * -6px), calc(var(--py, 0) * -5px), 0); }
+.lux-aurora .blob { position: absolute; display: block; border-radius: 46% 54% 52% 48%; mix-blend-mode: screen; will-change: transform; }
+.lux-aurora .b1 { width: 56vmax; height: 56vmax; left: 46%; top: -24%; opacity: 0.3; background: radial-gradient(circle at 45% 45%, #ffffff 0%, rgba(255, 255, 255, 0.3) 40%, transparent 70%); animation: lux-drift-1 48s ease-in-out infinite alternate; }
+.lux-aurora .b2 { width: 46vmax; height: 46vmax; left: -16%; top: 44%; opacity: 0.22; background: radial-gradient(circle at 55% 50%, #c4b5fd 0%, rgba(196, 181, 253, 0.3) 42%, transparent 70%); animation: lux-drift-2 56s ease-in-out infinite alternate; }
+.lux-aurora .b3 { width: 40vmax; height: 40vmax; left: 52%; top: 50%; opacity: 0.28; background: radial-gradient(circle, #e9d5ff 0%, rgba(233, 213, 255, 0.28) 44%, transparent 70%); animation: lux-drift-3 62s ease-in-out infinite alternate; }
+.lux-aurora .b4 { width: 34vmax; height: 34vmax; left: 6%; top: -22%; opacity: 0.24; background: radial-gradient(circle, #a78bfa 0%, rgba(167, 139, 250, 0.28) 44%, transparent 70%); animation: lux-drift-4 70s ease-in-out infinite alternate; }
+.lux-aurora .b5 { width: 22vmax; height: 22vmax; left: 30%; top: 70%; opacity: 0.18; background: radial-gradient(circle, #fae8ff 0%, rgba(250, 232, 255, 0.2) 40%, transparent 70%); animation: lux-drift-5 52s ease-in-out infinite alternate; }
+@keyframes lux-drift-1 { 0% { transform: translate3d(0, 0, 0) rotate(0deg) scale(1); border-radius: 46% 54% 52% 48%; } 50% { transform: translate3d(-5vw, 5vh, 0) rotate(22deg) scale(1.06); border-radius: 56% 44% 46% 54%; } 100% { transform: translate3d(-2vw, 9vh, 0) rotate(44deg) scale(0.97); } }
+@keyframes lux-drift-2 { 0% { transform: translate3d(0, 0, 0) rotate(0deg); } 50% { transform: translate3d(6vw, -4vh, 0) rotate(-18deg) scale(1.05); } 100% { transform: translate3d(3vw, -8vh, 0) rotate(-36deg); } }
+@keyframes lux-drift-3 { 0% { transform: translate3d(0, 0, 0) scale(1); } 50% { transform: translate3d(-6vw, -5vh, 0) scale(1.08); } 100% { transform: translate3d(-3vw, 3vh, 0) scale(0.95); } }
+@keyframes lux-drift-4 { 0% { transform: translate3d(0, 0, 0) rotate(0deg); } 50% { transform: translate3d(4vw, 6vh, 0) rotate(28deg) scale(1.04); } 100% { transform: translate3d(8vw, 2vh, 0) rotate(50deg); } }
+@keyframes lux-drift-5 { 0% { transform: translate3d(0, 0, 0) scale(1); } 50% { transform: translate3d(6vw, -5vh, 0) scale(1.12); } 100% { transform: translate3d(12vw, -2vh, 0); } }
+.lux-fluid, .lux-sparks { position: absolute; inset: 0; width: 100%; height: 100%; display: block; mix-blend-mode: screen; opacity: 0; transition: opacity 2000ms var(--ease-out); }
+.lux-fluid.on { opacity: 0.4; }
+.lux-sparks.on { opacity: 0.6; transition-delay: 300ms; }
+.lux-grain {
+  position: absolute; inset: -60%; opacity: 0.035; mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.9 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+.lux-vignette { position: absolute; inset: 0; background: radial-gradient(ellipse 90% 80% at 50% 50%, transparent 50%, rgba(52, 16, 78, 0.3) 100%); }
+.lux-scene.still .blob { animation: none; }
+
+/* ---- the card (every sign-in screen): white, quiet, the app's own colours ---- */
+.auth-page .auth-card {
+  position: relative; width: 100%; max-width: 420px; margin: 0 auto; gap: 1.05rem;
+  padding: clamp(1.5rem, 3vw, 2.25rem); border-radius: 16px; color: var(--ink);
+  box-shadow: 0 1px 2px rgba(15, 17, 23, 0.04), 0 18px 48px -24px rgba(15, 17, 23, 0.28);
+  animation: lux-card-in 800ms var(--ease-out) 80ms both;
+}
+@keyframes lux-card-in { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+.auth-page .auth-card > * { animation: lux-rise 700ms var(--ease-out) both; animation-delay: calc(var(--i, 0) * 45ms + 320ms); }
+.auth-page .auth-card > :nth-child(1) { --i: 0; }
+.auth-page .auth-card > :nth-child(2) { --i: 1; }
+.auth-page .auth-card > :nth-child(3) { --i: 2; }
+.auth-page .auth-card > :nth-child(4) { --i: 3; }
+.auth-page .auth-card > :nth-child(5) { --i: 4; }
+.auth-page .auth-card > :nth-child(6) { --i: 5; }
+.auth-page .auth-card > :nth-child(n + 7) { --i: 6; }
+@keyframes lux-rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.auth-page .auth-card h1 { color: var(--ink); font-size: clamp(1.55rem, 1.35rem + 0.7vw, 1.85rem); font-weight: 640; letter-spacing: -0.035em; line-height: 1.15; margin: 0.25rem 0 0.3rem; }
+.auth-page .auth-card .kicker { color: var(--brand); letter-spacing: 0.12em; }
+.auth-page .auth-card p { margin: 0; }
+.auth-page .auth-card a { color: var(--brand); font-weight: 540; text-decoration: none; }
+.auth-page .auth-card a:hover { color: var(--brand-hover); text-decoration: underline; text-underline-offset: 3px; }
+.auth-page .auth-card a:focus-visible, .auth-page .auth-card button:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; border-radius: 6px; }
+.auth-page .auth-card .form-error { color: var(--coral-ink); background: var(--coral-soft); border: 1px solid var(--coral-line); border-radius: 10px; padding: 0.6rem 0.8rem; font-size: 0.9rem; animation: lux-rise 300ms var(--ease-out) both; }
+
+.lux-card-head { display: grid; justify-items: start; padding-bottom: 0.35rem; }
+.lux-mark { display: inline-grid; place-items: center; margin-bottom: 1rem; }
+.lux-mark svg { width: 40px; height: 40px; }
+
+/* ---- floating-label fields ---- */
+.lux-field { position: relative; }
+.lux-field input {
+  height: 3.4rem; padding: 1.3rem 0.9rem 0.4rem; border-radius: 10px; font-size: 1rem; color: var(--ink);
+  background: #fff; border: 1px solid var(--hairline-strong); box-shadow: var(--shadow-xs);
+  transition: border-color 200ms var(--ease), box-shadow 200ms var(--ease);
+}
+.lux-field.has-trailing input { padding-right: 3.1rem; }
+.lux-field input:hover { border-color: #b8bec9; }
+.lux-field input:focus { outline: none; border-color: var(--brand); box-shadow: var(--ring); }
+.lux-field input[aria-invalid='true'], .lux-field input:user-invalid { border-color: var(--coral); box-shadow: 0 0 0 3px rgba(229, 72, 77, 0.14); }
+.lux-field label {
+  position: absolute; left: 0.9rem; top: 50%; transform: translateY(-50%); transform-origin: left center; pointer-events: none;
+  color: var(--muted); font-size: 1rem; font-weight: 450; white-space: nowrap;
+  transition: top 220ms var(--ease-out), transform 220ms var(--ease-out), color 160ms var(--ease);
+}
+.lux-field input:focus + label, .lux-field input:not(:placeholder-shown) + label, .lux-field input:-webkit-autofill + label { top: 1rem; transform: translateY(-50%) scale(0.78); }
+.lux-field input:focus + label { color: var(--brand); }
+.lux-field input[aria-invalid='true'] + label { color: var(--coral-ink); }
+.lux-eye {
+  position: absolute; right: 0.45rem; top: calc(50% - 1.2rem); transform: none; width: 2.4rem; height: 2.4rem; min-height: 0; padding: 0;
+  border: 0; border-radius: 8px; background: transparent; color: var(--muted); box-shadow: none; transition: color 160ms, background 160ms;
+}
+.lux-eye:hover { color: var(--ink); background: var(--sheet-2); }
+.lux-eye:active:not(:disabled) { transform: none; background: var(--paper-2); }
+
+.lux-options { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; font-size: 0.9rem; }
+.lux-check { display: inline-flex; align-items: center; gap: 0.55rem; cursor: pointer; color: var(--ink-2); user-select: none; }
+.lux-check input { width: 1.05rem; height: 1.05rem; min-height: 0; margin: 0; padding: 0; accent-color: var(--brand); cursor: pointer; box-shadow: none; }
+
+/* ---- the sign-in button ---- */
+.lux-submit {
+  position: relative; width: 100%; min-height: 3.2rem; margin-top: 0.1rem; padding: 0 1.1rem; justify-content: center; gap: 0.6rem;
+  border: 1px solid var(--brand); border-radius: 10px; color: #fff; font-size: 1rem; font-weight: 600; letter-spacing: -0.005em;
+  background: var(--brand);
+  box-shadow: 0 1px 2px rgba(15, 17, 23, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  transition: background 200ms var(--ease), border-color 200ms var(--ease), box-shadow 200ms var(--ease), transform 120ms var(--ease);
+}
+.lux-submit:hover:not(:disabled) { background: var(--brand-hover); border-color: var(--brand-hover); box-shadow: 0 6px 18px -8px rgba(109, 45, 147, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.14); }
+.lux-submit:active:not(:disabled) { transform: scale(0.99); }
+.lux-submit:disabled { opacity: 1; cursor: progress; }
+.lux-submit-icon { display: inline-grid; place-items: center; width: 1.2rem; height: 1.2rem; }
+.lux-arrow { transition: transform 250ms var(--ease-out); }
+.lux-submit:hover:not(:disabled) .lux-arrow { transform: translateX(3px); }
+.lux-spinner { width: 1rem; height: 1rem; border-radius: 50%; border: 2px solid rgba(255, 255, 255, 0.35); border-top-color: #fff; animation: lux-spin 700ms linear infinite; }
+@keyframes lux-spin { to { transform: rotate(360deg); } }
+.lux-submit.done { background: #15803d; border-color: #15803d; }
+.lux-check-path { stroke-dasharray: 24; stroke-dashoffset: 24; animation: lux-draw 400ms var(--ease-out) forwards; }
+@keyframes lux-draw { to { stroke-dashoffset: 0; } }
+.auth-page .auth-card.shake-a { animation: lux-shake-a 380ms var(--ease) both; }
+.auth-page .auth-card.shake-b { animation: lux-shake-b 380ms var(--ease) both; }
+@keyframes lux-shake-a { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-5px); } 50% { transform: translateX(4px); } 75% { transform: translateX(-2px); } }
+@keyframes lux-shake-b { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-5px); } 50% { transform: translateX(4px); } 75% { transform: translateX(-2px); } }
+.lux-alt { display: grid; gap: 0.15rem; color: var(--muted); text-align: center; line-height: 1.6; padding-top: 0.9rem; border-top: 1px solid var(--hairline); }
+
+
+@media (prefers-reduced-motion: reduce) {
+  .lux-art *, .lux-art *::before, .lux-art *::after, .auth-page .auth-card, .auth-page .auth-card * { animation: none !important; transition-duration: 1ms !important; }
+  .auth-page .lux-spinner { animation: lux-spin 1400ms linear infinite !important; }
+  .lux-aurora { transform: none; }
+  .lux-check-path { stroke-dashoffset: 0; }
+}
