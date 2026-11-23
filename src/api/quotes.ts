@@ -45,7 +45,7 @@ import { date as dateSchema, issueSchema, uuid } from './schemas.ts';
 export type QuoteStatus = 'draft' | 'sent' | 'accepted' | 'declined' | 'invoiced' | 'cancelled';
 const LINK_TTL_MS = 120 * 86_400_000;
 const VALID_DOCUMENT = ['authorized', 'authorized_with_alert', 'contingency_pending', 'pending'];
-const UNIT_NAMES: Record<string, string> = {
+export const UNIT_NAMES: Record<string, string> = {
   H87: 'piece', EA: 'each', BX: 'box', PK: 'pack', KGM: 'kg', LBR: 'lb', LTR: 'litre', GLL: 'US gal', GLI: 'imp. gal', MTR: 'metre', FOT: 'foot', HUR: 'hour', DAY: 'day', MON: 'month',
 };
 

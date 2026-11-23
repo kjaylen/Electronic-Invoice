@@ -6,6 +6,7 @@ import { api, type Item, link, type Page } from '../api';
 import { type T, useT } from '../i18n';
 import { useSession } from '../session';
 import { useToast } from '../toast';
+import { type PurchaseOrder, PurchaseOrderList } from './PurchaseOrders';
 import { belizeDate, belizeToday, Combobox, ErrorText, Field, fromCents, Modal, money, PAYMENT_METHOD_TEXT, Segmented, Select, toCents, unitName, useDebounced, usePageTitle } from '../ui';
 
 interface StockItem {
@@ -60,7 +61,7 @@ export function Inventory() {
   usePageTitle(t('Inventory'));
   const { can } = useSession();
   const [params, setParams] = useSearchParams();
-  const filter = (params.get('filter') as 'tracked' | 'low' | 'untracked' | 'deliveries' | null) ?? 'tracked';
+  const filter = (params.get('filter') as 'tracked' | 'low' | 'untracked' | 'deliveries' | 'orders' | null) ?? 'tracked';
   const [q, setQ] = useState('');
   const search = useDebounced(q, 250);
   const [data, setData] = useState<{ data: StockItem[]; totals: StockTotals } | null>(null);
@@ -68,8 +69,9 @@ export function Inventory() {
   const [open, setOpen] = useState<string | null>(null);
   const [counting, setCounting] = useState(false);
   const load = useCallback(() => {
-    if (filter === 'deliveries') return;
-    api<{ data: StockItem[]; totals: StockTotals }>(`/v1/inventory?filter=${filter}${search.trim() ? `&q=${encodeURIComponent(search.trim())}` : ''}`).then(setData).catch(setError);
+    // The deliveries and orders tabs still show the stock figures above them.
+    const list = filter === 'deliveries' || filter === 'orders' ? 'tracked' : filter;
+    api<{ data: StockItem[]; totals: StockTotals }>(`/v1/inventory?filter=${list}${search.trim() && list === filter ? `&q=${encodeURIComponent(search.trim())}` : ''}`).then(setData).catch(setError);
   }, [filter, search]);
   useEffect(() => {
     setData(null);
@@ -84,6 +86,7 @@ export function Inventory() {
         <span className="spacer" />
         {manage && <button className="secondary" onClick={() => setCounting(true)}>{t('Stock count')}</button>}
         <a className="button secondary" href={link('/v1/inventory.csv')} download>CSV</a>
+        {manage && <Link className="button secondary" to="/inventory/orders/new" viewTransition>{t('New order')}</Link>}
         {manage && <Link className="button" to="/inventory/receive" viewTransition>{t('Receive stock')}<span className="chip" aria-hidden="true">+</span></Link>}
       </div>
       <div className="kpis">
@@ -93,12 +96,13 @@ export function Inventory() {
         <div className="card kpi"><span className="kpi-head">{t('Items tracked')}</span><span className="kpi-value">{tt ? tt.tracked : '—'}</span><span className="kpi-note">{tt ? t('{n} not tracked', { n: tt.untracked }) : ' '}</span></div>
       </div>
       <div className="row">
-        <Segmented switches label={t('Show')} value={filter} onChange={(v) => setParams({ filter: v }, { replace: true })} options={[['tracked', t('Tracked')], ['low', t('Low or out')], ['untracked', t('Not tracked')], ['deliveries', t('Deliveries')]]} />
+        <Segmented switches label={t('Show')} value={filter} onChange={(v) => setParams({ filter: v }, { replace: true })} options={[['tracked', t('Tracked')], ['low', t('Low or out')], ['untracked', t('Not tracked')], ['deliveries', t('Deliveries')], ['orders', t('Orders')]]} />
         <span className="spacer" />
-        {filter !== 'deliveries' && <input type="search" className="search-input" placeholder={t('Name, code or barcode')} value={q} onChange={(e) => setQ(e.target.value)} aria-label={t('Search items')} />}
+        {filter === 'low' && manage && data && data.data.length > 0 && <Link className="button secondary" to="/inventory/orders/new?suggest=1" viewTransition>{t('Order what is running low')}</Link>}
+        {filter !== 'deliveries' && filter !== 'orders' && <input type="search" className="search-input" placeholder={t('Name, code or barcode')} value={q} onChange={(e) => setQ(e.target.value)} aria-label={t('Search items')} />}
       </div>
       <ErrorText error={error} />
-      {filter === 'deliveries' ? <Deliveries /> : (
+      {filter === 'orders' ? <PurchaseOrderList /> : filter === 'deliveries' ? <Deliveries /> : (
         <section className="card">
           {!data ? <div className="skeleton" style={{ height: '10rem' }} /> : data.data.length === 0 ? (
             <div className="empty">{filter === 'tracked' ? t('No stock tracked yet. Receive a delivery, or open an item and track its stock: every sale then takes it off.') : filter === 'low' ? t('Nothing is running low.') : t('Every item is tracked.')}</div>
@@ -350,6 +354,20 @@ export function ReceiveStock() {
   const [dueDate, setDueDate] = useState(belizeDate(30));
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
+  // ?order=<id>: what is still to come on that purchase order, ready to tick off.
+  const [params] = useSearchParams();
+  const orderId = params.get('order');
+  const [order, setOrder] = useState<PurchaseOrder | null>(null);
+  useEffect(() => {
+    if (!orderId) return;
+    api<PurchaseOrder>(`/v1/purchase-orders/${orderId}`).then((po) => {
+      setOrder(po);
+      if (po.supplier.id) setSupplier({ id: po.supplier.id, name: po.supplier.name, tin: null });
+      setSupplierName(po.supplier.name);
+      const left = po.lines.filter((l) => Number(l.remaining) > 0);
+      if (left.length) setLines(left.map((l) => ({ key: ++lineKey, item: { id: l.itemId, name: l.description } as Item, quantity: l.remaining, unitCost: l.unitCost })));
+    }).catch(setError);
+  }, [orderId]);
 
   const ready = lines.filter((l) => l.item && DEC.test(l.quantity) && Number(l.quantity) > 0 && DEC.test(l.unitCost));
   const lineCents = (l: ReceiveLine) => (l.item && DEC.test(l.quantity) && DEC.test(l.unitCost) ? BigInt(Math.round(Number(l.quantity) * Number(l.unitCost) * 100)) : 0n);
@@ -368,12 +386,13 @@ export function ReceiveStock() {
           ...(supplier ? { supplierId: supplier.id } : supplierName.trim() ? { supplierName: supplierName.trim() } : {}),
           ...(reference.trim() && { reference: reference.trim() }),
           receivedOn,
+          ...(order && { purchaseOrderId: order.id }),
           lines: ready.map((l) => ({ itemId: l.item!.id, quantity: l.quantity, unitCost: l.unitCost })),
           ...(recordBill && { expense: { gstTreatment: treatment, ...(paidNow ? { paid: { on: receivedOn, method } } : { paid: null, dueDate }) } }),
         },
       });
       toast(t('Stock received'));
-      navigate('/inventory?filter=deliveries', { viewTransition: true });
+      navigate(order ? `/inventory/orders/${order.id}` : '/inventory?filter=deliveries', { viewTransition: true });
     } catch (err) {
       setError(err);
       setBusy(false);
@@ -383,6 +402,7 @@ export function ReceiveStock() {
   return (
     <form className="stack" onSubmit={(e) => void submit(e)}>
       <div className="row"><div><span className="kicker"><Link to="/inventory" viewTransition>{t('Inventory')}</Link></span><h1>{t('Receive stock')}</h1></div></div>
+      {order && <div className="banner ok"><div><strong>{t('Receiving against {n}', { n: order.number })}</strong>{t('What is still to come is filled in. Change the quantities to what actually arrived; remove what did not come.')}</div></div>}
       <div className="doc-layout">
         <div className="stack">
           <fieldset className="stack">
@@ -397,7 +417,7 @@ export function ReceiveStock() {
               onPick={(s) => { setSupplier(s); setSupplierName(s.name); }}
             />
             <div className="form-grid">
-              <Field label={t('Their delivery note or invoice number')}><input maxLength={100} value={reference} onChange={(e) => setReference(e.target.value)} /></Field>
+              <Field label={t('Their delivery note or invoice number')}><input maxLength={100} placeholder={order?.number} value={reference} onChange={(e) => setReference(e.target.value)} /></Field>
               <Field label={t('Received on')}><input type="date" required max={belizeToday()} value={receivedOn} onChange={(e) => setReceivedOn(e.target.value)} /></Field>
             </div>
           </fieldset>

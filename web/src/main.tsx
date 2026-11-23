@@ -55,6 +55,8 @@ const Inventory = page(() => import('./pages/Inventory'), 'Inventory');
 const Shifts = page(() => import('./pages/Shifts'), 'Shifts');
 const ShiftDetail = page(() => import('./pages/Shifts'), 'ShiftDetail');
 const ReceiveStock = page(() => import('./pages/Inventory'), 'ReceiveStock');
+const PurchaseOrderEditor = page(() => import('./pages/PurchaseOrders'), 'PurchaseOrderEditor');
+const PurchaseOrderDetail = page(() => import('./pages/PurchaseOrders'), 'PurchaseOrderDetail');
 const ExpenseEditor = page(() => import('./pages/Expenses'), 'ExpenseEditor');
 const PayInvoice = page(() => import('./pages/Pay'), 'PayInvoice');
 const Quotes = page(() => import('./pages/Quotes'), 'Quotes');
@@ -350,6 +352,9 @@ function BusinessApp() {
         <Route path="/shifts" element={<Allowed permission="documents.issue"><Shifts /></Allowed>} />
         <Route path="/shifts/:id" element={<Allowed permission="documents.issue"><ShiftDetail /></Allowed>} />
         <Route path="/inventory/receive" element={<Allowed permission="catalog.manage"><ReceiveStock /></Allowed>} />
+        <Route path="/inventory/orders/new" element={<Allowed permission="catalog.manage"><PurchaseOrderEditor /></Allowed>} />
+        <Route path="/inventory/orders/:id" element={<Allowed permission="catalog.manage"><PurchaseOrderDetail /></Allowed>} />
+        <Route path="/inventory/orders/:id/edit" element={<Allowed permission="catalog.manage"><PurchaseOrderEditor /></Allowed>} />
         <Route path="/expenses/:id" element={<Allowed permission="expenses.manage"><ExpenseEditor /></Allowed>} />
         <Route path="/quotes" element={<Allowed permission="documents.issue"><Quotes /></Allowed>} />
         <Route path="/quotes/new" element={<QuoteEditor />} />

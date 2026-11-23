@@ -100,6 +100,13 @@ export const TEMPLATES: TemplateDef[] = [
     variables: [...BUSINESS, IMAGES, ...CUSTOMER, { name: 'quote.number', description: 'The quotation number' }, { name: 'quote.total', description: 'The total' }, { name: 'quote.valid_until', description: 'Until when it stands' }, { name: 'view_url', description: 'The link to view and accept it' }, { name: 'message', description: 'The message typed when sending' }],
   },
   {
+    key: 'email.purchase-order', group: 'emails', name: 'Purchase order email', preview: 'email', language: 'html', file: 'email-purchase-order.liquid',
+    description: 'Sent to a supplier with a purchase order; the PDF is attached.',
+    subject: 'Purchase order {{ order.number }} from {{ business.name }}',
+    subjectEs: 'Orden de compra {{ order.number }} de {{ business.name }}',
+    variables: [...BUSINESS, IMAGES, { name: 'supplier.name', description: "The supplier's name" }, { name: 'supplier.email', description: 'Where it is sent' }, { name: 'order.number', description: 'The order number, e.g. PO-12' }, { name: 'order.expected_on', description: 'When you want it (may be empty)' }, { name: 'order.lines', description: 'What is ordered: description, code, quantity, unit_cost, total' }, { name: 'order.total', description: 'The total before GST' }, { name: 'message', description: 'The message typed when sending' }],
+  },
+  {
     key: 'email.order', group: 'emails', name: 'Order confirmation', preview: 'email', language: 'html', file: 'email-order.liquid',
     description: 'Sent to a buyer after they order from your online store.',
     subject: 'Order #{{ order.number }} at {{ store.name }}',

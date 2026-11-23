@@ -10,7 +10,7 @@
  *   PUT  /v1/inventory/:itemId/settings   { track, quantity?, lowStock? }
  *   POST /v1/inventory/count              a stock count { counts: [{ itemId, quantity }], note? }
  *   GET  /v1/inventory/receipts           stock received
- *   POST /v1/inventory/receipts           { supplierId? | supplierName?, supplierTin?, reference?, receivedOn, lines: [{ itemId, quantity, unitCost }],
+ *   POST /v1/inventory/receipts           { supplierId? | supplierName?, supplierTin?, reference?, receivedOn, purchaseOrderId?, lines: [{ itemId, quantity, unitCost }],
  *                                           expense?: { gstTreatment, paid?: { on, method } | null, dueDate? } }
  */
 
@@ -22,6 +22,7 @@ import { toBigInt } from '../db/database.ts';
 import { formatCents, mul, parseDecimal, roundToCents } from '../engine/decimal.ts';
 import { ADJUST_REASONS, type AdjustReason, moveStock, StockError, stockQuantity } from '../inventory/stock.ts';
 import type { PipelineDeps } from '../pipeline/issue.ts';
+import { poNumber, receiveAgainstOrder } from './purchasing.ts';
 import { ApiError, notFound } from './errors.ts';
 import { can, requirePermission } from './permissions.ts';
 import { csvCell } from './reports.ts';
@@ -163,7 +164,7 @@ export function registerInventoryRoutes(app: FastifyInstance, deps: PipelineDeps
   });
 
   type ReceiptBody = {
-    supplierId?: string; supplierName?: string; supplierTin?: string; reference?: string; receivedOn: string; note?: string;
+    supplierId?: string; supplierName?: string; supplierTin?: string; reference?: string; receivedOn: string; note?: string; purchaseOrderId?: string;
     lines: Array<{ itemId: string; quantity: string; unitCost: string }>;
     expense?: { gstTreatment: 'standard' | 'zero' | 'exempt' | 'none'; paid?: { on: string; method: string } | null; dueDate?: string | null } | null;
   };
@@ -175,7 +176,7 @@ export function registerInventoryRoutes(app: FastifyInstance, deps: PipelineDeps
           type: 'object', required: ['receivedOn', 'lines'], additionalProperties: false,
           properties: {
             supplierId: uuid, supplierName: { type: 'string', maxLength: 200 }, supplierTin: { type: 'string', pattern: '^\\d{6}$' }, reference: { type: 'string', maxLength: 100 },
-            receivedOn: dateSchema, note: { type: 'string', maxLength: 500 },
+            receivedOn: dateSchema, note: { type: 'string', maxLength: 500 }, purchaseOrderId: uuid,
             lines: {
               type: 'array', minItems: 1, maxItems: 200,
               items: { type: 'object', required: ['itemId', 'quantity', 'unitCost'], additionalProperties: false, properties: { itemId: uuid, quantity: { type: 'string', pattern: '^\\d{1,12}(\\.\\d{1,3})?$' }, unitCost: { type: 'string', pattern: '^\\d{1,15}(\\.\\d{1,6})?$' } } },
@@ -207,6 +208,17 @@ export function registerInventoryRoutes(app: FastifyInstance, deps: PipelineDeps
         supplierName = s.name;
         supplierTin = supplierTin ?? s.tin;
       }
+      // Against a purchase order: its supplier, and its number as the reference when none is given.
+      let reference = b.reference?.trim() || null;
+      if (b.purchaseOrderId) {
+        const po = (await db.query<{ number: number; supplier_id: string | null; supplier_name: string }>('select number, supplier_id, supplier_name from purchase_orders where id = $1 and tenant_id = $2', [b.purchaseOrderId, request.tenantId])).rows[0];
+        if (!po) throw new ApiError(422, 'invalid_receipt', 'That purchase order is not yours');
+        if (!b.supplierId && !supplierName) {
+          supplierName = po.supplier_name;
+          if (po.supplier_id) supplierTin = supplierTin ?? (await db.query<{ tin: string | null }>('select tin from suppliers where id = $1', [po.supplier_id])).rows[0]?.tin ?? null;
+        }
+        reference = reference ?? poNumber(po.number);
+      }
       if (b.expense && !supplierName) throw new ApiError(422, 'invalid_receipt', 'Name the supplier to record the bill');
       const items = (await db.query<{ id: string }>('select id from items where tenant_id = $1 and id = any($2::uuid[]) and archived_at is null', [request.tenantId, b.lines.map((l) => l.itemId)])).rows;
       if (items.length !== b.lines.length) throw new ApiError(422, 'invalid_receipt', 'An item is not in your catalog');
@@ -222,21 +234,22 @@ export function registerInventoryRoutes(app: FastifyInstance, deps: PipelineDeps
           await tx.query(
             `insert into expenses (id, tenant_id, supplier_id, supplier_name, supplier_tin, reference, expense_date, due_date, category, description, gst_treatment, net_cents, gst_cents, total_cents, claim_gst, paid_on, payment_method, created_by)
              values ($1, $2, $3, $4, $5, $6, $7, $8, 'Stock for resale', $9, $10, $11, $12, $13, true, $14, $15, $16)`,
-            [expenseId, request.tenantId, b.supplierId ?? null, supplierName, supplierTin, b.reference?.trim() || null, b.receivedOn, b.expense.paid ? null : b.expense.dueDate ?? null,
+            [expenseId, request.tenantId, b.supplierId ?? null, supplierName, supplierTin, reference, b.receivedOn, b.expense.paid ? null : b.expense.dueDate ?? null,
               `Stock received: ${b.lines.length} item${b.lines.length === 1 ? '' : 's'}`, b.expense.gstTreatment, String(net), String(gst), String(net + gst),
               b.expense.paid?.on ?? null, b.expense.paid?.method ?? null, request.userId || null],
           );
         }
         await tx.query(
-          'insert into stock_receipts (id, tenant_id, supplier_id, supplier_name, reference, received_on, total_cost_cents, expense_id, note, created_by) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)',
-          [receiptId, request.tenantId, b.supplierId ?? null, supplierName, b.reference?.trim() || null, b.receivedOn, String(net), expenseId, b.note?.trim() || null, request.userId || null],
+          'insert into stock_receipts (id, tenant_id, supplier_id, supplier_name, reference, received_on, total_cost_cents, expense_id, note, created_by, purchase_order_id) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)',
+          [receiptId, request.tenantId, b.supplierId ?? null, supplierName, reference, b.receivedOn, String(net), expenseId, b.note?.trim() || null, request.userId || null, b.purchaseOrderId ?? null],
         );
+        if (b.purchaseOrderId) await receiveAgainstOrder(tx, request.tenantId, b.purchaseOrderId, b.lines);
         for (const l of b.lines) {
-          await moveStock(tx, { tenantId: request.tenantId, itemId: l.itemId, quantity: stockQuantity(l.quantity), reason: 'receive', receiptId, unitCost: l.unitCost, startTracking: true, userId: request.userId || null, ...(b.reference && { note: b.reference }) });
+          await moveStock(tx, { tenantId: request.tenantId, itemId: l.itemId, quantity: stockQuantity(l.quantity), reason: 'receive', receiptId, unitCost: l.unitCost, startTracking: true, userId: request.userId || null, ...(reference && { note: reference }) });
         }
         return { expenseId };
       });
-      await audit(db, { tenantId: request.tenantId, userId: request.userId || null, action: 'stock.received', target: supplierName ?? b.reference ?? '', details: { lines: b.lines.length, cost: formatCents(net) }, ip: request.ip });
+      await audit(db, { tenantId: request.tenantId, userId: request.userId || null, action: 'stock.received', target: supplierName ?? reference ?? '', details: { lines: b.lines.length, cost: formatCents(net), ...(b.purchaseOrderId && { purchaseOrder: reference }) }, ip: request.ip });
       return reply.code(201).send({ id: receiptId, totalCost: formatCents(net), expenseId: result.expenseId });
     },
   );

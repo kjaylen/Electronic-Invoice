@@ -1,0 +1,47 @@
+{%- comment -%}
+  A purchase order sent to a supplier (the PDF is attached).
+{% endcomment -%}
+<!doctype html>
+<html lang="en">
+<body style="margin:0;padding:0;background:#f4f5f7;font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;color:#0f1117">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f5f7;padding:32px 12px">
+    <tr><td align="center">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border:1px solid #e6e8ec;border-radius:14px">
+        <tr><td style="padding:28px 32px 6px">
+          {%- if business.logo %}
+          <img src="{{ business.logo }}" alt="{{ business.name }}" height="40" style="display:block;height:40px;width:auto;max-width:220px;border:0;margin:0 0 14px">
+          {%- else %}
+          <div style="font-size:13px;color:#646b7b">{{ business.name }}</div>
+          {%- endif %}
+          <h1 style="margin:6px 0 0;font-size:22px;line-height:1.25;letter-spacing:-0.02em">Purchase order {{ order.number }}</h1>
+        </td></tr>
+        <tr><td style="padding:14px 32px 4px;font-size:15px;line-height:1.6">
+          <p style="margin:0 0 14px">Hello{% if supplier.name %} {{ supplier.name }}{% endif %},</p>
+          <p style="margin:0 0 14px">Please find attached purchase order {{ order.number }} from {{ business.name }}{% if order.expected_on %}, wanted by {{ order.expected_on | date: '%B %-d, %Y' }}{% endif %}.</p>
+          {%- if message %}<p style="margin:0 0 14px;white-space:pre-line">{{ message }}</p>{% endif %}
+        </td></tr>
+        <tr><td style="padding:4px 32px 4px">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="font-size:14px;line-height:1.5;border-collapse:collapse">
+            {%- for line in order.lines %}
+            <tr>
+              <td style="padding:6px 0;border-bottom:1px solid #eef0f3">{{ line.description }}{% if line.code %} <span style="color:#646b7b">· {{ line.code }}</span>{% endif %}</td>
+              <td style="padding:6px 0;border-bottom:1px solid #eef0f3;text-align:right;white-space:nowrap">× {{ line.quantity }}</td>
+            </tr>
+            {%- endfor %}
+            <tr>
+              <td style="padding:10px 0 0;font-weight:600">Total before GST</td>
+              <td style="padding:10px 0 0;text-align:right;font-weight:600;white-space:nowrap">{{ order.total | money }}</td>
+            </tr>
+          </table>
+        </td></tr>
+        <tr><td style="padding:14px 32px 4px;font-size:15px;line-height:1.6">
+          <p style="margin:0 0 14px">Please quote {{ order.number }} on your delivery note and invoice, and reply to this email to confirm.</p>
+        </td></tr>
+        <tr><td style="padding:12px 32px 28px;font-size:12px;line-height:1.6;color:#646b7b">
+          {{ business.name }}{% if business.telephone %} · {{ business.telephone }}{% endif %}{% if business.email %} · {{ business.email }}{% endif %}
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>

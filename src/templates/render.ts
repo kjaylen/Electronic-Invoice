@@ -338,6 +338,10 @@ export async function sampleContext(def: TemplateDef, biz: BusinessContext, lang
         payments: [{ number: '001-000000031', paid_on: '2026-11-02', method: 'Bank transfer', reference: 'BB-77812', amount: '420.00' }],
       } } };
     case 'email.quote': return { context: { business: biz, customer, quote: { number: 'Q-1007', total: '3400.00', valid_until: '2026-12-22' }, view_url: 'https://example.bz/q/sample', message: es ? 'Como lo conversamos por teléfono.' : 'As discussed on the phone.' } };
+    case 'email.purchase-order': return { context: { business: biz, supplier: { name: 'Bze Wholesale Ltd.', email: 'orders@example.bz' }, order: {
+      number: 'PO-12', expected_on: '2026-11-29', total: '640.00',
+      lines: [{ description: 'Coffee beans 1lb', code: 'CB1', quantity: '40', unit_cost: '12.50', total: '500.00' }, { description: 'Paper cups 12 oz (50)', code: null, quantity: '20', unit_cost: '7.00', total: '140.00' }],
+    }, message: es ? 'Por favor entregar en la mañana.' : 'Please deliver in the morning.' } };
     case 'email.order': return { context: { store, order: {
       number: 1042, customer_name: 'Maria Chan', payment_method: 'bank_transfer',
       items: [{ name: 'Coffee beans 1lb', variant: 'Dark roast', quantity: 2, total: '44.00' }, { name: 'Banana bread', variant: null, quantity: 1, total: '3.75' }],
