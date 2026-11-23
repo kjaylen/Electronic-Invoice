@@ -45,6 +45,9 @@ export const WEBHOOK_EVENTS = [
   'order.refunded',
   'payment.recorded',
   'invoice.paid',
+  'expense.recorded',
+  'stock.received',
+  'purchase_order.received',
 ] as const;
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number] | 'ping';
 
@@ -214,6 +217,58 @@ export async function eventData(db: Queryable, type: string, tenantId: string, s
   if (type === 'invoice.paid') {
     const invoice = await invoiceOf(subjectId);
     return invoice ? { invoice } : null;
+  }
+  if (type === 'expense.recorded') {
+    const e = (await db.query<Record<string, unknown>>(
+      `select id, supplier_id, supplier_name, supplier_tin, reference, expense_date::text as expense_date, due_date::text as due_date, category, description,
+         gst_treatment, net_cents, gst_cents, total_cents, claim_gst, paid_on::text as paid_on, payment_method, recurring_expense_id, created_at
+       from expenses where id = $1 and tenant_id = $2`, [subjectId, tenantId],
+    )).rows[0];
+    if (!e) return null;
+    return {
+      expense: {
+        id: e.id, supplier: { id: e.supplier_id, name: e.supplier_name, tin: e.supplier_tin }, reference: e.reference, date: e.expense_date, dueDate: e.due_date,
+        category: e.category, description: e.description, gstTreatment: e.gst_treatment,
+        totals: { net: cents(e.net_cents), gst: cents(e.gst_cents), total: cents(e.total_cents) }, claimGst: e.claim_gst,
+        paid: e.paid_on ? { on: e.paid_on, method: e.payment_method } : null, recurringExpenseId: e.recurring_expense_id, createdAt: iso(e.created_at),
+      },
+    };
+  }
+  if (type === 'stock.received') {
+    const r = (await db.query<Record<string, unknown>>(
+      'select id, supplier_id, supplier_name, reference, received_on::text as received_on, total_cost_cents, expense_id, purchase_order_id, created_at from stock_receipts where id = $1 and tenant_id = $2',
+      [subjectId, tenantId],
+    )).rows[0];
+    if (!r) return null;
+    const lines = (await db.query<{ item_id: string; name: string; seller_code: string | null; change: string; unit_cost: string | null }>(
+      'select m.item_id, i.name, i.seller_code, m.change::text as change, m.unit_cost::text as unit_cost from stock_movements m join items i on i.id = m.item_id where m.receipt_id = $1 order by i.name',
+      [subjectId],
+    )).rows;
+    return {
+      receipt: {
+        id: r.id, supplier: { id: r.supplier_id, name: r.supplier_name }, reference: r.reference, receivedOn: r.received_on, totalCost: cents(r.total_cost_cents),
+        expenseId: r.expense_id, purchaseOrderId: r.purchase_order_id, createdAt: iso(r.created_at),
+        lines: lines.map((l) => ({ itemId: l.item_id, name: l.name, code: l.seller_code, quantity: String(Number(l.change)), unitCost: l.unit_cost === null ? null : String(Number(l.unit_cost)) })),
+      },
+    };
+  }
+  if (type === 'purchase_order.received') {
+    const po = (await db.query<Record<string, unknown>>(
+      'select id, number, supplier_id, supplier_name, status, expected_on::text as expected_on, total_cost_cents, created_at from purchase_orders where id = $1 and tenant_id = $2',
+      [subjectId, tenantId],
+    )).rows[0];
+    if (!po) return null;
+    const lines = (await db.query<{ item_id: string; description: string; quantity: string; received: string; unit_cost: string }>(
+      'select item_id, description, quantity::text as quantity, received::text as received, unit_cost::text as unit_cost from purchase_order_lines where purchase_order_id = $1 order by line_number',
+      [subjectId],
+    )).rows;
+    return {
+      purchaseOrder: {
+        id: po.id, number: `PO-${po.number}`, supplier: { id: po.supplier_id, name: po.supplier_name }, status: po.status, expectedOn: po.expected_on,
+        total: cents(po.total_cost_cents), createdAt: iso(po.created_at),
+        lines: lines.map((l) => ({ itemId: l.item_id, description: l.description, quantity: String(Number(l.quantity)), received: String(Number(l.received)), unitCost: String(Number(l.unit_cost)) })),
+      },
+    };
   }
   if (type === 'payment.recorded') {
     const p = (await db.query<PaymentRow>('select *, paid_on::text as paid_on from invoice_payments where id = $1 and tenant_id = $2', [subjectId, tenantId])).rows[0];

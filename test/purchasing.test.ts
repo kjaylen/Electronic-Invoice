@@ -9,6 +9,7 @@ import type { LightMyRequestResponse } from 'fastify';
 import { buildApp } from '../src/api/app.ts';
 import { createUser } from '../src/db/users.ts';
 import { memoryMailer } from '../src/mail/mailer.ts';
+import { eventData } from '../src/webhooks/webhooks.ts';
 import { setupPipeline } from './pipeline-setup.ts';
 
 const CSRF = { 'x-requested-with': 'etd-web' };
@@ -139,6 +140,18 @@ test('purchase orders: suggest, order, send, receive in parts, and close', async
     assert.equal(sum.deliveries.length, 3);
     assert.deepEqual(sum.items.map((i: { name: string; lastCost: string; received: string }) => [i.name, i.lastCost, i.received]), [['Coffee beans 1lb', '12.50', '30'], ['Paper cups (50)', '6.00', '4'], ['Sugar 4 lb', '3.25', '6']]);
     assert.equal((await call('GET', `/v1/suppliers/${supplier.id}/summary`, undefined, cashier)).statusCode, 403);
+
+    // Webhook events: each delivery, the bill, and the order once fully received; with their details.
+    const events = (await f.db.query<{ type: string; subject_id: string }>(
+      `select type, subject_id from event_outbox where tenant_id = $1 and type in ('stock.received', 'expense.recorded', 'purchase_order.received') order by id`, [f.tenantA],
+    )).rows;
+    assert.deepEqual(events.map((e) => e.type), ['stock.received', 'stock.received', 'expense.recorded', 'stock.received', 'purchase_order.received', 'stock.received']);
+    const received = (await eventData(f.db, 'purchase_order.received', f.tenantA, po.id)) as { purchaseOrder: { number: string; lines: Array<{ received: string }> } };
+    assert.deepEqual([received.purchaseOrder.number, received.purchaseOrder.lines.map((l) => l.received)], ['PO-1', ['20', '6']]);
+    const delivery = (await eventData(f.db, 'stock.received', f.tenantA, d2.json().id)) as { receipt: { reference: string; lines: Array<{ name: string; quantity: string }> } };
+    assert.deepEqual([delivery.receipt.reference, delivery.receipt.lines.map((l) => `${l.name} ${l.quantity}`)], ['INV-889', ['Coffee beans 1lb 8', 'Sugar 4 lb 6']]);
+    const expense = (await eventData(f.db, 'expense.recorded', f.tenantA, d2.json().expenseId)) as { expense: { totals: { total: string } } };
+    assert.equal(expense.expense.totals.total, '134.44');
 
     const logged = (await f.db.query<{ action: string }>(`select action from audit_events where tenant_id = $1 and action like 'purchase_order.%' order by id`, [f.tenantA])).rows.map((r) => r.action);
     assert.deepEqual(logged, ['purchase_order.created', 'purchase_order.sent', 'purchase_order.created', 'purchase_order.sent', 'purchase_order.closed']);
