@@ -54,6 +54,7 @@ import { registerPublicQuoteRoutes, registerQuoteRoutes } from './quotes.ts';
 import { registerRecurringRoutes } from './recurring.ts';
 import { registerExpenseRoutes } from './expenses.ts';
 import { registerAccountingRoutes } from './accounting.ts';
+import { registerAccountantPackRoutes } from './accountant-pack.ts';
 import { registerInventoryRoutes } from './inventory.ts';
 import { registerPurchasingRoutes } from './purchasing.ts';
 import { registerSupplierSummaryRoutes } from './supplier-summary.ts';
@@ -356,6 +357,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     registerRecurringRoutes(tenant, deps, ctx, { ...(options.ekyash && { ekyash: options.ekyash }) });
     registerExpenseRoutes(tenant, deps, ctx);
     registerAccountingRoutes(tenant, deps);
+    registerAccountantPackRoutes(tenant, deps, ctx);
     registerInventoryRoutes(tenant, deps);
     registerPurchasingRoutes(tenant, deps, ctx);
     registerSupplierSummaryRoutes(tenant, deps);

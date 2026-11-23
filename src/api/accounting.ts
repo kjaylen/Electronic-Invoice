@@ -123,6 +123,25 @@ export async function profitAndLoss(db: Queryable, tenantId: string, from: strin
   };
 }
 
+/** The GST return worksheet as CSV (with a BOM, for spreadsheets). */
+export function gstReturnCsv(r: Awaited<ReturnType<typeof gstReturn>>): string {
+  const rows: Array<[string, string, string]> = [
+    ['Standard-rated sales (12.5%)', r.sales.standard.net, r.sales.standard.gst],
+    ['Zero-rated sales', r.sales.zero.net, '0.00'],
+    ['Exempt sales', r.sales.exempt.net, ''],
+    ['GST charged on sales (output tax)', '', r.outputGst],
+    ['Standard-rated purchases with a tax invoice (claimable)', r.purchases.claimable.net, r.purchases.claimable.gst],
+    ['Standard-rated purchases, GST not claimable', r.purchases.notClaimable.net, r.purchases.notClaimable.gst],
+    ['Zero-rated purchases', r.purchases.zero.net, '0.00'],
+    ['Exempt purchases', r.purchases.exempt.net, ''],
+    ['Purchases from suppliers not charging GST', r.purchases.noGst.net, ''],
+    ['GST paid on purchases you can claim (input tax)', '', r.inputGst],
+    [r.net.startsWith('-') ? 'GST credit for the period' : 'GST to pay for the period', '', r.net.replace('-', '')],
+  ];
+  const csv = ['Line,Net (BZD),GST (BZD)', ...rows.map(([a, b, d]) => [csvCell(a), csvCell(b, false), csvCell(d, false)].join(','))].join('\r\n');
+  return `\uFEFF${csv}\r\n`;
+}
+
 export function registerAccountingRoutes(app: FastifyInstance, deps: PipelineDeps) {
   const { db } = deps;
   app.get<{ Querystring: Period }>('/reports/gst-return', { schema: { querystring: periodSchema } }, async (request, reply) => {
@@ -130,21 +149,7 @@ export function registerAccountingRoutes(app: FastifyInstance, deps: PipelineDep
     checkPeriod(request.query);
     const r = await gstReturn(db, request.tenantId, request.query.from, request.query.to);
     if (request.query.format !== 'csv') return r;
-    const rows: Array<[string, string, string]> = [
-      ['Standard-rated sales (12.5%)', r.sales.standard.net, r.sales.standard.gst],
-      ['Zero-rated sales', r.sales.zero.net, '0.00'],
-      ['Exempt sales', r.sales.exempt.net, ''],
-      ['GST charged on sales (output tax)', '', r.outputGst],
-      ['Standard-rated purchases with a tax invoice (claimable)', r.purchases.claimable.net, r.purchases.claimable.gst],
-      ['Standard-rated purchases, GST not claimable', r.purchases.notClaimable.net, r.purchases.notClaimable.gst],
-      ['Zero-rated purchases', r.purchases.zero.net, '0.00'],
-      ['Exempt purchases', r.purchases.exempt.net, ''],
-      ['Purchases from suppliers not charging GST', r.purchases.noGst.net, ''],
-      ['GST paid on purchases you can claim (input tax)', '', r.inputGst],
-      [r.net.startsWith('-') ? 'GST credit for the period' : 'GST to pay for the period', '', r.net.replace('-', '')],
-    ];
-    const csv = ['Line,Net (BZD),GST (BZD)', ...rows.map(([a, b, d]) => [csvCell(a), csvCell(b, false), csvCell(d, false)].join(','))].join('\r\n');
-    return reply.type('text/csv; charset=utf-8').header('Content-Disposition', `attachment; filename="gst-${request.query.from}-to-${request.query.to}.csv"`).send(`﻿${csv}\r\n`);
+    return reply.type('text/csv; charset=utf-8').header('Content-Disposition', `attachment; filename="gst-${request.query.from}-to-${request.query.to}.csv"`).send(gstReturnCsv(r));
   });
 
   app.get<{ Querystring: Period }>('/reports/gst-return.pdf', { schema: { querystring: periodSchema } }, async (request, reply) => {

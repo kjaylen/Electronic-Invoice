@@ -193,6 +193,7 @@ export function Reports() {
         <div><span className="kicker">{t('Insights')}</span><h1>{t('Reports')}</h1></div>
         <span className="spacer" />
         <a className="button secondary" href={link(`/v1/reports/documents?${qs}`)} download>{t('All documents (CSV)')}</a>
+        <a className="button secondary" href={link(`/v1/reports/accountant-pack?${qs}`)} download title={t('The GST return, profit and loss, sales, payments, expenses with their receipts, who owes you and your stock, in one ZIP')}>{t('For your accountant (ZIP)')}</a>
         <button className="secondary" onClick={() => setArchiving(true)}>{t('Download archive')}</button>
       </div>
       {archiving && (

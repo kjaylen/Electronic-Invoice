@@ -2777,4 +2777,6 @@ export const ES: Record<string, string> = {
   "Emailed a password link": "Envió un enlace de contraseña",
   "Posted a notice": "Publicó un aviso",
   "Ended a notice": "Terminó un aviso",
+  "The GST return, profit and loss, sales, payments, expenses with their receipts, who owes you and your stock, in one ZIP": "La declaración del GST, pérdidas y ganancias, ventas, cobros, gastos con sus recibos, quién le debe y su inventario, en un ZIP",
+  "For your accountant (ZIP)": "Para su contador (ZIP)",
 };

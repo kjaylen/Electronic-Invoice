@@ -53,7 +53,7 @@ export function gstInside(totalCents: bigint, ratePercent = '12.5'): bigint {
 const receiptKind = (data: Buffer): 'image/jpeg' | 'image/png' | 'image/webp' | 'application/pdf' | null =>
   imageType(data) ?? (data.subarray(0, 5).toString('latin1') === '%PDF-' ? 'application/pdf' : null);
 
-interface ExpenseRow {
+export interface ExpenseRow {
   id: string;
   supplier_id: string | null;
   supplier_name: string;
@@ -79,6 +79,21 @@ interface ExpenseRow {
 const COLUMNS = `e.id, e.supplier_id, e.supplier_name, e.supplier_tin, e.reference, e.expense_date::text as expense_date, e.due_date::text as due_date, e.category, e.description,
   e.gst_treatment, e.net_cents, e.gst_cents, e.total_cents, e.claim_gst, e.paid_on::text as paid_on, e.payment_method, e.receipt_content_type, e.receipt_bytes,
   u.name as created_by_name, e.created_at`;
+/** The columns of an expense row (with `users u` left-joined on created_by). */
+export const EXPENSE_COLUMNS = COLUMNS;
+
+/** Expenses as CSV, for the accountant (with a BOM, for spreadsheets). */
+export function expensesCsvText(rows: Array<ReturnType<typeof expenseJson>>): string {
+  const header = ['Date', 'Supplier', 'Supplier TIN', 'Reference', 'Category', 'Description', 'GST treatment', 'Net', 'GST', 'Total', 'GST claimable', 'Due', 'Paid on', 'Method', 'Receipt'];
+  const lines = [header.map((h) => csvCell(h)).join(',')];
+  for (const e of rows) {
+    lines.push([
+      csvCell(e.date), csvCell(e.supplier.name), csvCell(e.supplier.tin ?? ''), csvCell(e.reference ?? ''), csvCell(e.category), csvCell(e.description ?? ''), csvCell(e.gstTreatment),
+      csvCell(e.net, false), csvCell(e.gst, false), csvCell(e.total, false), csvCell(e.claimableGst, false), csvCell(e.dueDate ?? ''), csvCell(e.paid?.on ?? ''), csvCell(e.paid?.method ?? ''), csvCell(e.receipt ? 'yes' : 'no'),
+    ].join(','));
+  }
+  return `\uFEFF${lines.join('\r\n')}\r\n`;
+}
 
 export function expenseJson(e: ExpenseRow) {
   const today = belizeToday();
@@ -293,15 +308,7 @@ export function registerExpenseRoutes(app: FastifyInstance, deps: PipelineDeps, 
     canRead(request);
     const { where, params } = listWhere(request.tenantId, request.query);
     const rows = (await db.query<ExpenseRow>(`select ${COLUMNS} from expenses e left join users u on u.id = e.created_by where ${where} order by e.expense_date, e.created_at limit 20000`, params)).rows.map(expenseJson);
-    const header = ['Date', 'Supplier', 'Supplier TIN', 'Reference', 'Category', 'Description', 'GST treatment', 'Net', 'GST', 'Total', 'GST claimable', 'Due', 'Paid on', 'Method', 'Receipt'];
-    const lines = [header.map((h) => csvCell(h)).join(',')];
-    for (const e of rows) {
-      lines.push([
-        csvCell(e.date), csvCell(e.supplier.name), csvCell(e.supplier.tin ?? ''), csvCell(e.reference ?? ''), csvCell(e.category), csvCell(e.description ?? ''), csvCell(e.gstTreatment),
-        csvCell(e.net, false), csvCell(e.gst, false), csvCell(e.total, false), csvCell(e.claimableGst, false), csvCell(e.dueDate ?? ''), csvCell(e.paid?.on ?? ''), csvCell(e.paid?.method ?? ''), csvCell(e.receipt ? 'yes' : 'no'),
-      ].join(','));
-    }
-    return reply.type('text/csv; charset=utf-8').header('Content-Disposition', `attachment; filename="expenses-${request.query.from ?? 'all'}-to-${request.query.to ?? belizeToday()}.csv"`).send(`﻿${lines.join('\r\n')}\r\n`);
+    return reply.type('text/csv; charset=utf-8').header('Content-Disposition', `attachment; filename="expenses-${request.query.from ?? 'all'}-to-${request.query.to ?? belizeToday()}.csv"`).send(expensesCsvText(rows));
   });
 
   app.get('/expense-categories', async (request) => {

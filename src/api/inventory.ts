@@ -100,6 +100,22 @@ async function loadStock(db: Queryable, tenantId: string, itemId: string): Promi
   return r;
 }
 
+/** Stock as CSV (with a BOM, for spreadsheets). */
+export function stockCsvText(rows: Array<ReturnType<typeof stockJson>>): string {
+  const lines = [['Item', 'Code', 'Barcode', 'Unit', 'In stock', 'Low at', 'Average cost', 'Value', 'Price'].map((h) => csvCell(h)).join(',')];
+  for (const r of rows) {
+    lines.push([csvCell(r.name), csvCell(r.sellerCode ?? ''), csvCell(r.barcode ?? ''), csvCell(r.unitCode), csvCell(r.stock ?? '', false), csvCell(r.lowStock ?? '', false),
+      csvCell(r.averageCost ?? '', false), csvCell(r.value, false), csvCell(r.price, false)].join(','));
+  }
+  return `\uFEFF${lines.join('\r\n')}\r\n`;
+}
+
+/** Every tracked item, today, as CSV: for the accountant's pack. */
+export async function stockOnHandCsv(db: Queryable, tenantId: string): Promise<string> {
+  const rows = (await db.query<StockRow>(`select ${STOCK_COLUMNS} from items i where i.tenant_id = $1 and i.archived_at is null and ${filterSql('tracked')} order by lower(i.name) limit 20000`, [tenantId])).rows.map(stockJson);
+  return stockCsvText(rows);
+}
+
 export function registerInventoryRoutes(app: FastifyInstance, deps: PipelineDeps) {
   const { db } = deps;
   const itemParams = { type: 'object', required: ['itemId'], properties: { itemId: uuid } } as const;
@@ -162,12 +178,7 @@ export function registerInventoryRoutes(app: FastifyInstance, deps: PipelineDeps
   app.get<{ Querystring: ListQuery }>('/inventory.csv', { schema: { querystring: listQuery } }, async (request, reply) => {
     canRead(request);
     const rows = await list(request.tenantId, { ...request.query, filter: request.query.filter ?? 'tracked' });
-    const lines = [['Item', 'Code', 'Barcode', 'Unit', 'In stock', 'Low at', 'Average cost', 'Value', 'Price'].map((h) => csvCell(h)).join(',')];
-    for (const r of rows) {
-      lines.push([csvCell(r.name), csvCell(r.sellerCode ?? ''), csvCell(r.barcode ?? ''), csvCell(r.unitCode), csvCell(r.stock ?? '', false), csvCell(r.lowStock ?? '', false),
-        csvCell(r.averageCost ?? '', false), csvCell(r.value, false), csvCell(r.price, false)].join(','));
-    }
-    return reply.type('text/csv; charset=utf-8').header('Content-Disposition', `attachment; filename="stock-${belizeToday()}.csv"`).send(`﻿${lines.join('\r\n')}\r\n`);
+    return reply.type('text/csv; charset=utf-8').header('Content-Disposition', `attachment; filename="stock-${belizeToday()}.csv"`).send(stockCsvText(rows));
   });
 
   // ---------- stock received ----------

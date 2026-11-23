@@ -167,6 +167,7 @@ Local database: `docker compose up -d db`, then `DATABASE_URL=postgres://einvoic
 | `GET /v1/reports/summary` | `from`, `to`: totals, GST by rate, by type and by day. Credit notes subtract; only documents with legal value count |
 | `GET /v1/reports/customers`, `/v1/reports/items` | Sales by customer and by item |
 | `GET /v1/reports/documents` | The document register as CSV, every status included |
+| `GET /v1/reports/accountant-pack` | `from`, `to` (at most a year): one ZIP for the accountant (see "For your accountant"); recorded in the activity log |
 | `GET /v1/reports/archive` | `from`, `to`, `pdf=true`: one ZIP with every document's signed XML, BTS's replies, cancellation events, the register and (optionally) the PDFs. Streamed; up to 20,000 documents per download; recorded in the activity log |
 
 Every report also answers `?format=csv` (UTF-8 with BOM for Excel; cells that a spreadsheet would run as formulas are neutralised).
@@ -406,6 +407,7 @@ Neither is a tax document: each keeps the `POST /v1/documents` body it will issu
 
 - **Expenses and bills**: what the business pays, with the supplier (saved, or typed as on the receipt), their invoice number, a category, and the total as paid. For standard-rated purchases the GST inside is worked out at 12.5% unless the receipt shows another figure. A bill can be left to pay later (due date, "Bills to pay", mark paid). A photo or PDF of the receipt (up to 5 MB, checked by its first bytes) is kept in the database or object storage and always served through the app, never from a public address. Permission `expenses.manage`: owners, admins, managers, accountants, API keys.
 - **GST return worksheet** (Reports → GST return, also CSV and PDF): sales from the authorized e-invoices of the period by GST rate (credit notes subtract), purchases from the recorded expenses by GST treatment; GST paid is claimable only with a tax invoice from a GST-registered supplier (its TIN). It shows output tax, input tax and what to pay or carry forward, with warnings (documents still waiting for BTS, GST without a supplier TIN, claimed GST without a receipt). A working paper for the return filed with BTS, not the return itself.
+- **For your accountant** (Reports → For your accountant (ZIP), for the period chosen): one ZIP with a README (what is in it and the GST return's warnings), the GST return (PDF and CSV), profit and loss (by month and by cost category), the sales register, payments received against invoices (voided ones marked), the expenses and their attached receipts (up to 300, named by date and supplier), who owes what and the stock on hand at average cost (both as of today). The signed e-invoices stay in the document archive.
 - **Profit and loss** (Reports → Profit and loss): income is sales before GST; costs are expenses before the GST claimed back (GST that cannot be claimed is a cost); by month and by category.
 
 ## Repeating expenses (`src/api/recurring-expenses.ts`)

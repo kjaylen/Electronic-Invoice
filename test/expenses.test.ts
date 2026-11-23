@@ -6,6 +6,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { inflateRawSync } from 'node:zlib';
 import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
 import { buildApp } from '../src/api/app.ts';
 import { gstInside } from '../src/api/expenses.ts';
@@ -157,4 +158,58 @@ test('GST return: GST on sales less claimable GST on purchases; profit and loss 
     assert.equal(pl.months.length, 1);
     assert.deepEqual(pl.categories[0], { category: 'Rent', amount: '300.00' });
     assert.equal((await c.app.inject({ method: 'GET', url: `/v1/reports/profit?from=${today()}&to=${monthStart()}T`, headers: c.owner })).statusCode, 400);
+  }));
+
+/** The files in a ZIP made by our writer (sizes known in each local header). */
+function unzip(buf: Buffer): Map<string, Buffer> {
+  const files = new Map<string, Buffer>();
+  let i = 0;
+  while (i + 30 <= buf.length && buf.readUInt32LE(i) === 0x04034b50) {
+    const method = buf.readUInt16LE(i + 8);
+    const size = buf.readUInt32LE(i + 18);
+    const nameLength = buf.readUInt16LE(i + 26);
+    const extraLength = buf.readUInt16LE(i + 28);
+    const name = buf.toString('utf8', i + 30, i + 30 + nameLength);
+    const start = i + 30 + nameLength + extraLength;
+    const data = buf.subarray(start, start + size);
+    files.set(name, method === 8 ? inflateRawSync(data) : Buffer.from(data));
+    i = start + size;
+  }
+  return files;
+}
+
+test('accountant pack: one ZIP with the GST return, profit and loss, sales, payments, expenses with their receipts, ageing and stock', () =>
+  withBusiness(async (c) => {
+    const sale = await c.app.inject({ method: 'POST', url: '/v1/documents', headers: c.owner, payload: { type: '02', lines: [{ description: 'Soap', quantity: '2', unitCode: 'H87', unitPrice: '4', gstCategory: 'S' }], payment: { meansCode: '10', terms: 'Cash' } } });
+    assert.equal(sale.statusCode, 201, sale.body);
+    const bill = await c.app.inject({ method: 'POST', url: '/v1/expenses', headers: c.owner, payload: { supplierName: 'Belize Wholesale Ltd.', supplierTin: '123456', reference: 'INV-77', date: today(), category: 'Stock for resale', gstTreatment: 'standard', total: '112.50' } });
+    assert.equal(bill.statusCode, 201, bill.body);
+    assert.equal((await c.app.inject({ method: 'POST', url: `/v1/expenses/${bill.json().id}/receipt`, headers: c.owner, payload: { dataBase64: JPEG } })).statusCode, 200);
+
+    const res = await c.app.inject({ method: 'GET', url: `/v1/reports/accountant-pack?from=${monthStart()}&to=${today()}`, headers: c.owner });
+    assert.equal(res.statusCode, 200, res.body);
+    assert.equal(res.headers['content-type'], 'application/zip');
+    assert.match(String(res.headers['content-disposition']), /accountant-TEST-\d{4}-\d{2}-\d{2}-to-/);
+    const files = unzip(res.rawPayload);
+    for (const name of ['README.txt', 'gst-return.pdf', 'gst-return.csv', 'profit-and-loss.csv', 'sales-register.csv', 'payments-received.csv', 'expenses.csv', 'receivables-ageing.csv', 'stock-on-hand.csv']) {
+      assert.ok(files.has(name), `${name} in ${[...files.keys()].join(', ')}`);
+    }
+    const receipts = [...files.keys()].filter((n) => n.startsWith('receipts/'));
+    assert.equal(receipts.length, 1);
+    assert.match(receipts[0]!, /^receipts\/\d{4}-\d{2}-\d{2}_Belize-Wholesale-Ltd_[0-9a-f]{8}\.jpeg$/);
+    assert.equal(files.get(receipts[0]!)!.toString('base64'), JPEG, 'the receipt exactly as uploaded');
+    assert.equal(files.get('gst-return.pdf')!.subarray(0, 4).toString(), '%PDF');
+    assert.match(files.get('expenses.csv')!.toString(), /Belize Wholesale Ltd\.,123456,INV-77/);
+    assert.match(files.get('sales-register.csv')!.toString(), /\d{3}-\d{9}/);
+    assert.match(files.get('gst-return.csv')!.toString(), /GST to pay for the period|GST credit for the period/);
+    assert.match(files.get('profit-and-loss.csv')!.toString(), /Costs by category/);
+    const readme = files.get('README.txt')!.toString();
+    assert.match(readme, /TEST ENVIRONMENT/);
+    assert.match(readme, /receipts\/ +The receipts attached to those expenses \(1 of 1\)/);
+    const exported = (await c.f.db.query<{ n: number }>("select count(*)::int as n from audit_events where tenant_id = $1 and action = 'accountant_pack.exported'", [c.f.tenantA])).rows[0]!.n;
+    assert.equal(exported, 1);
+
+    assert.equal((await c.app.inject({ method: 'GET', url: `/v1/reports/accountant-pack?from=2024-01-01&to=${today()}`, headers: c.owner })).statusCode, 400, 'at most a year');
+    await createUser(c.f.db, { tenantId: c.f.tenantA, name: 'Cal', email: 'cal@biz.example', role: 'cashier', password: PASSWORD });
+    assert.equal((await c.app.inject({ method: 'GET', url: `/v1/reports/accountant-pack?from=${monthStart()}&to=${today()}`, headers: await c.login('cal@biz.example') })).statusCode, 403);
   }));

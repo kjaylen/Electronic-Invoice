@@ -312,6 +312,18 @@ const fileSafe = (s: string) => s.replace(/[^A-Za-z0-9-]+/g, '-').replace(/^-|-$
 
 // ---------- routes ----------
 
+/** Who owes what, today, as CSV (with a BOM, for spreadsheets). */
+export async function ageingCsv(db: Queryable, tenantId: string): Promise<string> {
+  const a = await ageing(db, tenantId);
+  const header = ['Customer', 'TIN', 'Email', 'Invoices', 'Oldest due', 'Current', '1-30 days', '31-60 days', '61-90 days', 'Over 90 days', 'Total'];
+  const lines = [header.map((h) => csvCell(h)).join(',')];
+  for (const c of a.customers) {
+    lines.push([csvCell(c.name), csvCell(c.tin ?? ''), csvCell(c.email ?? ''), csvCell(c.invoices, false), csvCell(c.oldestDue), ...AGE_BUCKETS.map((b) => csvCell(c.buckets[b], false)), csvCell(c.total, false)].join(','));
+  }
+  lines.push([csvCell('Total'), '', '', '', '', ...AGE_BUCKETS.map((b) => csvCell(a.totals[b], false)), csvCell(a.totals.total, false)].join(','));
+  return `\uFEFF${lines.join('\r\n')}\r\n`;
+}
+
 export function registerReceivableRoutes(app: FastifyInstance, deps: PipelineDeps, ctx: ServerContext, extras: { ekyash?: { sandboxUrl?: string; liveUrl?: string } } = {}) {
   const { db } = deps;
   const idParams = { type: 'object', required: ['id'], properties: { id: uuid } } as const;
@@ -424,14 +436,7 @@ export function registerReceivableRoutes(app: FastifyInstance, deps: PipelineDep
 
   app.get('/receivables/ageing.csv', async (request, reply) => {
     canRead(request);
-    const a = await ageing(db, request.tenantId);
-    const header = ['Customer', 'TIN', 'Email', 'Invoices', 'Oldest due', 'Current', '1-30 days', '31-60 days', '61-90 days', 'Over 90 days', 'Total'];
-    const lines = [header.map((h) => csvCell(h)).join(',')];
-    for (const c of a.customers) {
-      lines.push([csvCell(c.name), csvCell(c.tin ?? ''), csvCell(c.email ?? ''), csvCell(c.invoices, false), csvCell(c.oldestDue), ...AGE_BUCKETS.map((b) => csvCell(c.buckets[b], false)), csvCell(c.total, false)].join(','));
-    }
-    lines.push([csvCell('Total'), '', '', '', '', ...AGE_BUCKETS.map((b) => csvCell(a.totals[b], false)), csvCell(a.totals.total, false)].join(','));
-    return reply.type('text/csv; charset=utf-8').header('Content-Disposition', `attachment; filename="ageing-${belizeToday()}.csv"`).send(`\uFEFF${lines.join('\r\n')}\r\n`);
+    return reply.type('text/csv; charset=utf-8').header('Content-Disposition', `attachment; filename="ageing-${belizeToday()}.csv"`).send(await ageingCsv(db, request.tenantId));
   });
 
   const statementQuery = { type: 'object', required: ['customer'], additionalProperties: false, properties: { customer: customerKey } } as const;

@@ -14,7 +14,7 @@
 
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { audit } from '../db/audit.ts';
-import { toBigInt } from '../db/database.ts';
+import { type Queryable, toBigInt } from '../db/database.ts';
 import { formatCents } from '../engine/decimal.ts';
 import { ETD_TYPE_NAMES, type IssuedEtdType } from '../engine/ubl.ts';
 import type { PipelineDeps } from '../pipeline/issue.ts';
@@ -86,6 +86,24 @@ function archiveReadme(biz: { tin: string; name: string; environment: string }, 
 }
 const num = (v: unknown) => ({ v, text: false });
 const txt = (v: unknown) => ({ v });
+
+/** The document register: every document of the period, any status (for the accountant, and in the archive). */
+export async function documentRegisterCsv(db: Queryable, tenantId: string, q: { from: string; to: string }): Promise<string> {
+  const rows = (await db.query<{ issue_date: string; issue_time: string; etd_type: IssuedEtdType; series_number: number; serial: string; etdui: string; name: string | null; tin: string | null; net: string; gst: string; tax: string; total: string; status: string; protocol_number: string | null; referenced_etdui: string | null }>(
+    `select d.issue_date::text as issue_date, d.issue_time::text as issue_time, d.etd_type, d.series_number, d.serial::text as serial, d.etdui,
+       d.customer_snapshot->>'name' as name, d.customer_snapshot->>'tin' as tin, d.line_extension_cents as net, d.gst_cents as gst, d.tax_cents as tax,
+       d.tax_inclusive_cents as total, d.status, d.protocol_number, d.referenced_etdui
+     from documents d where d.tenant_id = $1 and d.issue_date between $2::date and $3::date
+       and d.reception_env = (select case environment when 'production' then '01' else '02' end from tenants where id = $1)
+     order by d.issue_date, d.issue_time, d.etd_type, d.serial limit 100000`, [tenantId, q.from, q.to],
+  )).rows;
+  const header = ['Date', 'Time', 'Type', 'Number', 'ETDUI', 'Customer', 'Customer TIN', 'Net (BZD)', 'GST (BZD)', 'All taxes (BZD)', 'Total (BZD)', 'Status', 'BTS authorization', 'References'];
+  return toCsv(header, rows.map((r) => [
+    txt(r.issue_date), txt(r.issue_time.slice(0, 8)), txt(ETD_TYPE_NAMES[r.etd_type]),
+    txt(`${String(r.series_number).padStart(3, '0')}-${r.serial.padStart(9, '0')}`), txt(r.etdui), txt(r.name), txt(r.tin),
+    money(r.net), money(r.gst), money(r.tax), money(r.total), txt(r.status), txt(r.protocol_number), txt(r.referenced_etdui),
+  ]));
+}
 
 export function registerReportRoutes(app: FastifyInstance, deps: PipelineDeps) {
   const { db } = deps;
@@ -271,23 +289,7 @@ export function registerReportRoutes(app: FastifyInstance, deps: PipelineDeps) {
     return { data: rows.map((r) => ({ hour: r.hour, documents: r.n, total: cents(r.total) })) };
   });
 
-  /** The document register: every document of the period, any status (for the accountant, and in the archive). */
-  const registerCsv = async (tenantId: string, q: { from: string; to: string }): Promise<string> => {
-    const rows = (await db.query<{ issue_date: string; issue_time: string; etd_type: IssuedEtdType; series_number: number; serial: string; etdui: string; name: string | null; tin: string | null; net: string; gst: string; tax: string; total: string; status: string; protocol_number: string | null; referenced_etdui: string | null }>(
-      `select d.issue_date::text as issue_date, d.issue_time::text as issue_time, d.etd_type, d.series_number, d.serial::text as serial, d.etdui,
-         d.customer_snapshot->>'name' as name, d.customer_snapshot->>'tin' as tin, d.line_extension_cents as net, d.gst_cents as gst, d.tax_cents as tax,
-         d.tax_inclusive_cents as total, d.status, d.protocol_number, d.referenced_etdui
-       from documents d where d.tenant_id = $1 and d.issue_date between $2::date and $3::date
-         and d.reception_env = (select case environment when 'production' then '01' else '02' end from tenants where id = $1)
-       order by d.issue_date, d.issue_time, d.etd_type, d.serial limit 100000`, [tenantId, q.from, q.to],
-    )).rows;
-    const header = ['Date', 'Time', 'Type', 'Number', 'ETDUI', 'Customer', 'Customer TIN', 'Net (BZD)', 'GST (BZD)', 'All taxes (BZD)', 'Total (BZD)', 'Status', 'BTS authorization', 'References'];
-    return toCsv(header, rows.map((r) => [
-      txt(r.issue_date), txt(r.issue_time.slice(0, 8)), txt(ETD_TYPE_NAMES[r.etd_type]),
-      txt(`${String(r.series_number).padStart(3, '0')}-${r.serial.padStart(9, '0')}`), txt(r.etdui), txt(r.name), txt(r.tin),
-      money(r.net), money(r.gst), money(r.tax), money(r.total), txt(r.status), txt(r.protocol_number), txt(r.referenced_etdui),
-    ]));
-  };
+  const registerCsv = (tenantId: string, q: { from: string; to: string }) => documentRegisterCsv(db, tenantId, q);
 
   app.get<PeriodQuery>('/reports/documents', { schema: { querystring: periodQuery } }, async (request, reply) => {
     const q = request.query;
