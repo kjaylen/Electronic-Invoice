@@ -2640,4 +2640,6 @@ export const ES: Record<string, string> = {
   "Marked ready.": "Marcado como listo.",
   "Marked order {target} ready": "Marcó el pedido {target} como listo",
   "On its way": "En camino",
+  "We will email {email} once, when it is back.": "Le escribiremos a {email} una sola vez, cuando vuelva a estar disponible.",
+  "Email me when it is back": "Avísenme cuando vuelva",
 };

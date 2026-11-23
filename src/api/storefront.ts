@@ -9,6 +9,7 @@
  *   POST /v1/store/:slug/orders/:n/pay?t=        start (or retry) paying an order online → where to send the buyer
  *   POST /v1/store/:slug/orders/:n/payments/:id/confirm?t=   back from the provider: was it paid?
  *   GET|POST /v1/store/:slug/test-payments/:id   the pretend card page of the test gateway
+ *   POST /v1/store/:slug/products/:handle/notify { variantId, email }: email me when this sold-out variant is back
  *   POST /v1/store/:slug/quote                   price a cart, with delivery
  *   POST /v1/store/:slug/orders                  place an order
  *   GET  /v1/store/:slug/orders/:number?t=       the buyer's order page (the token from the order link)
@@ -38,6 +39,7 @@ import { type GatewayExtras, gatewayOptions, settlePaidOrder } from './payments.
 import { toBigInt } from '../db/database.ts';
 import { formatCents } from '../engine/decimal.ts';
 import { emailLanguage, PHRASES } from '../templates/lang.ts';
+import { addStockAlert, StockAlertError } from '../commerce/stock-alerts.ts';
 
 
 // Limits on placing orders (shared by every server process), so a script cannot flood a store.
@@ -302,6 +304,27 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
     });
     void request;
   }
+
+  app.post<{ Params: { slug: string; handle: string }; Body: { variantId: string; email: string } }>(
+    '/:slug/products/:handle/notify',
+    {
+      schema: {
+        params: { type: 'object', required: ['slug', 'handle'], properties: { ...slugParams, handle: { type: 'string', maxLength: 80 } } },
+        body: { type: 'object', required: ['variantId', 'email'], additionalProperties: false, properties: { variantId: uuid, email: { type: 'string', format: 'email', maxLength: 254 } } },
+      },
+    },
+    async (request) => {
+      const s = await store(request);
+      if (await overLimit(db, `stock-alert|${request.ip}`, 20, HOUR_MS)) throw new ApiError(429, 'too_many_requests', 'Too many requests from here; try again later');
+      try {
+        await addStockAlert(db, s.tenantId, request.params.handle, request.body.variantId, request.body.email);
+      } catch (e) {
+        if (e instanceof StockAlertError) throw new ApiError(e.code === 'not_found' ? 404 : 409, e.code, e.message);
+        throw e;
+      }
+      return { ok: true };
+    },
+  );
 
   const orderParams = { type: 'object', required: ['slug', 'number'], properties: { ...slugParams, number: { type: 'string', pattern: '^\\d{1,9}$' } } } as const;
   const tokenQuery = { type: 'object', required: ['t'], additionalProperties: false, properties: { t: { type: 'string', minLength: 20, maxLength: 64 } } } as const;

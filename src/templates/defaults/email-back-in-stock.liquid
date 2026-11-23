@@ -1,0 +1,32 @@
+{%- comment -%}
+  Sent once to a buyer who asked to be told when a sold-out product came back.
+{% endcomment -%}
+<!doctype html>
+<html lang="en">
+<body style="margin:0;padding:0;background:#f4f5f7;font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;color:#0f1117">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f5f7;padding:32px 12px">
+    <tr><td align="center">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border:1px solid #e6e8ec;border-radius:14px">
+        <tr><td style="padding:28px 32px 6px">
+          {%- if store.logo %}
+          <img src="{{ store.logo }}" alt="{{ store.name }}" height="40" style="display:block;height:40px;width:auto;max-width:220px;border:0;margin:0 0 14px">
+          {%- else %}
+          <div style="font-size:13px;color:#646b7b">{{ store.name }}</div>
+          {%- endif %}
+          <h1 style="margin:6px 0 0;font-size:22px;line-height:1.25;letter-spacing:-0.02em">It's back in stock</h1>
+        </td></tr>
+        <tr><td style="padding:14px 32px 4px;font-size:15px;line-height:1.6">
+          <p style="margin:0 0 14px"><strong>{{ product.title }}</strong>{% if product.variant %} ({{ product.variant }}){% endif %} is available again at {{ store.name }}, for {{ product.price | money }}.</p>
+          <p style="margin:0 0 14px">You asked us to let you know. It may sell out again, so order soon if you want it.</p>
+        </td></tr>
+        <tr><td style="padding:8px 32px 4px">
+          <a href="{{ product.url }}" style="display:inline-block;background:#6d2d93;color:#ffffff;padding:12px 22px;border-radius:9px;text-decoration:none;font-weight:600;font-size:15px">See it in the store</a>
+        </td></tr>
+        <tr><td style="padding:22px 32px 28px;font-size:12px;line-height:1.6;color:#646b7b">
+          {{ store.name }}{% if store.telephone %} · {{ store.telephone }}{% endif %}{% if store.city %} · {{ store.city }}{% endif %}. You get this email once, because you asked for it.
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>

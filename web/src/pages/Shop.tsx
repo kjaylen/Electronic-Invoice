@@ -300,7 +300,12 @@ export function ShopProduct() {
             </div>
           </fieldset>
         ))}
-        {variant && !variant.available && <p className="form-error">{t('Sold out')}</p>}
+        {variant && !variant.available && (
+          <div className="stack back-in-stock">
+            <p className="form-error">{t('Sold out')}</p>
+            <BackInStock handle={p.handle} variantId={variant.id} />
+          </div>
+        )}
         {variant?.left !== null && variant?.left !== undefined && variant.available && <p className="small low-stock">{t('Only {n} left', { n: variant.left })}</p>}
         <div className="row">
           <div className="qty shop-qty">
@@ -768,5 +773,34 @@ export function ShopTestPayment() {
         </div>
       </section>
     </div>
+  );
+}
+
+/** "Email me when it's back" on a sold-out variant. */
+function BackInStock({ handle, variantId }: { handle: string; variantId: string }) {
+  const t = useT();
+  const [email, setEmail] = useState('');
+  const [done, setDone] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  useEffect(() => {
+    setDone(null);
+    setError(null);
+  }, [variantId]);
+  if (done) return <p className="small" role="status">{t('We will email {email} once, when it is back.', { email: done })}</p>;
+  return (
+    <form className="row nowrap" onSubmit={(e) => {
+      e.preventDefault();
+      setBusy(true);
+      setError(null);
+      api(shopApi(`/products/${handle}/notify`), { method: 'POST', body: { variantId, email: email.trim() } })
+        .then(() => setDone(email.trim()))
+        .catch(setError)
+        .finally(() => setBusy(false));
+    }}>
+      <input type="email" required placeholder={t('Your email')} aria-label={t('Your email')} value={email} onChange={(e) => setEmail(e.target.value)} />
+      <button type="submit" className="secondary" disabled={busy || !email.trim()}>{t('Email me when it is back')}</button>
+      <ErrorText error={error} />
+    </form>
   );
 }

@@ -121,6 +121,13 @@ export const TEMPLATES: TemplateDef[] = [
     variables: [{ name: 'store.name', description: 'Your store name' }, { name: 'store.logo', description: 'Your logo\'s address (empty when you have none)' }, IMAGES, { name: 'store.city', description: 'Where you are' }, { name: 'store.telephone', description: 'Your phone' }, { name: 'order.number', description: 'The order number' }, { name: 'order.customer_name', description: "The buyer's name" }, { name: 'order.delivery', description: 'true for delivery, false for pickup' }, { name: 'order.address', description: 'The delivery area' }, { name: 'order.pickup_address', description: 'Where to pick it up' }, { name: 'order.pickup_instructions', description: 'Your pickup instructions (store settings)' }, { name: 'order.items', description: 'What they bought: name, variant, quantity' }, { name: 'message', description: 'The message typed when marking it ready' }],
   },
   {
+    key: 'email.back-in-stock', group: 'emails', name: 'Back in stock', preview: 'email', language: 'html', file: 'email-back-in-stock.liquid',
+    description: 'Sent once to a buyer who asked to be told when a sold-out product came back.',
+    subject: '{{ product.title }} is back at {{ store.name }}',
+    subjectEs: '{{ product.title }} está disponible otra vez en {{ store.name }}',
+    variables: [{ name: 'store.name', description: 'Your store name' }, { name: 'store.logo', description: 'Your logo\'s address (empty when you have none)' }, IMAGES, { name: 'store.city', description: 'Where you are' }, { name: 'store.telephone', description: 'Your phone' }, { name: 'product.title', description: 'The product' }, { name: 'product.variant', description: 'The variant they wanted (may be empty)' }, { name: 'product.price', description: 'Its price with GST' }, { name: 'product.url', description: 'Its page in your store' }],
+  },
+  {
     key: 'document.invoice', group: 'documents', name: 'Invoice and notes (A4)', preview: 'a4', language: 'html', file: 'document-invoice.liquid',
     description: 'The printed copy of tax invoices, debit notes and credit notes, and the PDF you email.',
     requires: [BTS], variables: PRINTED,
