@@ -2634,4 +2634,10 @@ export const ES: Record<string, string> = {
   "Earned": "Ganados",
   "Undone (document cancelled)": "Deshechos (documento cancelado)",
   "By hand": "A mano",
+  "Ready for pickup": "Listo para recoger",
+  "Out for delivery": "En camino",
+  "Marked ready; the customer was told by email.": "Marcado como listo; se avisó al cliente por correo.",
+  "Marked ready.": "Marcado como listo.",
+  "Marked order {target} ready": "Marcó el pedido {target} como listo",
+  "On its way": "En camino",
 };

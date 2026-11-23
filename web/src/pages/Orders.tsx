@@ -17,7 +17,7 @@ export function refundState(o: Pick<Order, 'totals'>): 'full' | 'partial' | null
   return refunded >= toCents(o.totals.total) ? 'full' : 'partial';
 }
 
-export function OrderBadges({ order: o }: { order: Pick<Order, 'status' | 'paymentStatus' | 'fulfillmentStatus' | 'fulfillment' | 'totals'> }) {
+export function OrderBadges({ order: o }: { order: Pick<Order, 'status' | 'paymentStatus' | 'fulfillmentStatus' | 'fulfillment' | 'totals' | 'readyAt'> }) {
   const t = useT();
   const order = { ...o, refunded: refundState(o) };
   if (order.status === 'cancelled') return <span className="badge cancelled">{t('Cancelled')}</span>;
@@ -27,7 +27,7 @@ export function OrderBadges({ order: o }: { order: Pick<Order, 'status' | 'payme
         <span className={`badge ${order.paymentStatus === 'paid' ? 'authorized' : 'pending'}`}>{order.paymentStatus === 'paid' ? t('Paid') : t('Unpaid')}</span>
       )}
       <span className={`badge ${order.fulfillmentStatus === 'fulfilled' ? 'authorized' : 'test'}`}>
-        {order.fulfillmentStatus === 'fulfilled' ? (order.fulfillment === 'pickup' ? t('Picked up') : t('Delivered')) : order.fulfillment === 'pickup' ? t('To pick up') : t('To deliver')}
+        {order.fulfillmentStatus === 'fulfilled' ? (order.fulfillment === 'pickup' ? t('Picked up') : t('Delivered')) : o.readyAt ? (order.fulfillment === 'pickup' ? t('Ready for pickup') : t('Out for delivery')) : order.fulfillment === 'pickup' ? t('To pick up') : t('To deliver')}
       </span>
     </span>
   );
@@ -184,6 +184,11 @@ export function OrderDetail() {
         )}
         {o.paymentStatus === 'paid' && !docOk && can('documents.issue') && (
           <button disabled={busy !== null} onClick={() => void act('paid', () => api(`/v1/orders/${o.id}/paid`, { method: 'POST' }), () => t('The receipt was issued again.'))}>{t('Issue the receipt again')}</button>
+        )}
+        {o.status === 'open' && o.fulfillmentStatus === 'unfulfilled' && !o.readyAt && can('orders.manage') && (
+          <button className="secondary" disabled={busy !== null} onClick={() => void act('ready', () => api<Order & { emailed?: boolean }>(`/v1/orders/${o.id}/ready`, { method: 'POST' }), (r) => (r.emailed ? t('Marked ready; the customer was told by email.') : t('Marked ready.')))}>
+            {o.fulfillment === 'pickup' ? t('Ready for pickup') : t('Out for delivery')}
+          </button>
         )}
         {o.status === 'open' && o.fulfillmentStatus === 'unfulfilled' && can('orders.manage') && (
           <button className="secondary" disabled={busy !== null} onClick={() => void act('fulfilled', () => api(`/v1/orders/${o.id}/fulfilled`, { method: 'POST' }), () => (o.fulfillment === 'pickup' ? t('Marked picked up') : t('Marked delivered')))}>

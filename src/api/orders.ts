@@ -4,6 +4,7 @@
  *   GET  /v1/orders                 list: view=to_do (default) | unpaid | unfulfilled | done | cancelled | all
  *   GET  /v1/orders/:id
  *   POST /v1/orders/:id/paid        payment received: issues the BTS receipt (or tax invoice) and emails it
+ *   POST /v1/orders/:id/ready       ready for pickup or out for delivery { message?, notify? }: emails the buyer
  *   POST /v1/orders/:id/fulfilled   delivered or picked up
  *   POST /v1/orders/:id/cancel      cancel an unpaid order; its stock goes back
  *   POST /v1/orders/:id/refund      refund a paid order (all or some lines): a credit note against its document
@@ -16,7 +17,8 @@ import { cancelOrder, centsString, fulfillOrder, loadOrder, loadRefunds, markOrd
 import type { PipelineDeps } from '../pipeline/issue.ts';
 import type { ServerContext } from './context.ts';
 import { checkCreditLimit, sendDocumentEmail } from './documents.ts';
-import { notFound } from './errors.ts';
+import { ApiError, notFound } from './errors.ts';
+import { renderEmail } from '../templates/render.ts';
 import { requirePermission } from './permissions.ts';
 import { uuid } from './schemas.ts';
 import { assertCanIssue } from '../billing/billing.ts';
@@ -57,6 +59,7 @@ export function orderJson(o: OrderRow, lines?: OrderLineRow[], document?: { id: 
     }),
     createdAt: iso(o.created_at),
     paidAt: iso(o.paid_at),
+    readyAt: iso(o.ready_at ?? null),
     fulfilledAt: iso(o.fulfilled_at),
     cancelledAt: iso(o.cancelled_at),
     cancelReason: o.cancel_reason,
@@ -158,6 +161,40 @@ export function registerOrderRoutes(app: FastifyInstance, deps: PipelineDeps, ct
     }
     return { ...(await fullOrder(deps, request.tenantId, order.id)), emailed };
   });
+
+  // Ready for pickup, or out for delivery: the buyer is told by email (when they gave one).
+  app.post<{ Params: { id: string }; Body: { message?: string; notify?: boolean } | null }>(
+    '/orders/:id/ready',
+    { schema: { params: idParams, body: { type: ['object', 'null'], additionalProperties: false, properties: { message: { type: 'string', maxLength: 1000 }, notify: { type: 'boolean' } } } } },
+    async (request) => {
+      requirePermission(request, 'orders.manage');
+      const loaded = await loadOrder(db, request.tenantId, { id: request.params.id });
+      if (!loaded) throw notFound('Order');
+      const o = loaded.order;
+      if (o.status !== 'open' || o.fulfillment_status !== 'unfulfilled') throw new ApiError(409, 'not_open', 'This order is closed or already delivered');
+      await db.query('update orders set ready_at = now() where id = $1 and tenant_id = $2', [o.id, request.tenantId]);
+      let emailed: string | null = null;
+      if (request.body?.notify !== false && o.customer_email && ctx.mailConfigured) {
+        const t = (await db.query<{ name: string; telephone: string; city: string; street: string; email: string; store_settings: { pickup?: { instructions?: string } } | null }>(
+          'select coalesce(trade_name, legal_name) as name, telephone, city, street, email, store_settings from tenants where id = $1', [request.tenantId],
+        )).rows[0]!;
+        const lang = await emailLanguage(db, request.tenantId);
+        const mail = await renderEmail(db, request.tenantId, 'email.order-ready', {
+          store: { name: t.name, city: t.city, telephone: t.telephone },
+          order: {
+            number: o.number, customer_name: o.customer_name, delivery: o.fulfillment === 'delivery', address: o.delivery_zone,
+            pickup_address: `${t.street}, ${t.city}`, pickup_instructions: t.store_settings?.pickup?.instructions || null,
+            items: loaded.lines.map((l) => ({ name: l.product_title, variant: l.variant_title, quantity: Number(l.quantity) })),
+          },
+          message: request.body?.message?.trim() || null,
+        }, { publicUrl: ctx.publicUrl, lang });
+        await ctx.mailer.send({ to: o.customer_email, replyTo: t.email, subject: mail.subject, text: mail.text, html: mail.html });
+        emailed = o.customer_email;
+      }
+      await audit(db, { tenantId: request.tenantId, userId: request.userId || null, action: 'order.ready', target: `#${o.number}`, details: { emailed }, ip: request.ip });
+      return { ...(await fullOrder(deps, request.tenantId, o.id)), emailed };
+    },
+  );
 
   app.post<{ Params: { id: string } }>('/orders/:id/fulfilled', { schema: { params: idParams } }, async (request) => {
     requirePermission(request, 'orders.manage');

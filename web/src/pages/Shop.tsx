@@ -565,6 +565,8 @@ interface BuyerOrder {
   status: 'open' | 'cancelled';
   paymentStatus: 'unpaid' | 'paid';
   fulfillmentStatus: 'unfulfilled' | 'fulfilled';
+  /** When the store said it was ready for pickup, or on its way. */
+  readyAt?: string | null;
   paymentMethod: PaymentMethod;
   fulfillment: 'delivery' | 'pickup';
   deliveryZone: string | null;
@@ -655,6 +657,7 @@ export function ShopOrder() {
   const steps: Array<[string, boolean]> = [
     [t('Ordered'), true],
     [t('Paid'), o.paymentStatus === 'paid'],
+    [o.fulfillment === 'pickup' ? t('Ready for pickup') : t('On its way'), Boolean(o.readyAt) || o.fulfillmentStatus === 'fulfilled'],
     [o.fulfillment === 'pickup' ? t('Picked up') : t('Delivered'), o.fulfillmentStatus === 'fulfilled'],
   ];
   const wa = whatsappNumber(o.store.whatsapp);

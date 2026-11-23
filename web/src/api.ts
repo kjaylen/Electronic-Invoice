@@ -414,6 +414,7 @@ export interface Order {
   lines?: Array<{ lineNumber: number; variantId: string | null; productTitle: string; variantTitle: string | null; quantity: number; unitPrice: string; gstCategory: string; total: string }>;
   createdAt: string;
   paidAt: string | null;
+  readyAt?: string | null;
   fulfilledAt: string | null;
   cancelledAt: string | null;
   cancelReason: string | null;

@@ -342,6 +342,10 @@ export async function sampleContext(def: TemplateDef, biz: BusinessContext, lang
       number: 'PO-12', expected_on: '2026-11-29', total: '640.00',
       lines: [{ description: 'Coffee beans 1lb', code: 'CB1', quantity: '40', unit_cost: '12.50', total: '500.00' }, { description: 'Paper cups 12 oz (50)', code: null, quantity: '20', unit_cost: '7.00', total: '140.00' }],
     }, message: es ? 'Por favor entregar en la mañana.' : 'Please deliver in the morning.' } };
+    case 'email.order-ready': return { context: { store, order: {
+      number: 1042, customer_name: 'Maria Chan', delivery: false, address: null, pickup_address: '12 Burns Avenue, San Ignacio', pickup_instructions: es ? 'Toque el timbre en la puerta lateral.' : 'Ring the bell at the side door.',
+      items: [{ name: 'Coffee beans 1lb', variant: 'Dark roast', quantity: 2 }, { name: 'Banana bread', variant: null, quantity: 1 }],
+    }, message: es ? 'Abrimos hasta las 6 pm.' : 'We are open until 6 pm.' } };
     case 'email.order': return { context: { store, order: {
       number: 1042, customer_name: 'Maria Chan', payment_method: 'bank_transfer',
       items: [{ name: 'Coffee beans 1lb', variant: 'Dark roast', quantity: 2, total: '44.00' }, { name: 'Banana bread', variant: null, quantity: 1, total: '3.75' }],

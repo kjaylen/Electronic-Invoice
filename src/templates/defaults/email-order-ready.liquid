@@ -1,0 +1,42 @@
+{%- comment -%}
+  Sent to a buyer when their order is ready for pickup, or on its way (order.delivery).
+{% endcomment -%}
+<!doctype html>
+<html lang="en">
+<body style="margin:0;padding:0;background:#f4f5f7;font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;color:#0f1117">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f5f7;padding:32px 12px">
+    <tr><td align="center">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border:1px solid #e6e8ec;border-radius:14px">
+        <tr><td style="padding:28px 32px 6px">
+          {%- if store.logo %}
+          <img src="{{ store.logo }}" alt="{{ store.name }}" height="40" style="display:block;height:40px;width:auto;max-width:220px;border:0;margin:0 0 14px">
+          {%- else %}
+          <div style="font-size:13px;color:#646b7b">{{ store.name }}</div>
+          {%- endif %}
+          <h1 style="margin:6px 0 0;font-size:22px;line-height:1.25;letter-spacing:-0.02em">{% if order.delivery %}Your order is on its way{% else %}Your order is ready for pickup{% endif %}</h1>
+        </td></tr>
+        <tr><td style="padding:14px 32px 4px;font-size:15px;line-height:1.6">
+          <p style="margin:0 0 14px">Hello {{ order.customer_name }},</p>
+          {%- if order.delivery %}
+          <p style="margin:0 0 14px">Order #{{ order.number }} from {{ store.name }} is on its way to you{% if order.address %} in {{ order.address }}{% endif %}.</p>
+          {%- else %}
+          <p style="margin:0 0 14px">Order #{{ order.number }} is ready. Pick it up at {{ store.name }}{% if order.pickup_address %}, {{ order.pickup_address }}{% endif %}.</p>
+          {%- if order.pickup_instructions %}<p style="margin:0 0 14px;white-space:pre-line">{{ order.pickup_instructions }}</p>{% endif %}
+          {%- endif %}
+          {%- if message %}<p style="margin:0 0 14px;white-space:pre-line">{{ message }}</p>{% endif %}
+        </td></tr>
+        <tr><td style="padding:4px 32px 4px">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="font-size:14px;line-height:1.5;border-collapse:collapse">
+            {%- for item in order.items %}
+            <tr><td style="padding:6px 0;border-bottom:1px solid #eef0f3">{{ item.quantity }} × {{ item.name }}{% if item.variant %} <span style="color:#646b7b">({{ item.variant }})</span>{% endif %}</td></tr>
+            {%- endfor %}
+          </table>
+        </td></tr>
+        <tr><td style="padding:22px 32px 28px;font-size:12px;line-height:1.6;color:#646b7b">
+          {{ store.name }}{% if store.telephone %} · {{ store.telephone }}{% endif %}{% if store.city %} · {{ store.city }}{% endif %}
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>

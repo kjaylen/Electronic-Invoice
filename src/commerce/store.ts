@@ -389,6 +389,7 @@ export interface OrderRow {
   created_at: string | Date;
   paid_at: string | Date | null;
   fulfilled_at: string | Date | null;
+  ready_at?: string | Date | null;
   cancelled_at: string | Date | null;
   cancel_reason: string | null;
 }

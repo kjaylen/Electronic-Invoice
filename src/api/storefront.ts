@@ -335,6 +335,7 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
         lines: j.lines,
         totals: j.totals,
         createdAt: j.createdAt,
+        readyAt: j.readyAt,
         cancelReason: j.cancelReason,
         // How to pay, while it is still owed.
         instructions: order.status === 'open' && order.payment_status === 'unpaid' && order.payment_method === 'bank_transfer' ? s.settings.payments.bankTransfer.instructions : null,

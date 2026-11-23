@@ -496,3 +496,33 @@ test('link previews and search: store pages carry their title, price and picture
     assert.ok(map.body.includes(`<loc>https://app.example.test/${c.slug}/shop</loc>`));
   }, { webRoot: web });
 });
+
+test('ready for pickup: the buyer is told by email and sees the step on their order page', () =>
+  withStore(async (c) => {
+    await openStore(c, { pickup: { enabled: true, instructions: 'Ring the bell at the side door' } });
+    const p = await createProduct(c);
+    const placed = (await order(c, { lines: [{ variantId: p.variants[0].id, quantity: 1 }], fulfillment: 'pickup', paymentMethod: 'pay_at_pickup', customer: buyer })).json();
+    const id = (await c.app.inject({ method: 'GET', url: '/v1/orders', headers: c.owner })).json().data[0].id;
+    const accountant = await c.as('accountant');
+    assert.equal((await c.app.inject({ method: 'POST', url: `/v1/orders/${id}/ready`, headers: accountant })).statusCode, 403);
+
+    const ready = await c.app.inject({ method: 'POST', url: `/v1/orders/${id}/ready`, headers: c.owner, payload: { message: 'Open until 6 pm' } });
+    assert.equal(ready.statusCode, 200, ready.body);
+    assert.equal(ready.json().emailed, 'ana@example.com');
+    assert.ok(ready.json().readyAt);
+    const mail = c.mail.sent.at(-1)!;
+    assert.equal(mail.to, 'ana@example.com');
+    assert.match(mail.subject, /Your order #1001 is ready for pickup at /);
+    assert.match(mail.text, /Ring the bell at the side door/);
+    assert.match(mail.text, /Open until 6 pm/);
+    assert.match(mail.text, /1 × Island T-shirt/);
+
+    const page = (await c.app.inject({ method: 'GET', url: `/v1/store/${c.slug}/orders/${placed.number}?t=${placed.token}` })).json();
+    assert.ok(page.readyAt);
+
+    // Without telling them; and not once it is picked up.
+    const quiet = await c.app.inject({ method: 'POST', url: `/v1/orders/${id}/ready`, headers: c.owner, payload: { notify: false } });
+    assert.equal(quiet.json().emailed, null);
+    await c.app.inject({ method: 'POST', url: `/v1/orders/${id}/fulfilled`, headers: c.owner });
+    assert.equal((await c.app.inject({ method: 'POST', url: `/v1/orders/${id}/ready`, headers: c.owner })).statusCode, 409);
+  }));

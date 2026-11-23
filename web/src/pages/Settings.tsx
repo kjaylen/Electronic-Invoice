@@ -805,6 +805,7 @@ function describe(t: T, e: AuditEvent): string {
     'recurring_expense.created': t('Added a repeating expense'),
     'customer.account_link': t('Made an account link for {target}', { target }),
     'loyalty.settings': t('Changed the loyalty points settings'),
+    'order.ready': t('Marked order {target} ready', { target }),
     'loyalty.adjusted': t('Changed {target}’s loyalty points', { target }),
     'customer.account_link_sent': t('Emailed {target} their account link', { target }),
     'customer.account_links_revoked': t('Stopped a customer’s account links'),
