@@ -2077,3 +2077,41 @@ button.cat-tag:hover:not(:disabled) { background: var(--brand); border-color: va
 .pager-page { min-width: 5rem; text-align: center; font-variant-numeric: tabular-nums; }
 .activity-filters { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
 ol.activity.loading { opacity: 0.55; transition: opacity 150ms; }
+
+/* ==========================================================================
+   The totals panel (counter and invoice form): brand purple and white, the
+   lime kept to the logo's dot
+   ========================================================================== */
+.ticket {
+  --ticket-accent: #e9d5ff;
+  background: radial-gradient(120% 70% at 85% 0%, rgba(255, 255, 255, 0.1) 0%, transparent 55%), linear-gradient(160deg, #5f2788 0%, #4a1b6e 52%, #36104f 100%);
+  border-color: #3d1259;
+  box-shadow: 0 1px 2px rgba(45, 15, 69, 0.25), 0 18px 36px -18px rgba(45, 15, 69, 0.6);
+}
+.ticket .kicker { color: var(--ticket-accent); }
+.ticket h2, .totals.ticket > div span:first-child, .cart > div span:first-child { color: rgba(255, 255, 255, 0.82); }
+.ticket .grand { color: #fff; border-top-color: rgba(255, 255, 255, 0.35) !important; }
+.ticket .muted, .cart-empty, .cart-lines .each { color: rgba(255, 255, 255, 0.68); }
+.cart-lines li { border-bottom-color: rgba(255, 255, 255, 0.12); }
+/* Choices: white for the one chosen. */
+.cart .tabs, .ticket .tabs { background: rgba(255, 255, 255, 0.08); border-color: rgba(255, 255, 255, 0.14); }
+.cart .tabs::before, .ticket .tabs::before { background: #fff; box-shadow: 0 1px 3px rgba(45, 15, 69, 0.35); }
+.cart .tabs button.active, .ticket .tabs button.active, .cart .tabs.has-ind button.active, .ticket .tabs.has-ind button.active, .cart .tabs.has-ind button.active:hover:not(:disabled) { color: var(--brand-ink); }
+.cart .tabs button.active, .cart .tabs button.active:hover { background: #fff; color: var(--brand-ink); }
+.cart .tabs.has-ind button.active, .cart .tabs.has-ind button.active:hover { background: transparent; }
+.ticket .currency-switch button[aria-pressed='true'], .ticket .currency-switch button[aria-pressed='true']:hover:not(:disabled) { background: #fff; color: var(--brand-ink); }
+.ticket input, .ticket select, .cart input { background: rgba(255, 255, 255, 0.1); border-color: rgba(255, 255, 255, 0.26); color: #fff; }
+.ticket input:focus, .cart input:focus { background: rgba(255, 255, 255, 0.16); border-color: rgba(255, 255, 255, 0.6); box-shadow: 0 0 0 3px rgba(233, 213, 255, 0.25); }
+.tender > span { color: var(--ticket-accent); }
+.cart-lines .line-discount { background: var(--ticket-accent); color: var(--brand-deep); }
+.cart-lines .disc.on { background: #fff; color: var(--brand-ink); border-color: #fff; }
+.cart-lines .disc[aria-expanded='true'] { box-shadow: 0 0 0 3px rgba(233, 213, 255, 0.35); }
+.cart .cart-discount span:last-child { color: var(--ticket-accent); }
+/* The main button: white, in the brand's ink. */
+.ticket button.lime, .ticket .button.lime { background: #fff; border-color: #fff; color: var(--brand-ink); box-shadow: 0 6px 18px -8px rgba(20, 5, 35, 0.6), inset 0 -1px 0 rgba(45, 15, 69, 0.08); }
+.ticket button.lime:hover:not(:disabled), .ticket .button.lime:hover { background: #f5effa; border-color: #f5effa; color: var(--brand-deep); }
+.ticket button.lime .chip, .ticket .button.lime .chip { background: var(--brand); color: #fff; }
+.ticket button.lime:disabled { background: rgba(255, 255, 255, 0.55); border-color: transparent; color: var(--brand-ink); opacity: 1; }
+.ticket button.secondary { background: rgba(255, 255, 255, 0.08); border-color: rgba(255, 255, 255, 0.28); color: #fff; }
+.ticket button.secondary:hover:not(:disabled) { background: rgba(255, 255, 255, 0.16); color: #fff; }
+.ticket kbd { border-color: rgba(255, 255, 255, 0.45); }

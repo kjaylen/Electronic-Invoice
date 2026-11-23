@@ -592,7 +592,7 @@ export function CounterPanel(props: {
         </div>
 
         <form className="card ticket cart stack" onSubmit={issue}>
-          <span className="kicker" style={{ color: 'var(--lime)' }}>{means === 'account' ? t('Tax invoice, on account') : t('Tax receipt')} · BZD</span>
+          <span className="kicker">{means === 'account' ? t('Tax invoice, on account') : t('Tax receipt')} · BZD</span>
           {sale.lines.length === 0 ? <p className="cart-empty">{t('Scan or pick items to start a sale.')}</p> : (
             <ul className="cart-lines">
               {sale.lines.map((l) => (

@@ -699,7 +699,7 @@ export function NewDocument({ mode = 'issue' }: { mode?: FormMode } = {}) {
           <Field label={t('Note')} hint={t('Optional; printed on the document.')}><textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} /></Field>
         </fieldset>
         <div className="card totals ticket stack">
-          <span className="kicker" style={{ color: 'var(--lime)' }}>{mode === 'quote' ? t('Quote') : mode === 'recurring' ? t('Each invoice') : typeName} · BZD</span>
+          <span className="kicker">{mode === 'quote' ? t('Quote') : mode === 'recurring' ? t('Each invoice') : typeName} · BZD</span>
           <div><span>{t('Subtotal')}</span><span>{money(preview?.totals.lineExtension ?? '0.00')}</span></div>
           <div><span>GST</span><span>{money(preview?.totals.gst ?? '0.00')}</span></div>
           {preview && preview.totals.tax !== preview.totals.gst && (
