@@ -49,6 +49,9 @@ test('categories group items, count sales and change prices together', async () 
     const names = async (qs: string) => ((await app.inject({ method: 'GET', url: `/v1/items?${qs}`, headers: owner })).json().data as Array<{ name: string }>).map((i) => i.name).sort();
     assert.deepEqual(await names('category=COFFEE'), ['Latte', 'Mocha']);
     assert.deepEqual(await names('category='), ['Gift card']);
+    // The inventory list filters by category too (a stock count of one shelf).
+    const shelf = ((await app.inject({ method: 'GET', url: '/v1/inventory?filter=all&category=coffee', headers: owner })).json().data as Array<{ name: string }>).map((i) => i.name).sort();
+    assert.deepEqual(shelf, ['Latte', 'Mocha']);
 
     // An edit without the category keeps it; an item alone in its category may change its spelling.
     const kept = (await app.inject({ method: 'PUT', url: `/v1/items/${bread.id}`, headers: owner, payload: { name: 'Banana bread', unitCode: 'H87', unitPrice: '4.00', gstCategory: 'S' } })).json();

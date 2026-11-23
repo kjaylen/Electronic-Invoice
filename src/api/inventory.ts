@@ -113,10 +113,10 @@ export function registerInventoryRoutes(app: FastifyInstance, deps: PipelineDeps
 
   const listQuery = {
     type: 'object', additionalProperties: false,
-    properties: { filter: { type: 'string', enum: ['tracked', 'low', 'out', 'untracked', 'slow', 'all'] }, q: { type: 'string', maxLength: 100 }, limit: { type: 'string', pattern: '^[1-9][0-9]{0,3}$' } },
+    properties: { filter: { type: 'string', enum: ['tracked', 'low', 'out', 'untracked', 'slow', 'all'] }, q: { type: 'string', maxLength: 100 }, category: { type: 'string', maxLength: 80 }, limit: { type: 'string', pattern: '^[1-9][0-9]{0,3}$' } },
   } as const;
   // Query strings arrive as text (no type coercion): the limit is digits.
-  type ListQuery = { filter?: Filter; q?: string; limit?: string };
+  type ListQuery = { filter?: Filter; q?: string; limit?: string; category?: string };
   const list = async (tenantId: string, query: ListQuery, max = 2000) => {
     const params: unknown[] = [tenantId];
     let where = `i.tenant_id = $1 and i.archived_at is null and ${filterSql(query.filter ?? 'tracked')}`;
@@ -124,6 +124,14 @@ export function registerInventoryRoutes(app: FastifyInstance, deps: PipelineDeps
     if (text) {
       params.push(`%${text.replace(/[%_\\]/g, (c) => `\\${c}`)}%`, text);
       where += ` and (i.name ilike $${params.length - 1} or i.seller_code ilike $${params.length - 1} or i.barcode = $${params.length})`;
+    }
+    // ?category=Coffee, or ?category= (empty) for items without one: counting one shelf at a time.
+    if (query.category !== undefined) {
+      if (query.category === '') where += ' and i.category is null';
+      else {
+        params.push(query.category);
+        where += ` and lower(i.category) = lower($${params.length})`;
+      }
     }
     params.push(Math.min(query.limit ? Number(query.limit) : max, max));
     return (await db.query<StockRow>(

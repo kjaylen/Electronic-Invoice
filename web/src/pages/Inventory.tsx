@@ -250,11 +250,18 @@ function StockCountModal({ onClose, onDone }: { onClose: () => void; onDone: () 
   const t = useT();
   const toast = useToast();
   const [items, setItems] = useState<StockItem[] | null>(null);
+  // One shelf at a time: the items of a category.
+  const [categories, setCategories] = useState<string[]>([]);
+  const [category, setCategory] = useState('');
+  useEffect(() => void api<{ data: Array<{ name: string }> }>('/v1/items/categories').then((r) => setCategories(r.data.map((c) => c.name))).catch(() => {}), []);
   const [counts, setCounts] = useState<Record<string, string>>({});
   const [note, setNote] = useState(t('Stock count'));
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
-  useEffect(() => void api<{ data: StockItem[] }>('/v1/inventory?filter=tracked&limit=500').then((r) => setItems(r.data)).catch(setError), []);
+  useEffect(() => {
+    setItems(null);
+    void api<{ data: StockItem[] }>(`/v1/inventory?filter=tracked&limit=500${category ? `&category=${encodeURIComponent(category)}` : ''}`).then((r) => setItems(r.data)).catch(setError);
+  }, [category]);
   const filled = Object.entries(counts).filter(([, v]) => /^-?\d{1,12}(\.\d{1,3})?$/.test(v.trim()));
   const submit = async () => {
     setBusy(true);
@@ -271,6 +278,14 @@ function StockCountModal({ onClose, onDone }: { onClose: () => void; onDone: () 
     <Modal title={t('Stock count')} onClose={onClose} wide>
       <div className="stack">
         <p className="small muted">{t('Type what you counted on the shelf; leave the rest empty. Only what differs is recorded, as a count in each item’s history.')}</p>
+        {categories.length > 0 && (
+          <Field label={t('Category')}>
+            <Select value={category} onChange={(e) => setCategory(e.target.value)}>
+              <option value="">{t('Every category')}</option>
+              {categories.map((c) => <option key={c} value={c}>{c}</option>)}
+            </Select>
+          </Field>
+        )}
         {!items ? <div className="skeleton" style={{ height: '8rem' }} /> : items.length === 0 ? <p>{t('No stock tracked yet.')}</p> : (
           <div className="table-wrap count-table">
             <table>

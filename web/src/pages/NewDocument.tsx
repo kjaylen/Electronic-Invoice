@@ -19,7 +19,17 @@ interface Line {
   gstCategory: 'S' | 'Z' | 'E';
   exemptionReasonCode: string;
   discountPercent: string;
+  /** From the catalog: the usual price and the quantity prices, so the price follows the quantity until changed by hand. */
+  retail?: string | undefined;
+  breaks?: Array<{ minQuantity: string; unitPrice: string }> | undefined;
 }
+
+/** The price each at a quantity: the best quantity price reached, else the usual price. */
+const tierPrice = (retail: string, breaks: Array<{ minQuantity: string; unitPrice: string }> | undefined, quantity: string) => {
+  let best = retail;
+  for (const b of breaks ?? []) if (Number(quantity) >= Number(b.minQuantity)) best = b.unitPrice;
+  return best;
+};
 
 type NewCustomer = { name: string; tin: string; street: string; city: string; districtCode: string; telephone: string; email: string; save: boolean };
 
@@ -282,7 +292,22 @@ export function NewDocument({ mode = 'issue' }: { mode?: FormMode } = {}) {
 
   const isNote = type === '03' || type === '04';
   const needsCustomer = type !== '02';
-  const updateLine = (key: number, patch: Partial<Line>) => setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
+  const updateLine = (key: number, patch: Partial<Line>) => setLines((ls) => ls.map((l) => {
+    if (l.key !== key) return l;
+    const next = { ...l, ...patch };
+    // A new quantity: the quantity price, while the price is still the one the catalog gave.
+    if (patch.quantity !== undefined && patch.unitPrice === undefined && l.retail && l.breaks?.length && l.unitPrice === tierPrice(l.retail, l.breaks, l.quantity)) {
+      next.unitPrice = tierPrice(l.retail, l.breaks, next.quantity);
+    }
+    return next;
+  }));
+  /** What a picked item brings to a line: its price (wholesale, or for the line's quantity) and the quantity prices to follow. */
+  const fromCatalog = (it: Item, quantity: string): Partial<Line> => {
+    const wholesaleLine = priceFor(it) !== it.unitPrice;
+    return wholesaleLine
+      ? { unitPrice: priceFor(it), retail: undefined, breaks: undefined }
+      : { unitPrice: tierPrice(it.unitPrice, it.priceBreaks, quantity), retail: it.unitPrice, breaks: it.priceBreaks };
+  };
   const addLine = () => {
     const l = emptyLine();
     focusLine.current = l.key;
@@ -611,10 +636,10 @@ export function NewDocument({ mode = 'issue' }: { mode?: FormMode } = {}) {
                   render={(it) => <><strong>{it.name}</strong> <span className="muted">· {money(it.unitPrice)}{it.sellerCode && ` · ${it.sellerCode}`}{it.stock !== null && it.stock !== undefined && ` · ${t('{n} in stock', { n: it.stock })}`}</span></>}
                   value={l.description}
                   onText={(v) => updateLine(l.key, { description: v, itemId: undefined })}
-                  onPick={(it) => updateLine(l.key, { itemId: it.id, description: it.description, unitCode: it.unitCode, unitPrice: priceFor(it), gstCategory: it.gstCategory, exemptionReasonCode: it.exemptionReasonCode ?? '' })}
+                  onPick={(it) => updateLine(l.key, { itemId: it.id, description: it.description, unitCode: it.unitCode, ...fromCatalog(it, l.quantity), gstCategory: it.gstCategory, exemptionReasonCode: it.exemptionReasonCode ?? '' })}
                   onEnter={async (code) => {
                     const [hit] = (await api<Page<Item>>(`/v1/items?limit=1&code=${encodeURIComponent(code)}`)).data;
-                    if (hit) updateLine(l.key, { itemId: hit.id, description: hit.description, unitCode: hit.unitCode, unitPrice: priceFor(hit), gstCategory: hit.gstCategory, exemptionReasonCode: hit.exemptionReasonCode ?? '' });
+                    if (hit) updateLine(l.key, { itemId: hit.id, description: hit.description, unitCode: hit.unitCode, ...fromCatalog(hit, l.quantity), gstCategory: hit.gstCategory, exemptionReasonCode: hit.exemptionReasonCode ?? '' });
                   }}
                 />
               </Field>

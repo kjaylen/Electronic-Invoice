@@ -43,8 +43,11 @@ export function barcodeSvg(value: string, height = 34): string {
 function labelHtml(item: Item, business: string, show: { business: boolean; barcode: boolean }): string {
   const code = item.barcode ?? item.sellerCode ?? '';
   const bars = show.barcode && code ? barcodeSvg(code) : '';
+  // The first quantity price, under the price: "6+ BZ$3.94 each".
+  const deal = item.priceBreaks?.[0];
+  const dealHtml = deal ? `<div class="deal">${escapeHtml(String(Number(deal.minQuantity)))}+ BZ$${priceWithGst({ unitPrice: deal.unitPrice, gstCategory: item.gstCategory })} each</div>` : '';
   return `<div class="label">${show.business ? `<div class="biz">${escapeHtml(business)}</div>` : ''}<div class="name">${escapeHtml(item.name)}</div>`
-    + `<div class="price">BZ$${priceWithGst(item)}</div>${bars ? `<div class="bars">${bars}</div>` : ''}</div>`;
+    + `<div class="price">BZ$${priceWithGst(item)}</div>${dealHtml}${bars ? `<div class="bars">${bars}</div>` : ''}</div>`;
 }
 
 const SHEET_CSS = `@page { size: A4; margin: 10mm 7mm; }
@@ -57,6 +60,7 @@ body { margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; c
 const LABEL_CSS = `.biz { font-size: 6.5pt; color: #444; text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .name { font-size: 9pt; font-weight: 600; line-height: 1.15; max-height: 2.3em; overflow: hidden; }
 .price { font-size: 15pt; font-weight: 800; letter-spacing: -0.01em; margin: 0.6mm 0; }
+.deal { font-size: 7.5pt; font-weight: 700; margin: -0.4mm 0 0.4mm; }
 .bars { margin-top: auto; line-height: 0; }
 .bars svg { max-width: 100%; height: auto; max-height: 13mm; }`;
 
