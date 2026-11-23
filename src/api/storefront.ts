@@ -21,6 +21,7 @@
 
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { audit } from '../db/audit.ts';
+import { type CheckoutInput, markOrdered, restoreCheckout, saveCheckout, unsubscribe } from '../commerce/checkouts.ts';
 import { loadOrder, loadStore, type OrderInput, paymentMethodsFor, placeOrder, priceWithGst, quoteCart, StoreError, type StoreRef, variantTitle } from '../commerce/store.ts';
 import { simpleHtml } from '../mail/mailer.ts';
 import { renderEmail, renderStoreTheme, storeContext } from '../templates/render.ts';
@@ -86,6 +87,8 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
       delivery: { enabled: s.settings.delivery.enabled, zones: s.settings.delivery.enabled ? s.settings.delivery.zones.map((z) => ({ name: z.name, fee: priceWithGst(z.fee, 'S') })) : [] },
       pickup: { enabled: s.settings.pickup.enabled, address: s.settings.pickup.enabled ? `${s.street}, ${s.city}` : null },
       payments: { bankTransfer: p.bankTransfer.enabled, cashOnDelivery: p.cashOnDelivery.enabled, payAtPickup: p.payAtPickup.enabled, online: p.online.enabled ? p.online.provider : null },
+      // Buyers are told at checkout that they may get a reminder.
+      reminders: s.settings.reminders.enabled,
     };
   });
 
@@ -238,6 +241,7 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
               properties: { tin: { type: 'string', pattern: '^\\d{6}$' }, name: { type: 'string', minLength: 1, maxLength: 300 } },
             },
             note: { type: 'string', maxLength: 1000 },
+            checkoutId: uuid,
           },
         },
       },
@@ -246,6 +250,7 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
       const s = await store(request);
       if (await overLimit(db, `order|${request.ip}|${s.slug}`, 20, HOUR_MS) || await overLimit(db, `order|${request.ip}`, 60, HOUR_MS)) throw new ApiError(429, 'too_many_orders', 'Too many orders from here in the last hour; contact the store');
       const placed = await placeOrder(db, deps, s, request.body);
+      await markOrdered(db, s.tenantId, placed.id, request.body.checkoutId, request.body.customer.email).catch((e) => request.log.error({ err: e }, 'checkout not closed'));
       const path = `/${s.slug}/shop/orders/${placed.number}?t=${placed.token}`;
       await audit(db, { tenantId: s.tenantId, action: 'order.placed', target: `#${placed.number}`, details: { total: placed.quote.totals.total }, ip: request.ip });
       void notify(request, s, placed, path).catch((e) => request.log.error({ err: e }, 'order notification failed'));
@@ -259,6 +264,49 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
         }
       }
       return reply.code(201).send({ number: placed.number, token: placed.token, path, totals: placed.quote.totals, ...(payment && { payment }) });
+    },
+  );
+
+  // ---------- checkout reminders ----------
+
+  // The buyer's checkout as they fill it in (only once they have given an email).
+  app.put<{ Params: { slug: string; id: string }; Body: CheckoutInput }>(
+    '/:slug/checkouts/:id',
+    {
+      schema: {
+        params: { type: 'object', required: ['slug', 'id'], properties: { ...slugParams, id: uuid } },
+        body: {
+          type: 'object', required: ['email', 'lines'], additionalProperties: false,
+          properties: {
+            email: { type: 'string', maxLength: 254, pattern: '^[^\\s@,;<>]+@[^\\s@,;<>]+\\.[^\\s@,;<>]+$' },
+            name: { type: 'string', maxLength: 200 },
+            lines: { type: 'array', maxItems: 100, items: { type: 'object', required: ['variantId', 'quantity'], additionalProperties: false, properties: { variantId: uuid, quantity: { type: 'integer', minimum: 1, maximum: 9999 } } } },
+            ...choiceProps,
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const s = await store(request);
+      if (await overLimit(db, `checkout|${request.ip}`, 120, HOUR_MS)) throw new ApiError(429, 'too_many_requests', 'Too many requests from here; try again later');
+      const r = await saveCheckout(db, deps, s, request.params.id, request.body);
+      return reply.send(r);
+    },
+  );
+
+  // The link in a reminder: the cart and what the buyer had filled in.
+  app.get<{ Params: { slug: string }; Querystring: { t: string } }>(
+    '/:slug/checkouts/restore',
+    { schema: { params: { type: 'object', required: ['slug'], properties: slugParams }, querystring: { type: 'object', required: ['t'], properties: { t: { type: 'string', maxLength: 100 } } } } },
+    async (request) => restoreCheckout(db, await store(request), request.query.t),
+  );
+
+  // No more reminders from this store (the page's button, and one-click unsubscribe from mail apps).
+  app.post<{ Params: { slug: string }; Querystring: { t: string } }>(
+    '/:slug/checkouts/unsubscribe',
+    { schema: { params: { type: 'object', required: ['slug'], properties: slugParams }, querystring: { type: 'object', required: ['t'], properties: { t: { type: 'string', maxLength: 100 } } } } },
+    async (request) => {
+      return unsubscribe(db, await loadStore(db, request.params.slug, { requireOpen: false }), request.query.t);
     },
   );
 

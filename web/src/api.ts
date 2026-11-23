@@ -395,8 +395,26 @@ export interface StoreSettings {
   delivery: { enabled: boolean; zones: Array<{ name: string; fee: string }> };
   pickup: { enabled: boolean; instructions: string };
   payments: { bankTransfer: { enabled: boolean; instructions: string }; cashOnDelivery: { enabled: boolean }; payAtPickup: { enabled: boolean }; online: { enabled: boolean; provider: 'paypal' | 'test' | 'belizebank' | 'ekyash' } };
+  reminders: { enabled: boolean; afterHours: number; second: boolean };
   slug?: string;
 }
+
+/** A checkout left unfinished (checkout reminders). */
+export interface StoreCheckout {
+  id: string;
+  email: string;
+  name: string | null;
+  items: number;
+  total: string | null;
+  status: 'open' | 'ordered' | 'expired';
+  remindersSent: number;
+  lastRemindedAt: string | null;
+  recovered: boolean;
+  order: { id: string; number: number; total: string } | null;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface CheckoutSummary { left: number; reminded: number; recovered: number; recoveredTotal: string }
 
 export type PaymentMethod = 'bank_transfer' | 'cash_on_delivery' | 'pay_at_pickup' | 'online';
 
@@ -429,4 +447,6 @@ export interface Order {
   fulfilledAt: string | null;
   cancelledAt: string | null;
   cancelReason: string | null;
+  /** Placed after a checkout reminder (on the order page). */
+  recoveredByReminder?: boolean;
 }

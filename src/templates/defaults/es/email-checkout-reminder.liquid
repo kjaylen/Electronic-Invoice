@@ -1,0 +1,48 @@
+{%- comment -%}
+  Se envía a quien dio su correo al pagar y se fue sin hacer el pedido.
+  Mantenga el enlace para darse de baja: el comprador debe poder dejar de recibir estos correos.
+{% endcomment -%}
+<!doctype html>
+<html lang="es">
+<body style="margin:0;padding:0;background:#f4f5f7;font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;color:#0f1117">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f5f7;padding:32px 12px">
+    <tr><td align="center">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border:1px solid #e6e8ec;border-radius:14px">
+        <tr><td style="padding:28px 32px 6px">
+          {%- if store.logo %}
+          <img src="{{ store.logo }}" alt="{{ store.name }}" height="40" style="display:block;height:40px;width:auto;max-width:220px;border:0;margin:0 0 14px">
+          {%- else %}
+          <div style="font-size:13px;color:#646b7b">{{ store.name }}</div>
+          {%- endif %}
+          <h1 style="margin:6px 0 0;font-size:22px;line-height:1.25;letter-spacing:-0.02em">{% if reminder.number == 1 %}Su carrito le espera{% else %}¿Lo sigue pensando?{% endif %}</h1>
+        </td></tr>
+        <tr><td style="padding:14px 32px 4px;font-size:15px;line-height:1.6">
+          <p style="margin:0 0 14px">{% if buyer.name != blank %}Hola {{ buyer.name }}, dejó{% else %}Dejó{% endif %} esto en su carrito en {{ store.name }}. Lo guardamos para usted: siga donde lo dejó.</p>
+        </td></tr>
+        <tr><td style="padding:4px 32px">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #e6e8ec;font-size:14px">
+            {%- for item in items %}
+            <tr>
+              <td style="padding:10px 0;border-bottom:1px solid #e6e8ec">{{ item.title }}{% if item.variant %} <span style="color:#646b7b">({{ item.variant }})</span>{% endif %}{% if item.quantity > 1 %} <span style="color:#646b7b">× {{ item.quantity }}</span>{% endif %}</td>
+              <td align="right" style="padding:10px 0;border-bottom:1px solid #e6e8ec;white-space:nowrap">{{ item.total | money }}</td>
+            </tr>
+            {%- endfor %}
+            {%- if total %}
+            <tr><td style="padding:10px 0;font-weight:600">Total</td><td align="right" style="padding:10px 0;font-weight:600;white-space:nowrap">{{ total | money }}</td></tr>
+            {%- endif %}
+          </table>
+        </td></tr>
+        <tr><td style="padding:18px 32px 4px">
+          <a href="{{ url }}" style="display:inline-block;background:#6d2d93;color:#ffffff;padding:12px 22px;border-radius:9px;text-decoration:none;font-weight:600;font-size:15px">Terminar el pedido</a>
+        </td></tr>
+        <tr><td style="padding:14px 32px 0;font-size:14px;line-height:1.6;color:#3d4250">
+          Los precios y la disponibilidad son los de hoy y pueden cambiar. ¿Preguntas? {% if store.telephone %}Llámenos al {{ store.telephone }} o responda{% else %}Responda{% endif %} a este correo.
+        </td></tr>
+        <tr><td style="padding:22px 32px 28px;font-size:12px;line-height:1.6;color:#646b7b">
+          {{ store.name }}{% if store.city %} · {{ store.city }}{% endif %}. Recibe esto porque empezó un pedido en nuestra tienda{% if reminder.last %}; es el último recordatorio{% endif %}. <a href="{{ unsubscribe_url }}" style="color:#646b7b">Dejar de recibir estos correos</a>.
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>

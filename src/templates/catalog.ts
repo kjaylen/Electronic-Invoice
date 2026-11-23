@@ -128,6 +128,15 @@ export const TEMPLATES: TemplateDef[] = [
     variables: [{ name: 'store.name', description: 'Your store name' }, { name: 'store.logo', description: 'Your logo\'s address (empty when you have none)' }, IMAGES, { name: 'store.city', description: 'Where you are' }, { name: 'store.telephone', description: 'Your phone' }, { name: 'product.title', description: 'The product' }, { name: 'product.variant', description: 'The variant they wanted (may be empty)' }, { name: 'product.price', description: 'Its price with GST' }, { name: 'product.url', description: 'Its page in your store' }],
   },
   {
+    key: 'email.checkout-reminder', group: 'emails', name: 'Checkout reminder', preview: 'email', language: 'html', file: 'email-checkout-reminder.liquid',
+    description: 'Sent to a buyer who gave their email at checkout and left without ordering: an hour later (or as set), and once more a day after.',
+    subject: '{% if reminder.number == 1 %}You left something in your cart at {{ store.name }}{% else %}Still thinking it over? Your cart at {{ store.name }}{% endif %}',
+    subjectEs: '{% if reminder.number == 1 %}Dejó algo en su carrito en {{ store.name }}{% else %}¿Lo sigue pensando? Su carrito en {{ store.name }}{% endif %}',
+    variables: [{ name: 'store.name', description: 'Your store name' }, { name: 'store.logo', description: "Your logo's address (empty when you have none)" }, IMAGES, { name: 'store.city', description: 'Where you are' }, { name: 'store.telephone', description: 'Your phone' }, { name: 'store.url', description: 'Your store' },
+      { name: 'buyer.name', description: "The buyer's name (may be empty)" }, { name: 'items', description: 'What is in the cart: title, variant, quantity, price, total (with GST)' }, { name: 'total', description: "The cart's total as it stands now, with GST and delivery (may be empty)" },
+      { name: 'url', description: 'The link that puts the cart back and opens the checkout' }, { name: 'unsubscribe_url', description: 'The link to stop these emails (keep it in the email)' }, { name: 'reminder.number', description: '1 or 2' }, { name: 'reminder.last', description: 'Whether no other reminder follows' }],
+  },
+  {
     key: 'document.invoice', group: 'documents', name: 'Invoice and notes (A4)', preview: 'a4', language: 'html', file: 'document-invoice.liquid',
     description: 'The printed copy of tax invoices, debit notes and credit notes, and the PDF you email.',
     requires: [BTS], variables: PRINTED,

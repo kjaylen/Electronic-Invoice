@@ -2,7 +2,7 @@
 
 import { type FormEvent, useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
-import { api, type Order } from '../api';
+import { api, type Order, type CheckoutSummary, type StoreCheckout } from '../api';
 import { type T, useT } from '../i18n';
 import { useSession } from '../session';
 import { useToast } from '../toast';
@@ -45,6 +45,7 @@ export function Orders() {
   const [data, setData] = useState<{ data: Order[]; counts: { unpaid: number; unfulfilled: number } } | null>(null);
   const [error, setError] = useState<unknown>(null);
   const load = useCallback(() => {
+    if (view === 'unfinished') return;
     void api<{ data: Order[]; counts: { unpaid: number; unfulfilled: number } }>(`/v1/orders?view=${view}${q ? `&q=${encodeURIComponent(q)}` : ''}`).then(setData).catch(setError);
   }, [view, q]);
   useEffect(load, [load]);
@@ -71,12 +72,14 @@ export function Orders() {
             ['done', t('Done')],
             ['cancelled', t('Cancelled')],
             ['all', t('All')],
+            ['unfinished', t('Unfinished')],
           ]}
         />
         <span className="spacer" />
-        <input type="search" placeholder={t('Order number, name or phone')} aria-label={t('Search orders')} value={q} onChange={(e) => setQ(e.target.value)} style={{ maxWidth: 280 }} />
+        {view !== 'unfinished' && <input type="search" placeholder={t('Order number, name or phone')} aria-label={t('Search orders')} value={q} onChange={(e) => setQ(e.target.value)} style={{ maxWidth: 280 }} />}
       </div>
       <ErrorText error={error} />
+      {view === 'unfinished' ? <UnfinishedCheckouts /> : (
       <section className="card">
         {data === null ? <div className="stack"><div className="skeleton" /><div className="skeleton" /></div> : data.data.length === 0 ? (
           <div className="empty">{view === 'to_do' ? t('Nothing to do. New orders from your store appear here.') : t('No orders here.')}</div>
@@ -100,7 +103,54 @@ export function Orders() {
           </div>
         )}
       </section>
+      )}
     </div>
+  );
+}
+
+/** Checkouts where the buyer gave their email and left; and those a reminder brought back. */
+function UnfinishedCheckouts() {
+  const t = useT();
+  const [which, setWhich] = useState<'open' | 'recovered'>('open');
+  const [data, setData] = useState<{ data: StoreCheckout[]; summary: CheckoutSummary } | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  useEffect(() => {
+    setData(null);
+    void api<{ data: StoreCheckout[]; summary: CheckoutSummary }>(`/v1/store-checkouts?view=${which}`).then(setData).catch(setError);
+  }, [which]);
+  return (
+    <section className="card stack">
+      <div className="row">
+        <p className="small muted" style={{ margin: 0 }}>
+          {data && data.summary.reminded > 0 ? t('Last 30 days: {reminded} reminded, {recovered} came back and ordered ({amount}).', { reminded: data.summary.reminded, recovered: data.summary.recovered, amount: money(data.summary.recoveredTotal) }) : '\u00a0'}
+        </p>
+        <span className="spacer" />
+        <Segmented label={t('Show')} value={which} onChange={setWhich} options={[['open', t('Waiting')], ['recovered', t('Came back')]]} />
+      </div>
+      <ErrorText error={error} />
+      {data === null ? <div className="skeleton" style={{ height: '4rem' }} /> : data.data.length === 0 ? (
+        <div className="empty">{which === 'open' ? t('No unfinished checkouts. When a buyer gives their email and leaves, they appear here, and get a reminder (Settings → Online store).') : t('No orders from reminders yet.')}</div>
+      ) : (
+        <div className="table-wrap">
+          <table className="responsive">
+            <thead><tr><th scope="col">{t('Buyer')}</th><th scope="col">{t('Last seen')}</th><th scope="col" className="right">{t('Items')}</th><th scope="col" className="right">{t('Total')}</th><th scope="col">{t('Reminders')}</th></tr></thead>
+            <tbody>
+              {data.data.map((c) => (
+                <tr key={c.id}>
+                  <td data-label={t('Buyer')}>{c.name ?? '—'}<div className="small"><a href={`mailto:${c.email}`}>{c.email}</a></div></td>
+                  <td data-label={t('Last seen')} className="small">{when(c.updatedAt)}</td>
+                  <td data-label={t('Items')} className="right">{c.items}</td>
+                  <td data-label={t('Total')} className="right">{c.order ? money(c.order.total) : c.total ? money(c.total) : '—'}</td>
+                  <td data-label={t('Reminders')} className="small">
+                    {c.order ? <Link to={`/orders/${c.order.id}`} viewTransition>{t('Ordered: #{n}', { n: c.order.number })}</Link> : c.remindersSent === 0 ? t('Not sent yet') : c.remindersSent === 1 ? t('1 sent') : t('{n} sent', { n: c.remindersSent })}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -171,6 +221,7 @@ export function OrderDetail() {
         </div>
         <span className="spacer" />
         <OrderBadges order={o} />
+        {o.recoveredByReminder && <span className="badge authorized">{t('Came back after a reminder')}</span>}
       </div>
       {step && <div className="banner info" role="status"><div><strong>{t('Next step')}</strong>{step}</div></div>}
       {o.status === 'cancelled' && <div className="banner info"><div><strong>{t('Cancelled')}</strong>{o.cancelReason}</div></div>}

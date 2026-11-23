@@ -260,6 +260,7 @@ const settingsSchema = {
         online: { type: 'object', additionalProperties: false, properties: { enabled: { type: 'boolean' }, provider: { type: 'string', enum: ['paypal', 'test', 'belizebank', 'ekyash'] } } },
       },
     },
+    reminders: { type: 'object', additionalProperties: false, properties: { enabled: { type: 'boolean' }, afterHours: { type: 'integer', enum: [1, 2, 3, 6, 12, 24] }, second: { type: 'boolean' } } },
   },
 } as const;
 

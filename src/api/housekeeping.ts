@@ -20,6 +20,7 @@ import { reverseVoidedSales } from '../inventory/stock.ts';
 import { runRecurringExpenses } from './recurring-expenses.ts';
 import { reverseVoidedLoyalty } from './loyalty.ts';
 import { runStockAlerts } from '../commerce/stock-alerts.ts';
+import { runCheckoutReminders } from '../commerce/checkouts.ts';
 
 export interface HousekeepingOptions {
   mailer?: Mailer;
@@ -74,6 +75,7 @@ export async function runHousekeepingOnce(db: Queryable, options: HousekeepingOp
     result.notifications = await step('notifications', () => runNotifications(db, { mailer, ...(options.publicUrl && { publicUrl: options.publicUrl }) }));
     await step('daily summaries', () => runDailySummaries(db, { mailer, ...(options.publicUrl && { publicUrl: options.publicUrl }) }));
     await step('back in stock', () => runStockAlerts(db, { mailer, ...(options.publicUrl && { publicUrl: options.publicUrl }) }));
+    await step('checkout reminders', () => runCheckoutReminders(db, {}, { mailer, ...(options.publicUrl && { publicUrl: options.publicUrl }) }));
   }
   if (options.alertWebhookUrl) {
     const url = options.alertWebhookUrl;

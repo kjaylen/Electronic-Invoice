@@ -27,6 +27,8 @@ interface StoreInfo {
   delivery: { enabled: boolean; zones: Array<{ name: string; fee: string }> };
   pickup: { enabled: boolean; address: string | null };
   payments: { bankTransfer: boolean; cashOnDelivery: boolean; payAtPickup: boolean; online: 'paypal' | 'test' | 'belizebank' | 'ekyash' | null };
+  /** The store may email a reminder to buyers who leave at checkout. */
+  reminders?: boolean;
   /** The business's theme (Settings, Templates), rendered and sanitized by the server. Empty strings: none. */
   theme?: StoreTheme;
 }
@@ -84,6 +86,20 @@ window.addEventListener('storage', (e) => {
     listeners.forEach((l) => l());
   }
 });
+// ---------- this checkout (checkout reminders) ----------
+
+const CHECKOUT_KEY = `etd.checkout.${slug}`;
+const PREFILL_KEY = `etd.checkout.prefill.${slug}`;
+/** The id the store knows this checkout by, made on first use (a new one after each order). */
+function checkoutId(): string {
+  const existing = store.get<string>(CHECKOUT_KEY);
+  if (existing) return existing;
+  const id = crypto.randomUUID();
+  store.set(CHECKOUT_KEY, id);
+  return id;
+}
+interface Prefill { email: string; name: string | null; fulfillment: 'delivery' | 'pickup' | null; zone: string | null; discountCode: string | null }
+
 export function useCart() {
   const lines = useSyncExternalStore((cb) => {
     listeners.add(cb);
@@ -403,16 +419,25 @@ export function ShopCheckout() {
   const info = useStoreInfo();
   const navigate = useNavigate();
   const cart = useCart();
-  const [fulfillment, setFulfillment] = useState<'delivery' | 'pickup'>(info.delivery.enabled ? 'delivery' : 'pickup');
-  const [zone, setZone] = useState(info.delivery.zones[0]?.name ?? '');
+  const [fulfillment, setFulfillment] = useState<'delivery' | 'pickup'>(() => {
+    const p = store.get<Prefill>(PREFILL_KEY);
+    return p?.fulfillment === 'pickup' && info.pickup.enabled ? 'pickup' : info.delivery.enabled ? 'delivery' : 'pickup';
+  });
+  const [zone, setZone] = useState(() => {
+    const p = store.get<Prefill>(PREFILL_KEY);
+    return p?.zone && info.delivery.zones.some((z) => z.name === p.zone) ? p.zone : info.delivery.zones[0]?.name ?? '';
+  });
   const [payment, setPayment] = useState<PaymentMethod | ''>('');
-  const [contact, setContact] = useState({ name: '', email: '', phone: '' });
+  // Back from a reminder's link: what the buyer had filled in.
+  const [prefill] = useState(() => store.get<Prefill>(PREFILL_KEY));
+  useEffect(() => store.remove(PREFILL_KEY), []);
+  const [contact, setContact] = useState({ name: prefill?.name ?? '', email: prefill?.email ?? '', phone: '' });
   const [address, setAddress] = useState({ street: '', city: '', districtCode: '1' });
   const [wantsInvoice, setWantsInvoice] = useState(false);
   const [business, setBusiness] = useState({ tin: '', name: '' });
   const [note, setNote] = useState('');
-  const [codeInput, setCodeInput] = useState('');
-  const [code, setCode] = useState('');
+  const [codeInput, setCodeInput] = useState(prefill?.discountCode ?? '');
+  const [code, setCode] = useState(prefill?.discountCode ?? '');
   const [codeError, setCodeError] = useState<unknown>(null);
   const [quote, setQuote] = useState<QuoteResult | null>(null);
   const [quoteError, setQuoteError] = useState<unknown>(null);
@@ -443,6 +468,19 @@ export function ShopCheckout() {
   }, [linesBody, fulfillment, zone, code]);
   useEffect(refresh, [refresh]);
 
+  // Once there is an email, the store keeps this checkout, to send a reminder if the buyer leaves.
+  const validEmail = /^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+$/.test(contact.email.trim());
+  useEffect(() => {
+    if (!info.reminders || !validEmail || !linesBody.length) return;
+    const timer = setTimeout(() => {
+      void api(shopApi(`/checkouts/${checkoutId()}`), {
+        method: 'PUT',
+        body: { email: contact.email.trim(), ...(contact.name.trim() && { name: contact.name.trim() }), lines: linesBody, fulfillment, ...(fulfillment === 'delivery' && zone && { zone }), ...(code && { discountCode: code }) },
+      }).catch(() => {});
+    }, 1200);
+    return () => clearTimeout(timer);
+  }, [info.reminders, validEmail, contact.email, contact.name, linesBody, fulfillment, zone, code]);
+
   if (!cart.lines.length) return <div className="shop-empty"><h1>{t('Your cart is empty')}</h1><Link className="button" to="/shop">{t('Keep shopping')}</Link></div>;
   const needsAddress = fulfillment === 'delivery' || wantsInvoice;
 
@@ -465,9 +503,11 @@ export function ShopCheckout() {
           ...(wantsInvoice && { business }),
           ...(note.trim() && { note: note.trim() }),
           ...(code && { discountCode: code }),
+          ...(info.reminders && store.get<string>(CHECKOUT_KEY) && { checkoutId: store.get<string>(CHECKOUT_KEY) }),
         },
       });
       cart.clear();
+      store.remove(CHECKOUT_KEY);
       store.set(`etd.orderlinks.${slug}`, { ...(store.get<Record<string, string>>(`etd.orderlinks.${slug}`) ?? {}), [String(r.number)]: `/shop/orders/${r.number}?t=${r.token}` });
       // Paying online: on to the payment page (the provider's, or the test card page).
       if (r.payment && 'redirectUrl' in r.payment) {
@@ -493,7 +533,7 @@ export function ShopCheckout() {
           <Field label={t('Name')}><input required autoComplete="name" value={contact.name} onChange={(e) => setContact({ ...contact, name: e.target.value })} /></Field>
           <div className="form-grid">
             <Field label={t('Phone')} hint={t('So the store can reach you about the order.')}><input required type="tel" autoComplete="tel" value={contact.phone} onChange={(e) => setContact({ ...contact, phone: e.target.value })} /></Field>
-            <Field label={t('Email')} hint={t('For your order confirmation and receipt. Optional.')}><input type="email" autoComplete="email" value={contact.email} onChange={(e) => setContact({ ...contact, email: e.target.value })} /></Field>
+            <Field label={t('Email')} hint={info.reminders ? `${t('For your order confirmation and receipt. Optional.')} ${t('If you leave before ordering, we may email you a reminder; you can stop them from the email.')}` : t('For your order confirmation and receipt. Optional.')}><input type="email" autoComplete="email" value={contact.email} onChange={(e) => setContact({ ...contact, email: e.target.value })} /></Field>
           </div>
         </fieldset>
 
@@ -813,5 +853,68 @@ function BackInStock({ handle, variantId }: { handle: string; variantId: string 
       <button type="submit" className="secondary" disabled={busy || !email.trim()}>{t('Email me when it is back')}</button>
       <ErrorText error={error} />
     </form>
+  );
+}
+
+/** A reminder's link: the cart goes back on this device, then on to the checkout. */
+export function ShopResume() {
+  const t = useT();
+  const info = useStoreInfo();
+  usePageTitle(t('Your cart'), info.name);
+  const [params] = useSearchParams();
+  const navigate = useNavigate();
+  const [state, setState] = useState<'loading' | 'ordered' | 'empty' | 'error'>('loading');
+  useEffect(() => {
+    const token = params.get('t') ?? '';
+    void api<{ ordered: true } | ({ ordered: false; checkoutId: string; lines: CartLine[] } & Prefill)>(shopApi(`/checkouts/restore?t=${encodeURIComponent(token)}`))
+      .then((r) => {
+        if (r.ordered) return setState('ordered');
+        if (!r.lines.length) return setState('empty');
+        setCart(r.lines);
+        store.set(CHECKOUT_KEY, r.checkoutId);
+        store.set(PREFILL_KEY, { email: r.email, name: r.name, fulfillment: r.fulfillment, zone: r.zone, discountCode: r.discountCode });
+        navigate('/shop/checkout', { replace: true });
+      })
+      .catch(() => setState('error'));
+  }, [params, navigate]);
+  if (state === 'loading') return <div className="shop-empty"><p className="muted">{t('Getting your cart…')}</p></div>;
+  return (
+    <div className="shop-empty">
+      <h1>{state === 'ordered' ? t('You already ordered this') : state === 'empty' ? t('These are no longer available') : t('This link has expired')}</h1>
+      <p className="muted">{state === 'ordered' ? t('Thank you. Your order confirmation has the details.') : t('Have a look at what is in the store now.')}</p>
+      <Link className="button" to="/shop">{t('Go to the store')}</Link>
+    </div>
+  );
+}
+
+/** A reminder's "stop these emails" link. */
+export function ShopUnsubscribe() {
+  const t = useT();
+  const info = useStoreInfo();
+  usePageTitle(t('Email reminders'), info.name);
+  const [params] = useSearchParams();
+  const [state, setState] = useState<'ask' | 'busy' | 'done' | 'error'>('ask');
+  const stop = () => {
+    setState('busy');
+    void api(shopApi(`/checkouts/unsubscribe?t=${encodeURIComponent(params.get('t') ?? '')}`), { method: 'POST' }).then(() => setState('done')).catch(() => setState('error'));
+  };
+  return (
+    <div className="shop-empty">
+      {state === 'done' ? (
+        <>
+          <h1>{t('You will not get these reminders again')}</h1>
+          <p className="muted">{t('{store} will still email you about orders you place.', { store: info.name })}</p>
+        </>
+      ) : state === 'error' ? (
+        <h1>{t('This link has expired')}</h1>
+      ) : (
+        <>
+          <h1>{t('Stop cart reminders from {store}?', { store: info.name })}</h1>
+          <p className="muted">{t('We email a reminder when an order is started and not finished. Order confirmations still come.')}</p>
+          <button onClick={stop} disabled={state === 'busy'}>{t('Stop these emails')}</button>
+        </>
+      )}
+      <Link to="/shop">{t('Go to the store')}</Link>
+    </div>
   );
 }

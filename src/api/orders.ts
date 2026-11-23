@@ -3,6 +3,7 @@
  *
  *   GET  /v1/orders                 list: view=to_do (default) | unpaid | unfulfilled | done | cancelled | all
  *   GET  /v1/orders/:id
+ *   GET  /v1/store-checkouts        checkouts left unfinished (view=open|recovered|all) and the last 30 days' reminders and recovered sales
  *   POST /v1/orders/:id/paid        payment received: issues the BTS receipt (or tax invoice) and emails it
  *   POST /v1/orders/:id/ready       ready for pickup or out for delivery { message?, notify? }: emails the buyer
  *   POST /v1/orders/:id/fulfilled   delivered or picked up
@@ -14,6 +15,7 @@ import type { FastifyInstance } from 'fastify';
 import { audit } from '../db/audit.ts';
 import { BELIZE_DISTRICTS } from '../engine/ubl.ts';
 import { cancelOrder, centsString, fulfillOrder, loadOrder, loadRefunds, markOrderPaid, type OrderLineRow, type OrderRow, refundable, refundOrder, type RefundRow, trimDecimal } from '../commerce/store.ts';
+import { checkoutSummary, listCheckouts } from '../commerce/checkouts.ts';
 import type { PipelineDeps } from '../pipeline/issue.ts';
 import type { ServerContext } from './context.ts';
 import { checkCreditLimit, sendDocumentEmail } from './documents.ts';
@@ -141,8 +143,21 @@ export function registerOrderRoutes(app: FastifyInstance, deps: PipelineDeps, ct
   app.get<{ Params: { id: string } }>('/orders/:id', { schema: { params: idParams } }, async (request) => {
     const loaded = await loadOrder(db, request.tenantId, { id: request.params.id });
     if (!loaded) throw notFound('Order');
-    return fullOrder(deps, request.tenantId, loaded.order.id);
+    const full = await fullOrder(deps, request.tenantId, loaded.order.id);
+    // Placed after a checkout reminder.
+    const recovered = (await db.query('select 1 from store_checkouts where tenant_id = $1 and order_id = $2 and recovered limit 1', [request.tenantId, loaded.order.id])).rows.length > 0;
+    return { ...full, recoveredByReminder: recovered };
   });
+
+  // Checkouts left unfinished (checkout reminders), and the last 30 days' summary.
+  app.get<{ Querystring: { view?: 'open' | 'recovered' | 'all' } }>(
+    '/store-checkouts',
+    { schema: { querystring: { type: 'object', additionalProperties: false, properties: { view: { type: 'string', enum: ['open', 'recovered', 'all'] } } } } },
+    async (request) => {
+      requirePermission(request, 'orders.manage');
+      return { data: await listCheckouts(db, request.tenantId, request.query.view ?? 'open'), summary: await checkoutSummary(db, request.tenantId) };
+    },
+  );
 
   app.post<{ Params: { id: string } }>('/orders/:id/paid', { schema: { params: idParams } }, async (request) => {
     requirePermission(request, 'documents.issue');

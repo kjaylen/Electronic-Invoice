@@ -1,7 +1,8 @@
 /** Settings → Online store: open the store, delivery zones, pickup, payment methods, online payments, discount codes, own domain. */
 
 import { type FormEvent, useEffect, useState } from 'react';
-import { api, type StoreSettings } from '../api';
+import { Link } from 'react-router';
+import { api, type CheckoutSummary, type StoreSettings } from '../api';
 import { useT } from '../i18n';
 import { useToast } from '../toast';
 import { ErrorText, Field, money, Select } from '../ui';
@@ -18,6 +19,10 @@ export function StoreSettingsTab() {
   const [accountsVersion, setAccountsVersion] = useState(0);
   const [testAvailable, setTestAvailable] = useState(false);
   const [connected, setConnected] = useState<{ paypal: boolean; belizebank: boolean; ekyash: boolean }>({ paypal: false, belizebank: false, ekyash: false });
+  const [summary, setSummary] = useState<CheckoutSummary | null>(null);
+  useEffect(() => {
+    void api<{ summary: CheckoutSummary }>('/v1/store-checkouts').then((r) => setSummary(r.summary)).catch(() => {});
+  }, []);
   useEffect(() => {
     void api<StoreSettings>('/v1/store-settings').then(setS).catch(setError);
   }, [accountsVersion]);
@@ -126,6 +131,25 @@ export function StoreSettingsTab() {
           <EKyashConnect onChanged={() => setAccountsVersion((v) => v + 1)} />
           <PayPalConnect onChanged={() => setAccountsVersion((v) => v + 1)} />
         </div>
+      </section>
+      <section className="card stack">
+        <label className="row toggle"><input type="checkbox" checked={s.reminders.enabled} onChange={(e) => setS({ ...s, reminders: { ...s.reminders, enabled: e.target.checked } })} /> <strong>{t('Checkout reminders')}</strong></label>
+        <p className="small muted" style={{ margin: 0 }}>{t('A buyer who gives their email at checkout and leaves without ordering gets an email with a link back to their cart. Every reminder has a link to stop them.')}</p>
+        {s.reminders.enabled && (
+          <div className="row" style={{ gap: '1rem', alignItems: 'end' }}>
+            <Field label={t('Send the reminder')}>
+              <Select value={String(s.reminders.afterHours)} onChange={(e) => setS({ ...s, reminders: { ...s.reminders, afterHours: Number(e.target.value) } })}>
+                {[1, 2, 3, 6, 12, 24].map((h) => <option key={h} value={String(h)}>{h === 1 ? t('1 hour after they leave') : t('{n} hours after they leave', { n: h })}</option>)}
+              </Select>
+            </Field>
+            <label className="row toggle" style={{ paddingBottom: '0.55rem' }}><input type="checkbox" checked={s.reminders.second} onChange={(e) => setS({ ...s, reminders: { ...s.reminders, second: e.target.checked } })} /> {t('And once more a day later')}</label>
+          </div>
+        )}
+        {summary && summary.reminded > 0 && (
+          <p className="small" style={{ margin: 0 }}>
+            {t('Last 30 days: {reminded} reminded, {recovered} came back and ordered ({amount}).', { reminded: summary.reminded, recovered: summary.recovered, amount: money(summary.recoveredTotal) })} <Link to="/orders?view=unfinished" viewTransition>{t('See unfinished checkouts')}</Link>
+          </p>
+        )}
       </section>
       <div className="row"><span className="spacer" /><button type="submit" disabled={busy}>{busy ? t('Saving…') : t('Save store settings')}</button></div>
       <DiscountCodes />

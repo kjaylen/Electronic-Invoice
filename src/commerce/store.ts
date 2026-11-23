@@ -53,6 +53,8 @@ export interface StoreSettings {
     /** Card or PayPal at checkout, through the business's own payment account. */
     online: { enabled: boolean; provider: 'paypal' | 'test' | 'belizebank' | 'ekyash' };
   };
+  /** Emails to buyers who left at checkout: the first after some hours, optionally a second a day later. */
+  reminders: { enabled: boolean; afterHours: number; second: boolean };
 }
 
 export const DEFAULT_STORE_SETTINGS: StoreSettings = {
@@ -64,6 +66,7 @@ export const DEFAULT_STORE_SETTINGS: StoreSettings = {
   delivery: { enabled: true, zones: [{ name: 'Belize City', fee: '10.00' }] },
   pickup: { enabled: true, instructions: '' },
   payments: { bankTransfer: { enabled: true, instructions: '' }, cashOnDelivery: { enabled: true }, payAtPickup: { enabled: true }, online: { enabled: false, provider: 'test' } },
+  reminders: { enabled: true, afterHours: 1, second: true },
 };
 
 /** Stored settings over the defaults, so older or partial settings always have every field. */
@@ -84,6 +87,7 @@ export function withDefaults(stored: Partial<StoreSettings> | null | undefined):
       payAtPickup: { enabled: s.payments?.payAtPickup?.enabled ?? d.payments.payAtPickup.enabled },
       online: { enabled: s.payments?.online?.enabled ?? false, provider: s.payments?.online?.provider ?? 'test' },
     },
+    reminders: { enabled: s.reminders?.enabled ?? d.reminders.enabled, afterHours: s.reminders?.afterHours ?? d.reminders.afterHours, second: s.reminders?.second ?? d.reminders.second },
   };
 }
 
@@ -310,6 +314,8 @@ export interface OrderInput extends CheckoutChoice {
   /** For a tax invoice instead of a receipt. */
   business?: { tin: string; name: string };
   note?: string;
+  /** The checkout this order completes (checkout reminders). */
+  checkoutId?: string;
 }
 
 const tokenHash = (token: string) => createHash('sha256').update(token, 'utf8').digest('hex');

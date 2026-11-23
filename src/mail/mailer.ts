@@ -25,6 +25,8 @@ export interface MailMessage {
   html?: string;
   replyTo?: string;
   attachments?: MailAttachment[];
+  /** Extra headers, e.g. List-Unsubscribe. */
+  headers?: Record<string, string>;
 }
 
 export interface Mailer {

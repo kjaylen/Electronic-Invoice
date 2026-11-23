@@ -50,6 +50,8 @@ const ShopCart = page(() => import('./pages/Shop'), 'ShopCart');
 const ShopCheckout = page(() => import('./pages/Shop'), 'ShopCheckout');
 const ShopOrder = page(() => import('./pages/Shop'), 'ShopOrder');
 const ShopTestPayment = page(() => import('./pages/Shop'), 'ShopTestPayment');
+const ShopResume = page(() => import('./pages/Shop'), 'ShopResume');
+const ShopUnsubscribe = page(() => import('./pages/Shop'), 'ShopUnsubscribe');
 const Reports = page(() => import('./pages/Reports'), 'Reports');
 const Receivables = page(() => import('./pages/Receivables'), 'Receivables');
 const Expenses = page(() => import('./pages/Expenses'), 'Expenses');
@@ -365,6 +367,8 @@ function BusinessApp() {
           <Route path="checkout" element={<ShopCheckout />} />
           <Route path="orders/:number" element={<ShopOrder />} />
           <Route path="pay/:paymentId" element={<ShopTestPayment />} />
+          <Route path="resume" element={<ShopResume />} />
+          <Route path="unsubscribe" element={<ShopUnsubscribe />} />
         </Route>
       </Route>
       <Route element={<RequireSession />}>
@@ -425,6 +429,8 @@ function StoreDomainApp() {
           <Route path="checkout" element={<ShopCheckout />} />
           <Route path="orders/:number" element={<ShopOrder />} />
           <Route path="pay/:paymentId" element={<ShopTestPayment />} />
+          <Route path="resume" element={<ShopResume />} />
+          <Route path="unsubscribe" element={<ShopUnsubscribe />} />
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/shop" replace />} />

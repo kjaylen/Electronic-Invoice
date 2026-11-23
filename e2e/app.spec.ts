@@ -484,6 +484,8 @@ test('online store: a product with sizes and a photo, open the store, a buyer or
   await page.getByLabel(/^Bank details for buyers/).fill('Test Bank, account Corner Store, 111-222');
   await page.getByRole('button', { name: 'Open the store' }).click();
   await expect(page.getByRole('heading', { name: 'Your store is open' })).toBeVisible();
+  // Checkout reminders are on unless the store turns them off.
+  await expect(page.getByRole('checkbox', { name: 'Checkout reminders' })).toBeChecked();
 
   // A buyer, on another device.
   const buyer = await (await browser.newContext()).newPage();
@@ -498,13 +500,24 @@ test('online store: a product with sizes and a photo, open the store, a buyer or
   await buyer.getByRole('button', { name: /Check out/ }).click();
   await buyer.getByLabel('Name', { exact: true }).fill('Bea Buyer');
   await buyer.getByLabel(/^Phone/).fill('+501 600 1234');
+  await expect(buyer.getByText(/If you leave before ordering, we may email you a reminder/)).toBeVisible();
+  const kept = buyer.waitForResponse((r) => /\/checkouts\/[0-9a-f-]{36}$/.test(r.url()) && r.request().method() === 'PUT');
   await buyer.getByLabel(/^Email/).fill('bea@buyer.test');
   await buyer.getByRole('radio', { name: /Pickup/ }).check();
   await expect(buyer.locator('.summary .grand')).toContainText('BZ$67.50');
+  expect((await (await kept).json()).saved).toBe(true);
+  // Before she orders, the store sees a checkout waiting for a reminder.
+  await page.goto(p('/orders?view=unfinished'));
+  await expect(page.getByRole('row', { name: /bea@buyer\.test/ })).toContainText('Not sent yet');
   await buyer.getByRole('button', { name: /Place order/ }).click();
   await expect(buyer.getByRole('heading', { name: 'Thank you, Bea' })).toBeVisible();
   await expect(buyer.locator('pre.instructions')).toContainText('Test Bank');
   const orderUrl = buyer.url();
+  // Ordered: no longer unfinished. A reminder link that is not valid says so.
+  await page.reload();
+  await expect(page.getByText(/No unfinished checkouts/)).toBeVisible();
+  await buyer.goto(p('/shop/resume?t=not-a-real-link-0000000000'));
+  await expect(buyer.getByRole('heading', { name: 'This link has expired' })).toBeVisible();
 
   // The merchant confirms the transfer: that issues the receipt.
   await page.getByRole('navigation').getByRole('link', { name: 'Orders' }).click();
