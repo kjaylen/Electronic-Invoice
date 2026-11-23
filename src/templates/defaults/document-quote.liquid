@@ -1,0 +1,74 @@
+{%- comment -%}
+  A quotation (A4). Not a tax document: lay it out however you like.
+{% endcomment -%}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Quotation {{ quote.number }}</title>
+<style>
+  @page { size: A4; margin: 16mm; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 10.5pt; line-height: 1.45; color: #14161b; }
+  .top { display: flex; justify-content: space-between; gap: 12mm; padding-bottom: 6mm; border-bottom: 1.5pt solid #14161b; }
+  .logo { display: block; max-width: 60mm; max-height: 20mm; margin-bottom: 3mm; }
+  .name { font-size: 15pt; font-weight: 700; }
+  .muted { color: #5b6170; }
+  .title { text-align: right; }
+  .type { font-size: 22pt; font-weight: 700; letter-spacing: -0.02em; }
+  .label { font-size: 8.5pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #5b6170; margin: 6mm 0 1.5mm; }
+  table { width: 100%; border-collapse: collapse; }
+  th { font-size: 8.5pt; text-transform: uppercase; letter-spacing: 0.05em; color: #5b6170; text-align: left; padding: 2mm; border-bottom: 1pt solid #14161b; }
+  td { padding: 2.5mm 2mm; border-bottom: 0.5pt solid #d9dce2; vertical-align: top; }
+  .r { text-align: right; white-space: nowrap; }
+  .totals { width: 70mm; margin: 6mm 0 0 auto; }
+  .totals td { border: 0; padding: 1.3mm 0; }
+  .totals .grand td { border-top: 1.5pt solid #14161b; padding-top: 2.5mm; font-size: 13pt; font-weight: 700; }
+  .stamp { display: inline-block; margin-top: 3mm; padding: 1mm 3mm; border: 1.5pt solid currentColor; border-radius: 2mm; font-weight: 700; letter-spacing: 0.1em; color: #11703a; }
+  .terms { margin-top: 8mm; font-size: 9.5pt; color: #3d4250; white-space: pre-line; }
+</style>
+</head>
+<body>
+  <div class="top">
+    <div>
+      {%- if business.logo %}<img class="logo" src="{{ business.logo }}" alt="{{ business.name }}">{% endif %}
+      <div class="name">{{ business.name }}</div>
+      <div>TIN {{ business.tin }}</div>
+      {%- for line in business.address_lines %}<div>{{ line }}</div>{% endfor %}
+      <div class="muted">{{ business.telephone }}{% if business.telephone and business.email %} · {% endif %}{{ business.email }}</div>
+    </div>
+    <div class="title">
+      <div class="type">Quotation</div>
+      <div>No. {{ quote.number }}</div>
+      <div class="muted">{{ quote.date | date: '%B %-d, %Y' }}</div>
+      <div class="muted">Valid until {{ quote.valid_until | date: '%B %-d, %Y' }}</div>
+      {%- if quote.status == 'accepted' or quote.status == 'invoiced' %}<div class="stamp">{{ quote.status | upcase }}</div>{% endif %}
+    </div>
+  </div>
+
+  <div class="label">For</div>
+  <div><strong>{{ customer.name }}</strong></div>
+  {%- if customer.tin %}<div>TIN {{ customer.tin }}</div>{% endif %}
+  {%- for line in customer.address_lines %}<div>{{ line }}</div>{% endfor %}
+
+  <div class="label">Items</div>
+  <table>
+    <thead><tr><th>Description</th><th class="r">Quantity</th><th class="r">Unit price</th><th class="r">GST</th><th class="r">Total</th></tr></thead>
+    <tbody>
+      {%- for line in quote.lines %}
+      <tr><td>{{ line.description }}</td><td class="r">{{ line.quantity }} {{ line.unit }}</td><td class="r">{{ line.unit_price | amount }}</td><td class="r">{{ line.gst | amount }}</td><td class="r">{{ line.total | amount }}</td></tr>
+      {%- endfor %}
+    </tbody>
+  </table>
+
+  <table class="totals">
+    <tr><td>Subtotal</td><td class="r">{{ quote.totals.subtotal | amount }}</td></tr>
+    <tr><td>GST</td><td class="r">{{ quote.totals.gst | amount }}</td></tr>
+    <tr class="grand"><td>Total BZD</td><td class="r">{{ quote.totals.total | amount }}</td></tr>
+  </table>
+
+  {%- if quote.terms %}<div class="label">Terms</div><div class="terms">{{ quote.terms }}</div>{% endif %}
+  {%- if quote.note %}<div class="terms">{{ quote.note }}</div>{% endif %}
+  <div class="terms muted">A quotation is not a tax document. A tax invoice is issued when the work is invoiced.</div>
+</body>
+</html>

@@ -19,8 +19,12 @@ export type TicketLine =
   | { kind: 'pair'; left: string; right: string; bold?: boolean }
   | { kind: 'rule' }
   | { kind: 'qr'; data: string }
-  | { kind: 'feed'; lines: number };
+  | { kind: 'feed'; lines: number }
+  | TicketImage;
 export type Ticket = TicketLine[];
+
+/** A picture (the logo): 1-bit rows for ESC/POS (MSB first, 1 = black), and an image for system printers. */
+export interface TicketImage { kind: 'image'; width: number; height: number; bits: Uint8Array; src: string }
 
 export interface PrintOptions {
   /** Paper width: 58 mm (32 characters) or 80 mm (48). */
@@ -59,14 +63,17 @@ export interface DocumentView {
   };
   qr: { url: string };
   printed: { printable: boolean; authorization: string; regulatory: string[]; info: string[] };
+  /** The business's logo (its address), printed at the top. */
+  logo?: string | null;
 }
 
 const digits = (s: string) => s.match(/.{1,22}/g) ?? [s];
 
 /** A tax document (receipt, invoice, credit note) as the receipt printer prints it. */
-export function documentTicket(d: DocumentView, options: { message?: string; copy?: boolean } = {}): Ticket {
+export function documentTicket(d: DocumentView, options: { message?: string; copy?: boolean; logo?: TicketImage | null } = {}): Ticket {
   const v = d.view;
   const t: Ticket = [];
+  if (options.logo) t.push(options.logo, { kind: 'feed', lines: 1 });
   const text = (s: string, o: Omit<Extract<TicketLine, { kind: 'text' }>, 'kind' | 'text'> = {}) => t.push({ kind: 'text', text: s, ...o });
   const pair = (left: string, right: string, bold = false) => t.push({ kind: 'pair', left, right, bold });
   const rule = () => t.push({ kind: 'rule' });
@@ -336,6 +343,16 @@ export function toEscPos(ticket: Ticket, o: PrintOptions): Uint8Array {
       case 'feed':
         b.push(ESC, 0x64, Math.max(0, Math.min(10, l.lines)));
         break;
+      case 'image': {
+        // A raster picture, centred (GS v 0).
+        align('center');
+        const rowBytes = Math.ceil(l.width / 8);
+        b.push(GS, 0x76, 0x30, 0, rowBytes & 0xff, rowBytes >> 8, l.height & 0xff, l.height >> 8);
+        for (const byte of l.bits) b.push(byte);
+        b.push(0x0a);
+        align('left');
+        break;
+      }
       case 'qr': {
         align('center');
         const { qr, size, dots } = qrModule(l.data);
@@ -399,6 +416,7 @@ export function toHtml(ticket: Ticket, o: Pick<PrintOptions, 'paperWidth'>, titl
       case 'rule': return '<hr>';
       case 'feed': return `<div style="height:${l.lines * 4}mm"></div>`;
       case 'qr': return `<div class="qr">${qrSvg(l.data)}</div>`;
+      case 'image': return `<div class="img"><img src="${escapeHtml(l.src)}" alt=""></div>`;
     }
   }).join('');
   const printable = o.paperWidth === 58 ? 48 : 72;
@@ -413,5 +431,6 @@ body { width: ${printable}mm; margin: 0 auto; padding: 3mm 0 6mm; font: 9pt/1.3 
 .p { display: flex; justify-content: space-between; gap: 2mm } .p span:last-child { white-space: nowrap; text-align: right }
 hr { border: 0; border-top: 1px dashed #000; margin: 1.5mm 0 }
 .qr { display: flex; justify-content: center; padding: 3mm 0 }
+.img { display: flex; justify-content: center; padding-bottom: 1mm } .img img { max-width: 100%; max-height: 24mm; filter: grayscale(1) }
 </style></head><body>${body}</body></html>`;
 }

@@ -29,6 +29,8 @@ export interface RenderOptions {
   issuerMessage?: string;
   /** Override the QR lookup URL base. */
   qrBaseUrl?: string;
+  /** The business's logo (PNG or JPEG), printed at the top. One pdfkit cannot read is left out. */
+  logo?: Buffer;
 }
 
 export interface SheetOptions extends RenderOptions {
@@ -51,6 +53,20 @@ const QR_SIZE = mm(22);
 const QR_QUIET = mm(3);
 
 type Doc = PDFKit.PDFDocument;
+
+/** The logo scaled to fit a box, or null when there is none or pdfkit cannot read it (it is then left out). */
+export function fitLogo(logo: Buffer | undefined, maxW: number, maxH: number): { data: Buffer; w: number; h: number } | null {
+  if (!logo) return null;
+  try {
+    const probe = new PDFDocument({ autoFirstPage: false });
+    // openImage parses the whole image (not in the type definitions): a file it cannot read never reaches the page.
+    const img = (probe as unknown as { openImage(data: Buffer): { width: number; height: number } }).openImage(logo);
+    const scale = Math.min(maxW / img.width, maxH / img.height);
+    return { data: logo, w: img.width * scale, h: img.height * scale };
+  } catch {
+    return null;
+  }
+}
 
 function checkPrintable(view: PrintView, options: RenderOptions): void {
   if (!view.pendingAuthorization && !options.protocolNumber && !options.draft) {
@@ -162,12 +178,16 @@ export async function renderSheet(view: PrintView, options: SheetOptions = {}): 
   const docW = Math.min(140, blocksW * 0.22);
   const partyW = (blocksW - docW - 2 * gap) / 2;
   const isStrong = (i: number) => i < view.regulatory.length + (options.draft && !options.protocolNumber && !view.pendingAuthorization ? 1 : 0);
+  const logo = fitLogo(options.logo, 150, 42);
 
   const drawHeader = (d: Doc, sheet: number, sheets: number): number => {
     let y = top;
-    d.font(BOLD).fontSize(16).fillColor('black').text(view.typeName.toUpperCase(), left, y, { width: width * 0.6 });
+    // The logo, then the document's name beside it.
+    const titleX = logo ? left + logo.w + 14 : left;
+    if (logo) d.image(logo.data, left, y, { width: logo.w, height: logo.h });
+    d.font(BOLD).fontSize(16).fillColor('black').text(view.typeName.toUpperCase(), titleX, logo ? y + Math.max(0, (logo.h - 16) / 2) : y, { width: width * 0.6 });
     if (sheets > 1) d.font(FONT).fontSize(SMALL).text(`Sheet ${sheet} of ${sheets}`, left, y + 4, { width, align: 'right' });
-    y += 24;
+    y += logo ? Math.max(24, logo.h + 8) : 24;
 
     const partyBlock = (label: string, p: PrintView['issuer'], x: number): number => {
       d.font(FONT).fontSize(SMALL).text(label, x, y, { width: partyW });
@@ -325,6 +345,7 @@ export async function renderReceipt(view: PrintView, options: ReceiptOptions = {
   const pageW = mm(widthMm);
   const margin = mm(3); // at least 2 mm each side
   const w = pageW - 2 * margin;
+  const logo = fitLogo(options.logo, w * 0.7, mm(18));
 
   // Lay out twice: once to measure the height, once to draw on a page of exactly that height.
   const layout = (doc: Doc, draw: boolean): number => {
@@ -352,6 +373,10 @@ export async function renderReceipt(view: PrintView, options: ReceiptOptions = {
     };
     const digits = (s: string) => s.match(/.{1,22}/g)!.join('\n');
 
+    if (logo) {
+      if (draw) doc.image(logo.data, margin + (w - logo.w) / 2, y, { width: logo.w, height: logo.h });
+      y += logo.h + mm(2);
+    }
     textLine(view.issuer.name ?? '', { bold: true, align: 'center' });
     if (view.issuer.tin) textLine(`TIN ${view.issuer.tin}`, { align: 'center' });
     for (const a of view.issuer.addressLines) textLine(a, { align: 'center' });

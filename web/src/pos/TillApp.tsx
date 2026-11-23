@@ -5,7 +5,7 @@
  */
 
 import { createContext, type FormEvent, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { api, ApiError, type Account, type Me, type Permission, type Role, setTillTransport, UNAUTHORIZED_EVENT } from '../api';
+import { api, ApiError, apiBlob, type Account, type Me, type Permission, type Role, setTillTransport, UNAUTHORIZED_EVENT } from '../api';
 import { LanguageToggle, useT } from '../i18n';
 import { SessionContext, type SessionState } from '../session';
 import { useToast } from '../toast';
@@ -17,6 +17,7 @@ import { Sales } from './Sales';
 import { Sell } from './Sell';
 import { ShiftPanel } from './ShiftPanel';
 import { type DocumentView, documentTicket, type Ticket } from './ticket';
+import { ticketLogo } from './logo';
 import { CameraScanner } from './CameraScanner';
 import { withTransition } from '../motion';
 
@@ -537,7 +538,9 @@ function SignedInTill(props: {
     printDocument: async (id, options = {}) => {
       const view = await api<DocumentView>(`/v1/documents/${id}/view`);
       if (!view.printed.printable) throw new HardwareError(t('This document has no valid printed copy'));
-      const ticket = documentTicket(view, { message: hardware.receiptMessage, ...(options.copy && { copy: true }) });
+      // The business's logo on top (fetched once; printed without it if it cannot be had).
+      const logo = view.logo ? await ticketLogo(view.logo, (url) => apiBlob(url)) : null;
+      const ticket = documentTicket(view, { message: hardware.receiptMessage, ...(options.copy && { copy: true }), logo });
       for (let i = 0; i < (options.copy ? 1 : hardware.copies); i++) await printTicket(ticket, { openDrawer: i === 0 && options.openDrawer, title: view.view.typeName });
     },
     openDrawer: async () => {

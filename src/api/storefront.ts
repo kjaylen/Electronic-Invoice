@@ -22,6 +22,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { audit } from '../db/audit.ts';
 import { loadOrder, loadStore, type OrderInput, paymentMethodsFor, placeOrder, priceWithGst, quoteCart, StoreError, type StoreRef, variantTitle } from '../commerce/store.ts';
 import { simpleHtml } from '../mail/mailer.ts';
+import { renderEmail, renderStoreTheme, storeContext } from '../templates/render.ts';
 import type { PipelineDeps } from '../pipeline/issue.ts';
 import { publicLink, type ServerContext } from './context.ts';
 import { printedCopy } from './documents.ts';
@@ -65,8 +66,12 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
   app.get<{ Params: { slug: string } }>('/:slug', { schema: { params: { type: 'object', required: ['slug'], properties: slugParams } } }, async (request) => {
     const s = await store(request);
     const p = s.settings.payments;
+    // On the store's own domain the shop lives at /shop; on ours, at /<slug>/shop.
+    const own = ctx.publicUrl ? new URL(ctx.publicUrl).hostname : null;
+    const base = own && request.hostname.split(':')[0] !== own ? '/shop' : `/${s.slug}/shop`;
     return {
       slug: s.slug,
+      theme: await renderStoreTheme(db, s.tenantId, await storeContext(db, s.tenantId, { base })),
       name: s.name,
       tagline: s.settings.tagline,
       about: s.settings.about,
@@ -273,13 +278,16 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
         : o.payment_method === 'cash_on_delivery' ? [`Pay ${total} in cash when your order is delivered.`]
           : o.payment_method === 'online' ? [`Total ${total}, paid online. Your receipt is emailed as soon as the payment is confirmed.`] : [`Pay ${total} when you pick up your order.`];
       const link = publicLink(ctx, path);
-      await ctx.mailer.send({
-        to: o.customer_email,
-        replyTo: s.email,
-        subject: `Order #${o.number} at ${s.name}`,
-        text: [`Thank you, ${o.customer_name}. ${s.name} has your order #${o.number}.`, items.join('\n'), ...how, `Follow your order and get your receipt here: ${link}`].join('\n\n'),
-        html: simpleHtml({ heading: `Order #${o.number}`, paragraphs: [`Thank you, ${o.customer_name}. ${s.name} has your order.`, ...items, ...how, 'Your receipt, authorized by the Belize Tax Service, will be on this page once the payment is confirmed.'], button: { label: 'View your order', url: link } }),
-      });
+      const mail = await renderEmail(db, s.tenantId, 'email.order', {
+        store: { name: s.name, city: s.city, telephone: s.telephone, email: s.email },
+        order: {
+          number: o.number, customer_name: o.customer_name, payment_method: o.payment_method, payment_lines: how,
+          items: loaded.lines.map((l) => ({ name: l.product_title, variant: l.variant_title, quantity: Number(l.quantity), total: formatCents(toBigInt(l.total_cents)) })),
+          delivery: o.fulfillment === 'delivery', address: o.delivery_zone, delivery_fee: o.delivery_fee, total: placed.quote.totals.total,
+          paid: o.payment_status === 'paid', url: link,
+        },
+      }, { publicUrl: ctx.publicUrl });
+      await ctx.mailer.send({ to: o.customer_email, replyTo: s.email, subject: mail.subject, text: mail.text, html: mail.html });
     }
     const merchant = s.settings.notifyEmail || s.email;
     const admin = publicLink(ctx, `/${s.slug}/orders/${o.id}`);

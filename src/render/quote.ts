@@ -5,10 +5,12 @@
  */
 
 import PDFDocument from 'pdfkit';
-import { formatAmount } from './pdf.ts';
+import { fitLogo, formatAmount } from './pdf.ts';
 
 export interface QuoteInput {
   business: { name: string; tin: string; address: string; telephone: string; email: string };
+  /** The business's logo (PNG or JPEG), top right. */
+  logo?: Buffer;
   customer: { name: string; tin: string | null; addressLines: string[]; email: string | null };
   number: string;
   date: string;
@@ -44,13 +46,16 @@ export function renderQuote(q: QuoteInput): Promise<Buffer> {
   // ---- header ----
   doc.font('Helvetica-Bold').fontSize(20).fillColor('#160923').text('Quotation', left, 42);
   doc.font('Helvetica').fontSize(10).fillColor('#635b68').text(`${q.number} · ${q.date}`);
-  doc.font('Helvetica-Bold').fontSize(11).fillColor('#160923').text(q.business.name, left, 42, { width, align: 'right' });
+  // The logo, top right, above the business's name.
+  const logo = fitLogo(q.logo, 140, 40);
+  if (logo) doc.image(logo.data, left + width - logo.w, 42, { width: logo.w, height: logo.h });
+  doc.font('Helvetica-Bold').fontSize(11).fillColor('#160923').text(q.business.name, left, logo ? 42 + logo.h + 6 : 42, { width, align: 'right' });
   doc.font('Helvetica').fontSize(9).fillColor('#3b3342')
     .text(`TIN ${q.business.tin}`, { width, align: 'right' })
     .text(q.business.address, { width, align: 'right' })
     .text(`${q.business.telephone} · ${q.business.email}`, { width, align: 'right' });
 
-  let y = 120;
+  let y = Math.max(120, doc.y + 12);
   doc.moveTo(left, y).lineTo(left + width, y).strokeColor('#e6e1ea').lineWidth(1).stroke();
   y += 14;
   doc.font('Helvetica').fontSize(8).fillColor('#635b68').text('PREPARED FOR', left, y);

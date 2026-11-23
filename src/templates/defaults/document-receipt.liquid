@@ -1,0 +1,62 @@
+{%- comment -%}
+  The printed copy on a receipt printer roll (80 mm): tax receipts, and any document printed as a receipt.
+  BTS allows only what is in the signed document (the document object) plus your own message.
+  {% bts 'stacked' %} prints what BTS requires on every copy: the QR code, the ETDUI, the
+  authorization and the legal notices. Keep it.
+{% endcomment -%}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{{ document.type_name }} {{ document.number_display }}</title>
+<style>
+  @page { size: 80mm auto; margin: 0; }
+  * { box-sizing: border-box; }
+  body { width: 72mm; margin: 0 auto; padding: 4mm 0 8mm; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 9pt; line-height: 1.35; color: #000; }
+  .c { text-align: center; }
+  .b { font-weight: 700; }
+  .logo { display: block; margin: 0 auto 2mm; max-width: 48mm; max-height: 22mm; }
+  .name { font-size: 12pt; font-weight: 700; }
+  .big { font-size: 11pt; }
+  hr { border: 0; border-top: 1px dashed #000; margin: 2.5mm 0; }
+  .row { display: flex; justify-content: space-between; gap: 2mm; }
+  .row span:last-child { white-space: nowrap; text-align: right; }
+  .line { margin-top: 1.5mm; font-size: 11pt; }
+  .detail { font-size: 9pt; }
+  .total { font-size: 12pt; font-weight: 700; }
+</style>
+</head>
+<body>
+  {%- if business.logo %}<img class="logo" src="{{ business.logo }}" alt="{{ document.issuer.name }}">{% endif %}
+  <div class="c name">{{ document.issuer.name }}</div>
+  {%- if document.issuer.tin %}<div class="c">TIN {{ document.issuer.tin }}</div>{% endif %}
+  {%- for line in document.issuer.address_lines %}<div class="c">{{ line }}</div>{% endfor %}
+  {%- if document.issuer.telephone %}<div class="c">{{ document.issuer.telephone }}</div>{% endif %}
+  <hr>
+  <div class="c b big">{{ document.type_name | upcase }}</div>
+  <div class="c">No. {{ document.number }} · Series {{ document.series }}</div>
+  <div class="c">{{ document.issue_date }} {{ document.issue_time }}</div>
+  {%- if document.customer %}
+  <hr>
+  {%- if document.customer.name %}<div class="big">{{ document.customer.name }}</div>{% endif %}
+  {%- if document.customer.tin %}<div class="big">TIN {{ document.customer.tin }}</div>{% endif %}
+  {%- endif %}
+  <hr>
+  {%- for line in document.lines %}
+  <div class="line">{{ line.description }}</div>
+  <div class="row detail big"><span>{{ line.quantity }} {{ line.unit_code }} × {{ line.unit_price | amount }}</span><span>{{ line.net | amount }}</span></div>
+  {%- for a in line.adjustments %}<div class="row detail"><span>{{ a.reason }}</span><span>{% if a.is_charge %}+{% else %}−{% endif %}{{ a.amount | amount }}</span></div>{% endfor %}
+  {%- if line.tax != '0.00' %}<div class="row detail"><span>Tax</span><span>{{ line.tax | amount }}</span></div>{% endif %}
+  {%- endfor %}
+  <hr>
+  <div class="row big"><span>Price (excl. taxes)</span><span>{{ document.totals.tax_exclusive | amount }}</span></div>
+  {%- for tax in document.totals.other_taxes %}<div class="row big"><span>{{ tax.name }}</span><span>{{ tax.amount | amount }}</span></div>{% endfor %}
+  <div class="row big"><span>GST</span><span>{{ document.totals.gst | amount }}</span></div>
+  <div class="row total"><span>TOTAL</span><span>{{ document.totals.tax_inclusive | amount }}</span></div>
+  {%- if document.totals.payable != document.totals.tax_inclusive %}<div class="row total"><span>Amount due</span><span>{{ document.totals.payable | amount }}</span></div>{% endif %}
+  <hr>
+  {% bts 'stacked' %}
+  {%- if document.info.size > 0 %}<hr>{% for line in document.info %}<div>{{ line }}</div>{% endfor %}{% endif %}
+  {%- if message %}<hr><div class="c">{{ message }}</div>{% endif %}
+</body>
+</html>

@@ -342,6 +342,49 @@ test('installable: manifest, icons and service worker are served', async ({ page
   await expect.poll(() => page.evaluate(async () => Boolean(await navigator.serviceWorker.getRegistration())), { timeout: 10_000 }).toBe(true);
 });
 
+test('templates: edit an email with a live preview, a mistake shown on its line, save, a logo on the receipt, back to the default', async ({ page }) => {
+  await logIn(page);
+  await page.goto(p('/templates'));
+  await expect(page.getByRole('heading', { name: 'Templates', level: 1 })).toBeVisible();
+  const rail = page.locator('.tpl-rail');
+  await rail.getByRole('button', { name: 'Document email' }).click();
+  await expect(page.frameLocator('.tpl-mail-body').getByText(/Please find attached tax invoice/)).toBeVisible();
+
+  // The subject is Liquid too, and the preview follows it.
+  await page.getByLabel('Subject').fill('Your {{ document.type_name }} from {{ business.name }}');
+  // business.name is the trading name (Corner Store) when there is one.
+  await expect(page.locator('.tpl-mail-subject')).toHaveText('Your Tax Invoice from Corner Store');
+
+  // A mistake is marked on its line and pauses the preview; fixing it clears both.
+  await page.getByRole('textbox', { name: 'Template code' }).click();
+  await page.keyboard.press('Control+End');
+  await page.keyboard.type('\n{{ customer.name | shout }}');
+  await expect(page.locator('.tpl-problems.bad')).toContainText('shout');
+  await expect(page.locator('.tpl-stale')).toBeVisible();
+  await page.keyboard.press('Shift+Home');
+  await page.keyboard.press('Backspace');
+  await page.keyboard.press('Backspace');
+  await expect(page.locator('.tpl-problems.ok')).toBeVisible();
+  await page.keyboard.press('Control+s');
+  await expect(page.locator('.tpl-title .badge')).toHaveText('Customized');
+  await expect(rail.getByRole('button', { name: 'Document email' }).locator('.tpl-dot')).toBeVisible();
+
+  // A logo: uploaded under Images, it is the logo at once, and the receipt shows it.
+  await rail.getByRole('button', { name: 'Images' }).click();
+  await page.locator('.tpl-images input[type=file]').setInputFiles(`${root}web/public/icon-192.png`);
+  await expect(page.locator('.tpl-asset')).toHaveCount(1);
+  await expect(page.locator('.tpl-asset-badge')).toHaveText('Logo');
+  await rail.getByRole('button', { name: 'Receipt (80 mm roll)' }).click();
+  await expect(page.frameLocator('.tpl-roll-frame').locator('img.logo')).toBeVisible();
+
+  // Back to the default.
+  await rail.getByRole('button', { name: 'Document email' }).click();
+  await page.getByRole('button', { name: 'Use the default' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Use the default' }).click();
+  await expect(page.locator('.tpl-title .badge')).toHaveText('Default');
+  await expect(page.locator('.tpl-mail-subject')).toHaveText(/^Tax Invoice 001-000000042 from /);
+});
+
 test('online store: a product with sizes and a photo, open the store, a buyer orders, paid becomes a BTS receipt', async ({ page, browser }) => {
   await logIn(page);
   // The product.

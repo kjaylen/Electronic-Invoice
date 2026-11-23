@@ -22,7 +22,7 @@ import { authorizationText, infoLines, regulatoryLines, renderReceipt, renderShe
 import QRCode from 'qrcode';
 import { qrUrl, readEtdForPrint } from '../render/view.ts';
 import { type Queryable, toBigInt } from '../db/database.ts';
-import { simpleHtml } from '../mail/mailer.ts';
+import { businessContext, renderEmail } from '../templates/render.ts';
 import { type CustomerBody, customerFromRow, likePattern, loadCustomer, loadItems, nextCursor, parsePage } from './catalog.ts';
 import { audit } from '../db/audit.ts';
 import { overLimit } from '../db/ratelimit.ts';
@@ -33,6 +33,8 @@ import { date as dateSchema, issueSchema, listQuery, uuid } from './schemas.ts';
 import { assertCanIssue } from '../billing/billing.ts';
 import { type PaymentMethod, receivable, recordPayment, statusesFor } from '../receivables/receivables.ts';
 import { openShiftSql } from '../db/shifts.ts';
+import { documentPdf as templateDocumentPdf } from '../templates/pdf.ts';
+import { logoForPdf, logoPath } from '../templates/assets.ts';
 
 const PRINTABLE = ['authorized', 'authorized_with_alert', 'contingency_pending'];
 // Emails per business per hour (shared by every server process), so a compromised account cannot send spam at volume.
@@ -347,8 +349,11 @@ export async function printedCopy(deps: PipelineDeps, tenantId: string, document
   if (!row) throw notFound('Document');
   if (!PRINTABLE.includes(row.status)) throw new ApiError(409, 'not_printable', `A ${row.status.replace(/_/g, ' ')} document has no valid printed copy`);
   const view = readEtdForPrint(row.signed_xml);
-  const common = row.protocol_number ? { protocolNumber: row.protocol_number } : {};
-  const pdf = format === 'receipt' ? await renderReceipt(view, common) : await renderSheet(view, common);
+  const logo = await logoForPdf(deps.db, tenantId);
+  const common = { ...(row.protocol_number && { protocolNumber: row.protocol_number }), ...(logo && { logo }) };
+  // The business's template when a PDF browser is set up; the built-in layout otherwise.
+  const pdf = (await templateDocumentPdf(deps.db, tenantId, view, format, { protocolNumber: row.protocol_number }))
+    ?? (format === 'receipt' ? await renderReceipt(view, common) : await renderSheet(view, common));
   return { pdf, view, signedXml: row.signed_xml, filename: `${view.typeName.replace(/ /g, '-')}-${view.series}-${view.number}` };
 }
 
@@ -365,31 +370,38 @@ export async function sendDocumentEmail(
     to: string;
     message?: string;
     userId?: string | null;
-    /** A reminder or a payment request: its own subject and opening lines instead of "Please find attached". */
-    subject?: string;
+    /** Opening lines instead of "Please find attached" (a payment request, an invoice from a quote). */
     intro?: string[];
     /** A button to pay the invoice online. */
     payUrl?: string;
+    /** A payment reminder: sent with the reminder template. */
+    reminder?: { when: 'before' | 'due' | 'after'; days: number; what: string; balance: string; total: string; dueDate: string };
   },
 ): Promise<string> {
   const copy = await printedCopy(deps, tenantId, documentId);
-  const biz = (await deps.db.query<{ name: string; email: string }>('select coalesce(trade_name, legal_name) as name, email from tenants where id = $1', [tenantId])).rows[0]!;
+  const biz = await businessContext(deps.db, tenantId);
   const v = copy.view;
-  const title = `${v.typeName} ${v.series}-${v.number}`;
-  const body = [
-    ...(opts.intro?.length ? opts.intro : [`Please find attached ${v.typeName.toLowerCase()} ${v.series}-${v.number} from ${biz.name}.`]),
-    ...(opts.message?.trim() ? [opts.message.trim()] : []),
-  ];
-  const legal = 'The PDF is the printed copy. The XML file is the electronic tax document as authorized by the Belize Tax Service.';
-  const lines = [...body, ...(opts.payUrl ? [`Pay online: ${opts.payUrl}`] : []), legal];
+  const { reminder } = opts;
+  const mail = await renderEmail(deps.db, tenantId, reminder ? 'email.reminder' : 'email.document', {
+    business: biz,
+    customer: { name: v.customer?.name ?? null, email: opts.to },
+    document: {
+      type: v.etdType, type_name: v.typeName, number: v.number, series: v.series, number_display: `${v.series}-${v.number}`, etdui: v.etdui,
+      issue_date: v.issueDate, due_date: reminder?.dueDate ?? v.payment?.dueDate ?? null, total: reminder?.total ?? v.totals.payable,
+    },
+    intro: opts.intro ?? [],
+    message: opts.message?.trim() || null,
+    pay_url: opts.payUrl ?? null,
+    ...(reminder && { reminder: { when: reminder.when, days: reminder.days, what: reminder.what, balance: reminder.balance } }),
+  }, { publicUrl: ctx.publicUrl });
   const id = randomUUID();
   try {
     await ctx.mailer.send({
       to: opts.to,
       replyTo: biz.email,
-      subject: opts.subject ?? `${title} from ${biz.name}`,
-      text: lines.join('\n\n'),
-      html: simpleHtml({ heading: title, paragraphs: [...body, legal], ...(opts.payUrl && { button: { label: 'Pay online', url: opts.payUrl } }) }),
+      subject: mail.subject,
+      text: mail.text,
+      html: mail.html,
       attachments: [
         { filename: `${copy.filename}.pdf`, content: copy.pdf, contentType: 'application/pdf' },
         { filename: `${copy.filename}.xml`, content: copy.signedXml, contentType: 'application/xml' },
@@ -702,6 +714,7 @@ export function registerDocumentRoutes(app: FastifyInstance, deps: PipelineDeps,
       view,
       status: row.status,
       protocolNumber: row.protocol_number,
+      logo: await logoPath(db, request.tenantId),
       qr: { url, image: `data:image/svg+xml;base64,${Buffer.from(svg, 'utf8').toString('base64')}` },
       // The printed copy's texts, as the PDF writes them (receipt printers on tills print from these).
       printed: {
@@ -745,10 +758,14 @@ export function registerDocumentRoutes(app: FastifyInstance, deps: PipelineDeps,
         throw new ApiError(409, 'not_printable', 'The document is not authorized yet; add ?draft=true for a draft copy');
       }
       const view = readEtdForPrint(row.signed_xml);
-      const common = { ...(row.protocol_number && { protocolNumber: row.protocol_number }), ...(draft && { draft: true }) };
-      const pdf = q.format === 'receipt'
-        ? await renderReceipt(view, { ...common, ...(q.widthMm && { widthMm: Number(q.widthMm) }) })
-        : await renderSheet(view, { ...common, ...(q.paper && { paper: q.paper }), ...(q.orientation && { orientation: q.orientation }) });
+      const logo = await logoForPdf(db, request.tenantId);
+      const common = { ...(row.protocol_number && { protocolNumber: row.protocol_number }), ...(draft && { draft: true }), ...(logo && { logo }) };
+      // The template prints at its own page size; a roll other than 80 mm, or a chosen paper, uses the built-in layout.
+      const useTemplate = q.format === 'receipt' ? !q.widthMm || q.widthMm === '80' : !q.paper && !q.orientation;
+      const pdf = (useTemplate ? await templateDocumentPdf(db, request.tenantId, view, q.format === 'receipt' ? 'receipt' : 'sheet', { protocolNumber: row.protocol_number, draft }) : null)
+        ?? (q.format === 'receipt'
+          ? await renderReceipt(view, { ...common, ...(q.widthMm && { widthMm: Number(q.widthMm) }) })
+          : await renderSheet(view, { ...common, ...(q.paper && { paper: q.paper }), ...(q.orientation && { orientation: q.orientation }) }));
       return reply
         .type('application/pdf')
         .header('Content-Disposition', `inline; filename="${view.typeName.replace(/ /g, '-')}-${view.series}-${view.number}.pdf"`)

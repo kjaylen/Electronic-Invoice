@@ -65,6 +65,7 @@ const QuoteView = page(() => import('./pages/QuoteView'), 'QuoteView');
 const QuoteEditor = page(() => import('./pages/NewDocument'), 'QuoteEditor');
 const RecurringEditor = page(() => import('./pages/NewDocument'), 'RecurringEditor');
 const Settings = page(() => import('./pages/Settings'), 'Settings');
+const Templates = page(() => import('./pages/Templates'), 'Templates');
 
 function PageSkeleton() {
   return (
@@ -161,6 +162,7 @@ function Layout() {
       { to: '/reports', label: t('Reports'), icon: Icons.reports, permission: 'reports.view' },
     ]],
     [t('Business'), [
+      { to: '/templates', label: t('Templates'), icon: Icons.templates, permission: 'business.manage' },
       { to: '/settings', label: t('Settings'), icon: Icons.settings },
     ]],
   ];
@@ -354,6 +356,7 @@ function BusinessApp() {
         <Route path="/recurring/new" element={<RecurringEditor />} />
         <Route path="/recurring/:id" element={<Allowed permission="documents.issue"><RecurringDetail /></Allowed>} />
         <Route path="/recurring/:id/edit" element={<RecurringEditor />} />
+        <Route path="/templates" element={<Allowed permission="business.manage"><Templates /></Allowed>} />
         <Route path="/settings" element={<Settings />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

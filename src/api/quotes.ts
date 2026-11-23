@@ -30,7 +30,10 @@ import { calculateDocument } from '../engine/calc.ts';
 import { formatCents } from '../engine/decimal.ts';
 import { simpleHtml } from '../mail/mailer.ts';
 import type { PipelineDeps } from '../pipeline/issue.ts';
-import { renderQuote } from '../render/quote.ts';
+import { renderQuote, type QuoteInput } from '../render/quote.ts';
+import { quotePdf as templateQuotePdf } from '../templates/pdf.ts';
+import { businessContext, renderEmail } from '../templates/render.ts';
+import { logoForPdf } from '../templates/assets.ts';
 import { customerFromRow, loadCustomer } from './catalog.ts';
 import { publicLink, requireMail, type ServerContext } from './context.ts';
 import { type IssueBody, issueFromBody, resolveBody, toIssueRequest } from './documents.ts';
@@ -148,7 +151,7 @@ async function quotePdf(deps: PipelineDeps, tenantId: string, q: QuoteRow): Prom
   const req = await toIssueRequest(deps, tenantId, q.body);
   const c = req.customer;
   const lines = await linesOf(deps, tenantId, q.body);
-  return renderQuote({
+  const input: QuoteInput = {
     business: await businessContact(deps.db, tenantId),
     customer: {
       name: c?.name ?? 'Customer', tin: c?.tin ?? null, email: c?.contact?.email ?? null,
@@ -164,7 +167,9 @@ async function quotePdf(deps: PipelineDeps, tenantId: string, q: QuoteRow): Prom
     terms: q.body.payment?.terms ?? (q.body.type === '01' ? `Payment due ${q.due_days} days after the invoice` : null),
     note: q.body.note ?? null,
     acceptedBy: q.accepted_by,
-  });
+  };
+  const logo = await logoForPdf(deps.db, tenantId);
+  return (await templateQuotePdf(deps.db, tenantId, input)) ?? renderQuote({ ...input, ...(logo && { logo }) });
 }
 
 async function createLink(db: Queryable, ctx: ServerContext, q: QuoteRow): Promise<string> {
@@ -294,18 +299,17 @@ export function registerQuoteRoutes(app: FastifyInstance, deps: PipelineDeps, ct
       const to = request.body?.to ?? q.customer_snapshot?.email;
       if (!to) throw new ApiError(422, 'no_email', 'This customer has no email address; enter one');
       if (await overLimit(db, `quote-send|${q.id}`, 10, 24 * 3600_000)) throw new ApiError(429, 'too_many_emails', 'Enough emails for this quote today');
-      const biz = await businessContact(db, request.tenantId);
+      const biz = await businessContext(db, request.tenantId);
       const url = await createLink(db, ctx, q);
-      const total = `BZ$${formatCents(toBigInt(q.total_cents))}`;
-      const paragraphs = [
-        `${biz.name} has sent you quotation ${quoteNumber(q.number)} for ${total} (GST included), valid until ${q.valid_until}.`,
-        ...(request.body?.message?.trim() ? [request.body.message.trim()] : []),
-        'Open the link to see it and accept it online, or reply to this email with any questions.',
-      ];
+      const mail = await renderEmail(db, request.tenantId, 'email.quote', {
+        business: biz,
+        customer: { name: q.customer_snapshot?.name ?? null, email: to },
+        quote: { number: quoteNumber(q.number), total: formatCents(toBigInt(q.total_cents)), valid_until: String(q.valid_until).slice(0, 10) },
+        view_url: url,
+        message: request.body?.message?.trim() || null,
+      }, { publicUrl: ctx.publicUrl });
       await ctx.mailer.send({
-        to, replyTo: biz.email, subject: `Quotation ${quoteNumber(q.number)} from ${biz.name}`,
-        text: [...paragraphs, `View and accept: ${url}`].join('\n\n'),
-        html: simpleHtml({ heading: `Quotation ${quoteNumber(q.number)}`, paragraphs, button: { label: 'View and accept', url } }),
+        to, replyTo: biz.email, subject: mail.subject, text: mail.text, html: mail.html,
         attachments: [{ filename: `quote-${q.number}.pdf`, content: await quotePdf(deps, request.tenantId, q), contentType: 'application/pdf' }],
       });
       await db.query("update quotes set status = 'sent', sent_at = now(), updated_at = now() where id = $1", [q.id]);

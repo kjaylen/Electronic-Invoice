@@ -59,11 +59,13 @@ import { registerShiftRoutes } from './shifts.ts';
 import { registerPosAdminRoutes, registerPosDeviceRoutes, SESSION_TOKEN_PREFIX, tillMayUse, touchDevice } from './pos.ts';
 import { lookupSession } from '../db/users.ts';
 import { registerDiscountRoutes } from './discounts.ts';
+import { registerPublicAssetRoutes, registerTemplateRoutes } from './templates.ts';
 import { domainCache } from '../commerce/domains.ts';
 import { registerIntegrationCallback, registerIntegrationRoutes } from './integrations.ts';
 import type { QuickBooksConfig } from '../integrations/quickbooks.ts';
 import { plansJson } from './billing.ts';
 import { TRIAL_DAYS } from '../billing/plans.ts';
+import { type HtmlPdfRenderer, setPdfRenderer } from '../render/browser-pdf.ts';
 
 export type Principal = 'api' | Role;
 
@@ -119,6 +121,8 @@ export interface AppOptions {
   quickbooks?: { clientId: string; clientSecret: string; environment: 'sandbox' | 'production'; fetch?: typeof fetch };
   /** Extra origins the till apps call the API from (the built-in ones cover the iOS, Android and desktop apps). */
   tillOrigins?: string[];
+  /** Prints documents from the businesses' templates (a headless Chromium). Unset: the built-in layouts. Closed with the app. */
+  pdfRenderer?: HtmlPdfRenderer;
 }
 
 /** Where the till apps run: Capacitor on iOS and Android, the Electron desktop app. They send bearer tokens, never cookies. */
@@ -157,6 +161,14 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     trustProxy: true,
     ajv: { customOptions: { removeAdditional: false, coerceTypes: false, allErrors: false } },
   });
+  if (options.pdfRenderer) {
+    const renderer = options.pdfRenderer;
+    setPdfRenderer(renderer);
+    app.addHook('onClose', async () => {
+      setPdfRenderer(null);
+      await renderer.close();
+    });
+  }
   app.decorateRequest('tenantId', '');
   app.decorateRequest('principal', 'api');
   app.decorateRequest('userId', '');
@@ -192,7 +204,8 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     reply.header('X-Content-Type-Options', 'nosniff');
     reply.header('X-Frame-Options', 'SAMEORIGIN');
     reply.header('Referrer-Policy', 'same-origin');
-    reply.header('Content-Security-Policy', CSP);
+    // A route with a policy of its own (uploaded images) keeps it.
+    if (!reply.hasHeader('Content-Security-Policy')) reply.header('Content-Security-Policy', CSP);
     reply.header('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
     // Behind TLS (secure cookies), browsers should never use plain HTTP again.
     if (options.cookieSecure !== false) reply.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
@@ -335,12 +348,14 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     registerInventoryRoutes(tenant, deps);
     registerShiftRoutes(tenant, deps);
     registerPosAdminRoutes(tenant, deps);
+    registerTemplateRoutes(tenant, deps);
   }, { prefix: '/v1' });
 
   // The till apps before anyone signs in: pairing, who can sign in, PIN sign-in (the till's own token).
   await app.register(async (pos) => registerPosDeviceRoutes(pos, deps), { prefix: '/v1/pos' });
 
   registerPublicDocumentRoutes(app, deps);
+  registerPublicAssetRoutes(app, deps);
   registerIntegrationCallback(app, deps, ctx, quickbooks);
 
   // What the public pages need: who runs the service, and the plans.

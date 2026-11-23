@@ -59,6 +59,10 @@ Object.assign(process.env, {
   MAIL_OUTBOX_DIR: `${demoDir}/outbox`,
 });
 process.env.PUBLIC_URL ??= `http://localhost:${process.env.PORT}`;
+// Print from the templates: on Windows with the installed Edge (as the end-to-end tests do), elsewhere
+// with the Chromium Playwright installs. Without one, documents print with the built-in layouts.
+process.env.PDF_RENDERER ??= 'chromium';
+if (process.platform === 'win32' && !process.env.CHROMIUM_PATH) process.env.CHROMIUM_CHANNEL ??= 'msedge';
 console.log(`Stand-in BTS on ${bts.baseUrl} (create .demo/bts-down to simulate an outage)`);
 await import('../src/server.ts');
 

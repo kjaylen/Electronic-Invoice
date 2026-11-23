@@ -27,10 +27,22 @@ const TAGS: Array<{ prefix: string; name: string; description: string }> = [
   { prefix: '/v1/certificate', name: 'Business', description: '' },
   { prefix: '/v1/business', name: 'Business', description: '' },
   { prefix: '/v1/store-settings', name: 'Products', description: '' },
+  { prefix: '/v1/templates', name: 'Templates', description: 'The Liquid templates behind emails, printed documents and the online store (as in a Shopify theme), and the images and logo they use.' },
   { prefix: '/v1/pos', name: 'Tills', description: 'The till apps (iOS, Android, desktop): add a till and pair it with a one-time code, see what it runs and has plugged in, remove it.' },
 ];
 
 const SUMMARIES: Record<string, string> = {
+  'GET /v1/templates': 'Every template, and whether the business has customized it',
+  'GET /v1/templates/{key}': 'A template: its source (customized or the default), subject, variables and rules',
+  'PUT /v1/templates/{key}': 'Save a template (checked first: 422 with the problems and their lines)',
+  'DELETE /v1/templates/{key}': 'Back to the default template',
+  'POST /v1/templates/{key}/preview': 'Render a draft with sample data; any problems, with their lines',
+  'GET /v1/templates/{key}/versions': 'The last 30 saves',
+  'GET /v1/templates/{key}/versions/{id}': "One save's source",
+  'GET /v1/templates/assets': "The business's images, and which one is its logo",
+  'POST /v1/templates/assets': 'Upload an image (PNG, JPEG, GIF, WebP or SVG, up to 2 MB, as Base64)',
+  'DELETE /v1/templates/assets/{id}': 'Delete an image (refused while a saved template uses it)',
+  'PUT /v1/templates/logo': 'Choose the logo, or none',
   'POST /v1/documents': 'Issue a document. Answers 201 whenever a document was created, whatever BTS decided: check status.',
   'GET /v1/documents': 'List documents (filters, cursor pagination)',
   'POST /v1/documents/preview': 'Calculate totals without issuing',

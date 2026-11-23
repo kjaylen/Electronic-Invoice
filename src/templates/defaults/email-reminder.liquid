@@ -1,0 +1,55 @@
+{%- comment -%}
+  A payment reminder for an invoice (the invoice is attached).
+  reminder.when is "before" (before the due date), "due" (today) or "after" (overdue);
+  reminder.days is how many days before or after; reminder.what reads "invoice 001-000000042".
+  message holds your payment instructions (Getting paid, Settings).
+{% endcomment -%}
+<!doctype html>
+<html lang="en">
+<body style="margin:0;padding:0;background:#f4f5f7;font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;color:#0f1117">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f5f7;padding:32px 12px">
+    <tr><td align="center">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border:1px solid #e6e8ec;border-radius:14px">
+        <tr><td style="padding:28px 32px 6px">
+          {%- if business.logo %}
+          <img src="{{ business.logo }}" alt="{{ business.name }}" height="40" style="display:block;height:40px;width:auto;max-width:220px;border:0;margin:0 0 14px">
+          {%- else %}
+          <div style="font-size:13px;color:#646b7b">{{ business.name }}</div>
+          {%- endif %}
+          <h1 style="margin:6px 0 0;font-size:22px;line-height:1.25;letter-spacing:-0.02em">
+            {%- case reminder.when -%}
+              {%- when 'after' -%}Payment overdue
+              {%- when 'due' -%}Payment due today
+              {%- else -%}Payment due soon
+            {%- endcase -%}
+          </h1>
+        </td></tr>
+        <tr><td style="padding:14px 32px 4px;font-size:15px;line-height:1.6">
+          <p style="margin:0 0 14px">Hello{% if customer.name %} {{ customer.name }}{% endif %},</p>
+          {%- case reminder.when %}
+          {%- when 'after' %}
+          <p style="margin:0 0 14px">Our records show that {{ reminder.what }} was due on {{ document.due_date | date: '%-d %b %Y' }} and {{ reminder.balance | money }} is still unpaid ({{ reminder.days }} {{ reminder.days | pluralize: 'day', 'days' }} overdue).</p>
+          <p style="margin:0 0 14px">If you have already paid, thank you, and please ignore this message.</p>
+          {%- when 'due' %}
+          <p style="margin:0 0 14px">A friendly reminder that {{ reminder.what }} is due today.</p>
+          <p style="margin:0 0 14px">Amount due: <strong>{{ reminder.balance | money }}</strong>.</p>
+          {%- else %}
+          <p style="margin:0 0 14px">A friendly reminder that {{ reminder.what }} for {{ document.total | money }} is due on {{ document.due_date | date: '%-d %b %Y' }}.</p>
+          <p style="margin:0 0 14px">Amount due: <strong>{{ reminder.balance | money }}</strong>.</p>
+          {%- endcase %}
+          {%- if message %}<p style="margin:0 0 14px;white-space:pre-line">{{ message }}</p>{% endif %}
+        </td></tr>
+        {%- if pay_url %}
+        <tr><td style="padding:8px 32px 4px">
+          <a href="{{ pay_url }}" style="display:inline-block;background:#6d2d93;color:#ffffff;padding:12px 22px;border-radius:9px;text-decoration:none;font-weight:600;font-size:15px">Pay online</a>
+        </td></tr>
+        {%- endif %}
+        <tr><td style="padding:22px 32px 28px;font-size:12px;line-height:1.6;color:#646b7b">
+          The PDF is the printed copy. The XML file is the electronic tax document as authorized by the Belize Tax Service.<br>
+          {{ business.name }}{% if business.telephone %} · {{ business.telephone }}{% endif %}{% if business.email %} · {{ business.email }}{% endif %}
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>

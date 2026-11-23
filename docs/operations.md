@@ -131,14 +131,29 @@ deployments). To move to object storage behind a CDN:
 - **Payment reminders** are emailed by housekeeping for businesses that turned them on (at most 50 per business per run, each step once per invoice). They need SMTP and `PUBLIC_URL` (for the pay links).
 - **Webhooks** go out every 5 seconds from the worker's process. A failing endpoint is switched off after 20 failures in a row; the business switches it back on.
 
-## 7. Staff accounts
+## 7. Printing from templates
+
+Businesses can edit their printed documents (Templates in the app). Those print as PDFs in a
+headless Chromium when `PDF_RENDERER=chromium`; the Docker image installs Debian's Chromium and sets
+it (`--build-arg PDF_BROWSER=none` leaves it out). Elsewhere, point `CHROMIUM_PATH` at a Chromium or
+Chrome, set `CHROMIUM_CHANNEL=chrome` or `msedge` for an installed browser, or run
+`npx playwright install chromium`.
+
+* Printing never depends on it: without a browser, or when one print fails, the document prints with
+  the built-in layout. The log says so: `template PDF failed; using the built-in layout: …`. After a
+  failed start the browser is tried again five minutes later, not on every print.
+* The browser runs pages with JavaScript off and the network closed (images are inlined), each print
+  in its own context, with a 15-second limit. One browser serves the process.
+* Memory: allow about 150 MB more per server process for Chromium.
+
+## 8. Staff accounts
 
 Staff sign in to `/admin` with two-step sign-in, always: the first sign-in sets
 up the authenticator app and shows ten recovery codes. Manage staff from the
 command line: `npm run platform-admin -- add|reset|reset-2fa|disable|enable|list`.
 A lost phone: `reset-2fa` (they set it up again at the next sign-in).
 
-## 8. When something goes wrong
+## 9. When something goes wrong
 
 **BTS is down.** Nothing to do: businesses keep issuing in contingency mode
 (documents say "Pending of BTS authorization"), owners are emailed, and the

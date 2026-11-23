@@ -16,9 +16,14 @@ FROM node:22-bookworm-slim AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
 # pg_dump and pg_restore for scripts/backup.sh and scripts/restore.sh.
+# Chromium prints documents from the businesses' templates (--build-arg PDF_BROWSER=none leaves it
+# out: documents then print with the built-in layouts).
+ARG PDF_BROWSER=chromium
 RUN apt-get update \
   && apt-get install -y --no-install-recommends postgresql-client ca-certificates \
+  && if [ "$PDF_BROWSER" = "chromium" ]; then apt-get install -y --no-install-recommends chromium fonts-liberation fonts-dejavu-core; fi \
   && rm -rf /var/lib/apt/lists/*
+ENV PDF_RENDERER=${PDF_BROWSER} CHROMIUM_PATH=/usr/bin/chromium
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force
 COPY src ./src

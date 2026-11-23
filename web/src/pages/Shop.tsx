@@ -27,7 +27,12 @@ interface StoreInfo {
   delivery: { enabled: boolean; zones: Array<{ name: string; fee: string }> };
   pickup: { enabled: boolean; address: string | null };
   payments: { bankTransfer: boolean; cashOnDelivery: boolean; payAtPickup: boolean; online: 'paypal' | 'test' | 'belizebank' | 'ekyash' | null };
+  /** The business's theme (Settings, Templates), rendered and sanitized by the server. Empty strings: none. */
+  theme?: StoreTheme;
 }
+
+interface StoreTheme { css: string; announcement: string; home: string; footer: string }
+const NO_THEME: StoreTheme = { css: '', announcement: '', home: '', footer: '' };
 
 interface ProductCard {
   handle: string;
@@ -95,6 +100,49 @@ export function useCart() {
   };
 }
 
+// ---------- theme ----------
+
+const THEME_PARTS = { 'store.theme': 'css', 'store.announcement': 'announcement', 'store.home': 'home', 'store.footer': 'footer' } as const;
+
+/**
+ * In the template editor's preview (a same-origin frame opened with ?theme-preview), the editor
+ * sends the part being edited, already rendered and sanitized by the server, as you type.
+ */
+function useThemePreview(): Partial<StoreTheme> {
+  const [parts, setParts] = useState<Partial<StoreTheme>>({});
+  useEffect(() => {
+    if (window.parent === window || !new URLSearchParams(window.location.search).has('theme-preview')) return;
+    const onMessage = (e: MessageEvent) => {
+      if (e.origin !== window.location.origin || e.source !== window.parent) return;
+      const data = e.data as { type?: string; key?: string; content?: unknown };
+      if (data?.type !== 'theme-preview' || typeof data.content !== 'string' || !data.key || !(data.key in THEME_PARTS)) return;
+      const part = THEME_PARTS[data.key as keyof typeof THEME_PARTS];
+      setParts((p) => ({ ...p, [part]: data.content as string }));
+    };
+    window.addEventListener('message', onMessage);
+    window.parent.postMessage({ type: 'theme-preview-ready' }, window.location.origin);
+    return () => window.removeEventListener('message', onMessage);
+  }, []);
+  return parts;
+}
+
+/** A section of the business's own HTML; its links to the store stay inside the shop. */
+function ThemeSection({ html, className }: { html: string; className: string }) {
+  const navigate = useNavigate();
+  if (!html) return null;
+  const onClick = (e: React.MouseEvent) => {
+    const a = (e.target as HTMLElement).closest('a');
+    if (!a || a.target === '_blank' || e.metaKey || e.ctrlKey || e.shiftKey) return;
+    const url = new URL(a.href, window.location.href);
+    if (url.origin !== window.location.origin) return;
+    const shop = url.pathname.match(/^(?:\/[^/]+)?\/shop(\/.*)?$/);
+    if (!shop) return;
+    e.preventDefault();
+    navigate(`/shop${shop[1] ?? ''}${url.search}`, { viewTransition: true });
+  };
+  return <div className={`theme-section ${className}`} onClick={onClick} dangerouslySetInnerHTML={{ __html: html }} />;
+}
+
 // ---------- layout ----------
 
 export function ShopLayout() {
@@ -103,6 +151,9 @@ export function ShopLayout() {
   const [error, setError] = useState<unknown>(null);
   const { count } = useCart();
   const location = useLocation();
+  const preview = useThemePreview();
+  const theme = useMemo(() => ({ ...NO_THEME, ...info?.theme, ...preview }), [info, preview]);
+  const outlet = useMemo(() => info && { ...info, theme }, [info, theme]);
   useEffect(() => {
     void api<StoreInfo>(shopApi('')).then(setInfo).catch(setError);
   }, []);
@@ -120,6 +171,8 @@ export function ShopLayout() {
   }
   return (
     <div className="shop">
+      {theme.css && <style data-theme="store">{theme.css}</style>}
+      <ThemeSection html={theme.announcement} className="shop-announcement" />
       {info?.test && <div className="shop-test" role="note">{t('Test store: orders are not real and receipts have no fiscal value.')}</div>}
       <header className="shop-header">
         <Link to="/shop" className="shop-brand" viewTransition>
@@ -134,12 +187,13 @@ export function ShopLayout() {
       </header>
       <main className="shop-main" id="main">
         <div className="page" key={location.pathname}>
-          {info ? <Outlet context={info} /> : <div className="shop-grid">{[0, 1, 2, 3].map((i) => <div key={i} className="skeleton" style={{ height: '16rem' }} />)}</div>}
+          {outlet ? <Outlet context={outlet} /> : <div className="shop-grid">{[0, 1, 2, 3].map((i) => <div key={i} className="skeleton" style={{ height: '16rem' }} />)}</div>}
         </div>
       </main>
       <footer className="shop-footer">
         {info?.about && <p>{info.about}</p>}
         <p className="small">{info?.city && `${info.city} · `}{info?.telephone}{info?.whatsapp && <> · <a href={`https://wa.me/${whatsappNumber(info.whatsapp) ?? ''}`} target="_blank" rel="noreferrer">WhatsApp</a></>}</p>
+        <ThemeSection html={theme.footer} className="shop-footer-section" />
         <p className="small muted">{t('Every purchase comes with a receipt authorized by the Belize Tax Service.')} · eInvoicing</p>
       </footer>
     </div>
@@ -170,6 +224,7 @@ export function ShopHome() {
           {info.pickup.enabled && <span>{t('Pickup in {city}', { city: info.city })}</span>}
         </div>
       </div>
+      <ThemeSection html={info.theme?.home ?? ''} className="shop-home-section" />
       <input type="search" className="shop-search" placeholder={t('Search the store')} aria-label={t('Search the store')} value={q} onChange={(e) => setQ(e.target.value)} />
       {products === null ? <div className="shop-grid">{[0, 1, 2, 3].map((i) => <div key={i} className="skeleton" style={{ height: '16rem' }} />)}</div> : products.length === 0 ? (
         <div className="shop-empty"><p className="muted">{q ? t('Nothing matches your search.') : t('No products yet. Check back soon.')}</p></div>

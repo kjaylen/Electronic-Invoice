@@ -24,6 +24,7 @@ import { ZipWriter } from '../render/zip.ts';
 import { ApiError } from './errors.ts';
 import { requirePermission } from './permissions.ts';
 import { date } from './schemas.ts';
+import { logoForPdf } from '../templates/assets.ts';
 
 export const COUNTED_STATUSES = ['authorized', 'authorized_with_alert', 'contingency_pending'];
 const signed = (col: string) => `sum(case when d.etd_type = '04' then -${col} else ${col} end)`;
@@ -227,6 +228,7 @@ export function registerReportRoutes(app: FastifyInstance, deps: PipelineDeps) {
             `select document_id, event_code, serial::text as serial, signed_xml, created_at from events
              where tenant_id = $1 and document_id = any($2::uuid[]) and status in ('registered', 'pending') order by serial`, [tenantId, ids],
           )).rows;
+          let logo: Buffer | null | undefined;
           for (const d of docs) {
             const name = `${d.issue_date}_${ETD_TYPE_NAMES[d.etd_type].replace(/ /g, '-')}_${String(d.series_number).padStart(3, '0')}-${d.serial.padStart(9, '0')}`;
             // Belize wall-clock time, stored in the ZIP's time fields.
@@ -238,7 +240,8 @@ export function registerReportRoutes(app: FastifyInstance, deps: PipelineDeps) {
               await zip.add(`events/${name}_event-${e.event_code}-${e.serial.padStart(9, '0')}.xml`, e.signed_xml, new Date(e.created_at));
             }
             if (q.pdf && PDF_STATUSES.includes(d.status)) {
-              const pdf = await renderSheet(readEtdForPrint(d.signed_xml), d.protocol_number ? { protocolNumber: d.protocol_number } : {});
+              logo ??= (await logoForPdf(db, request.tenantId)) ?? null;
+              const pdf = await renderSheet(readEtdForPrint(d.signed_xml), { ...(d.protocol_number && { protocolNumber: d.protocol_number }), ...(logo && { logo }) });
               await zip.add(`pdf/${name}.pdf`, pdf, when);
             }
           }

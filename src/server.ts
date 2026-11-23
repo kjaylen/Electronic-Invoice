@@ -31,6 +31,10 @@
  *   SMTP_URL             outgoing mail server, e.g. smtps://user:pass@smtp.example.com:465
  *   MAIL_FROM            sender address, e.g. "eInvoicing <no-reply@example.bz>"
  *   MAIL_OUTBOX_DIR      instead of SMTP: write each email as an .eml file here (development)
+ *   PDF_RENDERER         "chromium" to print documents from the businesses' templates (needs a Chromium:
+ *                        `npx playwright install chromium`); unset: the built-in layouts
+ *   CHROMIUM_PATH        a Chromium or Chrome to use instead of Playwright's
+ *   CHROMIUM_CHANNEL     or an installed browser: "chrome" or "msedge"
  *
  *   npm start
  */
@@ -52,6 +56,7 @@ import { migrate, pgDatabase } from './db/database.ts';
 import { keyringFromEnv } from './db/keystore.ts';
 import { type Mailer, noMailer, outboxMailer, smtpMailer } from './mail/mailer.ts';
 import { cachingClientProvider } from './pipeline/clients.ts';
+import { chromiumRenderer } from './render/browser-pdf.ts';
 
 const env = process.env;
 if (!env.DATABASE_URL) {
@@ -96,6 +101,7 @@ const app = await buildApp({
     billing: { ...(env.PLATFORM_BILLING_TENANT && { tenantSlug: env.PLATFORM_BILLING_TENANT }), ...(env.PLATFORM_PAYMENT_INSTRUCTIONS && { paymentInstructions: env.PLATFORM_PAYMENT_INSTRUCTIONS }) },
   }),
   ...(webRoot && { webRoot }),
+  ...(env.PDF_RENDERER === 'chromium' && { pdfRenderer: chromiumRenderer({ ...(env.CHROMIUM_PATH && { executablePath: env.CHROMIUM_PATH }), ...(env.CHROMIUM_CHANNEL && { channel: env.CHROMIUM_CHANNEL }) }) }),
   cookieSecure: env.COOKIE_SECURE !== 'false',
   allowSignup: env.ALLOW_SIGNUP !== 'false',
   logger: true,

@@ -1,0 +1,14 @@
+{%- comment -%}
+  A section on your store's home page, between the welcome and the products.
+  Use it for a banner, your story, featured products. Leave it empty to show nothing.
+  products lists your products (name, price, url, image); store has your store's details.
+  Example:
+  <section class="featured">
+    <h2>New this week</h2>
+    <ul>
+    {%- for product in products limit: 3 %}
+      <li><a href="{{ product.url }}">{{ product.name }}: {{ product.price | money }}</a></li>
+    {%- endfor %}
+    </ul>
+  </section>
+{% endcomment -%}

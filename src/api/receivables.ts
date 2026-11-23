@@ -28,14 +28,16 @@ import { toBigInt } from '../db/database.ts';
 import { overLimit } from '../db/ratelimit.ts';
 import { formatCents, parseCents } from '../engine/decimal.ts';
 import { BELIZE_DISTRICTS } from '../engine/ubl.ts';
-import { simpleHtml } from '../mail/mailer.ts';
+import { businessContext, renderEmail } from '../templates/render.ts';
+import { logoForPdf } from '../templates/assets.ts';
 import { confirmPayment, type GatewayOptions, gatewayFor, getPaymentAccount, PaymentError, type Provider, startPayment, walletDisplay } from '../commerce/payments.ts';
 import type { PipelineDeps } from '../pipeline/issue.ts';
 import {
   AGE_BUCKETS, ageing, openReceivables, PAYMENT_METHODS, type PaymentMethod, paymentJson, paymentsFor, type Receivable, receivable,
   ReceivableError, receivablesSummary, recordPayment, statement, voidPayment,
 } from '../receivables/receivables.ts';
-import { renderStatement } from '../render/statement.ts';
+import { renderStatement, type StatementInput } from '../render/statement.ts';
+import { statementPdf as templateStatementPdf } from '../templates/pdf.ts';
 import { requireMail, type ServerContext } from './context.ts';
 import { createShareLink, sendDocumentEmail, shareLinkFor } from './documents.ts';
 import { ApiError, notFound } from './errors.ts';
@@ -136,37 +138,20 @@ export async function emailInvoice(deps: PipelineDeps, ctx: ServerContext, tenan
   });
 }
 
-/** The wording of a reminder, from how far past (or before) the due date it is. */
-export function reminderWording(r: Receivable, businessName: string, days: number): { subject: string; intro: string[] } {
-  const what = docLabel(r).toLowerCase();
-  const amount = money2(r.balance);
-  if (days < 0) {
-    const n = -days;
-    return {
-      subject: `Reminder: ${what} from ${businessName} is due ${n === 1 ? 'tomorrow' : `in ${n} days`}`,
-      intro: [`A friendly reminder that ${what} for ${money2(r.total)} is due on ${longDate(r.dueDate)}.`, `Amount due: ${amount}.`],
-    };
-  }
-  if (days === 0) {
-    return { subject: `Reminder: ${what} from ${businessName} is due today`, intro: [`A friendly reminder that ${what} is due today.`, `Amount due: ${amount}.`] };
-  }
+/** What a reminder's template sees, from how far past (or before) the due date it is. */
+export function reminderFor(r: Receivable, days: number) {
   return {
-    subject: `Overdue: ${what} from ${businessName}`,
-    intro: [
-      `Our records show that ${what} was due on ${longDate(r.dueDate)} and ${amount} is still unpaid (${days} day${days === 1 ? '' : 's'} overdue).`,
-      'If you have already paid, thank you, and please ignore this message.',
-    ],
+    when: days < 0 ? 'before' as const : days === 0 ? 'due' as const : 'after' as const,
+    days: Math.abs(days), what: docLabel(r).toLowerCase(), balance: r.balance, total: r.total, dueDate: r.dueDate,
   };
 }
 
 /** Email one payment reminder for an invoice. Returns the message id. */
 async function sendReminder(deps: PipelineDeps, ctx: ServerContext, tenantId: string, r: Receivable, to: string, userId: string | null, settings: ReceivableSettings, extras: { ekyash?: { sandboxUrl?: string; liveUrl?: string } } = {}): Promise<string> {
-  const biz = await business(deps.db, tenantId);
-  const { subject, intro } = reminderWording(r, biz.name, daysPastDue(r.dueDate));
   const provider = ctx.publicUrl ? await invoiceProvider(deps.db, tenantId, settings, extras) : null;
   const payUrl = provider ? (await createShareLink(deps.db, ctx, tenantId, r.documentId, userId)).payUrl : undefined;
   return sendDocumentEmail(deps, ctx, tenantId, r.documentId, {
-    to, userId, subject, intro, ...(settings.instructions.trim() && { message: settings.instructions.trim() }), ...(payUrl && { payUrl }),
+    to, userId, reminder: reminderFor(r, daysPastDue(r.dueDate)), ...(settings.instructions.trim() && { message: settings.instructions.trim() }), ...(payUrl && { payUrl }),
   });
 }
 
@@ -222,7 +207,7 @@ function addDays(isoDate: string, days: number): string {
 // ---------- statements ----------
 
 async function statementPdf(db: Queryable, tenantId: string, s: Awaited<ReturnType<typeof statement>>, settings: ReceivableSettings): Promise<Buffer> {
-  return renderStatement({
+  const input: StatementInput = {
     business: await business(db, tenantId),
     customer: { name: s.customer.name, tin: s.customer.tin },
     asOf: s.asOf,
@@ -231,7 +216,9 @@ async function statementPdf(db: Queryable, tenantId: string, s: Awaited<ReturnTy
     totalDue: s.totalDue,
     overdue: s.overdue,
     note: settings.instructions.trim() || null,
-  });
+  };
+  const logo = await logoForPdf(db, tenantId);
+  return (await templateStatementPdf(db, tenantId, input)) ?? renderStatement({ ...input, ...(logo && { logo }) });
 }
 
 const customerKey = { type: 'string', minLength: 3, maxLength: 310, pattern: '^(c:[0-9a-fA-F-]{36}|t:\\d{6}|n:.+|walk-in)$' } as const;
@@ -387,24 +374,23 @@ export function registerReceivableRoutes(app: FastifyInstance, deps: PipelineDep
       if (!to) throw new ApiError(422, 'no_email', 'This customer has no email address; enter one');
       if (await overLimit(db, `statement|${request.tenantId}|${request.body.customer}`, 10, 24 * 3600_000)) throw new ApiError(429, 'too_many_statements', 'Enough statements for this customer today');
       const settings = await receivableSettings(db, request.tenantId);
-      const biz = await business(db, request.tenantId);
+      const biz = await businessContext(db, request.tenantId);
       const provider = ctx.publicUrl ? await invoiceProvider(db, request.tenantId, settings, extras) : null;
-      const owed = s.open.filter((r) => r.balanceCents > 0n);
-      const invoiceLines: string[] = [];
-      for (const r of owed.slice(0, 30)) {
+      const open = [];
+      for (const r of s.open.filter((x) => x.balanceCents > 0n).slice(0, 30)) {
         const link = provider ? (await createShareLink(db, ctx, request.tenantId, r.documentId, request.userId || null)).payUrl : null;
-        invoiceLines.push(`${docLabel(r)}: ${money2(r.balance)}, due ${longDate(r.dueDate)}${r.daysOverdue > 0 ? ` (${r.daysOverdue} days overdue)` : ''}${link ? `. Pay online: ${link}` : ''}`);
+        open.push({
+          label: docLabel(r), type: TYPE_NAME[r.type] ?? 'Invoice', number: r.number, issue_date: r.issueDate, due_date: r.dueDate, days_overdue: r.daysOverdue,
+          total: r.total, paid: r.paid, credited: r.credited, balance: r.balance, pay_url: link,
+        });
       }
-      const paragraphs = [
-        `Please find attached your statement of account from ${biz.name} as of ${longDate(s.asOf)}.`,
-        owed.length ? `Total due: ${money2(s.totalDue)}${s.overdue !== '0.00' ? `, of which ${money2(s.overdue)} is overdue` : ''}.` : 'You have nothing to pay. Thank you.',
-        ...invoiceLines,
-        ...(settings.instructions.trim() ? [settings.instructions.trim()] : []),
-      ];
+      const mail = await renderEmail(db, request.tenantId, 'email.statement', {
+        business: biz, customer: { name: s.customer.name, tin: s.customer.tin ?? null, email: to },
+        statement: { as_of: s.asOf, open, total_due: s.totalDue, overdue: s.overdue, note: settings.instructions.trim() || null },
+      }, { publicUrl: ctx.publicUrl });
       const pdf = await statementPdf(db, request.tenantId, s, settings);
       await ctx.mailer.send({
-        to, replyTo: biz.email, subject: `Statement of account from ${biz.name}`,
-        text: paragraphs.join('\n\n'), html: simpleHtml({ heading: 'Statement of account', paragraphs }),
+        to, replyTo: biz.email, subject: mail.subject, text: mail.text, html: mail.html,
         attachments: [{ filename: `statement-${s.asOf}.pdf`, content: pdf, contentType: 'application/pdf' }],
       });
       await audit(db, { tenantId: request.tenantId, userId: request.userId || null, action: 'statement.sent', target: s.customer.name, details: { to }, ip: request.ip });
