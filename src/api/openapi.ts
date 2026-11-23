@@ -143,6 +143,8 @@ const SUMMARIES: Record<string, string> = {
   'GET /v1/reports/summary': 'Totals, GST by rate, by type and by day',
   'GET /v1/reports/customers': 'Sales by customer',
   'GET /v1/reports/items': 'Sales by item',
+  'POST /v1/items/import': 'Import items from CSV (dryRun to check first); matched by code, then barcode',
+  'POST /v1/customers/import': 'Import customers from CSV (dryRun to check first); matched by TIN, then email',
   'GET /v1/reports/staff': 'Sales by person: documents, total, discounts given, average receipt',
   'GET /v1/reports/hours': 'Sales by hour of the day (Belize time)',
   'PUT /v1/business/daily-summary': 'Turn the morning summary email to owners and admins on or off',

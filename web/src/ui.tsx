@@ -115,7 +115,7 @@ export function usePageTitle(title: string) {
 export function Field(props: { label: string; hint?: string; children: ReactNode; className?: string }) {
   return (
     <label className={`field ${props.className ?? ''}`}>
-      {props.label}
+      <span className="field-label">{props.label}</span>
       {props.children}
       {props.hint && <span className="hint">{props.hint}</span>}
     </label>

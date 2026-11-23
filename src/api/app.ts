@@ -60,6 +60,7 @@ import { registerPosAdminRoutes, registerPosDeviceRoutes, SESSION_TOKEN_PREFIX, 
 import { lookupSession } from '../db/users.ts';
 import { registerDiscountRoutes } from './discounts.ts';
 import { registerPublicAssetRoutes, registerTemplateRoutes } from './templates.ts';
+import { registerImportRoutes } from './imports.ts';
 import { domainCache } from '../commerce/domains.ts';
 import { registerIntegrationCallback, registerIntegrationRoutes } from './integrations.ts';
 import type { QuickBooksConfig } from '../integrations/quickbooks.ts';
@@ -349,6 +350,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     registerShiftRoutes(tenant, deps);
     registerPosAdminRoutes(tenant, deps);
     registerTemplateRoutes(tenant, deps);
+    registerImportRoutes(tenant, deps);
   }, { prefix: '/v1' });
 
   // The till apps before anyone signs in: pairing, who can sign in, PIN sign-in (the till's own token).

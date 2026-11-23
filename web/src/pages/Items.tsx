@@ -1,9 +1,11 @@
 import { type FormEvent, useEffect, useState } from 'react';
+import { Link } from 'react-router';
 import { api, type Item, type Page } from '../api';
 import { useT } from '../i18n';
 import { useSession } from '../session';
 import { useToast } from '../toast';
 import { ErrorText, Field, GST_CATEGORIES, Modal, money, Select, unitName, UNITS, useDebounced, usePageTitle } from '../ui';
+import { ImportDialog } from './ImportDialog';
 
 type Form = { name: string; description: string; sellerCode: string; barcode: string; unitCode: string; unitPrice: string; gstCategory: string; exemptionReasonCode: string; favorite: boolean };
 const EMPTY: Form = { name: '', description: '', sellerCode: '', barcode: '', unitCode: 'H87', unitPrice: '', gstCategory: 'S', exemptionReasonCode: '', favorite: false };
@@ -91,6 +93,7 @@ export function Items() {
   const [list, setList] = useState<Item[] | null>(null);
   const [cursor, setCursor] = useState<string | null>(null);
   const [editing, setEditing] = useState<Item | 'new' | null>(null);
+  const [importing, setImporting] = useState(false);
   const [archiving, setArchiving] = useState<Item | null>(null);
   const [error, setError] = useState<unknown>(null);
 
@@ -134,6 +137,8 @@ export function Items() {
       <div className="row">
         <div><h2>{t('All items')}</h2></div>
         <span className="spacer" />
+        <Link className="button secondary" to="/labels" viewTransition>{t('Print labels')}</Link>
+        {manage && <button type="button" className="secondary" onClick={() => setImporting(true)}>{t('Import')}</button>}
         {manage && <button onClick={() => setEditing('new')}>{t('Add item')}</button>}
       </div>
       <p className="muted small">{t('Everything you sell at the counter and on invoices, including each variant of your products. Star an item to make it a quick button at the counter.')}</p>
@@ -168,6 +173,7 @@ export function Items() {
         {cursor && <button className="secondary" onClick={() => void load(cursor)}>{t('Load more')}</button>}
       </section>
 
+      {importing && <ImportDialog kind="items" onClose={() => setImporting(false)} onDone={() => void load()} />}
       {editing && (
         <Modal wide title={editing === 'new' ? t('Add item') : t('Edit {name}', { name: editing.name })} onClose={() => setEditing(null)}>
           <ItemForm

@@ -418,6 +418,46 @@ test('templates: edit an email with a live preview, a mistake shown on its line,
   await expect(page.locator('.tpl-mail-subject')).toHaveText(/^Tax Invoice 001-000000042 from /);
 });
 
+test('labels: price tags with barcodes for items, on an A4 sheet', async ({ page }) => {
+  await logIn(page);
+  await page.goto(p('/products?tab=items'));
+  await page.getByRole('link', { name: 'Print labels' }).click();
+  await expect(page.getByRole('heading', { name: 'Labels', level: 1 })).toBeVisible();
+  const search = page.getByRole('combobox', { name: 'Add an item' });
+  await search.fill('Coconut');
+  await page.getByRole('option', { name: /Coconut water/ }).click();
+  await page.getByLabel('Labels for Coconut water').fill('3');
+  await expect(page.getByRole('button', { name: 'Print 3 labels' })).toBeEnabled();
+  await expect(page.locator('.label-options')).toContainText('3 labels on 1 sheet');
+  // 3.50 plus GST is 3.94; the barcode is drawn.
+  const preview = page.frameLocator('.labels-frame');
+  await expect(preview.locator('.label')).toHaveCount(3);
+  await expect(preview.locator('.label').first()).toContainText('BZ$3.94');
+  await expect(preview.locator('.label svg').first()).toBeVisible();
+});
+
+test('import: customers from a spreadsheet, checked row by row first', async ({ page }) => {
+  await logIn(page);
+  await page.goto(p('/customers'));
+  await page.getByRole('button', { name: 'Import' }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.locator('input[type=file]').setInputFiles({
+    name: 'customers.csv', mimeType: 'text/csv',
+    buffer: Buffer.from(['Name,TIN,Email,City', 'Caye Caulker Dive Shop,654987,dive@caye.example,Caye Caulker', 'No TIN Here,12,,'].join('\n')),
+  });
+  await expect(dialog.locator('.import-summary')).toContainText('1 new');
+  await expect(dialog.locator('.import-summary')).toContainText('1 with problems');
+  await expect(dialog).toContainText('TIN "12" is not 6 digits');
+  await dialog.getByRole('button', { name: 'Import 1 row, skip the rest' }).click();
+  await expect(page.getByRole('status').getByText('1 added, 0 updated.')).toBeVisible();
+  await expect(page.getByRole('row', { name: /Caye Caulker Dive Shop/ })).toContainText('654987');
+  // The customer's own page.
+  await page.getByRole('link', { name: 'Caye Caulker Dive Shop' }).click();
+  await expect(page.getByRole('heading', { name: 'Caye Caulker Dive Shop', level: 1 })).toBeVisible();
+  await expect(page.locator('.kpis')).toContainText('Bought this year');
+  await expect(page.getByText('Nothing owed. All paid up.')).toBeVisible();
+});
+
 test('online store: a product with sizes and a photo, open the store, a buyer orders, paid becomes a BTS receipt', async ({ page, browser }) => {
   await logIn(page);
   // The product.

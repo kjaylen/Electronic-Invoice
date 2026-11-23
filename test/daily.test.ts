@@ -87,3 +87,31 @@ test('the daily summary: sales against last week, how customers paid, best selle
     await f.close();
   }
 });
+
+test('a customer at a glance: what they bought, what they owe, recent documents, favourite items', async () => {
+  const f = await setupPipeline();
+  for (const t of ['01', '02'] as const) f.bts.script(SUBMIT_PATHS[t], AUTHORIZED);
+  const app = await buildApp({ pipeline: f.deps, cookieSecure: true });
+  try {
+    const slug = (await f.db.query<{ slug: string }>('select slug from tenants where id = $1', [f.tenantA])).rows[0]!.slug;
+    await createUser(f.db, { tenantId: f.tenantA, name: 'Olive', email: 'olive@biz.example', role: 'owner', password: PASSWORD });
+    const login = await app.inject({ method: 'POST', url: '/v1/auth/login', headers: CSRF, payload: { business: slug, login: 'olive@biz.example', password: PASSWORD } });
+    const owner = { ...CSRF, cookie: cookieFrom(login), 'x-business': slug };
+    const customer = (await app.inject({ method: 'POST', url: '/v1/customers', headers: owner, payload: { name: 'Hotel San Ignacio Ltd.', tin: '777888', address: { street: '18 Buena Vista', city: 'San Ignacio', districtCode: '2' } } })).json();
+    const line = (description: string, price: string) => ({ description, quantity: '2', unitCode: 'H87', unitPrice: price, gstCategory: 'S' });
+    assert.equal((await app.inject({ method: 'POST', url: '/v1/documents', headers: owner, payload: { type: '02', customerId: customer.id, lines: [line('Coffee beans', '20.00')], payment: { meansCode: '10', terms: 'Paid' } } })).statusCode, 201);
+    const inv = await app.inject({ method: 'POST', url: '/v1/documents', headers: owner, payload: { type: '01', customerId: customer.id, lines: [line('Coffee beans', '20.00'), line('Mugs', '10.00')], payment: { meansCode: '30', dueDate: '2099-12-31' } } });
+    assert.equal(inv.statusCode, 201, inv.body);
+
+    const s = (await app.inject({ method: 'GET', url: `/v1/customers/${customer.id}/summary`, headers: owner })).json();
+    assert.equal(s.customer.name, 'Hotel San Ignacio Ltd.');
+    assert.deepEqual([s.sales.documents, s.sales.lifetime, s.sales.thisYear], [2, '112.50', '112.50']); // 45.00 + 67.50
+    assert.deepEqual([s.owed.total, s.owed.overdue, s.owed.invoices.length], ['67.50', '0.00', 1]);
+    assert.equal(s.recent.length, 2);
+    assert.deepEqual(s.topItems[0], { name: 'Coffee beans', quantity: '4', total: '90.00' });
+    assert.equal(s.key, `c:${customer.id}`);
+  } finally {
+    await app.close();
+    await f.close();
+  }
+});

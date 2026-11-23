@@ -94,6 +94,15 @@ export function NewDocument({ mode = 'issue' }: { mode?: FormMode } = {}) {
   const [reason, setReason] = useState('');
   const [customerMode, setCustomerMode] = useState<'saved' | 'new' | 'walkin'>(initialType === '02' ? 'walkin' : 'saved');
   const [customer, setCustomer] = useState<Customer | null>(null);
+  // From a customer's page: start with them chosen.
+  const presetCustomer = params.get('customer');
+  useEffect(() => {
+    if (!presetCustomer) return;
+    void api<Customer>(`/v1/customers/${presetCustomer}`).then((c) => {
+      setCustomerMode('saved');
+      setCustomer(c);
+    }).catch(() => {});
+  }, [presetCustomer]);
   const [newCustomer, setNewCustomer] = useState<NewCustomer>(EMPTY_CUSTOMER);
   const [receiptTin, setReceiptTin] = useState('');
   const [lines, setLines] = useState<Line[]>(() => [emptyLine()]);

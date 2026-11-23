@@ -5,6 +5,7 @@ import { useT } from '../i18n';
 import { useSession } from '../session';
 import { useToast } from '../toast';
 import { DISTRICTS, ErrorText, Field, Modal, Select, useDebounced, usePageTitle } from '../ui';
+import { ImportDialog } from './ImportDialog';
 
 type Form = { name: string; tin: string; street: string; city: string; districtCode: string; telephone: string; email: string };
 const EMPTY: Form = { name: '', tin: '', street: '', city: '', districtCode: '1', telephone: '', email: '' };
@@ -85,6 +86,7 @@ export function Customers() {
   const [list, setList] = useState<Customer[] | null>(null);
   const [cursor, setCursor] = useState<string | null>(null);
   const [editing, setEditing] = useState<Customer | 'new' | null>(null);
+  const [importing, setImporting] = useState(false);
   const [archiving, setArchiving] = useState<Customer | null>(null);
   const [error, setError] = useState<unknown>(null);
 
@@ -120,6 +122,7 @@ export function Customers() {
       <div className="row">
         <div><span className="kicker">{t('Directory')}</span><h1>{t('Customers')}</h1></div>
         <span className="spacer" />
+        {manage && <button type="button" className="secondary" onClick={() => setImporting(true)}>{t('Import')}</button>}
         {manage && <button onClick={() => setEditing('new')}>{t('Add customer')}</button>}
       </div>
       <input type="search" placeholder={t('Search by name, TIN, phone or email')} value={q} onChange={(e) => setQ(e.target.value)} aria-label={t('Search customers')} />
@@ -132,7 +135,7 @@ export function Customers() {
               <tbody>
                 {list.map((c) => (
                   <tr key={c.id}>
-                    <td data-label={t('Name')}><strong>{c.name}</strong></td>
+                    <td data-label={t('Name')}><Link to={`/customers/${c.id}`} className="strong-link" viewTransition>{c.name}</Link></td>
                     <td data-label="TIN">{c.tin ?? '—'}</td>
                     <td data-label={t('Address')}>{c.address ? `${c.address.street}, ${c.address.city}` : '—'}</td>
                     <td data-label={t('Contact')}>{[c.contact.telephone, c.contact.email].filter(Boolean).join(' · ') || '—'}</td>
@@ -150,6 +153,7 @@ export function Customers() {
         {cursor && <button className="secondary" onClick={() => void load(cursor)}>{t('Load more')}</button>}
       </section>
 
+      {importing && <ImportDialog kind="customers" onClose={() => setImporting(false)} onDone={() => void load()} />}
       {editing && (
         <Modal wide title={editing === 'new' ? t('Add customer') : t('Edit {name}', { name: editing.name })} onClose={() => setEditing(null)}>
           <CustomerForm

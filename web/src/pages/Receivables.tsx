@@ -175,7 +175,7 @@ function OpenInvoices() {
 
 // ---------- a customer's statement ----------
 
-function StatementModal({ customerKey, onClose }: { customerKey: string; onClose: () => void }) {
+export function StatementModal({ customerKey, onClose }: { customerKey: string; onClose: () => void }) {
   const t = useT();
   const toast = useToast();
   const { can } = useSession();

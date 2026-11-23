@@ -66,6 +66,8 @@ const QuoteEditor = page(() => import('./pages/NewDocument'), 'QuoteEditor');
 const RecurringEditor = page(() => import('./pages/NewDocument'), 'RecurringEditor');
 const Settings = page(() => import('./pages/Settings'), 'Settings');
 const Templates = page(() => import('./pages/Templates'), 'Templates');
+const Labels = page(() => import('./pages/Labels'), 'Labels');
+const CustomerDetail = page(() => import('./pages/CustomerDetail'), 'CustomerDetail');
 
 function PageSkeleton() {
   return (
@@ -334,6 +336,7 @@ function BusinessApp() {
         <Route path="/documents/new" element={<NewDocument />} />
         <Route path="/documents/:id" element={<DocumentDetail />} />
         <Route path="/customers" element={<Customers />} />
+        <Route path="/customers/:id" element={<CustomerDetail />} />
         <Route path="/orders" element={<Orders />} />
         <Route path="/orders/:id" element={<OrderDetail />} />
         <Route path="/products" element={<Products />} />
@@ -356,6 +359,7 @@ function BusinessApp() {
         <Route path="/recurring/new" element={<RecurringEditor />} />
         <Route path="/recurring/:id" element={<Allowed permission="documents.issue"><RecurringDetail /></Allowed>} />
         <Route path="/recurring/:id/edit" element={<RecurringEditor />} />
+        <Route path="/labels" element={<Labels />} />
         <Route path="/templates" element={<Allowed permission="business.manage"><Templates /></Allowed>} />
         <Route path="/settings" element={<Settings />} />
       </Route>

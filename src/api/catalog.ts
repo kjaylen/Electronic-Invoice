@@ -15,6 +15,9 @@ import { certificateSchema, customerSchema, itemSchema, listQuery, uuid } from '
 import { assertFeature, getSubscription } from '../billing/billing.ts';
 import { PLANS } from '../billing/plans.ts';
 import type { Queryable } from '../db/database.ts';
+import { openReceivables } from '../receivables/receivables.ts';
+import { formatCents } from '../engine/decimal.ts';
+import { toBigInt } from '../db/database.ts';
 
 // ---------- pagination ----------
 
@@ -294,6 +297,47 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: PipelineDeps) 
   app.get<{ Params: { id: string } }>('/customers/:id', { schema: { params: { type: 'object', properties: { id: uuid } } } }, async (request) =>
     customerJson(await loadCustomer(deps, request.tenantId, request.params.id)),
   );
+
+  // A customer at a glance: what they bought (all time, this year), what they owe, their recent documents and favourite items.
+  app.get<{ Params: { id: string } }>('/customers/:id/summary', { schema: { params: { type: 'object', required: ['id'], properties: { id: uuid } } } }, async (request) => {
+    const customer = customerJson(await loadCustomer(deps, request.tenantId, request.params.id));
+    const env = `(select case environment when 'production' then '01' else '02' end from tenants where id = $1)`;
+    const counted = "('authorized', 'authorized_with_alert', 'contingency_pending', 'pending')";
+    const sales = (await db.query<{ lifetime: unknown; this_year: unknown; n: number; last: string | null; first: string | null }>(
+      `select coalesce(sum(case when etd_type = '04' then -tax_inclusive_cents else tax_inclusive_cents end), 0) as lifetime,
+         coalesce(sum(case when etd_type = '04' then -tax_inclusive_cents else tax_inclusive_cents end) filter (where extract(year from issue_date) = extract(year from (now() - interval '6 hours'))), 0) as this_year,
+         count(*)::int as n, max(issue_date)::text as last, min(issue_date)::text as first
+       from documents where tenant_id = $1 and customer_id = $2 and status in ${counted} and reception_env = ${env}`,
+      [request.tenantId, request.params.id],
+    )).rows[0]!;
+    const recent = (await db.query<{ id: string; etd_type: string; series_number: number; serial: string; issue_date: string; total: unknown; status: string }>(
+      `select id, etd_type, series_number, serial::text as serial, issue_date::text as issue_date, tax_inclusive_cents as total, status
+       from documents where tenant_id = $1 and customer_id = $2 and reception_env = ${env} order by issue_date desc, created_at desc limit 10`,
+      [request.tenantId, request.params.id],
+    )).rows;
+    const items = (await db.query<{ name: string; quantity: string; total: unknown }>(
+      `select l.description as name, sum(l.quantity)::text as quantity, sum(l.line_total_cents) as total
+       from document_lines l join documents d on d.id = l.document_id and d.tenant_id = l.tenant_id
+       where d.tenant_id = $1 and d.customer_id = $2 and d.etd_type in ('01', '02') and d.status in ${counted} and d.reception_env = ${env}
+       group by l.description order by sum(l.line_total_cents) desc limit 5`,
+      [request.tenantId, request.params.id],
+    )).rows;
+    const open = (await openReceivables(db, request.tenantId, { customerKey: `c:${request.params.id}` })).filter((r) => r.balanceCents > 0n);
+    const overdue = open.filter((r) => r.daysOverdue > 0);
+    const c = (v: unknown) => formatCents(toBigInt(v ?? 0));
+    return {
+      customer,
+      key: `c:${request.params.id}`,
+      sales: { lifetime: c(sales.lifetime), thisYear: c(sales.this_year), documents: sales.n, lastSale: sales.last, firstSale: sales.first },
+      owed: {
+        total: formatCents(open.reduce((a, r) => a + r.balanceCents, 0n)),
+        overdue: formatCents(overdue.reduce((a, r) => a + r.balanceCents, 0n)),
+        invoices: open.map((r) => ({ id: r.documentId, number: r.number, dueDate: r.dueDate, balance: r.balance, daysOverdue: r.daysOverdue })),
+      },
+      recent: recent.map((d) => ({ id: d.id, type: d.etd_type, number: `${String(d.series_number).padStart(3, '0')}-${d.serial.padStart(9, '0')}`, issueDate: d.issue_date, total: c(d.total), status: d.status })),
+      topItems: items.map((i) => ({ name: i.name, quantity: String(Number(i.quantity)), total: c(i.total) })),
+    };
+  });
 
   // Edit: replaces all fields. Documents already issued keep the details they were issued with.
   app.put<{ Params: { id: string }; Body: CustomerBody }>(

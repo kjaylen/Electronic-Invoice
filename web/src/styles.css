@@ -673,8 +673,11 @@ ol.activity li.warn strong { color: var(--coral-ink); }
 .photo-add { display: grid; place-items: center; align-content: center; gap: 0.3rem; aspect-ratio: 1; border: 1.5px dashed var(--hairline-strong); border-radius: var(--radius); cursor: pointer; text-align: center; padding: 0.5rem; color: var(--brand); font-weight: 560; transition: border-color 160ms var(--ease), background 160ms var(--ease); }
 .photo-add:hover, .photo-add:focus-within { border-color: var(--brand); background: var(--lavender); }
 .variants { display: grid; gap: 0.75rem; }
-.variant-row { display: grid; gap: 0.6rem; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); align-items: end; padding: 0.8rem; border: 1px solid var(--hairline); border-radius: var(--radius); background: var(--sheet-2); animation: rise 300ms var(--ease-out) both; }
-.variant-row .remove-variant { justify-self: start; }
+.variant-row { display: grid; column-gap: 0.6rem; row-gap: 0.4rem; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); align-items: start; padding: 0.8rem; border: 1px solid var(--hairline); border-radius: var(--radius); background: var(--sheet-2); animation: rise 300ms var(--ease-out) both; }
+/* Each field takes three shared rows (label, input, hint), so every input in a row lines up, however long its label or whether it has a hint. */
+.variant-row > label.field { grid-row: span 3; display: grid; grid-template-rows: subgrid; gap: 0.4rem; }
+.variant-row > label.field .field-label { align-self: end; }
+.variant-row .remove-variant { justify-self: start; grid-row: span 3; align-self: center; }
 button.danger-outline { color: var(--coral-ink); border-color: var(--coral-line); }
 .badges { gap: 0.3rem; flex-wrap: nowrap; }
 .store-status.open { border-left: 4px solid var(--lime); }
@@ -1734,3 +1737,40 @@ button.tpl-img-upload { margin: 0.6rem 0.3rem 0.3rem; justify-content: center; }
 .email-receipt { display: flex; gap: 0.5rem; margin-top: 0.75rem; }
 .email-receipt input { flex: 1; min-width: 0; }
 .email-sent { margin: 0.6rem 0 0; }
+
+/* ---------- labels: price tags and barcodes ---------- */
+.labels-layout { display: grid; grid-template-columns: minmax(300px, 400px) minmax(0, 1fr); gap: 1.25rem; align-items: start; }
+.label-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.label-rows li { display: flex; align-items: center; gap: 0.6rem; padding: 0.55rem 0; border-top: 1px solid var(--hairline); animation: row-in 240ms var(--ease-out) both; }
+.label-rows li:first-child { border-top: 0; }
+.label-rows li > div { display: flex; flex-direction: column; gap: 0.1rem; flex: 1; min-width: 0; }
+.label-rows li > div strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.label-copies input { width: 4.5rem; text-align: center; padding: 0.35rem 0.4rem; min-height: 0; }
+.label-options { padding-top: 0.5rem; border-top: 1px solid var(--hairline); }
+.labels-preview { padding: 0; overflow: hidden; min-height: 24rem; display: flex; }
+.labels-preview > p { padding: 1.25rem; }
+.labels-frame { width: 100%; height: min(78vh, 900px); border: 0; display: block; background: #eef0f3; }
+@media (max-width: 900px) { .labels-layout { grid-template-columns: minmax(0, 1fr); } }
+
+/* ---------- importing a spreadsheet ---------- */
+.import-actions { flex-wrap: wrap; gap: 0.75rem; align-items: center; }
+.file-button { cursor: pointer; }
+.import-summary { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.import-table { max-height: 46vh; overflow: auto; border: 1px solid var(--hairline); border-radius: var(--radius); }
+.import-table table { margin: 0; }
+.import-table thead th { position: sticky; top: 0; background: var(--sheet-2); z-index: 1; }
+.import-error td { background: var(--coral-soft); }
+.import-problem { color: var(--coral-ink); font-weight: 520; }
+
+/* ---------- a customer at a glance ---------- */
+.back-link { font-size: 0.88rem; text-decoration: none; color: var(--muted); width: fit-content; }
+.back-link:hover { color: var(--brand); }
+.customer-head { align-items: flex-end; flex-wrap: wrap; gap: 1rem; }
+.customer-head h1 { margin: 0.1rem 0 0.2rem; }
+.customer-head p { margin: 0; }
+.overdue-text { color: var(--coral-ink); font-weight: 560; }
+a.strong-link { font-weight: 620; color: var(--ink); text-decoration: none; }
+a.strong-link:hover { color: var(--brand); text-decoration: underline; text-underline-offset: 3px; }
+.customer-open { list-style: none; margin: 0.5rem 0 0; padding: 0; display: flex; flex-direction: column; }
+.customer-open li { display: flex; align-items: baseline; gap: 0.6rem; padding: 0.55rem 0; border-top: 1px solid var(--hairline); }
+.customer-open li:first-child { border-top: 0; }
