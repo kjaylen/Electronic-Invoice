@@ -14,7 +14,6 @@
  *   GET  /v1/account/:token/statement.pdf
  */
 
-import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { audit } from '../db/audit.ts';
 import type { Queryable } from '../db/database.ts';
@@ -25,28 +24,16 @@ import { simpleHtml } from '../mail/mailer.ts';
 import type { PipelineDeps } from '../pipeline/issue.ts';
 import { openReceivables, ReceivableError, statement } from '../receivables/receivables.ts';
 import { emailLanguage } from '../templates/lang.ts';
-import { publicLink, requireMail, type ServerContext } from './context.ts';
+import { accountTokenHash as hash, createAccountLink } from './account-links.ts';
+import { requireMail, type ServerContext } from './context.ts';
 import { createShareLink } from './documents.ts';
 import { ApiError, notFound } from './errors.ts';
 import { can, requirePermission } from './permissions.ts';
 import { businessContact, invoiceProvider, receivableSettings, statementPdfFor } from './receivables.ts';
 import { uuid } from './schemas.ts';
 
-const LINK_TTL_MS = 366 * 86_400_000;
-const hash = (token: string) => createHash('sha256').update(token, 'utf8').digest('hex');
 const VALID = ['authorized', 'authorized_with_alert', 'contingency_pending', 'pending'];
 const TYPE_NAMES: Record<string, string> = { '01': 'Tax invoice', '02': 'Tax receipt', '03': 'Debit note', '04': 'Credit note' };
-
-async function createAccountLink(db: Queryable, ctx: ServerContext, tenantId: string, customerId: string, userId: string | null) {
-  publicLink(ctx, '/');
-  const c = (await db.query<{ id: string; name: string; email: string | null }>('select id, name, email from customers where id = $1 and tenant_id = $2 and archived_at is null', [customerId, tenantId])).rows[0];
-  if (!c) throw notFound('Customer');
-  const token = randomBytes(32).toString('base64url');
-  const expiresAt = new Date(Date.now() + LINK_TTL_MS);
-  await db.query('insert into customer_links (id, tenant_id, customer_id, token_hash, created_by, expires_at) values ($1, $2, $3, $4, $5, $6)',
-    [randomUUID(), tenantId, customerId, hash(token), userId, expiresAt.toISOString()]);
-  return { customer: c, url: publicLink(ctx, `/a/${token}`), expiresAt: expiresAt.toISOString() };
-}
 
 export function registerAccountLinkRoutes(app: FastifyInstance, deps: PipelineDeps, ctx: ServerContext) {
   const { db } = deps;

@@ -90,7 +90,7 @@ export const TEMPLATES: TemplateDef[] = [
     description: 'A customer\'s statement, with the PDF attached.',
     subject: 'Statement of account from {{ business.name }}',
     subjectEs: 'Estado de cuenta de {{ business.name }}',
-    variables: [...BUSINESS, IMAGES, ...CUSTOMER, { name: 'statement.as_of', description: 'The date of the statement' }, { name: 'statement.open', description: 'What is still owed: label, number, issue_date, due_date, days_overdue, total, paid, balance, pay_url' }, { name: 'statement.total_due', description: 'Everything owed' }, { name: 'statement.overdue', description: 'What is past due' }, { name: 'statement.note', description: 'Your payment instructions' }],
+    variables: [...BUSINESS, IMAGES, ...CUSTOMER, { name: 'statement.as_of', description: 'The date of the statement' }, { name: 'statement.open', description: 'What is still owed: label, number, issue_date, due_date, days_overdue, total, paid, balance, pay_url' }, { name: 'statement.total_due', description: 'Everything owed' }, { name: 'statement.overdue', description: 'What is past due' }, { name: 'statement.note', description: 'Your payment instructions' }, { name: 'statement.account_url', description: 'The customer\'s account page (saved customers; may be empty)' }],
   },
   {
     key: 'email.quote', group: 'emails', name: 'Quotation email', preview: 'email', language: 'html', file: 'email-quote.liquid',

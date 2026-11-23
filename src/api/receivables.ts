@@ -46,6 +46,7 @@ import { settlePayment } from './payments.ts';
 import { can, requirePermission } from './permissions.ts';
 import { csvCell } from './reports.ts';
 import { date as dateSchema, money, uuid } from './schemas.ts';
+import { createAccountLink } from './account-links.ts';
 
 // ---------- settings ----------
 
@@ -393,7 +394,11 @@ export function registerReceivableRoutes(app: FastifyInstance, deps: PipelineDep
       }
       const mail = await renderEmail(db, request.tenantId, 'email.statement', {
         business: biz, customer: { name: s.customer.name, tin: s.customer.tin ?? null, email: to },
-        statement: { as_of: s.asOf, open, total_due: s.totalDue, overdue: s.overdue, note: settings.instructions.trim() || null },
+        statement: {
+          as_of: s.asOf, open, total_due: s.totalDue, overdue: s.overdue, note: settings.instructions.trim() || null,
+          // Their account page, for a saved customer: everything owed and paid, any time.
+          account_url: ctx.publicUrl && request.body.customer.startsWith('c:') ? (await createAccountLink(db, ctx, request.tenantId, request.body.customer.slice(2), request.userId || null).catch(() => null))?.url ?? null : null,
+        },
       }, { publicUrl: ctx.publicUrl, lang });
       const pdf = await statementPdf(db, request.tenantId, s, settings);
       await ctx.mailer.send({

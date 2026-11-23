@@ -25,6 +25,7 @@ test('account links: what a customer owes, their documents, their statement', as
   const f = await setupPipeline();
   for (const t of ['01', '02'] as const) f.bts.script(SUBMIT_PATHS[t], AUTHORIZED);
   const mailer = memoryMailer();
+  let mail = '';
   const app = await buildApp({ pipeline: f.deps, cookieSecure: true, mailer, publicUrl: 'https://app.example.test' });
   try {
     const slug = (await f.db.query<{ slug: string }>('select slug from tenants where id = $1', [f.tenantA])).rows[0]!.slug;
@@ -75,9 +76,15 @@ test('account links: what a customer owes, their documents, their statement', as
     assert.equal(mailer.sent.at(-1)!.to, '111222@cust.example');
     assert.match(mailer.sent.at(-1)!.text, /\/a\/[A-Za-z0-9_-]{43}/);
 
+    // A statement to a saved customer links to their account page.
+    const st2 = await app.inject({ method: 'POST', url: '/v1/receivables/statement/send', headers: owner, payload: { customer: `c:${shop.id}` } });
+    assert.equal(st2.statusCode, 200, st2.body);
+    assert.match(mail = mailer.sent.at(-1)!.text, /See your account online/);
+    assert.match(mail, /https:\/\/app\.example\.test\/a\/[A-Za-z0-9_-]{43}/);
+
     // Revoked: every link stops.
     const revoked = (await app.inject({ method: 'DELETE', url: `/v1/customers/${shop.id}/account-links`, headers: owner })).json();
-    assert.equal(revoked.revoked, 2);
+    assert.equal(revoked.revoked, 3);
     assert.equal((await app.inject({ method: 'GET', url: `/v1/account/${token}` })).statusCode, 404);
     assert.equal((await app.inject({ method: 'GET', url: '/v1/account/not-a-token' })).statusCode, 404);
   } finally {

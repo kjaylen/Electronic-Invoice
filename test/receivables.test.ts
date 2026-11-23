@@ -195,6 +195,7 @@ test('ageing, statements (JSON, PDF, email), the CSV and settings', () =>
     assert.match(mail.text, /Total due: BZ\$337\.50, of which BZ\$337\.50 is overdue/);
     assert.match(mail.text, /Pay online: https:\/\/app\.example\.test\/pay\//, 'each invoice has a pay link (test payments in the test environment)');
     assert.match(mail.text, /Belize Bank, account 000-111/);
+    assert.doesNotMatch(mail.text, /\/a\//, 'no account page for a customer who is not saved');
 
     const csv = await c.app.inject({ method: 'GET', url: '/v1/receivables/ageing.csv', headers: c.owner });
     assert.match(csv.body, /Island Logistics Ltd\.,777888,accounts@island\.example,2,/);

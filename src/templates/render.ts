@@ -330,7 +330,7 @@ export async function sampleContext(def: TemplateDef, biz: BusinessContext, lang
     case 'email.statement':
     case 'document.statement':
       return { context: { business: biz, customer, pay_url: 'https://example.bz/pay/sample', statement: {
-        as_of: '2026-11-22', total_due: '1850.00', overdue: '600.00', note: def.key === 'email.statement' ? transfer : null,
+        as_of: '2026-11-22', total_due: '1850.00', overdue: '600.00', note: def.key === 'email.statement' ? transfer : null, account_url: def.key === 'email.statement' ? 'https://example.bz/a/sample' : null,
         open: [
           { label: `${say.receivable('01')} 001-000000038`, type: 'Tax invoice', number: '001-000000038', issue_date: '2026-10-14', due_date: '2026-11-13', days_overdue: 9, total: '600.00', paid: '0.00', credited: '0.00', balance: '600.00', pay_url: 'https://example.bz/pay/sample-38' },
           { label: `${say.receivable('01')} 001-000000042`, type: 'Tax invoice', number: '001-000000042', issue_date: '2026-11-22', due_date: '2026-12-22', days_overdue: 0, total: '1250.00', paid: '0.00', credited: '0.00', balance: '1250.00', pay_url: 'https://example.bz/pay/sample-42' },

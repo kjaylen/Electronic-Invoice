@@ -37,6 +37,12 @@
           </table>
         </td></tr>
         {%- endif %}
+        {%- if statement.account_url %}
+        <tr><td style="padding:12px 32px 4px">
+          <a href="{{ statement.account_url }}" style="display:inline-block;background:#6d2d93;color:#ffffff;padding:11px 20px;border-radius:9px;text-decoration:none;font-weight:600;font-size:14px">See your account online</a>
+          <p style="margin:8px 0 0;font-size:12px;color:#646b7b">What you owe, paying online, and your invoices, whenever you like. The link is personal.</p>
+        </td></tr>
+        {%- endif %}
         {%- if statement.note %}
         <tr><td style="padding:10px 32px 4px;font-size:14px;line-height:1.6;color:#3d4250"><p style="margin:0;white-space:pre-line">{{ statement.note }}</p></td></tr>
         {%- endif %}
