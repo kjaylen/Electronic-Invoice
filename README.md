@@ -211,7 +211,7 @@ Issuing body:
 | `POST /v1/users/:id/disable`, `/enable`, `/password`, `/sign-out` | Deactivate (signs them out), reactivate, set a temporary password or send a link, end all sessions |
 | `POST /v1/users/:id/two-factor/reset` | A lost phone: turns their two-step sign-in off and ends their sessions |
 | `GET/POST/DELETE /v1/api-keys` | The business's API keys |
-| `GET /v1/audit` | The activity log |
+| `GET /v1/audit` | The activity log, newest first, 50 a page (`before` for the next): filtered by `kind` (`security`, `people`, `sales`, `store`, `stock`, `settings`), `userId`, `from` and `to` (days in Belize) |
 
 Each business has its own session cookie (`etd_s_<slug>`), so one browser can be signed in to several. Requests name the business with the `X-Business` header, or `?b=<slug>` on plain links such as PDF downloads.
 
@@ -297,6 +297,7 @@ A React + TypeScript app (Vite) served by the API server from `web/dist`. It's b
 - **Installable:** a web app manifest, icons and a service worker that caches the app shell (never API data), so it installs on phones and desktops and opens fast.
 - **Accessibility:** a skip link; focus moves to each new page; dialogs trap focus and give it back; a keyboard-operable combobox; every control labelled; muted text at 5:1 contrast.
 - **Sign-in screens:** a white card (floating labels, show or hide the password, keep me signed in, a clear busy, success and error state) beside a living panel: slowly drifting aurora light, a real-time fluid on the GPU (WebGL; velocity, pressure and dye, stirred by the pointer or a finger, a splash on a click) and a faint particle network that moves aside for the pointer (`web/src/scene/`). It scales down on phones and small machines, falls back to the still gradient without WebGL, stands still with reduced motion, and pauses while the tab is hidden.
+- **Long lists page:** documents, customers, items, the activity log and the console's staff log show one page at a time (newer and older, the page number), so they stay quick however long they get; changing a filter or search starts again at the first page.
 - **Robustness:** each page loads on demand and crashes stay inside one page (with a reload button); an expired session returns to the login page; network errors say so plainly.
 - **Design:** "ledger and drafting table".
   - Warm grid paper, cream sheets with hairline edges, aubergine ink.

@@ -4,7 +4,7 @@ import { api, link, type Item, type Page } from '../api';
 import { useT } from '../i18n';
 import { useSession } from '../session';
 import { useToast } from '../toast';
-import { Combobox, ErrorText, Field, GST_CATEGORIES, Modal, money, Select, unitName, UNITS, useDebounced, usePageTitle } from '../ui';
+import { Combobox, ErrorText, Field, GST_CATEGORIES, Modal, money, Select, unitName, UNITS, useDebounced, usePageTitle, Pager, usePages } from '../ui';
 import { ImportDialog } from './ImportDialog';
 
 type Form = { name: string; description: string; sellerCode: string; barcode: string; category: string; unitCode: string; unitPrice: string; wholesalePrice: string; gstCategory: string; exemptionReasonCode: string; favorite: boolean; breaks: Array<{ key: number; minQuantity: string; unitPrice: string }> };
@@ -175,8 +175,7 @@ export function Items() {
   const manage = can('catalog.manage');
   const [q, setQ] = useState('');
   const query = useDebounced(q, 250);
-  const [list, setList] = useState<Item[] | null>(null);
-  const [cursor, setCursor] = useState<string | null>(null);
+
   const [editing, setEditing] = useState<Item | 'new' | null>(null);
   const [importing, setImporting] = useState(false);
   const [archiving, setArchiving] = useState<Item | null>(null);
@@ -191,26 +190,19 @@ export function Items() {
   useEffect(() => {
     void loadCategories();
   }, []);
-  const load = async (after?: string) => {
-    try {
-      const filter = category === '' ? '' : `&category=${category === '\u0000' ? '' : encodeURIComponent(category)}`;
-      const r = await api<Page<Item>>(`/v1/items?limit=50${query ? `&q=${encodeURIComponent(query)}` : ''}${filter}${after ? `&cursor=${after}` : ''}`);
-      setList(after ? [...(list ?? []), ...r.data] : r.data);
-      setCursor(r.nextCursor);
-    } catch (e) {
-      setError(e);
-      setList([]);
-    }
-  };
-  useEffect(() => {
-    void load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, category]);
+  // One page at a time; a new search or category starts again at the first.
+  const pages = usePages<Item>(async (cursor) => {
+    const filter = category === '' ? '' : `&category=${category === '\u0000' ? '' : encodeURIComponent(category)}`;
+    const r = await api<Page<Item>>(`/v1/items?limit=50${query ? `&q=${encodeURIComponent(query)}` : ''}${filter}${cursor ? `&cursor=${cursor}` : ''}`);
+    return { data: r.data, next: r.nextCursor };
+  }, `${query}|${category}`);
+  const list = pages.rows;
+  const load = pages.reload;
 
   const toggleFavorite = async (it: Item) => {
     try {
       const saved = await api<Item>(`/v1/items/${it.id}`, { method: 'PUT', body: itemBody({ ...toForm(it), favorite: !it.favorite }) });
-      setList((l) => l?.map((x) => (x.id === it.id ? saved : x)) ?? null);
+      pages.setRows((l) => l.map((x) => (x.id === it.id ? saved : x)));
     } catch (e) {
       setError(e);
     }
@@ -250,7 +242,7 @@ export function Items() {
           </Select>
         )}
       </div>
-      <ErrorText error={error} />
+      <ErrorText error={error ?? pages.error} />
       <section className="card">
         {list === null ? <div className="stack"><div className="skeleton" /><div className="skeleton" /></div> : list.length === 0 ? <div className="empty">{query ? t('No items match your search.') : t('No items yet.')}</div> : (
           <div className="table-wrap">
@@ -278,7 +270,7 @@ export function Items() {
             </table>
           </div>
         )}
-        {cursor && <button className="secondary" onClick={() => void load(cursor)}>{t('Load more')}</button>}
+        <Pager pages={pages} />
       </section>
 
       {importing && <ImportDialog kind="items" onClose={() => setImporting(false)} onDone={() => { void load(); void loadCategories(); }} />}

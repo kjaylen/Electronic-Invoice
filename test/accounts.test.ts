@@ -275,6 +275,21 @@ test('the activity log records sign-ins, account changes, certificate and cancel
     assert.equal(page1.data.length, 2);
     const page2 = (await app.inject({ method: 'GET', url: `/v1/audit?limit=2&before=${page1.nextBefore}`, headers: owner.headers })).json();
     assert.ok(page2.data[0].id < page1.data[1].id, 'the next page continues before the last one shown');
+
+    // Filtered: by kind, by person, by day (in Belize).
+    const kinds = async (kind: string) => (await app.inject({ method: 'GET', url: `/v1/audit?kind=${kind}`, headers: owner.headers })).json().data.map((e: { action: string }) => e.action);
+    const security = await kinds('security');
+    assert.ok(security.includes('login') && security.includes('login.failed'));
+    assert.ok(!security.includes('document.cancelled'));
+    assert.deepEqual([...new Set(await kinds('sales'))], ['document.cancelled']);
+    const people = await kinds('people');
+    assert.ok(people.includes('user.created') && people.includes('user.updated') && !people.includes('login'));
+    const byOlive = (await app.inject({ method: 'GET', url: `/v1/audit?userId=${change.user.id}`, headers: owner.headers })).json().data;
+    assert.ok(byOlive.length > 0 && byOlive.every((e: { user: { id: string } | null }) => e.user?.id === change.user.id));
+    const today = new Date(Date.now() - 6 * 3600_000).toISOString().slice(0, 10);
+    assert.ok((await app.inject({ method: 'GET', url: `/v1/audit?from=${today}&to=${today}`, headers: owner.headers })).json().data.length >= 5);
+    assert.equal((await app.inject({ method: 'GET', url: '/v1/audit?to=2020-01-01', headers: owner.headers })).json().data.length, 0);
+    assert.equal((await app.inject({ method: 'GET', url: '/v1/audit?kind=everything', headers: owner.headers })).statusCode, 400);
     await assert.rejects(f.db.query('delete from audit_events'), /permanent/, 'the log cannot be erased');
   }));
 

@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router';
 import { api, type Customer, type DocumentInfo, link, type Page } from '../api';
 import { useSession } from '../session';
 import { useT } from '../i18n';
-import { belizeDate, belizeToday, Field, Segmented, Select, useDebounced, usePageTitle } from '../ui';
+import { belizeDate, belizeToday, Field, Pager, Segmented, Select, useDebounced, usePageTitle, usePages } from '../ui';
 import { DocumentTable, usePollWhile } from './Dashboard';
 
 const PAGE = 25;
@@ -21,9 +21,6 @@ export function Documents() {
   const customerId = params.get('customerId') ?? '';
   const [q, setQ] = useState(params.get('q') ?? '');
   const query = useDebounced(q, 300);
-  const [docs, setDocs] = useState<DocumentInfo[]>([]);
-  const [cursor, setCursor] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
   const [customer, setCustomer] = useState<Customer | null>(null);
 
   const update = (key: string, value: string) => {
@@ -53,25 +50,14 @@ export function Documents() {
     return `/v1/documents?${p}`;
   }, [status, type, from, to, customerId, query]);
 
-  const load = useCallback(() => {
-    void api<Page<DocumentInfo>>(url()).then((r) => {
-      setDocs(r.data);
-      setCursor(r.nextCursor);
-      setLoading(false);
-    }).catch(() => setLoading(false));
-  }, [url]);
-  useEffect(() => {
-    setLoading(true);
-    load();
-  }, [load]);
-  usePollWhile(docs.some((d) => d.status === 'pending' || d.status === 'contingency_pending'), load, 10_000);
-
-  const more = async () => {
-    if (!cursor) return;
-    const r = await api<Page<DocumentInfo>>(url(cursor));
-    setDocs([...docs, ...r.data]);
-    setCursor(r.nextCursor);
-  };
+  // One page at a time; the filters start again at the first.
+  const pages = usePages<DocumentInfo>(async (cursor) => {
+    const r = await api<Page<DocumentInfo>>(url(cursor ?? undefined));
+    return { data: r.data, next: r.nextCursor };
+  }, url());
+  const docs = pages.rows ?? [];
+  const loading = pages.rows === null;
+  usePollWhile(docs.some((d) => d.status === 'pending' || d.status === 'contingency_pending'), () => void pages.reload(), 10_000);
   const filtered = Boolean(status || type || from || to || customerId || query);
 
   return (
@@ -114,7 +100,7 @@ export function Documents() {
       </div>
       <section className="card" aria-busy={loading}>
         {loading ? <div className="stack"><div className="skeleton" /><div className="skeleton" /><div className="skeleton" /></div> : <DocumentTable docs={docs} {...(filtered && { empty: t('No documents match these filters.') })} />}
-        {cursor && <button className="secondary" onClick={() => void more()}>{t('Load more')}</button>}
+        <Pager pages={pages} newest />
       </section>
     </div>
   );

@@ -4,7 +4,7 @@ import { api, link, type Customer, type Page } from '../api';
 import { useT } from '../i18n';
 import { useSession } from '../session';
 import { useToast } from '../toast';
-import { DISTRICTS, ErrorText, Field, Modal, Select, useDebounced, usePageTitle } from '../ui';
+import { DISTRICTS, ErrorText, Field, Modal, Select, useDebounced, usePageTitle, Pager, usePages } from '../ui';
 import { ImportDialog } from './ImportDialog';
 
 type Form = { name: string; tin: string; street: string; city: string; districtCode: string; telephone: string; email: string; priceList: 'retail' | 'wholesale'; creditLimit: string };
@@ -96,27 +96,19 @@ export function Customers() {
   const manage = can('catalog.manage');
   const [q, setQ] = useState('');
   const query = useDebounced(q, 250);
-  const [list, setList] = useState<Customer[] | null>(null);
-  const [cursor, setCursor] = useState<string | null>(null);
+
   const [editing, setEditing] = useState<Customer | 'new' | null>(null);
   const [importing, setImporting] = useState(false);
   const [archiving, setArchiving] = useState<Customer | null>(null);
   const [error, setError] = useState<unknown>(null);
 
-  const load = async (after?: string) => {
-    try {
-      const r = await api<Page<Customer>>(`/v1/customers?limit=25${query ? `&q=${encodeURIComponent(query)}` : ''}${after ? `&cursor=${after}` : ''}`);
-      setList(after ? [...(list ?? []), ...r.data] : r.data);
-      setCursor(r.nextCursor);
-    } catch (e) {
-      setError(e);
-      setList([]);
-    }
-  };
-  useEffect(() => {
-    void load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query]);
+  // One page at a time; a new search starts again at the first.
+  const pages = usePages<Customer>(async (cursor) => {
+    const r = await api<Page<Customer>>(`/v1/customers?limit=25${query ? `&q=${encodeURIComponent(query)}` : ''}${cursor ? `&cursor=${cursor}` : ''}`);
+    return { data: r.data, next: r.nextCursor };
+  }, query);
+  const list = pages.rows;
+  const load = pages.reload;
 
   const archive = async () => {
     if (!archiving) return;
@@ -140,7 +132,7 @@ export function Customers() {
         {manage && <button onClick={() => setEditing('new')}>{t('Add customer')}</button>}
       </div>
       <input type="search" placeholder={t('Search by name, TIN, phone or email')} value={q} onChange={(e) => setQ(e.target.value)} aria-label={t('Search customers')} />
-      <ErrorText error={error} />
+      <ErrorText error={error ?? pages.error} />
       <section className="card">
         {list === null ? <div className="stack"><div className="skeleton" /><div className="skeleton" /></div> : list.length === 0 ? <div className="empty">{query ? t('No customers match your search.') : t('No customers yet. Add the ones you invoice often.')}</div> : (
           <div className="table-wrap">
@@ -164,7 +156,7 @@ export function Customers() {
             </table>
           </div>
         )}
-        {cursor && <button className="secondary" onClick={() => void load(cursor)}>{t('Load more')}</button>}
+        <Pager pages={pages} />
       </section>
 
       {importing && <ImportDialog kind="customers" onClose={() => setImporting(false)} onDone={() => void load()} />}

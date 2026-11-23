@@ -2072,3 +2072,8 @@ button.cat-tag:hover:not(:disabled) { background: var(--brand); border-color: va
 .timer.running { border-color: var(--brand-line); color: var(--brand-ink); background: var(--brand-soft); }
 .work-pick { max-height: 18rem; overflow-y: auto; }
 .work-pick label { gap: 0.6rem; align-items: baseline; }
+/* Pages through a long list */
+.pager { display: flex; align-items: center; justify-content: center; gap: 1rem; padding-top: 0.9rem; }
+.pager-page { min-width: 5rem; text-align: center; font-variant-numeric: tabular-nums; }
+.activity-filters { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+ol.activity.loading { opacity: 0.55; transition: opacity 150ms; }

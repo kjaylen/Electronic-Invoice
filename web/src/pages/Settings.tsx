@@ -11,7 +11,7 @@ import { assignableRoles, ROLE_DESCRIPTION, ROLE_LABEL } from '../permissions';
 import { useSession } from '../session';
 import { useToast } from '../toast';
 import { CodeForm, RecoveryCodes, SetupSteps, type TwoFactorSetupInfo } from '../twofactor';
-import { DISTRICTS, ErrorText, Field, Modal, money, Segmented, Select, usePageTitle } from '../ui';
+import { DISTRICTS, ErrorText, Field, Modal, money, Pager, Segmented, Select, usePageTitle, usePages } from '../ui';
 import { PlanTab, UpgradeNotice } from './Billing';
 import { WebhooksPanel } from './Webhooks';
 import { IntegrationsTab } from './Integrations';
@@ -869,44 +869,70 @@ function changes(t: T, e: AuditEvent): string | null {
 
 function ActivityTab() {
   const t = useT();
-  const [events, setEvents] = useState<AuditEvent[] | null>(null);
-  const [next, setNext] = useState<number | null>(null);
-  const [error, setError] = useState<unknown>(null);
-  const load = async (before?: number) => {
-    try {
-      const r = await api<{ data: AuditEvent[]; nextBefore: number | null }>(`/v1/audit?limit=50${before ? `&before=${before}` : ''}`);
-      setEvents((prev) => (before ? [...(prev ?? []), ...r.data] : r.data));
-      setNext(r.nextBefore);
-    } catch (e) {
-      setError(e);
-      setEvents([]);
-    }
-  };
+  const { can } = useSession();
+  const [filters, setFilters] = useState({ kind: '', userId: '', from: '', to: '' });
+  const [people, setPeople] = useState<ManagedAccount[]>([]);
   useEffect(() => {
-    void load();
+    if (can('users.manage')) void api<{ data: ManagedAccount[] }>('/v1/users').then((r) => setPeople(r.data)).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  const pages = usePages<AuditEvent>(async (cursor) => {
+    const p = new URLSearchParams({ limit: '50' });
+    if (cursor) p.set('before', cursor);
+    for (const [k, v] of Object.entries(filters)) if (v) p.set(k, v);
+    const r = await api<{ data: AuditEvent[]; nextBefore: number | null }>(`/v1/audit?${p}`);
+    return { data: r.data, next: r.nextBefore ? String(r.nextBefore) : null };
+  }, JSON.stringify(filters));
+  const filtered = Object.values(filters).some(Boolean);
+  const events = pages.rows;
   return (
     <section className="card stack">
       <div>
         <h2>{t('Activity')}</h2>
         <p className="small muted">{t('Sign-ins, account changes, the certificate, API keys and cancellations. This log cannot be edited or deleted.')}</p>
       </div>
-      <ErrorText error={error} />
-      {events === null ? <div className="skeleton" style={{ height: '8rem' }} /> : events.length === 0 ? <div className="empty">{t('Nothing yet.')}</div> : (
-        <ol className="activity">
-          {events.map((e) => (
-            <li key={e.id} className={e.action === 'login.failed' ? 'warn' : ''}>
-              <time dateTime={e.at} className="mono small muted">{new Date(e.at).toLocaleString()}</time>
-              <div>
-                <strong>{e.user?.name ?? (e.action.startsWith('business.') && e.action !== 'business.updated' && e.action !== 'business.created' ? t('Platform staff') : e.action === 'order.placed' ? t('A buyer') : t('Someone'))}</strong> {describe(t, e).charAt(0).toLowerCase() + describe(t, e).slice(1)}
-                {changes(t, e) && <div className="small muted">{changes(t, e)}</div>}
-              </div>
-              {e.ip && <span className="mono small muted ip">{e.ip}</span>}
-            </li>
-          ))}
-        </ol>
-      )}
-      {next && <button className="secondary" onClick={() => void load(next)}>{t('Load more')}</button>}
+      <div className="form-grid activity-filters">
+        <Field label={t('What')}>
+          <Select value={filters.kind} onChange={(e) => setFilters({ ...filters, kind: e.target.value })}>
+            <option value="">{t('Everything')}</option>
+            <option value="security">{t('Sign-ins and security')}</option>
+            <option value="people">{t('People and access')}</option>
+            <option value="sales">{t('Sales and payments')}</option>
+            <option value="store">{t('Online store')}</option>
+            <option value="stock">{t('Stock and expenses')}</option>
+            <option value="settings">{t('Settings')}</option>
+          </Select>
+        </Field>
+        {people.length > 0 && (
+          <Field label={t('Who')}>
+            <Select value={filters.userId} onChange={(e) => setFilters({ ...filters, userId: e.target.value })}>
+              <option value="">{t('Everyone')}</option>
+              {people.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+            </Select>
+          </Field>
+        )}
+        <Field label={t('From')}><input type="date" value={filters.from} max={filters.to || undefined} onChange={(e) => setFilters({ ...filters, from: e.target.value })} /></Field>
+        <Field label={t('To')}><input type="date" value={filters.to} min={filters.from || undefined} onChange={(e) => setFilters({ ...filters, to: e.target.value })} /></Field>
+      </div>
+      {filtered && <div className="row"><span className="spacer" /><button type="button" className="link" onClick={() => setFilters({ kind: '', userId: '', from: '', to: '' })}>{t('Clear filters')}</button></div>}
+      <ErrorText error={pages.error} />
+      <div aria-busy={pages.loading}>
+        {events === null ? <div className="skeleton" style={{ height: '8rem' }} /> : events.length === 0 ? <div className="empty">{filtered ? t('Nothing matches these filters.') : t('Nothing yet.')}</div> : (
+          <ol className={`activity${pages.loading ? ' loading' : ''}`}>
+            {events.map((e) => (
+              <li key={e.id} className={e.action === 'login.failed' ? 'warn' : ''}>
+                <time dateTime={e.at} className="mono small muted">{new Date(e.at).toLocaleString()}</time>
+                <div>
+                  <strong>{e.user?.name ?? (e.action.startsWith('business.') && e.action !== 'business.updated' && e.action !== 'business.created' ? t('Platform staff') : e.action === 'order.placed' ? t('A buyer') : t('Someone'))}</strong> {describe(t, e).charAt(0).toLowerCase() + describe(t, e).slice(1)}
+                  {changes(t, e) && <div className="small muted">{changes(t, e)}</div>}
+                </div>
+                {e.ip && <span className="mono small muted ip">{e.ip}</span>}
+              </li>
+            ))}
+          </ol>
+        )}
+      </div>
+      <Pager pages={pages} newest />
     </section>
   );
 }

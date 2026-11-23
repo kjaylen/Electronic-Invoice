@@ -12,7 +12,7 @@ import { useT } from '../i18n';
 import { useToast } from '../toast';
 import { CodeForm, RecoveryCodes, SetupSteps, type TwoFactorChallenge } from '../twofactor';
 import { type BillingInfo, type BillingInvoice, StatusPill } from './Billing';
-import { ErrorText, Field, Modal, money, Segmented, Select, usePageTitle } from '../ui';
+import { ErrorText, Field, Modal, money, Pager, Segmented, Select, usePageTitle, usePages } from '../ui';
 
 interface StaffAdmin {
   id: string;
@@ -827,16 +827,11 @@ function EnvironmentDialog({ detail, target, onClose, onDone }: { detail: Tenant
 function Activity() {
   const t = useT();
   usePageTitle(t('Staff log'));
-  const [rows, setRows] = useState<AuditRow[] | null>(null);
-  const [next, setNext] = useState<number | null>(null);
-  const load = async (before?: number) => {
-    const r = await api<{ data: AuditRow[]; nextBefore: number | null }>(`/v1/platform/audit${before ? `?before=${before}` : ''}`);
-    setRows((prev) => (before ? [...(prev ?? []), ...r.data] : r.data));
-    setNext(r.nextBefore);
-  };
-  useEffect(() => {
-    void load();
-  }, []);
+  const pages = usePages<AuditRow>(async (cursor) => {
+    const r = await api<{ data: AuditRow[]; nextBefore: number | null }>(`/v1/platform/audit${cursor ? `?before=${cursor}` : ''}`);
+    return { data: r.data, next: r.nextBefore ? String(r.nextBefore) : null };
+  }, 'all');
+  const rows = pages.rows;
   return (
     <div className="stack">
       <div><span className="kicker">{t('Platform console')}</span><h1>{t('Staff log')}</h1><p className="small muted">{t('Every staff sign-in and change. It cannot be edited or deleted.')}</p></div>
@@ -856,7 +851,7 @@ function Activity() {
             ))}
           </ol>
         )}
-        {next && <button className="secondary" onClick={() => void load(next)}>{t('Load more')}</button>}
+        <Pager pages={pages} newest />
       </section>
     </div>
   );

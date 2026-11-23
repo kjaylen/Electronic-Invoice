@@ -132,6 +132,92 @@ export function ErrorText({ error }: { error: unknown }) {
   return <p className="form-error" role="alert">{errorMessage(t, error)}</p>;
 }
 
+export interface Pages<T> {
+  /** This page's rows (null while the first page loads). */
+  rows: T[] | null;
+  setRows: (update: (rows: T[]) => T[]) => void;
+  error: unknown;
+  loading: boolean;
+  /** 1 for the first page. */
+  page: number;
+  hasPrevious: boolean;
+  hasNext: boolean;
+  previous: () => void;
+  next: () => void;
+  /** Load this page again (after a change). */
+  reload: () => Promise<void>;
+}
+
+/**
+ * A cursor-paged list one page at a time, instead of an ever-longer list:
+ * light however far back it goes. `fetchPage(cursor)` loads a page (null:
+ * the first) and says the cursor of the next one; when `key` changes (the
+ * filters) it starts again at page 1. Answers that arrive late are dropped.
+ */
+export function usePages<T>(fetchPage: (cursor: string | null) => Promise<{ data: T[]; next: string | null }>, key: string): Pages<T> {
+  const [nav, setNav] = useState<{ key: string; cursors: Array<string | null> }>({ key, cursors: [null] });
+  const cursors = nav.key === key ? nav.cursors : [null];
+  const cursor = cursors[cursors.length - 1] ?? null;
+  const [state, setState] = useState<{ rows: T[] | null; next: string | null; error: unknown }>({ rows: null, next: null, error: null });
+  const [loading, setLoading] = useState(true);
+  const fetchRef = useRef(fetchPage);
+  fetchRef.current = fetchPage;
+  const seq = useRef(0);
+  const load = useCallback(async () => {
+    const mine = ++seq.current;
+    setLoading(true);
+    try {
+      const r = await fetchRef.current(cursor);
+      if (mine === seq.current) setState({ rows: r.data, next: r.next, error: null });
+    } catch (e) {
+      if (mine === seq.current) setState((s) => ({ rows: s.rows ?? [], next: null, error: e }));
+    } finally {
+      if (mine === seq.current) setLoading(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cursor, key]);
+  useEffect(() => {
+    void load();
+  }, [load]);
+  const toTop = () => {
+    document.getElementById('main')?.scrollTo?.({ top: 0, behavior: 'smooth' });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+  return {
+    rows: state.rows,
+    setRows: (update) => setState((s) => ({ ...s, rows: update(s.rows ?? []) })),
+    error: state.error,
+    loading,
+    page: cursors.length,
+    hasPrevious: cursors.length > 1,
+    hasNext: Boolean(state.next),
+    previous: () => {
+      if (cursors.length < 2) return;
+      setNav({ key, cursors: cursors.slice(0, -1) });
+      toTop();
+    },
+    next: () => {
+      if (!state.next) return;
+      setNav({ key, cursors: [...cursors, state.next] });
+      toTop();
+    },
+    reload: load,
+  };
+}
+
+/** Page through a list: previous (or newer), the page number, next (or older). Hidden when it all fits on one page. */
+export function Pager<T>({ pages, newest = false }: { pages: Pages<T>; newest?: boolean }) {
+  const t = useT();
+  if (!pages.hasPrevious && !pages.hasNext) return null;
+  return (
+    <nav className="pager" aria-label={t('Pages')}>
+      <button type="button" className="secondary small-button" disabled={!pages.hasPrevious || pages.loading} onClick={pages.previous}>← {newest ? t('Newer') : t('Previous')}</button>
+      <span className="small muted pager-page" aria-live="polite">{t('Page {n}', { n: pages.page })}</span>
+      <button type="button" className="secondary small-button" disabled={!pages.hasNext || pages.loading} onClick={pages.next}>{newest ? t('Older') : t('Next')} →</button>
+    </nav>
+  );
+}
+
 /** Value that only changes after `ms` without further changes. */
 export function useDebounced<T>(value: T, ms: number): T {
   const [v, setV] = useState(value);

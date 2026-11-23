@@ -48,6 +48,16 @@ const role = { type: 'string', enum: [...ROLES] } as const;
 const idParams = { type: 'object', required: ['id'], properties: { id: uuid } } as const;
 const ROLE_NAMES: Record<Role, string> = { owner: 'an owner', admin: 'an admin', manager: 'a manager', cashier: 'a cashier', accountant: 'an accountant' };
 
+/** The activity log's kinds, as action patterns. */
+export const AUDIT_KINDS = {
+  security: ['login', 'login.%', 'password.%', 'two_factor.%', 'user.signed_out', 'user.two_factor_reset', 'support.%', 'till.signed_in'],
+  people: ['user.%', 'apikey.%', 'till.%'],
+  sales: ['document.%', 'documents.%', 'quote.%', 'recurring.%', 'payment.%', 'invoice.%', 'statement.%', 'work.%', 'customer%', 'shift.%', 'discount.%', 'loyalty.%', 'accountant_pack.%'],
+  store: ['store.%', 'order.%'],
+  stock: ['stock.%', 'items.%', 'purchase_order.%', 'expense.%', 'recurring_expense.%'],
+  settings: ['business.%', 'certificate.%', 'template.%', 'payments.%', 'billpay.%', 'webhook.%', 'integration.%', 'counter.%', 'receivables.%', 'billing.%', 'timeclock.%'],
+} as const satisfies Record<string, readonly string[]>;
+
 export function registerUserRoutes(app: FastifyInstance, deps: PipelineDeps, ctx: ServerContext) {
   const { db } = deps;
   const actorRole = (request: FastifyRequest) => request.principal as Role;
@@ -267,13 +277,32 @@ export function registerUserRoutes(app: FastifyInstance, deps: PipelineDeps, ctx
     return { sessionsEnded: ended };
   });
 
-  app.get<{ Querystring: { before?: string; limit?: string } }>(
+  app.get<{ Querystring: { before?: string; limit?: string; userId?: string; kind?: keyof typeof AUDIT_KINDS; from?: string; to?: string } }>(
     '/audit',
-    { schema: { querystring: { type: 'object', additionalProperties: false, properties: { before: { type: 'string', pattern: '^\\d{1,18}$' }, limit: { type: 'string', pattern: '^\\d{1,3}$' } } } } },
+    {
+      schema: {
+        querystring: {
+          type: 'object', additionalProperties: false,
+          properties: {
+            before: { type: 'string', pattern: '^\\d{1,18}$' }, limit: { type: 'string', pattern: '^\\d{1,3}$' },
+            userId: { type: 'string', pattern: '^[0-9a-fA-F-]{36}$' }, kind: { type: 'string', enum: Object.keys(AUDIT_KINDS) },
+            from: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' }, to: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
+          },
+        },
+      },
+    },
     async (request) => {
       requirePersonWith(request, 'audit.view');
-      const limit = Math.min(Math.max(Number(request.query.limit ?? 50), 1), 200);
-      const events = await auditEvents(db, request.tenantId, { limit: limit + 1, ...(request.query.before && { before: Number(request.query.before) }) });
+      const q = request.query;
+      const limit = Math.min(Math.max(Number(q.limit ?? 50), 1), 200);
+      const events = await auditEvents(db, request.tenantId, {
+        limit: limit + 1,
+        ...(q.before && { before: Number(q.before) }),
+        ...(q.userId && { userId: q.userId }),
+        ...(q.kind && { actions: AUDIT_KINDS[q.kind] }),
+        ...(q.from && { from: q.from }),
+        ...(q.to && { to: q.to }),
+      });
       return { data: events.slice(0, limit), nextBefore: events.length > limit ? events[limit - 1]!.id : null };
     },
   );

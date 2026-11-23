@@ -30,13 +30,24 @@ export interface AuditEvent {
   user: { id: string; name: string } | null;
 }
 
-export async function auditEvents(db: Queryable, tenantId: string, opts: { limit: number; before?: number }): Promise<AuditEvent[]> {
+export async function auditEvents(
+  db: Queryable,
+  tenantId: string,
+  opts: { limit: number; before?: number; userId?: string; actions?: readonly string[]; from?: string; to?: string },
+): Promise<AuditEvent[]> {
   const params: unknown[] = [tenantId, opts.limit];
   let where = 'a.tenant_id = $1';
-  if (opts.before) {
-    params.push(opts.before);
-    where += ' and a.id < $3';
-  }
+  const add = (sql: string, v: unknown) => {
+    params.push(v);
+    where += ` and ${sql.replaceAll('?', `$${params.length}`)}`;
+  };
+  if (opts.before) add('a.id < ?', opts.before);
+  if (opts.userId) add('a.user_id = ?', opts.userId);
+  // Actions as LIKE patterns ('order.%').
+  if (opts.actions?.length) add('a.action like any(?::text[])', opts.actions);
+  // Days in Belize.
+  if (opts.from) add("(a.at at time zone 'America/Belize')::date >= ?::date", opts.from);
+  if (opts.to) add("(a.at at time zone 'America/Belize')::date <= ?::date", opts.to);
   const rows = (await db.query<{ id: string | number; at: string | Date; action: string; target: string | null; details: Record<string, unknown> | null; ip: string | null; user_id: string | null; user_name: string | null }>(
     `select a.id, a.at, a.action, a.target, a.details, a.ip, a.user_id, u.name as user_name
      from audit_events a left join users u on u.id = a.user_id where ${where} order by a.id desc limit $2`,
