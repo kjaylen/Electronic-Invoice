@@ -67,7 +67,7 @@ export function Dashboard() {
   const [work, setWork] = useState<{ customers: number; amount: string } | null>(null);
   const payer = can('expenses.manage');
   const manager = can('business.manage');
-  const [fromQuickBooks, setFromQuickBooks] = useState(0);
+  const [pickedUp, setPickedUp] = useState(0);
 
   const load = useCallback(() => {
     void api<Page<DocumentInfo>>('/v1/documents?limit=8').then((r) => setRecent(r.data)).catch(() => setRecent([]));
@@ -79,7 +79,7 @@ export function Dashboard() {
     if (stockKeeper) void api<{ totals: { low: number; out: number } }>('/v1/inventory?filter=low&limit=1').then((r) => setStock(r.totals)).catch(() => {});
     if (stockKeeper) void api<{ data: Array<{ late: boolean }> }>('/v1/purchase-orders?status=open').then((r) => setLateOrders(r.data.filter((o) => o.late).length)).catch(() => {});
     if (payer) void api<{ totals: { overdue: string } }>('/v1/expenses?status=unpaid').then((r) => setBills(r.totals)).catch(() => {});
-    if (manager) void api<{ attention: number }>('/v1/connectors/todo').then((r) => setFromQuickBooks(r.attention)).catch(() => {});
+    if (manager) void api<{ attention: number }>('/v1/connectors/todo').then((r) => setPickedUp(r.attention)).catch(() => {});
     if (biller) void api<{ toInvoice: Array<{ amount: string }> }>('/v1/work?status=unbilled').then((r) => setWork({ customers: r.toInvoice.length, amount: r.toInvoice.reduce((a, x) => a + Number(x.amount), 0).toFixed(2) })).catch(() => {});
   }, [today, reports, stockKeeper, payer, biller, manager]);
   useEffect(() => {
@@ -105,7 +105,7 @@ export function Dashboard() {
     ...(orders?.unpaid ? [{ to: '/orders?view=unpaid', tone: 'warn' as const, text: orders.unpaid === 1 ? t('1 online order waiting for payment') : t('{n} online orders waiting for payment', { n: orders.unpaid }) }] : []),
     ...(orders?.unfulfilled ? [{ to: '/orders?view=unfulfilled', tone: 'warn' as const, text: orders.unfulfilled === 1 ? t('1 order to deliver or hand over') : t('{n} orders to deliver or hand over', { n: orders.unfulfilled }) }] : []),
     ...(rejected.length ? [{ to: '/documents?status=rejected', tone: 'bad' as const, text: rejected.length === 1 ? t('1 document rejected by BTS') : t('{n} documents rejected by BTS', { n: rejected.length }) }] : []),
-    ...(fromQuickBooks ? [{ to: '/settings?tab=integrations', tone: 'bad' as const, text: fromQuickBooks === 1 ? t('1 document from QuickBooks needs attention') : t('{n} documents from QuickBooks need attention', { n: fromQuickBooks }) }] : []),
+    ...(pickedUp ? [{ to: '/settings?tab=integrations', tone: 'bad' as const, text: pickedUp === 1 ? t('1 document from QuickBooks or NetSuite needs attention') : t('{n} documents from QuickBooks or NetSuite need attention', { n: pickedUp }) }] : []),
     ...(stock && stock.out ? [{ to: '/inventory?filter=low', tone: 'warn' as const, text: stock.out === 1 ? t('1 item out of stock') : t('{n} items out of stock', { n: stock.out }) }] : []),
     ...(stock && stock.low ? [{ to: '/inventory?filter=low', tone: 'warn' as const, text: stock.low === 1 ? t('1 item running low') : t('{n} items running low', { n: stock.low }) }] : []),
     ...(lateOrders ? [{ to: '/inventory?filter=orders', tone: 'warn' as const, text: lateOrders === 1 ? t('1 purchase order is late') : t('{n} purchase orders are late', { n: lateOrders }) }] : []),

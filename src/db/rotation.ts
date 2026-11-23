@@ -1,6 +1,7 @@
 /**
  * Re-encrypt every stored secret under the keyring's current key: the
- * certificates' private keys and the two-step sign-in secrets. Rows already
+ * certificates' private keys, the two-step sign-in secrets, the connectors'
+ * keys (NetSuite) and the integrations' tokens (QuickBooks Online). Rows already
  * under the current key are left alone, so it can be run again safely; each
  * row is updated only if it has not changed meanwhile.
  */
@@ -11,11 +12,13 @@ import type { Keyring } from './keystore.ts';
 export interface RotationResult {
   certificates: number;
   twoFactorSecrets: number;
+  /** Connector keys and integration tokens. */
+  connections: number;
   alreadyCurrent: number;
 }
 
 export async function rotateSecrets(db: Queryable, keys: Keyring, options: { dryRun?: boolean } = {}): Promise<RotationResult> {
-  const result: RotationResult = { certificates: 0, twoFactorSecrets: 0, alreadyCurrent: 0 };
+  const result: RotationResult = { certificates: 0, twoFactorSecrets: 0, connections: 0, alreadyCurrent: 0 };
 
   const certs = (await db.query<{ id: string; tenant_id: string; encrypted_key: string }>('select id, tenant_id, encrypted_key from certificates')).rows;
   for (const c of certs) {
@@ -46,6 +49,24 @@ export async function rotateSecrets(db: Queryable, keys: Keyring, options: { dry
     }
     plain.fill(0);
     result.twoFactorSecrets++;
+  }
+
+  const keyed = [
+    ...(await db.query<{ id: string; blob: string; context: string }>("select id::text, secret_encrypted as blob, 'connector:' || tenant_id || ':' || id as context from connector_links where secret_encrypted is not null")).rows.map((r) => ({ ...r, table: 'connector_links', column: 'secret_encrypted', key: 'id' })),
+    ...(await db.query<{ id: string; blob: string; context: string }>("select tenant_id::text || '/' || provider as id, tokens_encrypted as blob, 'integration:' || tenant_id || ':' || provider as context from integration_connections where tokens_encrypted is not null")).rows.map((r) => ({ ...r, table: 'integration_connections', column: 'tokens_encrypted', key: "tenant_id::text || '/' || provider" })),
+  ];
+  for (const k of keyed) {
+    if (keys.isCurrent(k.blob)) {
+      result.alreadyCurrent++;
+      continue;
+    }
+    const plain = await keys.decrypt(k.blob, k.context);
+    if (!options.dryRun) {
+      const next = await keys.encrypt(plain, k.context);
+      await db.query(`update ${k.table} set ${k.column} = $3 where ${k.key} = $1 and ${k.column} = $2`, [k.id, k.blob, next]);
+    }
+    plain.fill(0);
+    result.connections++;
   }
   return result;
 }

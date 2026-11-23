@@ -27,7 +27,7 @@ try {
   await migrate(db);
   const r = await rotateSecrets(db, keys, { dryRun });
   const verb = dryRun ? 'Would re-encrypt' : 'Re-encrypted';
-  console.log(`${verb} ${r.certificates} certificate key(s) and ${r.twoFactorSecrets} two-step sign-in secret(s) under key ${keys.currentKeyId}; ${r.alreadyCurrent} already used it.`);
+  console.log(`${verb} ${r.certificates} certificate key(s), ${r.twoFactorSecrets} two-step sign-in secret(s) and ${r.connections} connection secret(s) under key ${keys.currentKeyId}; ${r.alreadyCurrent} already used it.`);
   if (!dryRun) console.log('Once every server runs with the new key, remove KEY_ENCRYPTION_KEYS_PREVIOUS and restart.');
 } catch (e) {
   console.error((e as Error).message);

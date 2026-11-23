@@ -33,26 +33,33 @@ const WRITEBACK_BATCH = 20;
 
 /** A connection as the code reads it: its start day as text (a Postgres date otherwise arrives as a Date at local midnight). */
 export const LINK_SELECT = `select id, tenant_id, kind, name, username, password_hash, owner_id, file_id, status, settings, sync_from::text as sync_from, cursor,
-  company_name, last_seen_at, last_error, created_by, created_at, removed_at from connector_links`;
+  company_name, last_seen_at, last_error, created_by, created_at, removed_at, config, secret_encrypted, certificate_pem, certificate_expires_at, next_poll_at from connector_links`;
 
 export interface ConnectorLink {
   id: string;
   tenant_id: string;
-  kind: 'qbd' | 'qbpos';
+  kind: 'qbd' | 'qbpos' | 'netsuite';
   name: string;
-  username: string;
-  password_hash: string;
+  /** The Web Connector's sign-in (QuickBooks only). */
+  username: string | null;
+  password_hash: string | null;
   status: 'active' | 'paused';
   settings: ConnectorSettings;
   sync_from: string;
-  cursor: { invoice?: string; sales_receipt?: string; pos_receipt?: string; itemTypes?: Record<string, { name: string; type: string }> };
+  cursor: { invoice?: string; sales_receipt?: string; pos_receipt?: string; netsuite?: string; itemTypes?: Record<string, { name: string; type: string }> };
+  /** NetSuite: the account, the integration's client ID, the certificate ID and the write-back fields. */
+  config: import('./netsuite.ts').NetSuiteConfig;
+  secret_encrypted: string | null;
+  certificate_pem: string | null;
+  certificate_expires_at: Date | null;
 }
 export interface ConnectorSettings {
   /** QuickBooks sales tax code → GST category. */
   taxCodes?: Record<string, 'S' | 'Z' | 'E'>;
   /** QuickBooks sales tax code → exemption reason (for exempt ones). */
   exemptions?: Record<string, string>;
-  pull?: { invoices?: boolean; salesReceipts?: boolean };
+  /** Which documents are picked up (sales receipts are NetSuite's cash sales). */
+  pull?: { invoices?: boolean; salesReceipts?: boolean; creditMemos?: boolean };
   /** Issue even when QuickBooks charged a different tax than the GST worked out here. */
   issueOnTaxMismatch?: boolean;
 }
@@ -117,7 +124,7 @@ export async function handleQbwc(db: Queryable, xml: string): Promise<string> {
 
 async function authenticate(db: Queryable, username: string, password: string): Promise<string[]> {
   const link = (await db.query<ConnectorLink>(`${LINK_SELECT} where username = $1 and removed_at is null`, [username.trim().toLowerCase()])).rows[0];
-  if (!link || !(await verifyPassword(password, link.password_hash))) return ['', 'nvu'];
+  if (!link || link.kind === 'netsuite' || !link.password_hash || !(await verifyPassword(password, link.password_hash))) return ['', 'nvu'];
   if (link.status === 'paused') return ['', 'none'];
   const ticket = randomBytes(32).toString('base64url');
   const first: Step = link.kind === 'qbpos' ? 'pos' : link.settings.pull?.invoices === false ? 'receipts' : 'invoices';
@@ -162,6 +169,7 @@ async function closeSession(db: Queryable, ticket: string): Promise<string> {
 const STEPS: Record<ConnectorLink['kind'], Step[]> = {
   qbd: ['invoices', 'receipts', 'items', 'customers', 'release', 'writeback', 'done'],
   qbpos: ['pos', 'release', 'done'],
+  netsuite: ['done'],
 };
 const nextStep = (link: ConnectorLink, step: Step): Step => {
   const steps = STEPS[link.kind];

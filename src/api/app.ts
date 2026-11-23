@@ -133,6 +133,8 @@ export interface AppOptions {
   site?: { legalName?: string; contactEmail?: string };
   /** The platform's Intuit app, for the QuickBooks Online integration. */
   quickbooks?: { clientId: string; clientSecret: string; environment: 'sandbox' | 'production'; fetch?: typeof fetch };
+  /** NetSuite connections: how NetSuite is called (replaceable in tests). */
+  netsuite?: { fetch?: typeof fetch };
   /** Extra origins the till apps call the API from (the built-in ones cover the iOS, Android and desktop apps). */
   tillOrigins?: string[];
   /** Prints documents from the businesses' templates (a headless Chromium). Unset: the built-in layouts. Closed with the app. */
@@ -353,7 +355,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     registerPaymentAccountRoutes(tenant, deps, paymentExtras);
     registerDiscountRoutes(tenant, deps);
     registerIntegrationRoutes(tenant, deps, quickbooks);
-    registerConnectorRoutes(tenant, deps, ctx);
+    registerConnectorRoutes(tenant, deps, ctx, { netsuiteFetch: options.netsuite?.fetch });
     registerReceivableRoutes(tenant, deps, ctx, { ...(options.ekyash && { ekyash: options.ekyash }) });
     registerBillPaySettingsRoutes(tenant, deps, ctx);
     registerQuoteRoutes(tenant, deps, ctx, { ...(options.ekyash && { ekyash: options.ekyash }) });

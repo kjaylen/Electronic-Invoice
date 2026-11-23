@@ -1,20 +1,24 @@
 /**
  * Issuing what connectors picked up: a QuickBooks Desktop invoice or sales
- * receipt, or a QuickBooks POS receipt, becomes a document issued through the
- * same pipeline as everything else (signed, sent to BTS, numbered here).
+ * receipt, a QuickBooks POS receipt, or a NetSuite invoice, cash sale or
+ * credit memo becomes a document issued through the same pipeline as
+ * everything else (signed, sent to BTS, numbered here).
  *
  * Nothing is guessed silently. Each import is checked first, and held for a
  * person ("attention") when:
  *   - a line uses a sales tax code not mapped to a GST category yet;
  *   - the tax QuickBooks charged differs from the GST worked out here, or its
  *     lines do not add up to its subtotal (a layout we cannot read);
- *   - it is a return or credit (a credit note needs the original document);
+ *   - it is a return or credit whose original was not sent through here (a
+ *     credit note needs the document it corrects);
+ *   - it is in a currency other than Belize dollars (NetSuite);
  *   - issuing refuses it (a plan limit, a missing detail).
  * A person fixes the cause (a mapping here, the document in QuickBooks) and
  * sends it again; "issue anyway" overrides a tax difference.
  *
- * Issued documents are flagged for write-back (QuickBooks Desktop): the next
- * Web Connector session writes the BTS number back. When a document's BTS
+ * Issued documents are flagged for write-back (QuickBooks Desktop, NetSuite):
+ * the next Web Connector session, or the next read of NetSuite, writes the
+ * BTS number back. When a document's BTS
  * status changes later (an offline one authorized), it is written again.
  */
 
@@ -22,9 +26,10 @@ import { ApiError } from '../api/errors.ts';
 import { type IssueBody, issueFromBody } from '../api/documents.ts';
 import type { Queryable } from '../db/database.ts';
 import { calculateDocument, type LineInput } from '../engine/calc.ts';
-import type { DistrictCode } from '../engine/ubl.ts';
+import { type DistrictCode, UblError } from '../engine/ubl.ts';
 import type { PipelineDeps } from '../pipeline/issue.ts';
 import { type ConnectorLink, LINK_SELECT } from './qbwc.ts';
+import type { NsTxn } from './netsuite.ts';
 import type { PosReceipt, QbAddress, QbTxn } from './qbxml.ts';
 
 const STANDING = ['authorized', 'authorized_with_alert', 'contingency_pending', 'pending'];
@@ -103,6 +108,8 @@ export function qbdBody(link: ConnectorLink, imp: ImportRow): Built {
     if (type === 'discount' || amount < 0) {
       // A discount takes off the line just before it, as QuickBooks applies it.
       const prev = lines.at(-1);
+      // Its line was left out for an unmapped tax code: that is what to fix first.
+      if (!prev && unmapped.size) continue;
       if (!prev) return { attention: `The discount "${l.itemName ?? 'Discount'}" has no line before it to apply to. Move it below the line it discounts in QuickBooks.` };
       prev.allowanceCharges = [...(prev.allowanceCharges ?? []), { isCharge: false, reason: (l.itemName ?? 'Discount').slice(0, 100), amount: money2(Math.abs(amount)) }];
       continue;
@@ -186,37 +193,108 @@ export function posBody(link: ConnectorLink, imp: ImportRow): Built {
   }
   if (unmapped.size) return { attention: `Map these Point of Sale tax codes to GST first: ${[...unmapped].join(', ')}.` };
   if (!lines.length) return { attention: 'Nothing on it with a price.' };
-  // A discount on the whole receipt: shared over the lines by their value, the last line taking the remainder.
-  const discount = Math.round(Number(p.discount ?? 0) * 100);
-  if (discount > 0) {
-    const values = lines.map((l) => Math.round(Number(l.quantity) * Number(l.unitPrice) * 100) - Math.round(Number(l.allowanceCharges?.[0]?.amount ?? 0) * 100));
-    const total = values.reduce((a, v) => a + v, 0);
-    let left = discount;
-    lines.forEach((l, i) => {
-      const share = i === lines.length - 1 ? left : Math.round((discount * values[i]!) / total);
-      left -= share;
-      if (share > 0) l.allowanceCharges = [...(l.allowanceCharges ?? []), { isCharge: false, reason: 'Discount on the receipt', amount: (share / 100).toFixed(2) }];
-    });
-  }
+  spreadDiscount(lines, Math.round(Number(p.discount ?? 0) * 100), 'Discount on the receipt');
   return {
     body: { type: '02', lines, payment: { meansCode: meansFor(p.tender), terms: `Paid by ${(p.tender ?? 'cash').toLowerCase()}` }, note: `QuickBooks Point of Sale receipt ${p.number ?? ''} of ${p.txnDate}`.trim() },
     check: { label: 'tax', theirs: Number(p.taxAmount ?? NaN), ours: NaN },
   };
 }
 
+/** A discount on the whole document: shared over the lines by their value (after their own discounts), the last line taking the remainder. */
+function spreadDiscount(lines: LineInput[], discountCents: number, reason: string) {
+  if (discountCents <= 0 || !lines.length) return;
+  const values = lines.map((l) => Math.round(Number(l.quantity) * Number(l.unitPrice) * 100) - (l.allowanceCharges ?? []).reduce((a, x) => a + (x.isCharge ? -1 : 1) * Math.round(Number(x.amount) * 100), 0));
+  const total = values.reduce((a, v) => a + v, 0);
+  if (total <= 0) return;
+  let left = discountCents;
+  lines.forEach((l, i) => {
+    const share = i === lines.length - 1 ? left : Math.round((discountCents * values[i]!) / total);
+    left -= share;
+    if (share > 0) l.allowanceCharges = [...(l.allowanceCharges ?? []), { isCharge: false, reason, amount: (share / 100).toFixed(2) }];
+  });
+}
+
+// ---------- NetSuite ----------
+
+const NS_SKIP = new Set(['Subtotal', 'Description', 'Group', 'EndGroup', 'Payment']);
+const NS_KIND_WORDS: Record<NsTxn['kind'], string> = { invoice: 'invoice', sales_receipt: 'cash sale', credit_memo: 'credit memo' };
+
+/** A NetSuite invoice (tax invoice), cash sale (tax receipt) or credit memo (credit note against what it was made from). */
+export function nsBody(link: ConnectorLink, imp: ImportRow, original: { documentId: string } | null): Built {
+  const t = imp.payload as unknown as NsTxn;
+  if (t.exchangeRate !== null && Number(t.exchangeRate) !== 1) {
+    return { attention: `In ${t.currency ?? 'another currency'}: only documents in Belize dollars are sent to BTS from NetSuite. Issue it here in Belize dollars, then skip this one.` };
+  }
+  const lines: LineInput[] = [];
+  const extras = new Set<LineInput>();
+  const unmapped = new Set<string>();
+  for (const l of t.lines) {
+    if (l.itemType && NS_SKIP.has(l.itemType)) continue;
+    if (!l.itemId && !Number(l.amount ?? 0) && l.itemType !== 'Shipping' && l.itemType !== 'Handling') continue;
+    const amount = Number(l.amount ?? 0);
+    if (l.itemType === 'Discount' || l.itemType === 'Markup' || amount < 0) {
+      // Discount and markup items act on the line just before them, as NetSuite applies them.
+      const prev = lines.at(-1);
+      if (!prev && unmapped.size) continue;
+      if (!prev) return { attention: `The ${amount < 0 || l.itemType === 'Discount' ? 'discount' : 'markup'} "${l.itemName ?? l.itemType}" has no line before it to apply to. Move it below the line it applies to in NetSuite.` };
+      prev.allowanceCharges = [...(prev.allowanceCharges ?? []), { isCharge: amount > 0, reason: (l.itemName ?? (amount > 0 ? 'Markup' : 'Discount')).slice(0, 100), amount: money2(Math.abs(amount)) }];
+      continue;
+    }
+    const gst = gstFor(link, l.taxCode, l.taxable);
+    if ('unmapped' in gst) {
+      unmapped.add(gst.unmapped);
+      continue;
+    }
+    const hasRate = l.rate !== null && l.quantity !== null && Number(l.quantity) !== 0 && !String(l.rate).includes('%') && Math.abs(Number(l.quantity) * Number(l.rate) - amount) < 0.011;
+    const unit = l.unit ? UNIT_CODES[l.unit.trim().toLowerCase()] : undefined;
+    const extra = l.itemType === 'Shipping' || l.itemType === 'Handling';
+    lines.push({
+      description: (l.description ?? l.itemName ?? 'Item').slice(0, 1000),
+      ...(l.itemName && !extra && { itemName: l.itemName.slice(0, 200) }),
+      quantity: hasRate ? String(Math.abs(Number(l.quantity))) : '1',
+      unitCode: unit ?? (l.itemType === 'Service' || l.itemType === 'Shipping' || l.itemType === 'Handling' ? 'E48' : 'H87'),
+      unitPrice: hasRate ? String(Number(l.rate)) : money2(amount),
+      gstCategory: gst.category,
+      ...(gst.category === 'E' && { exemptionReasonCode: gst.exemption }),
+    });
+    if (extra) extras.add(lines.at(-1)!);
+  }
+  if (unmapped.size) return { attention: `Map these NetSuite tax codes to GST first: ${[...unmapped].join(', ')}.` };
+  if (!lines.length) return { attention: 'Nothing on it with a price.' };
+  // A discount on the whole transaction (NetSuite's header discount) is shared over the lines; shipping and handling are lines of their own already.
+  const header = Math.round(Math.abs(Number(t.discountTotal ?? 0)) * 100);
+  const goods = lines.filter((l) => !extras.has(l));
+  spreadDiscount(goods.length ? goods : lines, header, 'Discount');
+  const customer = customerFrom(t.customer, t.billAddress);
+  if (t.kind === 'invoice' && !customer.name) return { attention: 'The invoice has no customer name.' };
+  const note = `NetSuite ${NS_KIND_WORDS[t.kind]} ${t.tranId ?? ''} of ${t.tranDate}`.replace(/\s+/g, ' ');
+  const today = belizeToday();
+  let body: IssueBody;
+  if (t.kind === 'invoice') {
+    body = { type: '01', customer, lines, payment: { meansCode: '30', dueDate: t.dueDate && t.dueDate >= today ? t.dueDate : addDays(today, 30), ...(t.terms && { terms: t.terms.slice(0, 200) }) }, note };
+  } else if (t.kind === 'sales_receipt') {
+    body = { type: '02', ...(Object.keys(customer).length > 0 && { customer }), lines, payment: { meansCode: meansFor(t.paymentMethod), terms: `Paid by ${(t.paymentMethod ?? 'cash').toLowerCase()}` }, note };
+  } else {
+    if (!t.createdFrom) return { attention: 'A credit memo not made from an invoice or cash sale: a credit note needs the document it corrects. Make it from the invoice in NetSuite (Credit), or issue the credit note here and skip this one.' };
+    if (!original) return { attention: `Made from ${t.createdFrom.name ?? 'a transaction'}, which was not sent to BTS through here. Send that one first, or issue the credit note here and skip this one.` };
+    body = { type: '04', ...(Object.keys(customer).length > 0 && { customer }), lines, reference: { documentId: original.documentId, reason: (t.memo || `NetSuite credit memo ${t.tranId ?? ''}`).trim().slice(0, 500) }, payment: { meansCode: '30', terms: `Credited against ${t.createdFrom.name ?? 'the original'}`.slice(0, 200) }, note };
+  }
+  return { body, check: { label: 'tax', theirs: Number(t.taxTotal ?? NaN), ours: NaN }, ...(t.netTotal !== null && { subtotal: Number(t.netTotal) }) };
+}
+
 // ---------- running ----------
 
 /** Check an import's numbers against what its system charged: GST and the lines' sum. */
-function checkTotals(deps: PipelineDeps, built: Extract<Built, { body: IssueBody }>): string | null {
+function checkTotals(deps: PipelineDeps, built: Extract<Built, { body: IssueBody }>, source: string): string | null {
   const t = calculateDocument({ lines: built.body.lines as unknown as LineInput[] }, deps.tax);
   const gst = Number(t.gstAmount) / 100;
   const net = Number(t.lineExtensionAmount) / 100;
   const tolerance = Math.max(0.02, built.body.lines.length * 0.01);
   if (built.subtotal !== undefined && Number.isFinite(built.subtotal) && Math.abs(built.subtotal - net) > tolerance) {
-    return `Its lines come to BZ$${net.toFixed(2)} here but BZ$${built.subtotal.toFixed(2)} in QuickBooks (a discount or subtotal arranged in a way that cannot be read). Check it in QuickBooks, then send it again.`;
+    return `Its lines come to BZ$${net.toFixed(2)} here but BZ$${built.subtotal.toFixed(2)} in ${source} (a discount or subtotal arranged in a way that cannot be read). Check it in ${source}, then send it again.`;
   }
   if (built.check && Number.isFinite(built.check.theirs) && Math.abs(built.check.theirs - gst) > tolerance) {
-    return `QuickBooks charged BZ$${built.check.theirs.toFixed(2)} ${built.check.label}; the e-invoice would carry BZ$${gst.toFixed(2)} GST (12.5%). Check the tax code mapping or QuickBooks' tax rate, then send it again, or issue it anyway.`;
+    return `${source} charged BZ$${built.check.theirs.toFixed(2)} ${built.check.label}; the e-invoice would carry BZ$${gst.toFixed(2)} GST (12.5%). Check the tax code mapping or ${source}' tax rate, then send it again, or issue it anyway.`.replace("NetSuite' tax", "NetSuite's tax");
   }
   return null;
 }
@@ -229,7 +307,7 @@ export async function processConnectorImports(deps: PipelineDeps, options: { lim
   await db.query(
     `update connector_imports i set writeback = 'pending', status = case when d.status = 'rejected' then 'rejected' else i.status end, updated_at = now()
      from documents d, connector_links l
-     where d.id = i.document_id and l.id = i.link_id and l.kind = 'qbd' and i.writeback = 'done' and i.written_status is distinct from d.status`,
+     where d.id = i.document_id and l.id = i.link_id and l.kind in ('qbd', 'netsuite') and i.writeback = 'done' and i.written_status is distinct from d.status`,
   );
   const claimed = (await db.query<ImportRow>(
     `update connector_imports set status = 'issuing', attempts = attempts + 1, updated_at = now()
@@ -244,20 +322,31 @@ export async function processConnectorImports(deps: PipelineDeps, options: { lim
       result.held++;
     };
     try {
-      const built = imp.source_type === 'pos_receipt' ? posBody(link, imp) : qbdBody(link, imp);
+      let built: Built;
+      if (link.kind === 'netsuite') {
+        // A credit memo corrects what it was made from, if that was issued here.
+        const from = (imp.payload as unknown as NsTxn).createdFrom;
+        const original = imp.source_type === 'credit_memo' && from
+          ? (await db.query<{ document_id: string }>(
+            "select document_id from connector_imports where link_id = $1 and source_type in ('invoice', 'sales_receipt') and source_id = $2 and status = 'issued' and document_id is not null",
+            [link.id, from.id],
+          )).rows[0]
+          : undefined;
+        built = nsBody(link, imp, original ? { documentId: original.document_id } : null);
+      } else built = imp.source_type === 'pos_receipt' ? posBody(link, imp) : qbdBody(link, imp);
       if ('attention' in built) {
         await hold(built.attention);
         continue;
       }
       if (!imp.force && !link.settings.issueOnTaxMismatch) {
-        const problem = checkTotals(deps, built);
+        const problem = checkTotals(deps, built, link.kind === 'netsuite' ? 'NetSuite' : 'QuickBooks');
         if (problem) {
           await hold(problem);
           continue;
         }
       }
       const r = await issueFromBody(deps, imp.tenant_id, built.body, null, { accountLimit: 'skip' });
-      const writes = link.kind === 'qbd' ? 'pending' : 'none';
+      const writes = link.kind === 'qbpos' ? 'none' : 'pending';
       if (STANDING.includes(r.status)) {
         await db.query("update connector_imports set status = 'issued', document_id = $2, problem = null, force = false, writeback = $3, updated_at = now() where id = $1", [imp.id, r.documentId, writes]);
         result.issued++;
@@ -267,7 +356,8 @@ export async function processConnectorImports(deps: PipelineDeps, options: { lim
         result.rejected++;
       }
     } catch (e) {
-      if (e instanceof ApiError) await hold(e.message);
+      // A refusal or a document that cannot be built is for a person; anything else (the database, a timeout) is tried again.
+      if (e instanceof ApiError || e instanceof UblError) await hold(e.message);
       else if (imp.attempts >= 5) await hold(`Could not be issued: ${(e as Error).message}`);
       else await db.query("update connector_imports set status = 'new', updated_at = now() where id = $1", [imp.id]);
     }

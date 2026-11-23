@@ -1,4 +1,4 @@
-/** Settings → Integrations: QuickBooks Online, QuickBooks Desktop and Point of Sale (Pro plan). */
+/** Settings → Integrations: QuickBooks Online, QuickBooks Desktop and Point of Sale, and NetSuite (Pro plan). */
 
 import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router';
@@ -153,7 +153,7 @@ export function IntegrationsTab() {
       <ConnectorsSection />
       <section className="card stack">
         <h2>{t('More connections')}</h2>
-        <p className="small muted">{t('NetSuite is next. Any other system can send its invoices and receipts to BTS today through the API and webhooks (Settings → Developers).')}</p>
+        <p className="small muted">{t('Any other system can send its invoices and receipts to BTS through the API and webhooks (Settings → Developers).')}</p>
       </section>
     </div>
   );

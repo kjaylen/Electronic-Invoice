@@ -58,6 +58,7 @@ import { type Mailer, noMailer, outboxMailer, smtpMailer } from './mail/mailer.t
 import { cachingClientProvider } from './pipeline/clients.ts';
 import { chromiumRenderer } from './render/browser-pdf.ts';
 import { processConnectorImports } from './connectors/imports.ts';
+import { pollDueNetSuite } from './connectors/netsuite.ts';
 
 const env = process.env;
 if (!env.DATABASE_URL) {
@@ -186,6 +187,20 @@ const connectorTimer = intervalMs > 0
   : undefined;
 connectorTimer?.unref();
 
+// NetSuite accounts are read here: each every 5 minutes (NETSUITE_POLL_MINUTES), or at once when asked.
+let readingNetSuite = false;
+const netsuiteTimer = intervalMs > 0
+  ? setInterval(() => {
+      if (readingNetSuite) return;
+      readingNetSuite = true;
+      void pollDueNetSuite(pipeline, { everyMinutes: Number(env.NETSUITE_POLL_MINUTES ?? 5) })
+        .then((r) => (r.picked || r.written || r.errors) && app.log.info(r, 'netsuite'))
+        .catch((e) => app.log.error({ err: e }, 'netsuite failure'))
+        .finally(() => (readingNetSuite = false));
+    }, Number(env.NETSUITE_INTERVAL_MS ?? 15_000))
+  : undefined;
+netsuiteTimer?.unref();
+
 await app.listen({ port: Number(env.PORT ?? 3000), host: env.HOST ?? '0.0.0.0' });
 
 const shutdown = async (signal: string) => {
@@ -194,6 +209,7 @@ const shutdown = async (signal: string) => {
   await webhooks?.stop();
   if (integrationTimer) clearInterval(integrationTimer);
   if (connectorTimer) clearInterval(connectorTimer);
+  if (netsuiteTimer) clearInterval(netsuiteTimer);
   await housekeeping?.stop();
   await app.close();
   clients.closeAll();

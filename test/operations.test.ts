@@ -160,7 +160,7 @@ test('monitoring: worker heartbeat, stuck documents, alerts when problems start 
   }
 });
 
-test('key rotation re-encrypts certificate keys and two-step secrets under the new key, once', async () => {
+test('key rotation re-encrypts certificate keys, two-step secrets and connection keys under the new key, once', async () => {
   const db = pgliteDatabase(await PGlite.create());
   try {
     await migrate(db);
@@ -171,17 +171,21 @@ test('key rotation re-encrypts certificate keys and two-step secrets under the n
     await addCertificate(db, old, tenant, { certificatePem: readCert('signer-123456.cert.pem'), privateKeyPem: readCert('signer-123456.key.pem') });
     const user = await createUser(db, { tenantId: tenant, name: 'Olive', email: 'olive@x.example', role: 'owner', password: 'correct horse battery' });
     const secret = await beginTwoFactorSetup(db, old, 'user', user.id);
+    const linkId = '6f1c2a54-3b1e-4d7a-9a51-0f0e7c1d2b3a';
+    await db.query("insert into connector_links (id, tenant_id, kind, name, sync_from, secret_encrypted) values ($1, $2, 'netsuite', 'NetSuite', '2026-01-01', $3)", [linkId, tenant, await old.encrypt(Buffer.from('private key'), `connector:${tenant}:${linkId}`)]);
 
     const ring = keyringProtector(NEW, [OLD]);
-    assert.deepEqual(await rotateSecrets(db, ring, { dryRun: true }), { certificates: 1, twoFactorSecrets: 1, alreadyCurrent: 0 });
-    assert.deepEqual(await rotateSecrets(db, ring), { certificates: 1, twoFactorSecrets: 1, alreadyCurrent: 0 });
-    assert.deepEqual(await rotateSecrets(db, ring), { certificates: 0, twoFactorSecrets: 0, alreadyCurrent: 2 }, 'running it again changes nothing');
+    assert.deepEqual(await rotateSecrets(db, ring, { dryRun: true }), { certificates: 1, twoFactorSecrets: 1, connections: 1, alreadyCurrent: 0 });
+    assert.deepEqual(await rotateSecrets(db, ring), { certificates: 1, twoFactorSecrets: 1, connections: 1, alreadyCurrent: 0 });
+    assert.deepEqual(await rotateSecrets(db, ring), { certificates: 0, twoFactorSecrets: 0, connections: 0, alreadyCurrent: 3 }, 'running it again changes nothing');
 
     // The new key alone now reads everything.
     const onlyNew = localKeyProtector(NEW);
     assert.equal((await loadTenantContext(db, onlyNew, tenant)).tenantId, tenant);
     const confirmed = await confirmTwoFactorSetup(db, onlyNew, 'user', user.id, totpCode(base32Decode(secret), Math.floor(Date.now() / 30_000)));
     assert.equal(confirmed.length, 10);
+    const blob = (await db.query<{ secret_encrypted: string }>('select secret_encrypted from connector_links where id = $1', [linkId])).rows[0]!.secret_encrypted;
+    assert.equal((await onlyNew.decrypt(blob, `connector:${tenant}:${linkId}`)).toString(), 'private key');
   } finally {
     await db.close();
   }
