@@ -36,6 +36,7 @@ import { openShiftSql } from '../db/shifts.ts';
 import { documentPdf as templateDocumentPdf } from '../templates/pdf.ts';
 import { logoForPdf, logoPath } from '../templates/assets.ts';
 import { documentTypeName, emailLanguage } from '../templates/lang.ts';
+import { applyReward, checkRedeem, loyaltyBalance, recordLoyalty, REWARD_REASON, reverseVoidedLoyalty, rewardCents } from './loyalty.ts';
 
 const PRINTABLE = ['authorized', 'authorized_with_alert', 'contingency_pending'];
 // Emails per business per hour (shared by every server process), so a compromised account cannot send spam at volume.
@@ -64,6 +65,8 @@ export interface IssueBody {
   tenders?: Array<{ meansCode: string; amount: string }>;
   /** Issue an invoice on account even if it takes the customer over their credit limit (owners, admins, managers). */
   overrideCreditLimit?: boolean;
+  /** Loyalty points the customer uses as a reward on this sale (with customerId). */
+  redeemPoints?: number;
 }
 
 const MEANS_NAMES: Record<string, string> = { '10': 'cash', '20': 'cheque', '30': 'transfer', '31': 'transfer', '42': 'bank transfer', '48': 'card', '54': 'credit card', '55': 'debit card' };
@@ -198,7 +201,7 @@ export async function toIssueRequest(deps: PipelineDeps, tenantId: string, body:
   }
 
   const items = await loadItems(deps, tenantId, [...new Set(body.lines.map((l) => l.itemId).filter((x): x is string => Boolean(x)))]);
-  const lines: LineInput[] = body.lines.map((l, i) => {
+  let lines: LineInput[] = body.lines.map((l, i) => {
     const item = l.itemId ? items.get(l.itemId) : undefined;
     if (l.itemId && !item) throw new ApiError(422, 'invalid_document', `Line ${i + 1}: item ${l.itemId} not found`);
     const description = l.description ?? item?.description;
@@ -225,6 +228,12 @@ export async function toIssueRequest(deps: PipelineDeps, tenantId: string, body:
       ...(l.otherTaxes && { otherTaxes: l.otherTaxes }),
     };
   });
+
+  // Loyalty points used: a reward spread over the lines as discounts (the preview shows it too).
+  if (body.redeemPoints) {
+    const s = await checkRedeem(deps.db, tenantId, body.customerId, body.redeemPoints, body.type);
+    lines = applyReward(lines, rewardCents(body.redeemPoints, s), deps.tax);
+  }
 
   let reference: DocumentReference | undefined;
   if (body.reference) {
@@ -266,7 +275,7 @@ export async function toIssueRequest(deps: PipelineDeps, tenantId: string, body:
 async function checkDiscountLimit(deps: PipelineDeps, tenantId: string, req: IssueRequest): Promise<void> {
   const limit = (await deps.db.query<{ cashier_discount_limit: string | null }>('select cashier_discount_limit::text from tenants where id = $1', [tenantId])).rows[0]?.cashier_discount_limit;
   if (limit === null || limit === undefined) return;
-  const withDiscounts = calculateDocument({ lines: req.lines }, deps.tax);
+  const withDiscounts = calculateDocument({ lines: req.lines.map((l) => ({ ...l, allowanceCharges: (l.allowanceCharges ?? []).filter((a) => a.reason !== REWARD_REASON) })) }, deps.tax);
   const fullPrice = calculateDocument({ lines: req.lines.map((l) => ({ ...l, allowanceCharges: (l.allowanceCharges ?? []).filter((a) => a.isCharge) })) }, deps.tax);
   withDiscounts.lines.forEach((line, i) => {
     const base = fullPrice.lines[i]!.netAmount;
@@ -287,6 +296,10 @@ export async function issueFromBody(deps: PipelineDeps, tenantId: string, body: 
   if (split) issueRequest = split.req;
   if (issueRequest.etdType !== '04') await assertCanIssue(deps.db, tenantId);
   await checkCreditLimit(deps, tenantId, issueRequest);
+  if (body.redeemPoints) {
+    const balance = await loyaltyBalance(deps.db, tenantId, body.customerId!);
+    if (balance < body.redeemPoints) throw new ApiError(422, 'not_enough_points', `The customer has ${balance} points`);
+  }
   // Bought on account (an invoice not paid on the spot): within the customer's credit limit.
   if ((options.accountLimit ?? 'check') === 'check' && !body.paid) await checkAccountLimit(deps, tenantId, issueRequest);
   const result = await issueDocument(deps, tenantId, issueRequest);
@@ -304,6 +317,10 @@ export async function issueFromBody(deps: PipelineDeps, tenantId: string, body: 
   // A sale takes the items off the shelf (tracked ones), once it has legal value or is on its way to BTS.
   if ((issueRequest.etdType === '01' || issueRequest.etdType === '02') && ['authorized', 'authorized_with_alert', 'contingency_pending', 'pending'].includes(result.status)) {
     await recordSale(deps.db, tenantId, result.documentId, body.lines.map((l) => ({ itemId: l.itemId ?? null, quantity: l.quantity })), userId).catch(() => {});
+  }
+  // Loyalty points used and earned (or taken back by a credit note), once the document counts.
+  if (['authorized', 'authorized_with_alert', 'contingency_pending', 'pending'].includes(result.status)) {
+    await recordLoyalty(deps.db, tenantId, result.documentId, issueRequest, body.redeemPoints, userId, deps.tax).catch(() => {});
   }
   return result;
 }
@@ -868,6 +885,8 @@ export function registerDocumentRoutes(app: FastifyInstance, deps: PipelineDeps,
       const result = await cancelDocument(deps, request.tenantId, request.params.id, request.body.reason);
       // A cancelled sale goes back on the shelf.
       await reverseVoidedSales(db, { documentId: request.params.id }).catch(() => {});
+      // And its loyalty points: used ones back, earned ones gone.
+      await reverseVoidedLoyalty(db, { documentId: request.params.id }).catch(() => {});
       await audit(db, { tenantId: request.tenantId, userId: request.userId || null, action: 'document.cancelled', target: `${original.etd_type}-${String(original.series_number).padStart(3, '0')}-${String(original.serial).padStart(9, '0')}`, details: { reason: request.body.reason, result: result.status }, ip: request.ip });
       const document = documentJson(await loadDocument(deps, request.tenantId, request.params.id));
       return reply.code(result.status === 'pending' ? 202 : 200).send({

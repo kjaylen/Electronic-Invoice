@@ -18,6 +18,7 @@ import { heartbeat, opsStatus, type OpsThresholds, sendAlerts } from '../ops/mon
 import { backfillDueDates } from '../receivables/receivables.ts';
 import { reverseVoidedSales } from '../inventory/stock.ts';
 import { runRecurringExpenses } from './recurring-expenses.ts';
+import { reverseVoidedLoyalty } from './loyalty.ts';
 
 export interface HousekeepingOptions {
   mailer?: Mailer;
@@ -61,6 +62,7 @@ export async function runHousekeepingOnce(db: Queryable, options: HousekeepingOp
   if (options.reconcilePayments) await step('payments', options.reconcilePayments);
   // Stock sold on documents that were rejected or cancelled since goes back on the shelf.
   await step('stock', () => reverseVoidedSales(db));
+  await step('loyalty', () => reverseVoidedLoyalty(db));
   // Due dates for invoices issued before they were kept (read from the signed XML).
   await step('due dates', () => backfillDueDates(db));
   await step('repeating expenses', () => runRecurringExpenses(db));

@@ -11,7 +11,7 @@ import { assignableRoles, ROLE_DESCRIPTION, ROLE_LABEL } from '../permissions';
 import { useSession } from '../session';
 import { useToast } from '../toast';
 import { CodeForm, RecoveryCodes, SetupSteps, type TwoFactorSetupInfo } from '../twofactor';
-import { DISTRICTS, ErrorText, Field, Modal, Segmented, Select, usePageTitle } from '../ui';
+import { DISTRICTS, ErrorText, Field, Modal, money, Segmented, Select, usePageTitle } from '../ui';
 import { PlanTab, UpgradeNotice } from './Billing';
 import { WebhooksPanel } from './Webhooks';
 import { IntegrationsTab } from './Integrations';
@@ -287,6 +287,40 @@ function DailySummaryCard({ profile, onSaved }: { profile: BusinessProfile; onSa
   );
 }
 
+/** Loyalty points: on or off, how many are earned per BZ$1, what one is worth, the fewest used at once. */
+function LoyaltyCard() {
+  const t = useT();
+  const toast = useToast();
+  const { refreshMe } = useSession();
+  const [form, setForm] = useState<{ enabled: boolean; earnRate: string; pointValue: string; minRedeem: string } | null>(null);
+  useEffect(() => void api<{ enabled: boolean; earnRate: string; pointValue: string; minRedeem: number }>('/v1/loyalty-settings').then((s) => setForm({ ...s, minRedeem: String(s.minRedeem) })).catch(() => {}), []);
+  const save = useAction(async () => {
+    if (!form) return;
+    await api('/v1/loyalty-settings', { method: 'PUT', body: { enabled: form.enabled, earnRate: form.earnRate.trim(), pointValue: form.pointValue.trim(), minRedeem: Math.max(0, Number(form.minRedeem) || 0) } });
+    toast(form.enabled ? t('Loyalty points are on') : t('Loyalty points are off'));
+    void refreshMe?.();
+  });
+  if (!form) return null;
+  const example = Number(form.earnRate) > 0 && Number(form.pointValue) > 0 ? t('A customer who spends {spend} earns {pts} points, worth {worth} on a later purchase.', { spend: money('100.00'), pts: Math.floor(100 * Number(form.earnRate)), worth: money((Math.floor(100 * Number(form.earnRate)) * Number(form.pointValue)).toFixed(2)) }) : '';
+  return (
+    <section className="card stack">
+      <h2>{t('Loyalty points')}</h2>
+      <label className="row small"><input type="checkbox" checked={form.enabled} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} /> {t('Saved customers earn points on what they buy and use them at the counter')}</label>
+      {form.enabled && (
+        <div className="form-grid">
+          <Field label={t('Points per BZ$1 spent')}><input inputMode="decimal" pattern="\d{1,4}(\.\d{1,2})?" value={form.earnRate} onChange={(e) => setForm({ ...form, earnRate: e.target.value })} /></Field>
+          <Field label={t('One point is worth (BZ$)')}><input inputMode="decimal" pattern="\d{1,4}(\.\d{1,4})?" value={form.pointValue} onChange={(e) => setForm({ ...form, pointValue: e.target.value })} /></Field>
+          <Field label={t('Fewest points used at once')}><input inputMode="numeric" pattern="\d{1,7}" value={form.minRedeem} onChange={(e) => setForm({ ...form, minRedeem: e.target.value })} /></Field>
+        </div>
+      )}
+      {form.enabled && example && <p className="small muted">{example}</p>}
+      <p className="small muted">{t('Points used come off the sale as a discount, so GST is charged on what the customer pays. Credit notes take back the points they earned; cancelled documents undo theirs.')}</p>
+      <ErrorText error={save.error} />
+      <div className="row"><span className="spacer" /><button type="button" disabled={save.busy} onClick={() => void save.run()}>{t('Save')}</button></div>
+    </section>
+  );
+}
+
 // ---------- business ----------
 
 function BusinessTab() {
@@ -375,6 +409,7 @@ function BusinessTab() {
         {profile.environment === 'test' && <p className="small muted">{t('Moving to production is done by our team once BTS has approved your business.')}</p>}
       </section>
       {editable && <DailySummaryCard profile={profile} onSaved={() => void load()} />}
+      {editable && <LoyaltyCard />}
       {editable && <SecurityRules profile={profile} onSaved={() => void load()} />}
     </div>
   );
@@ -769,6 +804,8 @@ function describe(t: T, e: AuditEvent): string {
     'timeclock.corrected': t('Corrected someone’s hours'),
     'recurring_expense.created': t('Added a repeating expense'),
     'customer.account_link': t('Made an account link for {target}', { target }),
+    'loyalty.settings': t('Changed the loyalty points settings'),
+    'loyalty.adjusted': t('Changed {target}’s loyalty points', { target }),
     'customer.account_link_sent': t('Emailed {target} their account link', { target }),
     'customer.account_links_revoked': t('Stopped a customer’s account links'),
     'recurring_expense.deleted': t('Deleted a repeating expense'),

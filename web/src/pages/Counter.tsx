@@ -63,6 +63,8 @@ interface Sale {
   split?: { means: '48' | '30'; amount: string };
   /** Charged to the customer's account: days until it is due. */
   dueDays?: number;
+  /** Loyalty points the customer uses on this sale. */
+  redeemPoints?: number;
 }
 
 interface HeldSale { id: string; at: string; label: string; total: string; count: number; sale: Sale; heldBy?: string | null }
@@ -183,6 +185,9 @@ export function CounterPanel(props: {
   const [tab, setTab] = useState<string | null>(null);
   const [tabItems, setTabItems] = useState<Item[] | null>(null);
   const [preview, setPreview] = useState<{ totals: DocumentInfo['totals']; lines: Array<{ net: string }> } | null>(null);
+  // With points used: the same sale with the reward, for what the customer pays.
+  const [rewardPreview, setRewardPreview] = useState<{ key: string; totals: DocumentInfo['totals'] } | null>(null);
+  const [points, setPoints] = useState<{ customerId: string; balance: number } | null>(null);
   const [last, setLast] = useState<{ doc: DocumentInfo; change: string | null; email?: string | null } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
@@ -313,8 +318,40 @@ export function CounterPanel(props: {
       live = false;
     };
   }, [previewKey]);
-  const totals = preview?.totals ?? null;
-  const previewFresh = previewKey === JSON.stringify(linesBody);
+  // Loyalty: the customer's points, and the sale's total once they use some.
+  const loyalty = me?.counter?.loyalty ?? null;
+  const customerId = sale.customer?.id ?? null;
+  useEffect(() => {
+    setPoints(null);
+    if (!loyalty || !customerId) return;
+    let live = true;
+    void api<{ balance: number }>(`/v1/customers/${customerId}/loyalty`).then((r) => live && setPoints({ customerId, balance: r.balance })).catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [customerId, loyalty]);
+  const redeem = sale.redeemPoints && customerId ? sale.redeemPoints : 0;
+  const rewardKey = redeem ? JSON.stringify([linesBody, customerId, redeem]) : '';
+  const rewardDebounced = useDebounced(rewardKey, 250);
+  useEffect(() => {
+    if (!rewardDebounced) return setRewardPreview(null);
+    const [body, cid, n] = JSON.parse(rewardDebounced) as [typeof linesBody, string, number];
+    let live = true;
+    void api<{ totals: DocumentInfo['totals'] }>('/v1/documents/preview', { method: 'POST', body: { type: '02', customerId: cid, lines: body, redeemPoints: n } })
+      .then((p) => live && setRewardPreview({ key: rewardDebounced, totals: p.totals }))
+      .catch((e) => {
+        if (!live) return;
+        setRewardPreview(null);
+        setError(e);
+        setSale((s) => ({ ...s, redeemPoints: undefined }));
+      });
+    return () => {
+      live = false;
+    };
+  }, [rewardDebounced]);
+  const rewardFresh = !redeem || (rewardPreview !== null && rewardPreview.key === rewardKey);
+  const totals = redeem ? (rewardFresh ? rewardPreview!.totals : null) : preview?.totals ?? null;
+  const previewFresh = previewKey === JSON.stringify(linesBody) && rewardFresh;
 
   const total = totals?.taxInclusive ?? '0.00';
   const totalCents = toCents(total);
@@ -352,6 +389,7 @@ export function CounterPanel(props: {
         ...(sale.customer ? { customerId: sale.customer.id } : sale.tin.trim() ? { customer: { tin: sale.tin.trim() } } : {}),
         lines: linesBody,
         ...(overrideCreditLimit && { overrideCreditLimit: true }),
+        ...(redeem && { redeemPoints: redeem }),
         ...(onAccount
           ? { payment: { meansCode: '30', dueDate: belizeDate(days), terms: `Payment due in ${days} days` } }
           : means === 'split'
@@ -596,9 +634,25 @@ export function CounterPanel(props: {
           <CustomerPicker
             customer={sale.customer ?? null}
             tin={sale.tin}
-            onCustomer={(c) => setSale((s) => ({ ...s, customer: c, lines: reprice(s.lines, c?.priceList === 'wholesale'), ...(c === null && s.meansCode === 'account' && { meansCode: '10' as Means }) }))}
+            onCustomer={(c) => setSale((s) => ({ ...s, customer: c, redeemPoints: undefined, lines: reprice(s.lines, c?.priceList === 'wholesale'), ...(c === null && s.meansCode === 'account' && { meansCode: '10' as Means }) }))}
             onTin={(tin) => set({ tin })}
           />
+          {loyalty && sale.customer && points && points.customerId === sale.customer.id && (() => {
+            // As many points as the sale allows (its total without the reward), at most what they have.
+            const plain = preview?.totals ? toCents(preview.totals.taxInclusive) : 0n;
+            const valueCents = Math.round(Number(loyalty.pointValue) * 100);
+            const usable = valueCents > 0 ? Math.min(points.balance, Math.floor(Number(plain) / valueCents)) : 0;
+            const worth = (n: number) => money(fromCents(BigInt(Math.round(n * Number(loyalty.pointValue) * 100))));
+            return (
+              <div className="tender points">
+                <span>{redeem ? t('Using {n} points: {amount} off', { n: redeem, amount: worth(redeem) }) : t('{n} points ({amount})', { n: points.balance, amount: worth(points.balance) })}</span>
+                {redeem
+                  ? <button type="button" className="link on-dark" onClick={() => set({ redeemPoints: undefined })}>{t('Don’t use')}</button>
+                  : <button type="button" className="secondary" disabled={usable < Math.max(1, loyalty.minRedeem) || !sale.lines.length} onClick={() => set({ redeemPoints: usable })}>{t('Use points')}</button>}
+                {!redeem && points.balance > 0 && points.balance < loyalty.minRedeem && <span className="small">{t('At least {n} to use', { n: loyalty.minRedeem })}</span>}
+              </div>
+            );
+          })()}
 
           <Segmented label={t('Payment')} value={means} onChange={(v) => set({ meansCode: v })} options={meansOptions} />
           {means === 'split' && (

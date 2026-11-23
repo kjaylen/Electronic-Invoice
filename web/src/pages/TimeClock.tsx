@@ -47,7 +47,7 @@ export function ClockButton() {
   };
   return (
     <span className={`clock-pill ${mine.open ? 'on' : ''}`}>
-      {mine.open && <span className="small">{t('In since {time}', { time: clock(mine.open.clockIn) })} · {hoursText(mine.today)}</span>}
+      {mine.open && <span className="small">{t('In since {time}', { time: clock(mine.open.clockIn) })} · {hoursText(mine.open.hours)}</span>}
       <button type="button" className={mine.open ? 'secondary' : ''} disabled={busy} onClick={() => void toggle()}>{mine.open ? t('Clock out') : t('Clock in')}</button>
     </span>
   );

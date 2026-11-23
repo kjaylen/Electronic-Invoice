@@ -10,7 +10,7 @@ import { Link, useParams } from 'react-router';
 import { api, type Customer, type DocStatus } from '../api';
 import { useT } from '../i18n';
 import { useSession } from '../session';
-import { DISTRICTS, ErrorText, fromCents, Modal, money, StatusBadge, toCents, TYPE_NAMES, usePageTitle } from '../ui';
+import { DISTRICTS, ErrorText, Field, fromCents, Modal, money, StatusBadge, toCents, TYPE_NAMES, usePageTitle } from '../ui';
 import { StatementModal } from './Receivables';
 
 interface Summary {
@@ -32,6 +32,13 @@ export function CustomerDetail() {
   const [error, setError] = useState<unknown>(null);
   const [statement, setStatement] = useState(false);
   const [accountLink, setAccountLink] = useState(false);
+  const [loyalty, setLoyalty] = useState<{ enabled: boolean; balance: number; value: string; entries: Array<{ id: string; points: number; reason: string; note: string | null; at: string; number: string | null; documentId: string | null }> } | null>(null);
+  const [adjusting, setAdjusting] = useState(false);
+  const loadLoyalty = () => api<NonNullable<typeof loyalty>>(`/v1/customers/${id}/loyalty`).then(setLoyalty).catch(() => {});
+  useEffect(() => {
+    void loadLoyalty();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
   usePageTitle(s?.customer.name ?? t('Customer'));
   useEffect(() => {
     void api<Summary>(`/v1/customers/${id}/summary`).then(setS).catch(setError);
@@ -124,6 +131,30 @@ export function CustomerDetail() {
         </div>
       </div>
       {statement && <StatementModal customerKey={s.key} onClose={() => setStatement(false)} />}
+      {loyalty && (loyalty.enabled || loyalty.entries.length > 0) && (
+        <section className="card stack">
+          <div className="row">
+            <h2>{t('Loyalty points')}</h2>
+            <span className="spacer" />
+            <strong className="num">{t('{n} points', { n: loyalty.balance })}</strong>
+            <span className="muted small">({money(loyalty.value)})</span>
+            {can('catalog.manage') && <button type="button" className="secondary" onClick={() => setAdjusting(true)}>{t('Give or take points')}</button>}
+          </div>
+          {loyalty.entries.length === 0 ? <p className="small muted">{t('No points yet. They earn points on what they buy.')}</p> : (
+            <ul className="customer-open">
+              {loyalty.entries.slice(0, 12).map((e) => (
+                <li key={e.id}>
+                  <span className="small muted">{e.at.slice(0, 10)}</span>
+                  <span>{t(POINT_REASON[e.reason] ?? e.reason)}{e.number && e.documentId ? <> · <Link to={`/documents/${e.documentId}`} viewTransition>{e.number}</Link></> : ''}{e.note ? ` · ${e.note}` : ''}</span>
+                  <span className="spacer" />
+                  <strong className={`num ${e.points < 0 ? 'overdue-text' : ''}`}>{e.points > 0 ? `+${e.points}` : e.points}</strong>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
+      {adjusting && <AdjustPoints customerId={c.id} onClose={() => setAdjusting(false)} onDone={() => { setAdjusting(false); void loadLoyalty(); }} />}
       {accountLink && <AccountLinkModal customer={c} onClose={() => setAccountLink(false)} />}
     </div>
   );
@@ -171,6 +202,32 @@ function AccountLinkModal({ customer, onClose }: { customer: Customer; onClose: 
           <button type="button" className="secondary" onClick={onClose}>{t('Close')}</button>
         </div>
       </div>
+    </Modal>
+  );
+}
+
+const POINT_REASON: Record<string, string> = { earned: 'Earned', redeemed: 'Used', reversed: 'Undone (document cancelled)', adjusted: 'By hand' };
+
+function AdjustPoints({ customerId, onClose, onDone }: { customerId: string; onClose: () => void; onDone: () => void }) {
+  const t = useT();
+  const [points, setPoints] = useState('');
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  return (
+    <Modal title={t('Give or take points')} onClose={onClose}>
+      <form className="stack" onSubmit={(e) => {
+        e.preventDefault();
+        setBusy(true);
+        api(`/v1/customers/${customerId}/loyalty/adjust`, { method: 'POST', body: { points: Number(points), note: note.trim() } }).then(onDone).catch((err) => { setError(err); setBusy(false); });
+      }}>
+        <div className="form-grid">
+          <Field label={t('Points')} hint={t('Negative takes points away.')}><input required inputMode="numeric" pattern="-?\d{1,7}" value={points} onChange={(e) => setPoints(e.target.value)} placeholder="50" /></Field>
+          <Field label={t('Why')}><input required maxLength={200} value={note} onChange={(e) => setNote(e.target.value)} placeholder={t('Welcome bonus')} /></Field>
+        </div>
+        <ErrorText error={error} />
+        <div className="row"><span className="spacer" /><button type="button" className="secondary" onClick={onClose}>{t('Cancel')}</button><button type="submit" disabled={busy}>{t('Save')}</button></div>
+      </form>
     </Modal>
   );
 }

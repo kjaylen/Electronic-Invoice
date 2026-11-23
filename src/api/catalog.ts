@@ -19,6 +19,7 @@ import { spelledCategory } from '../inventory/categories.ts';
 import { openReceivables } from '../receivables/receivables.ts';
 import { formatCents, parseCents } from '../engine/decimal.ts';
 import { toBigInt } from '../db/database.ts';
+import { loyaltySettings } from './loyalty.ts';
 
 // ---------- pagination ----------
 
@@ -226,7 +227,10 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: PipelineDeps) 
       certificate: await certificateSummary(deps, request.tenantId),
       billing: await billingBanner(db, request.tenantId),
       contingency: { active: Boolean(period), since: period ? new Date(period.started_at).toISOString() : null, reason: period?.reason ?? null, queued },
-      counter: { cashierDiscountLimit: t.cashier_discount_limit === null ? null : String(Number(t.cashier_discount_limit)) },
+      counter: {
+        cashierDiscountLimit: t.cashier_discount_limit === null ? null : String(Number(t.cashier_discount_limit)),
+        loyalty: await loyaltySettings(db, request.tenantId).then((l) => (l.enabled ? { pointValue: l.pointValue, minRedeem: l.minRedeem } : null)),
+      },
     };
   });
 

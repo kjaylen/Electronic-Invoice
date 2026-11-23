@@ -158,6 +158,7 @@ export const issueSchema = {
     payableRoundingAmount: money,
     // Tax receipts paid partly one way and partly another (cash and card): the parts, adding up to the total.
     overrideCreditLimit: { type: 'boolean' },
+    redeemPoints: { type: 'integer', minimum: 1, maximum: 10_000_000 },
     tenders: {
       type: 'array',
       minItems: 2,
