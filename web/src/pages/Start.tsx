@@ -3,20 +3,17 @@
 import { type FormEvent, useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { api, ApiError, type SessionInfo } from '../api';
-import { AuthArt } from '../art';
+import { AuthPage } from '../scene/AuthShell';
 import { forgetBusiness, goToBusiness, recentBusinesses } from '../business';
-import { LanguageToggle, useT } from '../i18n';
+import { useT } from '../i18n';
 import { DISTRICTS, ErrorText, Field, Select, useDebounced, usePageTitle } from '../ui';
 
-function Layout(props: { art: { kicker: string; title: string; text: string }; children: React.ReactNode; wide?: boolean }) {
+/** The page's card, in the shared sign-in frame (the living panel is AuthShell's). */
+function Layout(props: { children: React.ReactNode; wide?: boolean }) {
   return (
-    <div className="auth-page">
-      <AuthArt {...props.art} />
-      <div className="auth-form">
-        <div className="auth-lang"><LanguageToggle /></div>
-        <div className={`card auth-card stack ${props.wide ? 'wide' : ''}`}>{props.children}</div>
-      </div>
-    </div>
+    <AuthPage>
+      <div className={`card auth-card stack ${props.wide ? 'wide' : ''}`}>{props.children}</div>
+    </AuthPage>
   );
 }
 
@@ -63,10 +60,11 @@ export function Start() {
   };
 
   return (
-    <Layout art={{ kicker: t('Electronic tax documents'), title: t('Issue it. Sign it. Get it authorized.'), text: t('Every business has its own address, its own team and its own records.') }}>
+    <Layout>
       <div>
         <span className="kicker">{t('Welcome')}</span>
         <h1>{t('Find your business')}</h1>
+        <p className="lead">{recent.length ? t('Pick a business you have used on this device, or enter another address.') : t('Enter the address your administrator gave you.')}</p>
       </div>
       {recent.length > 0 && (
         <ul className="recent">
@@ -88,8 +86,10 @@ export function Start() {
         <ErrorText error={error} />
         <button type="submit" className="big" disabled={busy}>{t('Continue')}<span className="chip" aria-hidden="true">→</span></button>
       </form>
-      <p className="small">{t('New to eInvoicing?')} <Link to="/signup" viewTransition>{t('Create a business')}</Link> · <Link to="/pricing">{t('Pricing')}</Link></p>
-      <p className="small muted start-links"><a href="/docs">{t('API')}</a> · <Link to="/terms">{t('Terms')}</Link> · <Link to="/privacy">{t('Privacy')}</Link></p>
+      <div className="auth-foot">
+        <p>{t('New to eInvoicing?')} <Link to="/signup" viewTransition>{t('Create a business')}</Link></p>
+        <p className="auth-foot-links"><Link to="/pricing">{t('Pricing')}</Link><a href="/docs">{t('API')}</a><Link to="/terms">{t('Terms')}</Link><Link to="/privacy">{t('Privacy')}</Link></p>
+      </div>
     </Layout>
   );
 }
@@ -136,10 +136,11 @@ export function CreateBusiness() {
 
   const origin = window.location.host;
   return (
-    <Layout wide art={{ kicker: t('Get started'), title: t('Your business, its own app.'), text: t('Register the business, choose its address, and create the owner account. You add your team afterwards, each with their own login and role.') }}>
+    <Layout wide>
       <div>
         <span className="kicker">{t('New business')}</span>
         <h1>{t('Create a business')}</h1>
+        <p className="lead">{t('Register the business and create the owner account. You add your team afterwards, each with their own login and role.')}</p>
       </div>
       <form className="stack" onSubmit={submit}>
         <fieldset className="stack">
@@ -178,7 +179,7 @@ export function CreateBusiness() {
         <ErrorText error={error} />
         <p className="small muted">{t('By creating a business you agree to the')} <Link to="/terms" target="_blank">{t('Terms of service')}</Link> {t('and the')} <Link to="/privacy" target="_blank">{t('Privacy policy')}</Link>.</p>
         <button type="submit" className="big" disabled={busy}>{busy ? t('Creating…') : t('Create business')}<span className="chip" aria-hidden="true">→</span></button>
-        <p className="small">{t('Already have one?')} <Link to="/?choose=1" viewTransition>{t('Find your business')}</Link></p>
+        <div className="auth-foot"><p>{t('Already have one?')} <Link to="/?choose=1" viewTransition>{t('Find your business')}</Link></p></div>
       </form>
     </Layout>
   );

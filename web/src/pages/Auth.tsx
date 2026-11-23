@@ -1,57 +1,19 @@
 /** Signing in to this business: log in, forgot password, set a password from a link, replace a temporary password. */
 
-import { type FormEvent, type InputHTMLAttributes, type ReactNode, useEffect, useRef, useState } from 'react';
+import { type FormEvent, type InputHTMLAttributes, type ReactNode, useEffect, useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate, useSearchParams } from 'react-router';
 import { api, ApiError, type SessionInfo } from '../api';
-import { Brand, BrandMark } from '../art';
-import { AuthScene, useParallax } from '../scene/AuthScene';
+import { BrandMark } from '../art';
+import { AuthPage, useBusinessName } from '../scene/AuthShell';
 import { BUSINESS } from '../business';
-import { LanguageToggle, useT } from '../i18n';
+import { useT } from '../i18n';
 import { useSession } from '../session';
 import { CodeForm, isChallenge, RecoveryCodes, SetupSteps, type TwoFactorChallenge, type TwoFactorSetupInfo } from '../twofactor';
 import { ErrorText, Field, usePageTitle } from '../ui';
 
-/** The business's public name, for its sign-in pages. */
-function useBusinessName(): { name: string | null; missing: boolean } {
-  const [state, setState] = useState<{ name: string | null; missing: boolean }>({ name: null, missing: false });
-  useEffect(() => {
-    if (!BUSINESS) return;
-    void api<{ name: string }>(`/v1/auth/business/${BUSINESS}`)
-      .then((b) => setState({ name: b.name, missing: false }))
-      .catch((e) => setState({ name: null, missing: e instanceof ApiError && e.status === 404 }));
-  }, []);
-  return state;
-}
-
-/**
- * The sign-in screens: the living panel (aurora, fluid, particles) on one
- * side with the headline, the white card on the other.
- */
-function AuthLayout(props: { art: { kicker: string; title: string; text: string }; children: ReactNode }) {
-  const art = useRef<HTMLElement>(null);
-  useParallax(art);
-  return (
-    <div className="auth-page">
-      <aside className="auth-art lux-art" ref={art}>
-        <AuthScene />
-        <div className="brand"><Brand light /></div>
-        <div className="headline">
-          <span className="kicker">{props.art.kicker}</span>
-          <h2>{props.art.title}</h2>
-          <p>{props.art.text}</p>
-        </div>
-        <div className="facts">
-          <span>BTS e-invoicing</span>
-          <span>Signed &amp; authorized</span>
-          <span>Keeps working in outages</span>
-        </div>
-      </aside>
-      <div className="auth-form">
-        <div className="auth-lang"><LanguageToggle /></div>
-        {props.children}
-      </div>
-    </div>
-  );
+/** A sign-in page's card: inside the shared frame (the living panel is AuthShell's). */
+function AuthLayout(props: { children: ReactNode }) {
+  return <AuthPage>{props.children}</AuthPage>;
 }
 
 /** A text field whose label floats up when it has focus or a value. */
@@ -99,7 +61,7 @@ function useSubmit(fn: () => Promise<void>) {
 function NoSuchBusiness() {
   const t = useT();
   return (
-    <AuthLayout art={{ kicker: t('Electronic tax documents'), title: t('Nothing at this address.'), text: t('Check the link with your administrator.') }}>
+    <AuthLayout>
       <div className="card auth-card stack">
         <h1>{t('No business here')}</h1>
         <p className="muted">{t('There is no business at /{slug}.', { slug: BUSINESS ?? '' })}</p>
@@ -157,7 +119,7 @@ export function Login() {
   if (session) return <Navigate to="/" replace />;
   if (challenge) {
     return (
-      <AuthLayout art={{ kicker: name ?? t('Account'), title: t('One more step.'), text: t('Your account is protected with two-step sign-in. Open your authenticator app for the code.') }}>
+      <AuthLayout>
         <div className="card auth-card stack">
           <div>
             <span className="kicker">{name ?? '…'}</span>
@@ -175,7 +137,7 @@ export function Login() {
   }
 
   return (
-    <AuthLayout art={{ kicker: t('Electronic tax documents'), title: name ?? t('Issue it. Sign it. Get it authorized.'), text: t('Sign in with the email or username your administrator gave you.') }}>
+    <AuthLayout>
       <form className={`card auth-card lux-login stack${shakes ? ` shake-${shakes % 2 ? 'a' : 'b'}` : ''}`} onSubmit={submit} aria-busy={phase === 'busy'}>
         <div className="lux-card-head">
           <span className="lux-mark" aria-hidden="true"><BrandMark /></span>
@@ -234,7 +196,7 @@ export function ForgotPassword() {
     setSent(true);
   });
   return (
-    <AuthLayout art={{ kicker: name ?? t('Account'), title: t('Locked out? It happens.'), text: t('We email you a link to choose a new password. It works once, for one hour. No email on your account? Ask your administrator to reset it.') }}>
+    <AuthLayout>
       <div className="card auth-card stack">
         <div>
           <span className="kicker">{name ?? t('Account')}</span>
@@ -289,7 +251,7 @@ export function ResetPassword() {
   });
   if (challenge) {
     return (
-      <AuthLayout art={{ kicker: info?.business.name ?? t('Account'), title: t('Password saved.'), text: t('Your account also uses two-step sign-in: enter the code from your authenticator app.') }}>
+      <AuthLayout>
         <div className="card auth-card stack">
           <div><span className="kicker">{info?.business.name ?? t('Account')}</span><h1>{t('Enter your code')}</h1></div>
           <CodeForm submitLabel={t('Log in')} onSubmit={async (code) => {
@@ -301,7 +263,7 @@ export function ResetPassword() {
     );
   }
   return (
-    <AuthLayout art={{ kicker: info?.business.name ?? t('Account'), title: welcome ? t('Welcome to the team.') : t('A fresh start.'), text: welcome ? t('Choose your password, then you are in.') : t('Choose a new password. You will be signed out on every other device.') }}>
+    <AuthLayout>
       <form className="card auth-card stack" onSubmit={submit}>
         <div>
           <span className="kicker">{info?.business.name ?? t('Account')}</span>
@@ -340,7 +302,7 @@ export function ChangePasswordRequired() {
     await refresh();
   });
   return (
-    <AuthLayout art={{ kicker: session?.business.tradeName ?? session?.business.legalName ?? '', title: t('Make it yours.'), text: t('Your administrator gave you a temporary password. Choose your own to continue; only you will know it.') }}>
+    <AuthLayout>
       <form className="card auth-card stack" onSubmit={submit}>
         <div>
           <span className="kicker">{session?.user.name}</span>
@@ -370,7 +332,7 @@ export function TwoFactorRequired() {
   });
   const business = session?.business.tradeName ?? session?.business.legalName ?? '';
   return (
-    <AuthLayout art={{ kicker: business, title: t('Lock the door.'), text: t('{business} requires two-step sign-in for owners and admins. After your password, you will also enter a code from your phone.', { business }) }}>
+    <AuthLayout>
       <div className="card auth-card stack">
         <div>
           <span className="kicker">{session?.user.name}</span>

@@ -2706,4 +2706,7 @@ export const ES: Record<string, string> = {
   "Hide password": "Ocultar contraseña",
   "Show password": "Mostrar contraseña",
   "Keep me signed in": "Mantener la sesión iniciada",
+  "Pick a business you have used on this device, or enter another address.": "Elija un negocio que haya usado en este dispositivo o escriba otra dirección.",
+  "Enter the address your administrator gave you.": "Escriba la dirección que le dio su administrador.",
+  "Register the business and create the owner account. You add your team afterwards, each with their own login and role.": "Registre el negocio y cree la cuenta del propietario. Después agrega a su equipo, cada uno con su propio usuario y rol.",
 };

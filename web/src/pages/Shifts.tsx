@@ -134,7 +134,7 @@ export function OpenShiftModal({ onClose, onDone, atTill }: { onClose: () => voi
           </Field>
         )}
         <Field label={t('Cash in the drawer to start (float)')} hint={t('Count it now; it is what the drawer should still hold at the end, plus cash sales.')}>
-          <input name="float" inputMode="decimal" placeholder="0.00" value={float} onChange={(e) => setFloat(e.target.value.trim())} autoFocus />
+          <input name="float" inputMode="decimal" placeholder="0.00" defaultValue="" onChange={(e) => setFloat(e.target.value.trim())} autoFocus />
         </Field>
         <ErrorText error={error} />
         <div className="row"><button type="button" className="secondary" onClick={onClose}>{t('Cancel')}</button><span className="spacer" /><button disabled={busy || (float !== '' && !MONEY.test(float))}>{t('Open shift')}</button></div>

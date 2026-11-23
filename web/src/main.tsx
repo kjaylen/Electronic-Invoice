@@ -15,6 +15,7 @@ import { ROLE_LABEL } from './permissions';
 import { SessionProvider, useSession } from './session';
 import { ToastProvider } from './toast';
 import { installIndicators } from './motion';
+import { AuthShell } from './scene/AuthShell';
 
 // Each page is its own chunk, loaded when first visited.
 const page = <K extends string>(load: () => Promise<Record<K, React.ComponentType>>, name: K) => lazy(() => load().then((m) => ({ default: m[name] })));
@@ -320,9 +321,12 @@ function BusinessApp() {
   return (
     <Routes>
       <Route element={<Bare />}>
-        <Route path="/login" element={<Login />} />
-        <Route path="/forgot-password" element={<ForgotPassword />} />
-        <Route path="/reset-password" element={<ResetPassword />} />
+        {/* The sign-in pages share one frame: the living panel stays, the card on the right changes. */}
+        <Route element={<AuthShell />}>
+          <Route path="/login" element={<Login />} />
+          <Route path="/forgot-password" element={<ForgotPassword />} />
+          <Route path="/reset-password" element={<ResetPassword />} />
+        </Route>
         <Route path="/setup" element={<Onboarding />} />
         {/* The public online store: no sign-in. */}
         <Route path="/shop" element={<ShopLayout />}>
@@ -402,8 +406,10 @@ function PublicApp() {
   return (
     <Routes>
       <Route element={<Bare />}>
-        <Route index element={<Start />} />
-        <Route path="/signup" element={<CreateBusiness />} />
+        <Route element={<AuthShell />}>
+          <Route index element={<Start />} />
+          <Route path="/signup" element={<CreateBusiness />} />
+        </Route>
         {/* A customer paying an invoice from its email. */}
         <Route path="/pay/:token" element={<PayInvoice />} />
         {/* A customer's account: what they owe, paying, their documents. */}

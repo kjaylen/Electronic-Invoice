@@ -1901,6 +1901,8 @@ button.cat-tag:hover:not(:disabled) { background: var(--brand); border-color: va
 .lux-scene { position: absolute; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
 .lux-aurora { position: absolute; inset: -30%; filter: blur(90px); transform: translate3d(calc(var(--px, 0) * -6px), calc(var(--py, 0) * -5px), 0); }
 .lux-aurora .blob { position: absolute; display: block; border-radius: 46% 54% 52% 48%; mix-blend-mode: screen; will-change: transform; }
+.lux-aurora .blob { animation-delay: var(--phase, 0s) !important; }
+.auth-card-loading { min-height: 24rem; opacity: 0.6; }
 .lux-aurora .b1 { width: 56vmax; height: 56vmax; left: 46%; top: -24%; opacity: 0.3; background: radial-gradient(circle at 45% 45%, #ffffff 0%, rgba(255, 255, 255, 0.3) 40%, transparent 70%); animation: lux-drift-1 48s ease-in-out infinite alternate; }
 .lux-aurora .b2 { width: 46vmax; height: 46vmax; left: -16%; top: 44%; opacity: 0.22; background: radial-gradient(circle at 55% 50%, #c4b5fd 0%, rgba(196, 181, 253, 0.3) 42%, transparent 70%); animation: lux-drift-2 56s ease-in-out infinite alternate; }
 .lux-aurora .b3 { width: 40vmax; height: 40vmax; left: 52%; top: 50%; opacity: 0.28; background: radial-gradient(circle, #e9d5ff 0%, rgba(233, 213, 255, 0.28) 44%, transparent 70%); animation: lux-drift-3 62s ease-in-out infinite alternate; }
@@ -2012,3 +2014,47 @@ button.cat-tag:hover:not(:disabled) { background: var(--brand); border-color: va
   .lux-aurora { transform: none; }
   .lux-check-path { stroke-dashoffset: 0; }
 }
+/* The other sign-in cards' main buttons match "Log in": full width, the same height and corners. */
+.auth-page .auth-card form button[type='submit'].big { width: 100%; min-height: 3.2rem; border-radius: 10px; }
+.auth-page .auth-card form.stack + p, .auth-page .auth-card form + p { margin-top: 0.15rem; }
+
+/* ==========================================================================
+   The sign-in frame: one screen high on wide screens (the panel stays put,
+   the right side scrolls on its own), and refined type on every card
+   ========================================================================== */
+@media (min-width: 901px) {
+  .auth-page { height: 100vh; height: 100dvh; overflow: hidden; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr); }
+  .auth-page > .auth-art { height: 100%; }
+  .auth-page > .auth-form { height: 100%; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; display: flex; flex-direction: column; padding: clamp(2.5rem, 6vh, 4.5rem) clamp(1.5rem, 3.5vw, 3.5rem); }
+  /* Centred while it fits; from the top, scrolling, when it does not. */
+  .auth-page > .auth-form > .auth-card { margin: auto; flex: none; }
+}
+.auth-page .auth-card.wide { max-width: 860px; padding: clamp(1.75rem, 3vw, 2.75rem); gap: 1.4rem; }
+
+/* The panel's words */
+.lux-art { padding: clamp(1.75rem, 3vw, 3rem); }
+.lux-art .brand { font-size: 1.12rem; }
+.lux-art .headline { max-width: 34rem; }
+.lux-art .headline .kicker { font-size: 0.72rem; font-weight: 650; letter-spacing: 0.16em; }
+.lux-art .headline h2 { font-size: clamp(2.1rem, 1.1rem + 2.4vw, 3.5rem); font-weight: 600; letter-spacing: -0.045em; line-height: 1.03; text-wrap: balance; margin: 0.85rem 0 1.1rem; }
+.lux-art .headline p { font-size: 1.04rem; line-height: 1.6; color: rgba(255, 255, 255, 0.8); max-width: 27rem; text-wrap: pretty; }
+.lux-art .facts { gap: 0.55rem 1.6rem; font-size: 0.66rem; letter-spacing: 0.15em; color: rgba(255, 255, 255, 0.72); }
+.auth-page .auth-card fieldset:last-of-type { padding-bottom: 0.35rem; }
+
+/* The cards' words */
+.auth-page .auth-card .lead { color: var(--muted); font-size: 0.97rem; line-height: 1.55; margin-top: 0.2rem; max-width: 46ch; text-wrap: pretty; }
+.auth-page .auth-card label.field { font-size: 0.86rem; font-weight: 560; color: var(--ink-2); gap: 0.42rem; }
+.auth-page .auth-card label.field .hint { font-size: 0.8rem; line-height: 1.45; }
+.auth-page .auth-card input:not([type='checkbox']):not([type='radio']), .auth-page .auth-card select { min-height: 2.85rem; border-radius: 10px; }
+.auth-page .auth-card .form-grid { gap: 1rem 1.15rem; }
+/* Sections as quiet headings over a hairline, not boxes inside a box. */
+.auth-page .auth-card fieldset { border: 0; border-radius: 0; padding: 0; background: none; box-shadow: none; }
+.auth-page .auth-card fieldset + fieldset { padding-top: 1.35rem; border-top: 1px solid var(--hairline); }
+.auth-page .auth-card fieldset > legend { font-family: var(--sans); font-size: 0.72rem; font-weight: 650; letter-spacing: 0.13em; text-transform: uppercase; color: var(--muted); margin: 0 0 1rem; }
+.auth-page .auth-card .address-preview { border-radius: 10px; padding: 0.75rem 0.95rem; }
+.auth-page .auth-card .recent-link { border-radius: 12px; }
+.auth-foot { display: grid; gap: 0.45rem; padding-top: 1rem; border-top: 1px solid var(--hairline); font-size: 0.88rem; color: var(--muted); }
+.auth-foot p { margin: 0; }
+.auth-foot-links { display: flex; flex-wrap: wrap; gap: 0.3rem 1.15rem; }
+.auth-foot-links a { color: var(--muted); font-weight: 500; }
+.auth-foot-links a:hover { color: var(--brand); }

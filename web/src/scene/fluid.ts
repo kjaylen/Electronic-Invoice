@@ -667,7 +667,8 @@ export function startFluid(canvas: HTMLCanvasElement, options: FluidOptions): Fl
     running = false;
     cancelAnimationFrame(frame);
   };
-  window.addEventListener('resize', onResize);
+  const resized = new ResizeObserver(onResize);
+  resized.observe(canvas);
   document.addEventListener('visibilitychange', onVisibility);
   canvas.addEventListener('webglcontextlost', onLost);
 
@@ -681,7 +682,7 @@ export function startFluid(canvas: HTMLCanvasElement, options: FluidOptions): Fl
       input.removeEventListener('pointermove', onMove as EventListener);
       input.removeEventListener('pointerdown', onDown as EventListener);
       (options.input ?? document).removeEventListener('pointerleave', onLeave);
-      window.removeEventListener('resize', onResize);
+      resized.disconnect();
       document.removeEventListener('visibilitychange', onVisibility);
       canvas.removeEventListener('webglcontextlost', onLost);
       release();

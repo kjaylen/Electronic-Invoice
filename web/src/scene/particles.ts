@@ -264,7 +264,8 @@ export function startParticles(canvas: HTMLCanvasElement, options: ParticleOptio
       frame = requestAnimationFrame(loop);
     }
   };
-  window.addEventListener('resize', onResize);
+  const resized = new ResizeObserver(onResize);
+  resized.observe(canvas);
   document.addEventListener('visibilitychange', onVisibility);
 
   return {
@@ -278,7 +279,7 @@ export function startParticles(canvas: HTMLCanvasElement, options: ParticleOptio
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('pointercancel', onUp);
       (options.input ?? document).removeEventListener('pointerleave', onLeave);
-      window.removeEventListener('resize', onResize);
+      resized.disconnect();
       document.removeEventListener('visibilitychange', onVisibility);
     },
   };

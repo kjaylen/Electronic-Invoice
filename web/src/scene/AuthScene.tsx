@@ -1,16 +1,16 @@
 /**
- * The sign-in backdrop: an aurora of slowly morphing gradient light (CSS), a
- * GPU fluid the pointer stirs (WebGL), a drifting particle network (2D
- * canvas), film grain and a vignette. Purely decorative: hidden from
- * assistive technology, behind everything, never in the way of the form.
+ * The sign-in panel's live layers: a GPU fluid the pointer stirs (WebGL)
+ * and a faint drifting particle network (2D canvas), over the panel's CSS
+ * aurora (see AuthShell). Purely decorative: hidden from assistive
+ * technology and never in the way of the form.
  *
  * Scaled to the device: fewer particles and a coarser fluid on phones and
  * small machines; without WebGL there is no fluid; with reduced motion
- * nothing moves (the aurora stays as a still gradient). Everything stops
- * while the tab is hidden and is torn down on unmount.
+ * neither starts. Both stop while the tab is hidden and are torn down on
+ * unmount. Loaded on its own, after the page.
  */
 
-import { type RefObject, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { startFluid } from './fluid';
 import { startParticles } from './particles';
 
@@ -37,15 +37,12 @@ function quality() {
   return { sim: 112, dye: 768, iterations: 18, fluidRatio: 1.25, sparks: 46, area: 14000, sparkRatio: 1.75 };
 }
 
-export function AuthScene() {
+export function LiveLayers() {
   const fluidRef = useRef<HTMLCanvasElement>(null);
   const sparksRef = useRef<HTMLCanvasElement>(null);
-  const [state, setState] = useState<{ fluid: boolean; sparks: boolean; still: boolean }>({ fluid: false, sparks: false, still: false });
+  const [on, setOn] = useState({ fluid: false, sparks: false });
   useEffect(() => {
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      setState({ fluid: false, sparks: false, still: true });
-      return;
-    }
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
     const q = quality();
     // Only the panel responds to the pointer, not the form beside it.
     const input = fluidRef.current?.closest<HTMLElement>('.lux-art') ?? undefined;
@@ -62,7 +59,7 @@ export function AuthScene() {
       sparks = null;
     }
     // Fade in after the first frames have painted.
-    const id = requestAnimationFrame(() => requestAnimationFrame(() => setState({ fluid: Boolean(fluid), sparks: Boolean(sparks), still: false })));
+    const id = requestAnimationFrame(() => requestAnimationFrame(() => setOn({ fluid: Boolean(fluid), sparks: Boolean(sparks) })));
     return () => {
       cancelAnimationFrame(id);
       fluid?.dispose();
@@ -70,59 +67,9 @@ export function AuthScene() {
     };
   }, []);
   return (
-    <div className={`lux-scene${state.still ? ' still' : ''}`} aria-hidden="true">
-      <div className="lux-aurora">
-        <span className="blob b1" />
-        <span className="blob b2" />
-        <span className="blob b3" />
-        <span className="blob b4" />
-        <span className="blob b5" />
-      </div>
-      <canvas ref={fluidRef} className={`lux-fluid${state.fluid ? ' on' : ''}`} />
-      <canvas ref={sparksRef} className={`lux-sparks${state.sparks ? ' on' : ''}`} />
-      <div className="lux-grain" />
-      <div className="lux-vignette" />
-    </div>
+    <>
+      <canvas ref={fluidRef} className={`lux-fluid${on.fluid ? ' on' : ''}`} />
+      <canvas ref={sparksRef} className={`lux-sparks${on.sparks ? ' on' : ''}`} />
+    </>
   );
-}
-
-/**
- * Pointer parallax: sets --px and --py (-1..1, eased) on the element, for
- * layers to drift against. Off for reduced motion and touch-only screens.
- */
-export function useParallax(ref: RefObject<HTMLElement | null>) {
-  useEffect(() => {
-    const el = ref.current;
-    if (!el || window.matchMedia('(prefers-reduced-motion: reduce)').matches || !window.matchMedia('(hover: hover)').matches) return;
-    let tx = 0;
-    let ty = 0;
-    let x = 0;
-    let y = 0;
-    let frame = 0;
-    const onMove = (e: PointerEvent) => {
-      const r = el.getBoundingClientRect();
-      tx = ((e.clientX - r.left) / r.width) * 2 - 1;
-      ty = ((e.clientY - r.top) / r.height) * 2 - 1;
-      if (!frame) frame = requestAnimationFrame(tick);
-    };
-    const onLeave = () => {
-      tx = 0;
-      ty = 0;
-      if (!frame) frame = requestAnimationFrame(tick);
-    };
-    const tick = () => {
-      x += (tx - x) * 0.08;
-      y += (ty - y) * 0.08;
-      el.style.setProperty('--px', x.toFixed(4));
-      el.style.setProperty('--py', y.toFixed(4));
-      frame = Math.abs(tx - x) + Math.abs(ty - y) > 0.001 ? requestAnimationFrame(tick) : 0;
-    };
-    el.addEventListener('pointermove', onMove, { passive: true });
-    el.addEventListener('pointerleave', onLeave);
-    return () => {
-      el.removeEventListener('pointermove', onMove);
-      el.removeEventListener('pointerleave', onLeave);
-      cancelAnimationFrame(frame);
-    };
-  }, [ref]);
 }
