@@ -8,7 +8,7 @@
 import { createHmac } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { expect, type Page, test } from '@playwright/test';
+import { type APIRequestContext, expect, type Page, test } from '@playwright/test';
 
 test.describe.configure({ mode: 'serial' });
 
@@ -592,6 +592,95 @@ test('till: set a PIN, add a till and pair it from the link, sign in, open a shi
   await till.getByRole('button', { name: 'Lock' }).click();
   await expect(till.getByRole('heading', { name: /Who is selling\?|Rosa Owner/ })).toBeVisible();
   await device.close();
+});
+
+/** The QuickBooks Web Connector, played: sign in, answer each qbXML request from `quickbooks`, until told it is done. */
+async function webConnector(request: APIRequestContext, username: string, password: string, quickbooks: (rq: string) => string) {
+  const call = async (method: string, args: Record<string, string>) => {
+    const body = `<?xml version="1.0" encoding="utf-8"?><soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"><soap:Body><${method} xmlns="http://developer.intuit.com/">${Object.entries(args).map(([k, v]) => `<${k}>${v.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</${k}>`).join('')}</${method}></soap:Body></soap:Envelope>`;
+    const res = await request.post('/v1/qbwc', { headers: { 'content-type': 'text/xml; charset=utf-8' }, data: body });
+    const m = new RegExp(`<${method}Result>([\\s\\S]*?)</${method}Result>`).exec(await res.text());
+    return (m?.[1] ?? '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+  };
+  const [ticket, company] = [...(await call('authenticate', { strUserName: username, strPassword: password })).matchAll(/<string>([^<]*)<\/string>/g)].map((m) => m[1]!);
+  expect(company).not.toBe('nvu');
+  for (let i = 0; i < 20; i++) {
+    const rq = await call('sendRequestXML', { ticket: ticket!, strHCPResponse: i === 0 ? '<QBXML><QBXMLMsgsRs><CompanyQueryRs statusCode="0"><CompanyRet><CompanyName>Corner Store Books</CompanyName></CompanyRet></CompanyQueryRs></QBXMLMsgsRs></QBXML>' : '', strCompanyFileName: '', qbXMLCountry: 'US', qbXMLMajorVers: '13', qbXMLMinorVers: '0' });
+    if (!rq) break;
+    if (Number(await call('receiveResponseXML', { ticket: ticket!, response: quickbooks(rq), hresult: '', message: '' })) >= 100) break;
+  }
+  await call('closeConnection', { ticket: ticket! });
+}
+
+test('QuickBooks Desktop: connect it, an invoice made in QuickBooks goes to BTS, a new tax code is mapped, the BTS number goes back', async ({ page, request }) => {
+  await logIn(page);
+  // Integrations come with the Pro plan: during the trial the switch is immediate.
+  await page.goto(p('/settings?tab=plan'));
+  await page.getByRole('button', { name: 'Upgrade to Pro' }).click();
+  await expect(page.getByText('You are on the Pro plan')).toBeVisible();
+
+  await page.goto(p('/settings?tab=integrations'));
+  await page.getByRole('button', { name: 'Connect QuickBooks Desktop' }).click();
+  let dialog = page.getByRole('dialog');
+  await dialog.getByLabel(/^Name/).fill('Front office');
+  await dialog.getByRole('button', { name: 'Continue' }).click();
+  dialog = page.getByRole('dialog', { name: 'Add it to the Web Connector' });
+  const username = (await dialog.locator('dd.mono').first().textContent())!;
+  const password = (await dialog.locator('.connector-secret').textContent())!;
+  expect(username).toMatch(/^corner-store-qbd-/);
+  const download = page.waitForEvent('download');
+  await dialog.getByRole('link', { name: 'Download the .qwc file' }).click();
+  expect((await download).suggestedFilename()).toBe('einvoicing-qbd.qwc');
+  await dialog.getByRole('button', { name: 'Done' }).click();
+  await expect(page.locator('.connector-link')).toContainText('Not connected yet');
+
+  // QuickBooks: one invoice taxed with the built-in code "Tax", one with a code nobody mapped yet ("GST").
+  const today = new Date(Date.now() - 6 * 3600_000).toISOString().slice(0, 10);
+  const invoice = (id: string, ref: string, code: string, edit: string) => `<InvoiceRet><TxnID>${id}</TxnID><TimeModified>${today}T09:00:00-06:00</TimeModified><EditSequence>${edit}</EditSequence><TxnDate>${today}</TxnDate><RefNumber>${ref}</RefNumber>
+    <CustomerRef><ListID>C-1</ListID><FullName>Belize Builders</FullName></CustomerRef><BillAddress><Addr1>Belize Builders</Addr1><City>Belmopan</City></BillAddress><IsPending>false</IsPending>
+    <Subtotal>100.00</Subtotal><SalesTaxTotal>12.50</SalesTaxTotal><InvoiceLineRet><ItemRef><ListID>I-1</ListID><FullName>Cement</FullName></ItemRef><Desc>Cement 94lb bag</Desc><Quantity>4</Quantity><Rate>25.00</Rate><Amount>100.00</Amount><SalesTaxCodeRef><FullName>${code}</FullName></SalesTaxCodeRef></InvoiceLineRet></InvoiceRet>`;
+  const mods: string[] = [];
+  const queries: string[] = [];
+  const quickbooks = (rq: string) => {
+    const rs = (b: string) => `<?xml version="1.0"?><QBXML><QBXMLMsgsRs>${b}</QBXMLMsgsRs></QBXML>`;
+    if (rq.includes('<InvoiceQueryRq')) queries.push(rq);
+    if (rq.includes('<InvoiceQueryRq')) return rs(`<InvoiceQueryRs requestID="Invoice" statusCode="0" iteratorRemainingCount="0">${invoice('INV-1', '2001', 'Tax', '10')}${invoice('INV-2', '2002', 'GST', '20')}</InvoiceQueryRs>`);
+    if (rq.includes('<SalesReceiptQueryRq')) return rs('<SalesReceiptQueryRs requestID="SalesReceipt" statusCode="0" iteratorRemainingCount="0"></SalesReceiptQueryRs>');
+    if (rq.includes('<ItemQueryRq')) return rs('<ItemQueryRs requestID="Item" statusCode="0"><ItemInventoryRet><ListID>I-1</ListID><FullName>Cement</FullName></ItemInventoryRet></ItemQueryRs>');
+    if (rq.includes('<CustomerQueryRq')) return rs('<CustomerQueryRs requestID="Customer" statusCode="0"><CustomerRet><ListID>C-1</ListID><FullName>Belize Builders</FullName><CompanyName>Belize Builders Ltd.</CompanyName><BillAddress><Addr1>Belize Builders Ltd.</Addr1><City>Belmopan</City></BillAddress><DataExtRet><OwnerID>0</OwnerID><DataExtName>TIN</DataExtName><DataExtType>STR255TYPE</DataExtType><DataExtValue>445566</DataExtValue></DataExtRet></CustomerRet></CustomerQueryRs>');
+    if (rq.includes('ModRq')) {
+      mods.push(rq);
+      return rs([...rq.matchAll(/<InvoiceModRq requestID="([^"]+)">/g)].map(([, id]) => `<InvoiceModRs requestID="${id}" statusCode="0"><InvoiceRet><EditSequence>ours-${id}</EditSequence></InvoiceRet></InvoiceModRs>`).join(''));
+    }
+    return rs('');
+  };
+  await webConnector(request, username, password, quickbooks);
+  // QuickBooks is asked for what changed since the connection's start day, in its date format.
+  expect(queries[0]).toContain(`<FromModifiedDate>${today}T00:00:00</FromModifiedDate>`);
+
+  // Invoice 2001 is sent to BTS; 2002 waits for its tax code to be mapped.
+  await page.reload();
+  await expect(page.locator('.connector-link')).toContainText('Corner Store Books');
+  await expect(page.locator('.connector-taxes summary')).toContainText('Some not mapped');
+  await expect(page.locator('table')).toContainText('Invoice 2002');
+  await page.getByRole('combobox', { name: 'GST for GST' }).click();
+  await page.getByRole('option', { name: 'GST 12.5%' }).click();
+  await page.getByRole('button', { name: 'Save tax codes' }).click();
+  await expect(page.getByText('Tax codes saved')).toBeVisible();
+
+  await page.getByRole('group', { name: 'Show' }).getByRole('button', { name: 'Sent to BTS' }).click();
+  await expect(page.locator('table tbody tr')).toHaveCount(2, { timeout: 20_000 });
+  await expect(page.locator('table')).toContainText('Invoice 2001');
+  await expect(page.locator('table')).toContainText('Written in QuickBooks at the next check');
+
+  // The next check-in writes each BTS number back into QuickBooks.
+  await webConnector(request, username, password, quickbooks);
+  expect(mods.join('')).toMatch(/BTS \d{3}-\d{9}/);
+  await page.reload();
+  await page.getByRole('group', { name: 'Show' }).getByRole('button', { name: 'Sent to BTS' }).click();
+  await expect(page.locator('table').getByText('BTS number written in QuickBooks')).toHaveCount(2);
+  await page.locator('table a').first().click();
+  await expect(page.getByText(/QuickBooks invoice 200\d/)).toBeVisible();
 });
 
 test('platform console: staff move the business to BTS production', async ({ page, browser }) => {

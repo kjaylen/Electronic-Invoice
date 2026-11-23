@@ -57,6 +57,7 @@ import { keyringFromEnv } from './db/keystore.ts';
 import { type Mailer, noMailer, outboxMailer, smtpMailer } from './mail/mailer.ts';
 import { cachingClientProvider } from './pipeline/clients.ts';
 import { chromiumRenderer } from './render/browser-pdf.ts';
+import { processConnectorImports } from './connectors/imports.ts';
 
 const env = process.env;
 if (!env.DATABASE_URL) {
@@ -171,6 +172,20 @@ const integrationTimer = intervalMs > 0 && quickbooksApp && env.PUBLIC_URL
   : undefined;
 integrationTimer?.unref();
 
+// Documents picked up by connectors (QuickBooks Desktop and Point of Sale) are issued here, a few at a time.
+let importing = false;
+const connectorTimer = intervalMs > 0
+  ? setInterval(() => {
+      if (importing) return;
+      importing = true;
+      void processConnectorImports(pipeline)
+        .then((r) => (r.issued || r.held || r.rejected) && app.log.info(r, 'connector imports'))
+        .catch((e) => app.log.error({ err: e }, 'connector imports failure'))
+        .finally(() => (importing = false));
+    }, Number(env.CONNECTOR_INTERVAL_MS ?? 10_000))
+  : undefined;
+connectorTimer?.unref();
+
 await app.listen({ port: Number(env.PORT ?? 3000), host: env.HOST ?? '0.0.0.0' });
 
 const shutdown = async (signal: string) => {
@@ -178,6 +193,7 @@ const shutdown = async (signal: string) => {
   await worker?.stop();
   await webhooks?.stop();
   if (integrationTimer) clearInterval(integrationTimer);
+  if (connectorTimer) clearInterval(connectorTimer);
   await housekeeping?.stop();
   await app.close();
   clients.closeAll();

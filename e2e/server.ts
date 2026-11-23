@@ -31,5 +31,6 @@ Object.assign(process.env, {
   PORT: process.env.E2E_PORT ?? '3100',
   DEMO_BTS_PORT: process.env.E2E_BTS_PORT ?? '8543',
   WORKER_INTERVAL_MS: '3000',
+  CONNECTOR_INTERVAL_MS: '2000',
 });
 await import('../scripts/demo.ts');

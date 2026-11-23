@@ -74,6 +74,7 @@ import { registerPublicAssetRoutes, registerTemplateRoutes } from './templates.t
 import { registerImportRoutes } from './imports.ts';
 import { domainCache } from '../commerce/domains.ts';
 import { registerIntegrationCallback, registerIntegrationRoutes } from './integrations.ts';
+import { registerConnectorRoutes, registerQbwcRoutes } from './connectors.ts';
 import type { QuickBooksConfig } from '../integrations/quickbooks.ts';
 import { plansJson } from './billing.ts';
 import { TRIAL_DAYS } from '../billing/plans.ts';
@@ -352,6 +353,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     registerPaymentAccountRoutes(tenant, deps, paymentExtras);
     registerDiscountRoutes(tenant, deps);
     registerIntegrationRoutes(tenant, deps, quickbooks);
+    registerConnectorRoutes(tenant, deps, ctx);
     registerReceivableRoutes(tenant, deps, ctx, { ...(options.ekyash && { ekyash: options.ekyash }) });
     registerBillPaySettingsRoutes(tenant, deps, ctx);
     registerQuoteRoutes(tenant, deps, ctx, { ...(options.ekyash && { ekyash: options.ekyash }) });
@@ -398,6 +400,9 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     openapi ??= buildOpenApi(collected.routes, { ...(options.publicUrl && { serverUrl: options.publicUrl }) });
     return reply.header('Cache-Control', 'public, max-age=300').send(openapi);
   });
+
+  // The QuickBooks Web Connector (SOAP): it signs in with a connection's own user name and password.
+  await app.register(async (q) => registerQbwcRoutes(q, deps), { prefix: '/v1/qbwc' });
 
   // The platform console, for our own staff.
   await app.register(async (platform) => registerPlatformRoutes(platform, deps, ctx, billingContext), { prefix: '/v1/platform' });

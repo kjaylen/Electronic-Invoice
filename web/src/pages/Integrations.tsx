@@ -1,4 +1,4 @@
-/** Settings → Integrations: QuickBooks Online (Pro plan). */
+/** Settings → Integrations: QuickBooks Online, QuickBooks Desktop and Point of Sale (Pro plan). */
 
 import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router';
@@ -8,6 +8,7 @@ import { useSession } from '../session';
 import { useToast } from '../toast';
 import { ErrorText, Field, Select, TYPE_NAMES } from '../ui';
 import { UpgradeNotice } from './Billing';
+import { ConnectorsSection } from './Connectors';
 
 interface QuickBooksState {
   available: boolean;
@@ -149,9 +150,10 @@ export function IntegrationsTab() {
         )}
         <ErrorText error={error} />
       </section>
+      <ConnectorsSection />
       <section className="card stack">
         <h2>{t('More connections')}</h2>
-        <p className="small muted">{t('Xero, Sage and others can connect today through the API and webhooks (Settings → Developers). Tell us which you need next.')}</p>
+        <p className="small muted">{t('NetSuite is next. Any other system can send its invoices and receipts to BTS today through the API and webhooks (Settings → Developers).')}</p>
       </section>
     </div>
   );
