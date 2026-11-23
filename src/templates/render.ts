@@ -16,7 +16,8 @@ import { buildEtdui } from '../engine/etdui.ts';
 import { authorizationText, infoLines, regulatoryLines } from '../render/pdf.ts';
 import { type PrintView, qrUrl } from '../render/view.ts';
 import { type AssetMap, assetMap, emailAssets } from './assets.ts';
-import { defaultSource, requirementProblems, type TemplateDef, templateDef } from './catalog.ts';
+import { defaultSource, defaultSubject, requirementProblems, type TemplateDef, templateDef } from './catalog.ts';
+import { documentTypeName, emailLanguage, type Lang, PHRASES } from './lang.ts';
 import { type BtsBlock, htmlToText, parseTemplate, renderHtml, renderText, TemplateError } from './engine.ts';
 
 const DISTRICTS: Record<string, string> = { '1': 'Belize', '2': 'Cayo', '3': 'Corozal', '4': 'Orange Walk', '5': 'Stann Creek', '6': 'Toledo' };
@@ -52,23 +53,25 @@ export async function businessContext(db: Queryable, tenantId: string): Promise<
 
 // ---------- loading and saving ----------
 
-export interface LoadedTemplate { source: string; subject: string | null; custom: boolean; updatedAt: string | null }
+export interface LoadedTemplate { source: string; subject: string | null; custom: boolean; updatedAt: string | null; lang: Lang }
 
-export async function loadTemplate(db: Queryable, tenantId: string, key: string): Promise<LoadedTemplate> {
+/** A business's template, or the default (emails: in the language its customer emails go out in). */
+export async function loadTemplate(db: Queryable, tenantId: string, key: string, lang?: Lang): Promise<LoadedTemplate> {
   const def = templateDef(key);
   if (!def) throw new TemplateError(`No template "${key}"`);
+  const language = def.group === 'emails' ? lang ?? await emailLanguage(db, tenantId) : 'en';
   const row = (await db.query<{ source: string; subject: string | null; updated_at: Date | string }>(
     'select source, subject, updated_at from templates where tenant_id = $1 and key = $2', [tenantId, key],
   )).rows[0];
   return row
-    ? { source: row.source, subject: row.subject ?? def.subject ?? null, custom: true, updatedAt: new Date(row.updated_at).toISOString() }
-    : { source: defaultSource(def), subject: def.subject ?? null, custom: false, updatedAt: null };
+    ? { source: row.source, subject: row.subject ?? defaultSubject(def, language), custom: true, updatedAt: new Date(row.updated_at).toISOString(), lang: language }
+    : { source: defaultSource(def, language), subject: defaultSubject(def, language), custom: false, updatedAt: null, lang: language };
 }
 
 export interface Problem { message: string; line?: number; where: 'template' | 'subject' }
 
 /** Everything wrong with a template, before it is saved: syntax, what it must keep, and a trial render. */
-export async function templateProblems(def: TemplateDef, source: string, subject: string | null, sample: Record<string, unknown>, bts?: BtsBlock, assets?: AssetMap): Promise<Problem[]> {
+export async function templateProblems(def: TemplateDef, source: string, subject: string | null, sample: Record<string, unknown>, bts?: BtsBlock, assets?: AssetMap, lang: Lang = 'en'): Promise<Problem[]> {
   const problems: Problem[] = [];
   try {
     parseTemplate(source);
@@ -88,7 +91,7 @@ export async function templateProblems(def: TemplateDef, source: string, subject
   for (const message of requirementProblems(def, source)) problems.push({ message, where: 'template' });
   if (!problems.length) {
     try {
-      await renderHtml(source, withAssets(sample, assets), bts);
+      await renderHtml(source, withAssets(sample, assets), bts, lang);
     } catch (e) {
       problems.push({ message: (e as Error).message, ...((e as TemplateError).line && { line: (e as TemplateError).line }), where: 'template' });
     }
@@ -118,23 +121,28 @@ export async function revertTemplate(db: Queryable, tenantId: string, key: strin
 
 // ---------- emails ----------
 
+/**
+ * An email from the business's template (or the default), in the language its customer emails go
+ * out in (`lang`, when the caller already knows it).
+ */
 export async function renderEmail(
-  db: Queryable, tenantId: string, key: string, context: Record<string, unknown>, options: { publicUrl?: string | undefined } = {},
+  db: Queryable, tenantId: string, key: string, context: Record<string, unknown>, options: { publicUrl?: string | undefined; lang?: Lang } = {},
 ): Promise<{ subject: string; html: string; text: string }> {
   const def = templateDef(key)!;
-  const t = await loadTemplate(db, tenantId, key);
+  const lang = options.lang ?? await emailLanguage(db, tenantId);
+  const t = await loadTemplate(db, tenantId, key, lang);
   const render = async (source: string, subject: string) => {
     // Images load from the public address (or are inlined when the server has none).
     const ctx = withAssets(context, await assetMap(db, tenantId, [source, subject], emailAssets(options.publicUrl)));
-    const html = await renderHtml(source, ctx);
-    return { html, text: htmlToText(html), subject: (await renderText(subject, ctx)).replace(/\s+/g, ' ').trim() };
+    const html = await renderHtml(source, ctx, undefined, lang);
+    return { html, text: htmlToText(html), subject: (await renderText(subject, ctx, lang)).replace(/\s+/g, ' ').trim() };
   };
   try {
-    return await render(t.source, t.subject ?? def.subject ?? '');
+    return await render(t.source, t.subject ?? defaultSubject(def, lang) ?? '');
   } catch (e) {
     if (!t.custom) throw e;
     // The business's version broke at send time: send the default rather than nothing.
-    return render(defaultSource(def), def.subject ?? '');
+    return render(defaultSource(def, lang), defaultSubject(def, lang) ?? '');
   }
 }
 
@@ -305,32 +313,35 @@ export function samplePrintView(biz: BusinessContext, receipt: boolean): PrintVi
 }
 
 /** Realistic data for previewing a template, with the business's own details. */
-export async function sampleContext(def: TemplateDef, biz: BusinessContext): Promise<{ context: Record<string, unknown>; bts?: BtsBlock }> {
+export async function sampleContext(def: TemplateDef, biz: BusinessContext, lang: Lang = 'en'): Promise<{ context: Record<string, unknown>; bts?: BtsBlock }> {
+  const es = lang === 'es';
+  const say = PHRASES[lang];
+  const transfer = es ? 'Pague por transferencia a Belize Bank, cuenta 000-111.' : 'Pay by transfer to Belize Bank, account 000-111.';
   const customer = { name: 'Island Logistics Ltd.', email: 'accounts@islandlogistics.example', tin: '777888', address_lines: ['4 Mile Northern Highway', 'Belize City, Belize'] };
-  const document = { type_name: 'Tax Invoice', number_display: '001-000000042', series: '001', number: '000000042', issue_date: '2026-11-22', due_date: '2026-12-22', total: '1250.00' };
+  const document = { type_name: documentTypeName('Tax Invoice', lang), number_display: '001-000000042', series: '001', number: '000000042', issue_date: '2026-11-22', due_date: '2026-12-22', total: '1250.00' };
   const store = { name: biz.name, tagline: 'Fresh from Cayo, every morning', city: 'San Ignacio', telephone: biz.telephone };
   switch (def.key) {
-    case 'email.document': return { context: { business: biz, customer, document, intro: [], message: 'Thank you for your business!\n\nPay by transfer to Belize Bank, account 000-111.', pay_url: 'https://example.bz/pay/sample' } };
+    case 'email.document': return { context: { business: biz, customer, document, intro: [], message: `${es ? '¡Gracias por su compra!' : 'Thank you for your business!'}\n\n${transfer}`, pay_url: 'https://example.bz/pay/sample' } };
     case 'email.reminder': return { context: {
       business: biz, customer, document: { ...document, due_date: '2026-11-19' },
-      reminder: { when: 'after', days: 3, what: 'invoice 001-000000042', balance: '1250.00' },
-      message: 'Pay by transfer to Belize Bank, account 000-111.', pay_url: 'https://example.bz/pay/sample',
+      reminder: { when: 'after', days: 3, what: `${say.receivable('01').toLowerCase()} 001-000000042`, balance: '1250.00' },
+      message: transfer, pay_url: 'https://example.bz/pay/sample',
     } };
     case 'email.statement':
     case 'document.statement':
       return { context: { business: biz, customer, pay_url: 'https://example.bz/pay/sample', statement: {
-        as_of: '2026-11-22', total_due: '1850.00', overdue: '600.00', note: def.key === 'email.statement' ? 'Pay by transfer to Belize Bank, account 000-111.' : null,
+        as_of: '2026-11-22', total_due: '1850.00', overdue: '600.00', note: def.key === 'email.statement' ? transfer : null,
         open: [
-          { label: 'Invoice 001-000000038', type: 'Tax invoice', number: '001-000000038', issue_date: '2026-10-14', due_date: '2026-11-13', days_overdue: 9, total: '600.00', paid: '0.00', credited: '0.00', balance: '600.00', pay_url: 'https://example.bz/pay/sample-38' },
-          { label: 'Invoice 001-000000042', type: 'Tax invoice', number: '001-000000042', issue_date: '2026-11-22', due_date: '2026-12-22', days_overdue: 0, total: '1250.00', paid: '0.00', credited: '0.00', balance: '1250.00', pay_url: 'https://example.bz/pay/sample-42' },
+          { label: `${say.receivable('01')} 001-000000038`, type: 'Tax invoice', number: '001-000000038', issue_date: '2026-10-14', due_date: '2026-11-13', days_overdue: 9, total: '600.00', paid: '0.00', credited: '0.00', balance: '600.00', pay_url: 'https://example.bz/pay/sample-38' },
+          { label: `${say.receivable('01')} 001-000000042`, type: 'Tax invoice', number: '001-000000042', issue_date: '2026-11-22', due_date: '2026-12-22', days_overdue: 0, total: '1250.00', paid: '0.00', credited: '0.00', balance: '1250.00', pay_url: 'https://example.bz/pay/sample-42' },
         ],
         payments: [{ number: '001-000000031', paid_on: '2026-11-02', method: 'Bank transfer', reference: 'BB-77812', amount: '420.00' }],
       } } };
-    case 'email.quote': return { context: { business: biz, customer, quote: { number: 'Q-1007', total: '3400.00', valid_until: '2026-12-22' }, view_url: 'https://example.bz/q/sample', message: 'As discussed on the phone.' } };
+    case 'email.quote': return { context: { business: biz, customer, quote: { number: 'Q-1007', total: '3400.00', valid_until: '2026-12-22' }, view_url: 'https://example.bz/q/sample', message: es ? 'Como lo conversamos por teléfono.' : 'As discussed on the phone.' } };
     case 'email.order': return { context: { store, order: {
       number: 1042, customer_name: 'Maria Chan', payment_method: 'bank_transfer',
       items: [{ name: 'Coffee beans 1lb', variant: 'Dark roast', quantity: 2, total: '44.00' }, { name: 'Banana bread', variant: null, quantity: 1, total: '3.75' }],
-      payment_lines: ['Pay BZ$52.75 by bank transfer:', 'Belize Bank, account 000-111', 'Use order #1042 as the reference.'],
+      payment_lines: [say.payByTransfer('BZ$52.75'), es ? 'Belize Bank, cuenta 000-111' : 'Belize Bank, account 000-111', say.orderReference(1042)],
       delivery: true, address: 'San Ignacio town', delivery_fee: '5.00', total: '52.75', paid: false, url: 'https://example.bz/shop/orders/1042',
     } } };
     case 'document.invoice':

@@ -34,6 +34,7 @@ import type { ServerContext } from './context.ts';
 import { sendDocumentEmail } from './documents.ts';
 import { ApiError } from './errors.ts';
 import { requirePermission } from './permissions.ts';
+import { emailLanguage, PHRASES } from '../templates/lang.ts';
 
 /** Gateway settings for a server: the test page lives in the store's own app. */
 export interface GatewayExtras {
@@ -58,7 +59,7 @@ export async function settlePaidOrder(deps: PipelineDeps, ctx: ServerContext, pa
   const { order, document } = await markOrderPaid(deps, payment.tenant_id, payment.order_id, null);
   await audit(deps.db, { tenantId: payment.tenant_id, action: 'order.paid', target: `#${order.number}`, details: { provider: payment.provider, transaction: payment.transaction_id } });
   if (document && order.customer_email && ctx.mailConfigured && ['authorized', 'authorized_with_alert', 'contingency_pending'].includes(document.status)) {
-    await sendDocumentEmail(deps, ctx, payment.tenant_id, document.documentId, { to: order.customer_email, message: `Thank you for your order #${order.number}. Your payment was received.` }).catch(() => {});
+    await sendDocumentEmail(deps, ctx, payment.tenant_id, document.documentId, { to: order.customer_email, message: PHRASES[await emailLanguage(deps.db, payment.tenant_id)].orderPaid(order.number) }).catch(() => {});
   }
 }
 

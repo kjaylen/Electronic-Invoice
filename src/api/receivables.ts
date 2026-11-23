@@ -29,6 +29,7 @@ import { overLimit } from '../db/ratelimit.ts';
 import { formatCents, parseCents } from '../engine/decimal.ts';
 import { BELIZE_DISTRICTS } from '../engine/ubl.ts';
 import { businessContext, renderEmail } from '../templates/render.ts';
+import { emailLanguage, type Lang, PHRASES, shortDate } from '../templates/lang.ts';
 import { logoForPdf } from '../templates/assets.ts';
 import { confirmPayment, type GatewayOptions, gatewayFor, getPaymentAccount, PaymentError, type Provider, startPayment, walletDisplay } from '../commerce/payments.ts';
 import type { PipelineDeps } from '../pipeline/issue.ts';
@@ -102,7 +103,6 @@ const receivableJson = (r: Receivable) => {
 const TYPE_NAME: Record<string, string> = { '01': 'Invoice', '03': 'Debit note' };
 const docLabel = (r: Receivable) => `${TYPE_NAME[r.type] ?? 'Invoice'} ${r.number}`;
 const money2 = (s: string) => `BZ$${Number(s).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-const longDate = (iso: string) => new Date(`${iso}T12:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
 const belizeToday = () => new Date(Date.now() - 6 * 3600_000).toISOString().slice(0, 10);
 const daysPastDue = (dueDate: string) => Math.round((Date.parse(belizeToday()) - Date.parse(dueDate)) / 86_400_000);
 
@@ -127,7 +127,8 @@ export async function emailInvoice(deps: PipelineDeps, ctx: ServerContext, tenan
   const r = await receivable(deps.db, tenantId, documentId);
   const provider = ctx.publicUrl && r && r.balanceCents > 0n ? await invoiceProvider(deps.db, tenantId, settings, { ...(options.ekyash && { ekyash: options.ekyash }) }) : null;
   const payUrl = provider ? (await createShareLink(deps.db, ctx, tenantId, documentId, options.userId ?? null)).payUrl : undefined;
-  const due = r && r.balanceCents > 0n ? [`Amount due: ${money2(r.balance)} by ${longDate(r.dueDate)}.`] : [];
+  const lang = await emailLanguage(deps.db, tenantId);
+  const due = r && r.balanceCents > 0n ? [PHRASES[lang].amountDue(money2(r.balance), shortDate(r.dueDate, lang))] : [];
   // With our own opening lines, the amount due goes with them; otherwise it leads the message.
   const message = [...(options.intro ? [] : due), settings.instructions.trim()].filter(Boolean).join('\n\n');
   return sendDocumentEmail(deps, ctx, tenantId, documentId, {
@@ -139,10 +140,10 @@ export async function emailInvoice(deps: PipelineDeps, ctx: ServerContext, tenan
 }
 
 /** What a reminder's template sees, from how far past (or before) the due date it is. */
-export function reminderFor(r: Receivable, days: number) {
+export function reminderFor(r: Receivable, days: number, lang: Lang = 'en') {
   return {
     when: days < 0 ? 'before' as const : days === 0 ? 'due' as const : 'after' as const,
-    days: Math.abs(days), what: docLabel(r).toLowerCase(), balance: r.balance, total: r.total, dueDate: r.dueDate,
+    days: Math.abs(days), what: `${PHRASES[lang].receivable(r.type).toLowerCase()} ${r.number}`, balance: r.balance, total: r.total, dueDate: r.dueDate,
   };
 }
 
@@ -151,7 +152,7 @@ async function sendReminder(deps: PipelineDeps, ctx: ServerContext, tenantId: st
   const provider = ctx.publicUrl ? await invoiceProvider(deps.db, tenantId, settings, extras) : null;
   const payUrl = provider ? (await createShareLink(deps.db, ctx, tenantId, r.documentId, userId)).payUrl : undefined;
   return sendDocumentEmail(deps, ctx, tenantId, r.documentId, {
-    to, userId, reminder: reminderFor(r, daysPastDue(r.dueDate)), ...(settings.instructions.trim() && { message: settings.instructions.trim() }), ...(payUrl && { payUrl }),
+    to, userId, reminder: reminderFor(r, daysPastDue(r.dueDate), await emailLanguage(deps.db, tenantId)), ...(settings.instructions.trim() && { message: settings.instructions.trim() }), ...(payUrl && { payUrl }),
   });
 }
 
@@ -376,18 +377,19 @@ export function registerReceivableRoutes(app: FastifyInstance, deps: PipelineDep
       const settings = await receivableSettings(db, request.tenantId);
       const biz = await businessContext(db, request.tenantId);
       const provider = ctx.publicUrl ? await invoiceProvider(db, request.tenantId, settings, extras) : null;
+      const lang = await emailLanguage(db, request.tenantId);
       const open = [];
       for (const r of s.open.filter((x) => x.balanceCents > 0n).slice(0, 30)) {
         const link = provider ? (await createShareLink(db, ctx, request.tenantId, r.documentId, request.userId || null)).payUrl : null;
         open.push({
-          label: docLabel(r), type: TYPE_NAME[r.type] ?? 'Invoice', number: r.number, issue_date: r.issueDate, due_date: r.dueDate, days_overdue: r.daysOverdue,
+          label: `${PHRASES[lang].receivable(r.type)} ${r.number}`, type: PHRASES[lang].receivable(r.type), number: r.number, issue_date: r.issueDate, due_date: r.dueDate, days_overdue: r.daysOverdue,
           total: r.total, paid: r.paid, credited: r.credited, balance: r.balance, pay_url: link,
         });
       }
       const mail = await renderEmail(db, request.tenantId, 'email.statement', {
         business: biz, customer: { name: s.customer.name, tin: s.customer.tin ?? null, email: to },
         statement: { as_of: s.asOf, open, total_due: s.totalDue, overdue: s.overdue, note: settings.instructions.trim() || null },
-      }, { publicUrl: ctx.publicUrl });
+      }, { publicUrl: ctx.publicUrl, lang });
       const pdf = await statementPdf(db, request.tenantId, s, settings);
       await ctx.mailer.send({
         to, replyTo: biz.email, subject: mail.subject, text: mail.text, html: mail.html,

@@ -20,6 +20,7 @@ import { notFound } from './errors.ts';
 import { requirePermission } from './permissions.ts';
 import { uuid } from './schemas.ts';
 import { assertCanIssue } from '../billing/billing.ts';
+import { emailLanguage, PHRASES } from '../templates/lang.ts';
 
 const iso = (v: string | Date | null) => (v ? new Date(v).toISOString() : null);
 
@@ -149,7 +150,7 @@ export function registerOrderRoutes(app: FastifyInstance, deps: PipelineDeps, ct
     let emailed = false;
     if (document && order.customer_email && ctx.mailConfigured && ['authorized', 'authorized_with_alert', 'contingency_pending'].includes(document.status)) {
       try {
-        await sendDocumentEmail(deps, ctx, request.tenantId, document.documentId, { to: order.customer_email, message: `Thank you for your order #${order.number}.`, userId: request.userId || null });
+        await sendDocumentEmail(deps, ctx, request.tenantId, document.documentId, { to: order.customer_email, message: PHRASES[await emailLanguage(db, request.tenantId)].orderThanks(order.number), userId: request.userId || null });
         emailed = true;
       } catch (e) {
         request.log.error({ err: e }, 'order receipt email failed');
@@ -207,7 +208,7 @@ export function registerOrderRoutes(app: FastifyInstance, deps: PipelineDeps, ct
       let emailed = false;
       if (full.customer.email && ctx.mailConfigured && ['authorized', 'authorized_with_alert', 'contingency_pending'].includes(document.status)) {
         try {
-          await sendDocumentEmail(deps, ctx, request.tenantId, document.documentId, { to: full.customer.email, message: `Your refund for order #${full.number}.`, userId: request.userId || null });
+          await sendDocumentEmail(deps, ctx, request.tenantId, document.documentId, { to: full.customer.email, message: PHRASES[await emailLanguage(db, request.tenantId)].refund(full.number), userId: request.userId || null });
           emailed = true;
         } catch (e) {
           request.log.error({ err: e }, 'refund email failed');

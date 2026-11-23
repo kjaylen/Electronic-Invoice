@@ -35,7 +35,11 @@ interface TemplateSummary {
   updatedAt: string | null;
 }
 
+type EmailLanguage = 'en' | 'es';
+
 interface TemplateDetail extends TemplateSummary {
+  /** For emails: the language they go out in. */
+  lang: EmailLanguage;
   source: string;
   subject: string | null;
   default: { source: string; subject: string | null };
@@ -70,7 +74,23 @@ export function Templates() {
   const key = params.get('key');
   const current = list?.find((x) => x.key === key) ?? null;
 
-  const refresh = useCallback(() => api<{ data: TemplateSummary[] }>('/v1/templates').then((r) => setList(r.data)).catch(setError), []);
+  const [emailLanguage, setEmailLanguage] = useState<EmailLanguage>('en');
+  const toast = useToast();
+  const refresh = useCallback(() => api<{ data: TemplateSummary[]; emailLanguage: EmailLanguage }>('/v1/templates').then((r) => {
+    setList(r.data);
+    setEmailLanguage(r.emailLanguage);
+  }).catch(setError), []);
+  const changeLanguage = async (lang: EmailLanguage) => {
+    const before = emailLanguage;
+    setEmailLanguage(lang);
+    try {
+      await api('/v1/templates/settings', { method: 'PUT', body: { emailLanguage: lang } });
+      toast(lang === 'es' ? t('Customer emails now go out in Spanish.') : t('Customer emails now go out in English.'));
+    } catch (e) {
+      setEmailLanguage(before);
+      toast(e instanceof Error ? e.message : String(e), 'bad');
+    }
+  };
   useEffect(() => {
     void refresh();
   }, [refresh]);
@@ -134,8 +154,8 @@ export function Templates() {
         <div className="tpl-work tab-panel">
           {key === IMAGES ? <ImagesManager />
             : current
-              ? <TemplateEditor key={current.key} summary={current} onSaved={() => void refresh()} onDirty={(d) => { dirty.current = d; }} onOpen={open} />
-              : <Overview list={list} onOpen={open} />}
+              ? <TemplateEditor key={`${current.key}:${emailLanguage}`} summary={current} onSaved={() => void refresh()} onDirty={(d) => { dirty.current = d; }} onOpen={open} />
+              : <Overview list={list} onOpen={open} emailLanguage={emailLanguage} onLanguage={(l) => void changeLanguage(l)} />}
         </div>
       </div>
       {pending !== null && (
@@ -151,7 +171,7 @@ export function Templates() {
   );
 }
 
-function Overview({ list, onOpen }: { list: TemplateSummary[] | null; onOpen: (key: string) => void }) {
+function Overview({ list, onOpen, emailLanguage, onLanguage }: { list: TemplateSummary[] | null; onOpen: (key: string) => void; emailLanguage: EmailLanguage; onLanguage: (lang: EmailLanguage) => void }) {
   const t = useT();
   return (
     <div className="tpl-overview stack">
@@ -169,7 +189,18 @@ function Overview({ list, onOpen }: { list: TemplateSummary[] | null; onOpen: (k
       </div>
       {GROUPS.map(([g, label]) => (
         <section key={g} className="stack tpl-section">
-          <h2 className="tpl-section-title">{t(label)}</h2>
+          <div className="tpl-section-head">
+            <h2 className="tpl-section-title">{t(label)}</h2>
+            {g === 'emails' && (
+              <div className="tpl-lang-setting">
+                <span className="small muted">{t('Customers get them in')}</span>
+                <Segmented label={t('Language of customer emails')} value={emailLanguage} onChange={onLanguage} options={[['en', 'English'], ['es', 'Español']]} />
+              </div>
+            )}
+          </div>
+          {g === 'emails' && (list ?? []).some((x) => x.group === 'emails' && x.custom) && (
+            <p className="small muted tpl-lang-note">{t('Emails you customized keep your wording in either language; the others switch to the built-in text in that language.')}</p>
+          )}
           <div className="tpl-cards">
             {(list ?? []).filter((x) => x.group === g).map((x) => (
               <button key={x.key} type="button" className="tpl-card card" onClick={() => onOpen(x.key)}>
@@ -346,6 +377,7 @@ function TemplateEditor({ summary, onSaved, onDirty, onOpen }: { summary: Templa
           <div className="row">
             <h2>{t(detail.name)}</h2>
             <span className={`badge ${detail.custom ? 'tpl-badge-custom' : 'tpl-badge-default'}`}>{detail.custom ? t('Customized') : t('Default')}</span>
+            {detail.group === 'emails' && <span className="tpl-lang-chip" title={t('Language of customer emails')}>{detail.lang === 'es' ? 'Español' : 'English'}</span>}
             {dirty && <span className="tpl-unsaved">{t('Unsaved changes')}</span>}
           </div>
           <p className="muted small">{t(detail.description)}</p>

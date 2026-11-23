@@ -8,7 +8,7 @@ import { autocompletion, closeBrackets, closeBracketsKeymap, type Completion, co
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { css } from '@codemirror/lang-css';
 import { html } from '@codemirror/lang-html';
-import { liquid } from '@codemirror/lang-liquid';
+import { liquidSupport } from './liquid-fix';
 import { bracketMatching, foldGutter, foldKeymap, HighlightStyle, indentOnInput, indentUnit, syntaxHighlighting } from '@codemirror/language';
 import { type Diagnostic, lintGutter, setDiagnostics } from '@codemirror/lint';
 import { highlightSelectionMatches, search, searchKeymap } from '@codemirror/search';
@@ -120,7 +120,7 @@ function language(lang: 'html' | 'css', variables: CodeVariable[]) {
     const top = v.name.split('.')[0]!;
     if (!tops.has(top)) tops.set(top, v.name === top ? v.description : '');
   }
-  return liquid({
+  return liquidSupport({
     base: lang === 'css' ? css() : html({ selfClosingTags: true }),
     variables: [...tops].map(([label, info]) => ({ label, type: 'variable', ...(info && { info }) })),
     properties: properties(variables),

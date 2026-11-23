@@ -88,6 +88,22 @@ test('the engine escapes output, reads no files, sees no prototypes, and names t
   assert.throws(() => parseTemplate('<p>\n{{ x | shout }}</p>'), (e: TemplateError) => e.line === 2 && /shout/.test(e.message));
 });
 
+test('the editor sees where a whitespace-trimming Liquid comment ends', async () => {
+  const { liquidSupport } = await import('../web/src/liquid-fix.ts');
+  const { parser } = liquidSupport().language;
+  for (const src of ['{%- comment -%}\nA note\n{%- endcomment -%}\n<p>{{ x }}</p>', '{% comment %}A note{% endcomment %}<p>{{ x }}</p>']) {
+    const tree = parser.parse(src);
+    assert.equal(tree.resolveInner(src.indexOf('note'), 1).name, 'CommentText', src);
+    assert.equal(tree.resolveInner(src.indexOf('<p>') + 1, 1).name, 'TagName', src);
+    assert.equal(tree.resolveInner(src.lastIndexOf('x'), 1).name, 'VariableName', src);
+  }
+  // {% raw %} keeps Liquid as text, up to a trimmed end tag too.
+  const raw = '{%- raw -%}{{ kept }}{%- endraw -%}<p>{{ x }}</p>';
+  const tree = parser.parse(raw);
+  assert.notEqual(tree.resolveInner(raw.indexOf('kept'), 1).name, 'VariableName');
+  assert.equal(tree.resolveInner(raw.lastIndexOf('x'), 1).name, 'VariableName');
+});
+
 test('asset_url finds uploaded images by name, and says so when one is missing', async () => {
   assert.equal(await renderHtml(`<img src="{{ 'logo.png' | asset_url }}">`, { __assets: { 'logo.png': '/v1/assets/abc/logo.png' } }), '<img src="/v1/assets/abc/logo.png">');
   await assert.rejects(renderHtml(`{{ 'nope.png' | asset_url }}`, { __assets: {} }), /No image named "nope.png"/);
@@ -169,6 +185,41 @@ test('templates: list, open, save, preview, history and back to the default', as
     const cashierLogin = await c.app.inject({ method: 'POST', url: '/v1/auth/login', headers: CSRF, payload: { business: c.slug, login: 'cass@biz.example', password: PASSWORD } });
     const cashier = { ...CSRF, cookie: cookieFrom(cashierLogin), 'x-business': c.slug };
     assert.equal((await c.app.inject({ method: 'GET', url: '/v1/templates', headers: cashier })).statusCode, 403);
+  });
+});
+
+test('customer emails in Spanish: the built-in text and subjects, Spanish dates, and back to English', async () => {
+  await withApp(async (c) => {
+    assert.equal((await c.app.inject({ method: 'GET', url: '/v1/templates', headers: c.owner })).json().emailLanguage, 'en');
+    assert.equal((await c.app.inject({ method: 'PUT', url: '/v1/templates/settings', headers: c.owner, payload: { emailLanguage: 'fr' } })).statusCode, 400);
+    assert.equal((await c.app.inject({ method: 'PUT', url: '/v1/templates/settings', headers: c.owner, payload: { emailLanguage: 'es' } })).statusCode, 200);
+
+    const doc = (await c.app.inject({ method: 'GET', url: '/v1/templates/email.document', headers: c.owner })).json();
+    assert.equal(doc.lang, 'es');
+    assert.match(doc.source, /Adjuntamos su/);
+    assert.match(doc.subject, / de \{\{ business\.name \}\}$/);
+
+    // The reminder previews in Spanish, dates included.
+    const reminder = (await c.app.inject({ method: 'GET', url: '/v1/templates/email.reminder', headers: c.owner })).json();
+    const preview = (await c.app.inject({ method: 'POST', url: '/v1/templates/email.reminder/preview', headers: c.owner, payload: { source: reminder.source, subject: reminder.subject } })).json();
+    assert.deepEqual(preview.problems, []);
+    assert.match(preview.subject, /^Vencida: factura 001-000000042 de /);
+    assert.match(preview.text, /vencía el 19 de noviembre de 2026/);
+    assert.match(preview.text, /3 días de atraso/);
+
+    // A real email goes out in Spanish.
+    const id = await issueReceipt(c);
+    await c.app.inject({ method: 'POST', url: `/v1/documents/${id}/email`, headers: c.owner, payload: { to: 'ana@example.com' } });
+    const es = c.mail.sent.at(-1)!;
+    assert.match(es.subject, /^Recibo fiscal \d{3}-\d{9} de /);
+    assert.match(es.text, /Adjuntamos su recibo fiscal/);
+    assert.match(es.text, /de \w+ de 20\d\d/);
+    assert.match(es.text, /El PDF es la copia impresa/);
+
+    // Back to English.
+    await c.app.inject({ method: 'PUT', url: '/v1/templates/settings', headers: c.owner, payload: { emailLanguage: 'en' } });
+    await c.app.inject({ method: 'POST', url: `/v1/documents/${id}/email`, headers: c.owner, payload: { to: 'ana@example.com' } });
+    assert.match(c.mail.sent.at(-1)!.subject, /^Tax Receipt \d{3}-\d{9} from /);
   });
 });
 

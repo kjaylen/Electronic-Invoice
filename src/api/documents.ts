@@ -35,6 +35,7 @@ import { type PaymentMethod, receivable, recordPayment, statusesFor } from '../r
 import { openShiftSql } from '../db/shifts.ts';
 import { documentPdf as templateDocumentPdf } from '../templates/pdf.ts';
 import { logoForPdf, logoPath } from '../templates/assets.ts';
+import { documentTypeName, emailLanguage } from '../templates/lang.ts';
 
 const PRINTABLE = ['authorized', 'authorized_with_alert', 'contingency_pending'];
 // Emails per business per hour (shared by every server process), so a compromised account cannot send spam at volume.
@@ -380,20 +381,21 @@ export async function sendDocumentEmail(
 ): Promise<string> {
   const copy = await printedCopy(deps, tenantId, documentId);
   const biz = await businessContext(deps.db, tenantId);
+  const lang = await emailLanguage(deps.db, tenantId);
   const v = copy.view;
   const { reminder } = opts;
   const mail = await renderEmail(deps.db, tenantId, reminder ? 'email.reminder' : 'email.document', {
     business: biz,
     customer: { name: v.customer?.name ?? null, email: opts.to },
     document: {
-      type: v.etdType, type_name: v.typeName, number: v.number, series: v.series, number_display: `${v.series}-${v.number}`, etdui: v.etdui,
+      type: v.etdType, type_name: documentTypeName(v.typeName, lang), number: v.number, series: v.series, number_display: `${v.series}-${v.number}`, etdui: v.etdui,
       issue_date: v.issueDate, due_date: reminder?.dueDate ?? v.payment?.dueDate ?? null, total: reminder?.total ?? v.totals.payable,
     },
     intro: opts.intro ?? [],
     message: opts.message?.trim() || null,
     pay_url: opts.payUrl ?? null,
     ...(reminder && { reminder: { when: reminder.when, days: reminder.days, what: reminder.what, balance: reminder.balance } }),
-  }, { publicUrl: ctx.publicUrl });
+  }, { publicUrl: ctx.publicUrl, lang });
   const id = randomUUID();
   try {
     await ctx.mailer.send({

@@ -17,8 +17,9 @@ export interface TemplateDef {
   description: string;
   /** What the editor highlights and the preview shows. */
   language: 'html' | 'css';
-  /** For emails: the subject line template. */
+  /** For emails: the subject line template (and its Spanish default). */
   subject?: string;
+  subjectEs?: string;
   /** How the preview is framed: an email, a page of A4, a receipt roll, a store section. */
   preview: 'email' | 'a4' | 'receipt' | 'section' | 'css';
   /** Things a saved template must contain. */
@@ -74,30 +75,35 @@ export const TEMPLATES: TemplateDef[] = [
     key: 'email.document', group: 'emails', name: 'Document email', preview: 'email', language: 'html', file: 'email-document.liquid',
     description: 'Sent with an invoice, receipt or note. The PDF and the signed XML are attached.',
     subject: '{{ document.type_name }} {{ document.number_display }} from {{ business.name }}',
+    subjectEs: '{{ document.type_name }} {{ document.number_display }} de {{ business.name }}',
     variables: [...BUSINESS, IMAGES, ...CUSTOMER, ...DOCUMENT_SUMMARY, { name: 'intro', description: 'Opening lines the app writes for some emails (a list; empty for a plain send)' }, { name: 'message', description: 'The message typed when sending, or your payment instructions' }, { name: 'pay_url', description: 'A link to pay online (invoices, when payments are on)' }],
   },
   {
     key: 'email.reminder', group: 'emails', name: 'Payment reminder', preview: 'email', language: 'html', file: 'email-reminder.liquid',
     description: 'Sent before, on and after an invoice is due, as set in Getting paid.',
     subject: "{% case reminder.when %}{% when 'after' %}Overdue: {{ reminder.what }} from {{ business.name }}{% when 'due' %}Reminder: {{ reminder.what }} from {{ business.name }} is due today{% else %}Reminder: {{ reminder.what }} from {{ business.name }} is due {% if reminder.days == 1 %}tomorrow{% else %}in {{ reminder.days }} days{% endif %}{% endcase %}",
+    subjectEs: "{% case reminder.when %}{% when 'after' %}Vencida: {{ reminder.what }} de {{ business.name }}{% when 'due' %}Recordatorio: {{ reminder.what }} de {{ business.name }} vence hoy{% else %}Recordatorio: {{ reminder.what }} de {{ business.name }} vence {% if reminder.days == 1 %}mañana{% else %}en {{ reminder.days }} días{% endif %}{% endcase %}",
     variables: [...BUSINESS, IMAGES, ...CUSTOMER, ...DOCUMENT_SUMMARY, { name: 'reminder.when', description: '"before", "due" or "after"' }, { name: 'reminder.days', description: 'Days before or after the due date' }, { name: 'reminder.what', description: 'The invoice, e.g. "invoice 001-000000042"' }, { name: 'reminder.balance', description: 'What is still owed (use | money)' }, { name: 'message', description: 'Your payment instructions' }, { name: 'pay_url', description: 'A link to pay online' }],
   },
   {
     key: 'email.statement', group: 'emails', name: 'Statement of account', preview: 'email', language: 'html', file: 'email-statement.liquid',
     description: 'A customer\'s statement, with the PDF attached.',
     subject: 'Statement of account from {{ business.name }}',
+    subjectEs: 'Estado de cuenta de {{ business.name }}',
     variables: [...BUSINESS, IMAGES, ...CUSTOMER, { name: 'statement.as_of', description: 'The date of the statement' }, { name: 'statement.open', description: 'What is still owed: label, number, issue_date, due_date, days_overdue, total, paid, balance, pay_url' }, { name: 'statement.total_due', description: 'Everything owed' }, { name: 'statement.overdue', description: 'What is past due' }, { name: 'statement.note', description: 'Your payment instructions' }],
   },
   {
     key: 'email.quote', group: 'emails', name: 'Quotation email', preview: 'email', language: 'html', file: 'email-quote.liquid',
     description: 'Sent with a quotation; the customer views and accepts it online.',
     subject: 'Quotation {{ quote.number }} from {{ business.name }}',
+    subjectEs: 'Cotización {{ quote.number }} de {{ business.name }}',
     variables: [...BUSINESS, IMAGES, ...CUSTOMER, { name: 'quote.number', description: 'The quotation number' }, { name: 'quote.total', description: 'The total' }, { name: 'quote.valid_until', description: 'Until when it stands' }, { name: 'view_url', description: 'The link to view and accept it' }, { name: 'message', description: 'The message typed when sending' }],
   },
   {
     key: 'email.order', group: 'emails', name: 'Order confirmation', preview: 'email', language: 'html', file: 'email-order.liquid',
     description: 'Sent to a buyer after they order from your online store.',
     subject: 'Order #{{ order.number }} at {{ store.name }}',
+    subjectEs: 'Pedido #{{ order.number }} en {{ store.name }}',
     variables: [{ name: 'store.name', description: 'Your store name' }, { name: 'store.logo', description: 'Your logo\'s address (empty when you have none)' }, IMAGES, { name: 'store.city', description: 'Where you are' }, { name: 'store.telephone', description: 'Your phone' }, { name: 'order.number', description: 'The order number' }, { name: 'order.customer_name', description: "The buyer's name" }, { name: 'order.items', description: 'What they bought: name, variant, quantity, total' }, { name: 'order.payment_method', description: 'bank_transfer, cash_on_delivery, pay_at_pickup or online' }, { name: 'order.payment_lines', description: 'How to pay, from your store settings (a list)' }, { name: 'order.delivery', description: 'true for delivery, false for pickup' }, { name: 'order.address', description: 'The delivery area' }, { name: 'order.delivery_fee', description: 'The delivery charge' }, { name: 'order.total', description: 'The total' }, { name: 'order.paid', description: 'true when paid online' }, { name: 'order.url', description: 'The order page' }],
   },
   {
@@ -146,20 +152,21 @@ export const templateDef = (key: string) => TEMPLATES.find((t) => t.key === key)
 
 const here = dirname(fileURLToPath(import.meta.url));
 const defaults = new Map<string, string>();
-/**
- * The built-in source of a template. The defaults close comments with `{% endcomment -%}`, never
- * `{%- endcomment -%}`: the editor's Liquid highlighter (@codemirror/lang-liquid) does not see an end
- * tag with a dash after `{%`, and would colour the whole file as a comment.
- */
-export function defaultSource(def: TemplateDef): string {
-  let s = defaults.get(def.key);
+/** The built-in source of a template; emails have a Spanish one too (defaults/es). */
+export function defaultSource(def: TemplateDef, lang: 'en' | 'es' = 'en'): string {
+  const spanish = lang === 'es' && def.group === 'emails';
+  const cacheKey = `${def.key}:${spanish ? 'es' : 'en'}`;
+  let s = defaults.get(cacheKey);
   if (s === undefined) {
     // Checked out with Windows line endings or not, the editor and the saved versions use plain newlines.
-    s = readFileSync(join(here, 'defaults', def.file), 'utf8').replace(/\r\n?/g, '\n');
-    defaults.set(def.key, s);
+    s = readFileSync(join(here, 'defaults', ...(spanish ? ['es'] : []), def.file), 'utf8').replace(/\r\n?/g, '\n');
+    defaults.set(cacheKey, s);
   }
   return s;
 }
+
+/** The built-in subject line of an email, in the language its emails go out in. */
+export const defaultSubject = (def: TemplateDef, lang: 'en' | 'es' = 'en'): string | null => (lang === 'es' ? def.subjectEs ?? def.subject : def.subject) ?? null;
 
 /** Problems that stop a template being saved (beyond Liquid syntax). */
 export function requirementProblems(def: TemplateDef, source: string): string[] {

@@ -1641,8 +1641,9 @@ button.tpl-card:hover .tpl-card-art { background: var(--brand); color: #fff; }
 .checker { background-color: #fff; background-image: linear-gradient(45deg, #f0f1f4 25%, transparent 25%), linear-gradient(-45deg, #f0f1f4 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #f0f1f4 75%), linear-gradient(-45deg, transparent 75%, #f0f1f4 75%); background-size: 14px 14px; background-position: 0 0, 0 7px, 7px -7px, -7px 0; }
 .tpl-images { position: relative; display: flex; flex-direction: column; gap: 1rem; min-height: 24rem; }
 .tpl-logo { display: grid; grid-template-columns: 15rem minmax(0, 1fr); gap: 1.4rem; align-items: center; padding: 1.25rem; }
-.tpl-logo-art { height: 8.5rem; border-radius: var(--radius-lg); border: 1px solid var(--hairline); display: grid; place-items: center; padding: 1rem; overflow: hidden; }
-.tpl-logo-art img { max-width: 100%; max-height: 100%; object-fit: contain; animation: pop 320ms var(--ease-out) both; }
+/* Image boxes: the picture fills a fixed frame inside the padding and keeps its proportions, whatever its shape. */
+.tpl-logo-art { position: relative; height: 8.5rem; border-radius: var(--radius-lg); border: 1px solid var(--hairline); display: grid; place-items: center; overflow: hidden; }
+.tpl-logo-art img { position: absolute; inset: 1rem; width: calc(100% - 2rem); height: calc(100% - 2rem); object-fit: contain; animation: pop 320ms var(--ease-out) both; }
 .tpl-logo-text h3 { margin: 0 0 0.3rem; font-size: 1.02rem; }
 .tpl-logo-text p { margin: 0 0 0.85rem; line-height: 1.5; }
 .tpl-logo-text .row { gap: 0.75rem; flex-wrap: wrap; }
@@ -1657,8 +1658,9 @@ button.tpl-drop:hover:not(:disabled) { background: var(--brand-soft); color: var
 .tpl-assets { display: grid; grid-template-columns: repeat(auto-fill, minmax(12.5rem, 1fr)); gap: 0.75rem; }
 .tpl-asset { margin: 0; padding: 0; overflow: hidden; display: flex; flex-direction: column; animation: rise 360ms var(--ease-out) both; transition: box-shadow var(--dur) var(--ease), border-color var(--dur) var(--ease); }
 .tpl-asset:hover { box-shadow: var(--shadow-lift); border-color: var(--hairline-strong); }
-.tpl-asset-img { position: relative; height: 8rem; display: grid; place-items: center; padding: 0.85rem; border-bottom: 1px solid var(--hairline); }
-.tpl-asset-img img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.tpl-asset-img { position: relative; height: 8rem; flex: none; overflow: hidden; border-bottom: 1px solid var(--hairline); }
+.tpl-asset-img img { position: absolute; inset: 0.85rem; width: calc(100% - 1.7rem); height: calc(100% - 1.7rem); object-fit: contain; }
+.tpl-asset-badge { z-index: 1; }
 .tpl-asset-badge { position: absolute; top: 0.5rem; left: 0.5rem; background: var(--brand); color: #fff; font-size: 0.7rem; font-weight: 650; letter-spacing: 0.02em; padding: 0.1rem 0.5rem; border-radius: 999px; box-shadow: var(--shadow-xs); }
 .tpl-asset figcaption { display: flex; flex-direction: column; gap: 0.2rem; padding: 0.65rem 0.75rem 0.75rem; min-width: 0; }
 .tpl-asset code { font-family: var(--code); font-size: 12px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1666,11 +1668,18 @@ button.tpl-drop:hover:not(:disabled) { background: var(--brand-soft); color: var
 button.tpl-tool-danger:hover:not(:disabled) { background: var(--coral-soft); color: var(--coral-ink); border-color: var(--coral-line); }
 .tpl-vars-name { font-size: 0.85rem; padding-left: 0.3rem; }
 button.tpl-img-row { flex-direction: row; align-items: center; gap: 0.6rem; }
-.tpl-img-thumb { flex: none; width: 42px; height: 34px; border-radius: 6px; border: 1px solid var(--hairline); display: grid; place-items: center; overflow: hidden; padding: 3px; }
-.tpl-img-thumb img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.tpl-img-thumb { position: relative; flex: none; width: 42px; height: 34px; border-radius: 6px; border: 1px solid var(--hairline); overflow: hidden; }
+.tpl-img-thumb img { position: absolute; inset: 3px; width: calc(100% - 6px); height: calc(100% - 6px); object-fit: contain; }
 .tpl-img-text { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
 .tpl-img-text code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 button.tpl-img-upload { margin: 0.6rem 0.3rem 0.3rem; justify-content: center; }
 @media (max-width: 720px) {
   .tpl-logo { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* ---------- templates: the language of customer emails ---------- */
+.tpl-section-head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem 1rem; flex-wrap: wrap; }
+.tpl-lang-setting { display: flex; align-items: center; gap: 0.6rem; }
+.tpl-lang-setting .tabs button { font-size: 0.82rem; padding: 0.2rem 0.75rem; min-height: 0; }
+.tpl-lang-note { margin: -0.2rem 0 0; }
+.tpl-lang-chip { font-size: 0.72rem; font-weight: 620; letter-spacing: 0.02em; color: var(--ink-2); background: var(--sheet); border: 1px solid var(--hairline-strong); border-radius: 999px; padding: 0.08rem 0.5rem; }

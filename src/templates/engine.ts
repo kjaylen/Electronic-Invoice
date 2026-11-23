@@ -51,9 +51,11 @@ class BtsTag extends Tag {
   }
 }
 
-function make(escape: boolean): Liquid {
+function make(escape: boolean, locale: string): Liquid {
   const engine = new Liquid({
     ...(escape && { outputEscape: 'escape' as const }),
+    // Month and day names in | date (the server's own locale never leaks in).
+    locale,
     strictFilters: true,
     strictVariables: false,
     ownPropertyOnly: true,
@@ -76,10 +78,13 @@ function make(escape: boolean): Liquid {
   return engine;
 }
 
+/** The language a template renders in (month names in | date): English, or Spanish for Spanish emails. */
+export type RenderLang = 'en' | 'es';
+const LOCALES: Record<RenderLang, string> = { en: 'en-US', es: 'es' };
 /** HTML output (emails, documents, store sections): escaped by default. */
-const html = make(true);
+const html: Record<RenderLang, Liquid> = { en: make(true, LOCALES.en), es: make(true, LOCALES.es) };
 /** Plain text (email subjects, CSS): nothing escaped. */
-const text = make(false);
+const text: Record<RenderLang, Liquid> = { en: make(false, LOCALES.en), es: make(false, LOCALES.es) };
 
 function wrap(e: unknown): TemplateError {
   const message = e instanceof Error ? e.message : String(e);
@@ -92,23 +97,23 @@ function wrap(e: unknown): TemplateError {
 /** Check a template parses; throws TemplateError with the line of the first problem. */
 export function parseTemplate(source: string): void {
   try {
-    html.parse(source);
+    html.en.parse(source);
   } catch (e) {
     throw wrap(e);
   }
 }
 
-export async function renderHtml(source: string, context: Record<string, unknown>, bts?: BtsBlock): Promise<string> {
+export async function renderHtml(source: string, context: Record<string, unknown>, bts?: BtsBlock, lang: RenderLang = 'en'): Promise<string> {
   try {
-    return await html.parseAndRender(source, { ...context, ...(bts && { __bts: bts }) });
+    return await html[lang].parseAndRender(source, { ...context, ...(bts && { __bts: bts }) });
   } catch (e) {
     throw wrap(e);
   }
 }
 
-export async function renderText(source: string, context: Record<string, unknown>): Promise<string> {
+export async function renderText(source: string, context: Record<string, unknown>, lang: RenderLang = 'en'): Promise<string> {
   try {
-    return await text.parseAndRender(source, context);
+    return await text[lang].parseAndRender(source, context);
   } catch (e) {
     throw wrap(e);
   }

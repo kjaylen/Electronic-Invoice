@@ -37,6 +37,7 @@ import { confirmPayment, gatewayFor, PaymentError, type Provider, startPayment, 
 import { type GatewayExtras, gatewayOptions, settlePaidOrder } from './payments.ts';
 import { toBigInt } from '../db/database.ts';
 import { formatCents } from '../engine/decimal.ts';
+import { emailLanguage, PHRASES } from '../templates/lang.ts';
 
 
 // Limits on placing orders (shared by every server process), so a script cannot flood a store.
@@ -273,10 +274,12 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
     const items = loaded.lines.map((l) => `${Number(l.quantity)} × ${l.product_title}${l.variant_title ? ` (${l.variant_title})` : ''}`);
     const total = `BZ$${placed.quote.totals.total}`;
     if (o.customer_email) {
+      const lang = await emailLanguage(db, s.tenantId);
+      const say = PHRASES[lang];
       const how = o.payment_method === 'bank_transfer'
-        ? [`Pay ${total} by bank transfer:`, s.settings.payments.bankTransfer.instructions || 'The store will send you its bank details.', `Use order #${o.number} as the reference.`]
-        : o.payment_method === 'cash_on_delivery' ? [`Pay ${total} in cash when your order is delivered.`]
-          : o.payment_method === 'online' ? [`Total ${total}, paid online. Your receipt is emailed as soon as the payment is confirmed.`] : [`Pay ${total} when you pick up your order.`];
+        ? [say.payByTransfer(total), s.settings.payments.bankTransfer.instructions || say.bankDetailsLater, say.orderReference(o.number)]
+        : o.payment_method === 'cash_on_delivery' ? [say.payCashOnDelivery(total)]
+          : o.payment_method === 'online' ? [say.paidOnline(total)] : [say.payAtPickup(total)];
       const link = publicLink(ctx, path);
       const mail = await renderEmail(db, s.tenantId, 'email.order', {
         store: { name: s.name, city: s.city, telephone: s.telephone, email: s.email },
@@ -286,7 +289,7 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
           delivery: o.fulfillment === 'delivery', address: o.delivery_zone, delivery_fee: o.delivery_fee, total: placed.quote.totals.total,
           paid: o.payment_status === 'paid', url: link,
         },
-      }, { publicUrl: ctx.publicUrl });
+      }, { publicUrl: ctx.publicUrl, lang });
       await ctx.mailer.send({ to: o.customer_email, replyTo: s.email, subject: mail.subject, text: mail.text, html: mail.html });
     }
     const merchant = s.settings.notifyEmail || s.email;

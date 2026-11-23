@@ -15,6 +15,7 @@
  *   POST   /v1/templates/assets               { name, dataBase64 }: PNG, JPEG, GIF, WebP or SVG, up to 2 MB
  *   DELETE /v1/templates/assets/:id           (refused while a saved template uses it)
  *   PUT    /v1/templates/logo                 { assetId | null }
+ *   PUT    /v1/templates/settings             { emailLanguage: en | es }: the language of customer emails
  *   GET    /v1/assets/:id/:name               the image itself, public (its id is random)
  */
 
@@ -22,7 +23,8 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { audit } from '../db/audit.ts';
 import type { PipelineDeps } from '../pipeline/issue.ts';
 import { addAsset, type AssetMap, assetMap, assetPath, type AssetRow, assetType, listAssets, MAX_ASSET_BYTES, MAX_ASSETS } from '../templates/assets.ts';
-import { defaultSource, TEMPLATES, type TemplateDef, templateDef } from '../templates/catalog.ts';
+import { defaultSource, defaultSubject, TEMPLATES, type TemplateDef, templateDef } from '../templates/catalog.ts';
+import { emailLanguage, type Lang, LANGS } from '../templates/lang.ts';
 import { htmlToText, renderHtml, renderText } from '../templates/engine.ts';
 import {
   businessContext, cleanCss, loadTemplate, revertTemplate, sampleContext, sanitizeSection, saveTemplate, storeContext, templateProblems, withAssets, withBtsStyles,
@@ -61,15 +63,17 @@ export function registerTemplateRoutes(app: FastifyInstance, deps: PipelineDeps)
   const draftAssets = (tenantId: string, source: string, subject: string | null): Promise<AssetMap> => assetMap(db, tenantId, [source, subject], { kind: 'url' });
 
   /** Sample data with the business's own details; store templates see the real store. */
-  async function sample(def: TemplateDef, tenantId: string) {
+  async function sample(def: TemplateDef, tenantId: string): Promise<Awaited<ReturnType<typeof sampleContext>> & { lang: Lang }> {
     const biz = await businessContext(db, tenantId);
-    const s = await sampleContext(def, biz);
+    // Emails preview in the language they go out in.
+    const lang: Lang = def.group === 'emails' ? await emailLanguage(db, tenantId) : 'en';
+    const s = await sampleContext(def, biz, lang);
     if (def.group === 'store') {
       const real = await storeContext(db, tenantId);
       const products = (real.products as unknown[]).length ? real.products : s.context.products;
-      return { ...s, context: { ...s.context, ...real, products } };
+      return { ...s, context: { ...s.context, ...real, products }, lang };
     }
-    return s;
+    return { ...s, lang };
   }
 
   // ---------- images ----------
@@ -145,16 +149,30 @@ export function registerTemplateRoutes(app: FastifyInstance, deps: PipelineDeps)
     requirePermission(request, 'business.manage');
     const custom = new Map((await db.query<{ key: string; updated_at: Date | string }>('select key, updated_at from templates where tenant_id = $1', [request.tenantId])).rows
       .map((r) => [r.key, new Date(r.updated_at).toISOString()]));
-    return { data: TEMPLATES.map((def) => ({ ...summary(def), custom: custom.has(def.key), updatedAt: custom.get(def.key) ?? null })) };
+    return {
+      data: TEMPLATES.map((def) => ({ ...summary(def), custom: custom.has(def.key), updatedAt: custom.get(def.key) ?? null })),
+      emailLanguage: await emailLanguage(db, request.tenantId),
+    };
   });
+
+  app.put<{ Body: { emailLanguage: Lang } }>(
+    '/templates/settings',
+    { schema: { body: { type: 'object', required: ['emailLanguage'], additionalProperties: false, properties: { emailLanguage: { type: 'string', enum: [...LANGS] } } } } },
+    async (request) => {
+      requirePermission(request, 'business.manage');
+      await db.query('update tenants set email_language = $2 where id = $1', [request.tenantId, request.body.emailLanguage]);
+      await audit(db, { tenantId: request.tenantId, userId: request.userId || null, action: 'template.email_language', target: request.body.emailLanguage, ip: request.ip });
+      return { emailLanguage: request.body.emailLanguage };
+    },
+  );
 
   app.get<{ Params: { key: string } }>('/templates/:key', { schema: { params: keyParams } }, async (request) => {
     requirePermission(request, 'business.manage');
     const def = defOf(request.params.key);
     const t = await loadTemplate(db, request.tenantId, def.key);
     return {
-      ...summary(def), source: t.source, subject: t.subject, custom: t.custom, updatedAt: t.updatedAt,
-      default: { source: defaultSource(def), subject: def.subject ?? null },
+      ...summary(def), source: t.source, subject: t.subject, custom: t.custom, updatedAt: t.updatedAt, lang: t.lang,
+      default: { source: defaultSource(def, t.lang), subject: defaultSubject(def, t.lang) },
       variables: def.variables, rules: (def.requires ?? []).map((r) => r.message),
     };
   });
@@ -166,8 +184,8 @@ export function registerTemplateRoutes(app: FastifyInstance, deps: PipelineDeps)
       const def = defOf(request.params.key);
       const source = request.body.source.replace(/\r\n?/g, '\n');
       const subject = def.subject !== undefined ? (request.body.subject ?? '').trim() : null;
-      const { context, bts } = await sample(def, request.tenantId);
-      const problems = await templateProblems(def, source, subject, context, bts, await draftAssets(request.tenantId, source, subject));
+      const { context, bts, lang } = await sample(def, request.tenantId);
+      const problems = await templateProblems(def, source, subject, context, bts, await draftAssets(request.tenantId, source, subject), lang);
       if (problems.length) throw new ApiError(422, 'invalid_template', problems[0]!.message, { problems });
       await saveTemplate(db, request.tenantId, def.key, source, subject, request.userId || null);
       await audit(db, { tenantId: request.tenantId, userId: request.userId || null, action: 'template.saved', target: def.key, ip: request.ip });
@@ -191,19 +209,19 @@ export function registerTemplateRoutes(app: FastifyInstance, deps: PipelineDeps)
     async (request) => {
       requirePermission(request, 'business.manage');
       const def = defOf(request.params.key);
-      const { context: plain, bts } = await sample(def, request.tenantId);
+      const { context: plain, bts, lang } = await sample(def, request.tenantId);
       const subject = def.subject !== undefined ? (request.body.subject ?? '') : null;
       const assets = await draftAssets(request.tenantId, request.body.source, subject);
       const context = withAssets(plain, assets);
-      const problems = await templateProblems(def, request.body.source, subject, plain, bts, assets);
+      const problems = await templateProblems(def, request.body.source, subject, plain, bts, assets, lang);
       // A template that is missing something it must keep still previews; one that does not render shows its problems.
       let html: string | null = null;
       let text: string | undefined;
       let renderedSubject: string | undefined;
       try {
-        if (def.preview === 'css') html = cleanCss(await renderText(request.body.source, context));
+        if (def.preview === 'css') html = cleanCss(await renderText(request.body.source, context, lang));
         else {
-          const out = await renderHtml(request.body.source, context, bts);
+          const out = await renderHtml(request.body.source, context, bts, lang);
           html = def.preview === 'section' ? sanitizeSection(out) : def.group === 'documents' ? withBtsStyles(out) : out;
           if (def.preview === 'email') text = htmlToText(out);
         }
@@ -212,7 +230,7 @@ export function registerTemplateRoutes(app: FastifyInstance, deps: PipelineDeps)
       }
       if (subject !== null) {
         try {
-          renderedSubject = (await renderText(subject, context)).replace(/\s+/g, ' ').trim();
+          renderedSubject = (await renderText(subject, context, lang)).replace(/\s+/g, ' ').trim();
         } catch {
           // Already in the problems.
         }
@@ -242,8 +260,9 @@ export function registerTemplateRoutes(app: FastifyInstance, deps: PipelineDeps)
         'select source, subject, action from template_versions where tenant_id = $1 and key = $2 and id = $3', [request.tenantId, def.key, request.params.id],
       )).rows[0];
       if (!v) throw notFound('Version');
+      const lang: Lang = def.group === 'emails' ? await emailLanguage(db, request.tenantId) : 'en';
       return v.action === 'reverted'
-        ? { source: defaultSource(def), subject: def.subject ?? null, action: v.action }
+        ? { source: defaultSource(def, lang), subject: defaultSubject(def, lang), action: v.action }
         : { source: v.source, subject: v.subject, action: v.action };
     },
   );
