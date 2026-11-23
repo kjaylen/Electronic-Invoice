@@ -4,6 +4,9 @@
  * documents when paid.
  */
 
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
@@ -35,7 +38,7 @@ function cookieFrom(res: LightMyRequestResponse): string {
   return `${m[1]}=${m[2]}`;
 }
 
-async function withStore(fn: (c: Ctx) => Promise<void>, appOptions: { objectStore?: ObjectStore } = {}) {
+async function withStore(fn: (c: Ctx) => Promise<void>, appOptions: { objectStore?: ObjectStore; webRoot?: string } = {}) {
   const f = await setupPipeline();
   const mail = memoryMailer();
   const app = await buildApp({ pipeline: f.deps, cookieSecure: true, publicUrl: 'https://app.example.test', mailer: mail, ...appOptions });
@@ -452,3 +455,44 @@ test('store settings: validation, and only owners and admins change them', () =>
     assert.equal(ok.json().enabled, false, 'partial updates keep the rest');
     assert.equal((await c.app.inject({ method: 'GET', url: '/v1/store-settings', headers: manager })).json().slug, c.slug);
   }));
+
+test('link previews and search: store pages carry their title, price and picture; each store has a sitemap', () => {
+  // A stand-in for the built web app.
+  const web = mkdtempSync(join(tmpdir(), 'store-seo-'));
+  writeFileSync(join(web, 'index.html'), '<!doctype html><html><head><title>eInvoicing</title></head><body><div id="root"></div></body></html>');
+  return withStore(async (c) => {
+    // Closed: the plain page, and no sitemap.
+    const closed = await c.app.inject({ method: 'GET', url: `/${c.slug}/shop` });
+    assert.ok(!closed.body.includes('og:title'));
+    assert.equal((await c.app.inject({ method: 'GET', url: `/${c.slug}/shop/sitemap.xml` })).statusCode, 404);
+
+    await openStore(c, { about: 'Island <b>shirts</b> & more, printed in Belize City.' });
+    const p = await createProduct(c, { ...TEE, title: 'Island "Reef" T-shirt' });
+    const png = new PNG({ width: 2, height: 2 });
+    const photo = (await c.app.inject({ method: 'POST', url: `/v1/products/${p.id}/images`, headers: c.owner, payload: { dataBase64: PNG.sync.write(png).toString('base64') } })).json();
+
+    const home = await c.app.inject({ method: 'GET', url: `/${c.slug}/shop` });
+    assert.equal(home.statusCode, 200);
+    assert.match(home.body, /<title>[^<]+ · Made here<\/title>/);
+    assert.ok(home.body.includes('<meta property="og:description" content="Island shirts &amp; more, printed in Belize City.">'), 'tags stripped, text escaped');
+    assert.ok(home.body.includes(`<meta property="og:image" content="https://app.example.test/v1/store/${c.slug}/images/${photo.id}">`), 'the newest product picture when there is no logo');
+
+    const product = await c.app.inject({ method: 'GET', url: `/${c.slug}/shop/products/${p.handle}?ref=wa` });
+    assert.match(product.body, /<title>Island &quot;Reef&quot; T-shirt · [^<]+<\/title>/);
+    assert.ok(product.body.includes('<meta property="og:type" content="product">'));
+    assert.ok(product.body.includes('<meta property="product:price:amount" content="45.00">'));
+    assert.ok(product.body.includes(`<meta property="og:url" content="https://app.example.test/${c.slug}/shop/products/${p.handle}">`));
+    assert.match(product.body, /og:description" content="BZ\$45\.00 · Soft cotton/);
+    assert.ok(!product.body.includes('"Reef"'), 'quotes in the title are escaped');
+
+    // An unknown product or another store page: the plain app page.
+    assert.ok(!(await c.app.inject({ method: 'GET', url: `/${c.slug}/shop/products/nope` })).body.includes('og:title'));
+    assert.ok(!(await c.app.inject({ method: 'GET', url: `/${c.slug}/shop/checkout` })).body.includes('og:title'));
+
+    const map = await c.app.inject({ method: 'GET', url: `/${c.slug}/shop/sitemap.xml` });
+    assert.equal(map.statusCode, 200);
+    assert.match(String(map.headers['content-type']), /application\/xml/);
+    assert.ok(map.body.includes(`<loc>https://app.example.test/${c.slug}/shop/products/${p.handle}</loc>`));
+    assert.ok(map.body.includes(`<loc>https://app.example.test/${c.slug}/shop</loc>`));
+  }, { webRoot: web });
+});

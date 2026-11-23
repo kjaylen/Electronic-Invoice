@@ -76,6 +76,7 @@ import type { QuickBooksConfig } from '../integrations/quickbooks.ts';
 import { plansJson } from './billing.ts';
 import { TRIAL_DAYS } from '../billing/plans.ts';
 import { type HtmlPdfRenderer, setPdfRenderer } from '../render/browser-pdf.ts';
+import { storePageMeta, storeRobots, storeSitemap, withMeta } from '../commerce/seo.ts';
 
 export type Principal = 'api' | Role;
 
@@ -428,13 +429,37 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   let indexHtml: string | null = null;
   if (hasWeb) {
     app.addHook('onRequest', async (request, reply) => {
-      if (request.method !== 'GET' || request.url.startsWith('/v1') || request.url.startsWith('/health') || request.url.startsWith('/assets/') || /\.[a-z0-9]{2,5}(\?|$)/i.test(request.url)) return;
+      if (request.method !== 'GET' || request.url.startsWith('/v1') || request.url.startsWith('/health') || request.url.startsWith('/assets/')) return;
+      const path = request.url.split('?')[0]!;
+      const isFile = /\.[a-z0-9]{2,5}$/i.test(path);
+      const page = () => (indexHtml ??= readFileSync(join(webRoot!, 'index.html'), 'utf8'));
       const slug = await storeDomains.slugFor(request.hostname);
-      if (!slug) return;
-      if (!request.url.startsWith('/shop')) return reply.redirect('/shop', 302);
-      indexHtml ??= readFileSync(join(webRoot!, 'index.html'), 'utf8');
-      return reply.type('text/html').header('Cache-Control', 'no-cache')
-        .send(indexHtml.replace('</head>', `<meta name="einvoicing-store" content="${slug.replace(/[^a-z0-9-]/g, '')}"></head>`));
+      if (slug) {
+        // A store's own domain: robots.txt and the sitemap for search engines, then its pages.
+        const origin = `https://${request.hostname}`;
+        if (path === '/robots.txt') return reply.type('text/plain; charset=utf-8').send(storeRobots(origin));
+        if (path === '/sitemap.xml') {
+          const xml = await storeSitemap(db, slug, `${origin}/shop`);
+          return xml ? reply.type('application/xml; charset=utf-8').send(xml) : reply.code(404).send({ error: { code: 'not_found', message: 'No store here' } });
+        }
+        if (isFile) return;
+        if (!path.startsWith('/shop')) return reply.redirect('/shop', 302);
+        // The page's title and picture for link previews and search results.
+        const meta = await storePageMeta(db, slug, path.replace(/^\/shop\/?/, ''), `${origin}/shop`).catch(() => null);
+        const html = page().replace('</head>', `<meta name="einvoicing-store" content="${slug.replace(/[^a-z0-9-]/g, '')}"></head>`);
+        return reply.type('text/html').header('Cache-Control', 'no-cache').send(meta ? withMeta(html, meta) : html);
+      }
+      // A store on the app's own address (/<slug>/shop/...): the same, with its sitemap beside it.
+      const store = /^\/([a-z0-9][a-z0-9-]{1,38}[a-z0-9])\/shop(?:\/(.*))?$/.exec(path);
+      if (!store) return;
+      const base = `${(ctx.publicUrl ?? `${request.protocol}://${request.host}`).replace(/\/$/, '')}/${store[1]}/shop`;
+      if (store[2] === 'sitemap.xml') {
+        const xml = await storeSitemap(db, store[1]!, base);
+        return xml ? reply.type('application/xml; charset=utf-8').send(xml) : reply.code(404).send({ error: { code: 'not_found', message: 'No store here' } });
+      }
+      if (isFile) return;
+      const meta = await storePageMeta(db, store[1]!, store[2] ?? '', base).catch(() => null);
+      if (meta) return reply.type('text/html').header('Cache-Control', 'no-cache').send(withMeta(page(), meta));
     });
     await app.register(fastifyStatic, { root: webRoot!, prefix: '/', wildcard: true, index: ['index.html'] });
   }

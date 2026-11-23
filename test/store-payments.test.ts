@@ -266,6 +266,9 @@ test('a store on its own domain: DNS verification, then the domain shows the sto
     const page = await app.inject({ method: 'GET', url: '/shop/products/tee', headers: { host: 'shop.cornerstore.bz' } });
     assert.equal(page.statusCode, 200);
     assert.ok(page.body.includes(`<meta name="einvoicing-store" content="${slug}">`), 'the page names the store');
+    const robots = await app.inject({ method: 'GET', url: '/robots.txt', headers: { host: 'shop.cornerstore.bz' } });
+    assert.match(robots.body, /Sitemap: https:\/\/shop\.cornerstore\.bz\/sitemap\.xml/);
+    assert.equal((await app.inject({ method: 'GET', url: '/sitemap.xml', headers: { host: 'shop.cornerstore.bz' } })).statusCode, 404, 'no sitemap while the store is closed');
     const plain = await app.inject({ method: 'GET', url: '/shop', headers: { host: 'app.example.test' } });
     assert.ok(!plain.body.includes('einvoicing-store'), 'the platform host is unchanged');
     // Another business cannot take the domain.

@@ -207,7 +207,7 @@ const useStoreInfo = () => useOutletContext<StoreInfo>();
 export function ShopHome() {
   const t = useT();
   const info = useStoreInfo();
-  usePageTitle(info.name);
+  usePageTitle(info.tagline ? info.tagline : '', info.name);
   const [products, setProducts] = useState<ProductCard[] | null>(null);
   const [q, setQ] = useState('');
   useEffect(() => {
@@ -254,7 +254,7 @@ export function ShopProduct() {
   const [photo, setPhoto] = useState(0);
   const [quantity, setQuantity] = useState(1);
   const [added, setAdded] = useState(false);
-  usePageTitle(p?.title ?? '');
+  usePageTitle(p?.title ?? '', useStoreInfo().name);
   useEffect(() => {
     void api<ProductPage>(shopApi(`/products/${handle}`)).then((r) => {
       setP(r);
@@ -327,7 +327,7 @@ export function ShopProduct() {
 
 export function ShopCart() {
   const t = useT();
-  usePageTitle(t('Cart'));
+  usePageTitle(t('Cart'), useStoreInfo().name);
   const navigate = useNavigate();
   const { lines, setQuantity } = useCart();
   const subtotal = lines.reduce((sum, l) => sum + Math.round(Number(l.price) * 100) * l.quantity, 0);
@@ -383,7 +383,7 @@ function Radio({ name, value, checked, onChange, children }: { name: string; val
 
 export function ShopCheckout() {
   const t = useT();
-  usePageTitle(t('Check out'));
+  usePageTitle(t('Check out'), useStoreInfo().name);
   const info = useStoreInfo();
   const navigate = useNavigate();
   const cart = useCart();
@@ -588,7 +588,7 @@ export function ShopOrder() {
   const token = params.get('t') ?? '';
   const [o, setO] = useState<BuyerOrder | null>(null);
   const [error, setError] = useState<unknown>(null);
-  usePageTitle(t('Order #{n}', { n: number ?? '' }));
+  usePageTitle(t('Order #{n}', { n: number ?? '' }), useStoreInfo().name);
   const load = useCallback(() => api<BuyerOrder>(shopApi(`/orders/${number}?t=${encodeURIComponent(token)}`)).then(setO).catch(setError), [number, token]);
   const navigate = useNavigate();
   const paymentId = params.get('payment');
@@ -727,7 +727,7 @@ export function ShopOrder() {
 /** The test gateway's pretend card page: approve or decline; no money moves. */
 export function ShopTestPayment() {
   const t = useT();
-  usePageTitle(t('Test payment'));
+  usePageTitle(t('Test payment'), useStoreInfo().name);
   const { paymentId } = useParams();
   const navigate = useNavigate();
   const [info, setInfo] = useState<{ store: string; orderNumber: number; amount: string; status: string; decided: boolean } | null>(null);
