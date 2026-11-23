@@ -55,7 +55,7 @@ Object.assign(process.env, {
   BTS_TIMEOUT_MS: '3000',
   COOKIE_SECURE: 'false',
   WORKER_INTERVAL_MS: '15000',
-  PORT: process.env.PORT ?? '3000',
+  PORT: process.env.PORT ?? '4300',
   MAIL_OUTBOX_DIR: `${demoDir}/outbox`,
 });
 process.env.PUBLIC_URL ??= `http://localhost:${process.env.PORT}`;

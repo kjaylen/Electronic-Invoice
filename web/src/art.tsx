@@ -1,16 +1,23 @@
 /** Original artwork for the app: the brand mark, the floating crystals and the sign-in flow field. */
 
-import { type CSSProperties, useEffect, useRef, useState } from 'react';
+import { type CSSProperties, useEffect, useId, useRef, useState } from 'react';
 
-/** A folded ledger sheet with a tick: "documents, authorized". */
+/** The Floreo mark (brand/floreo-mark-small.svg): an F whose arms are two leaves growing from the stem. */
 export function BrandMark() {
+  // Each copy needs its own gradient id (one inside a hidden element would blank the others).
+  const id = `bm${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
   return (
-    <svg viewBox="0 0 32 32" aria-hidden="true">
-      <rect x="1" y="1" width="30" height="30" rx="8" fill="#0f1117" />
-      <path d="M9 7.5h10l5 5V24.5a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1v-16a1 1 0 0 1 1-1Z" fill="#ffffff" />
-      <path d="M19 7.5v5h5" fill="#dfe2e8" />
-      <path d="M11.5 18.2l3 3 6-6.4" fill="none" stroke="#6d2d93" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
-      <circle cx="25" cy="25" r="4.2" fill="#7bf583" stroke="#0f1117" strokeWidth="1.6" />
+    <svg viewBox="0 0 64 64" aria-hidden="true">
+      <defs>
+        <linearGradient id={id} x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#5B2384" />
+          <stop offset="1" stopColor="#2E0F45" />
+        </linearGradient>
+      </defs>
+      <rect x="2" y="2" width="60" height="60" rx="15" fill={`url(#${id})`} />
+      <path d="M23 22.5Q32.33 8.57 48.5 13Q39.17 26.93 23 22.5Z" fill="#ffffff" />
+      <path d="M23 35.5Q30.59 25.48 42.5 29.5Q34.91 39.52 23 35.5Z" fill="#D8C3EA" />
+      <rect x="19.5" y="14" width="7.5" height="36" rx="3.75" fill="#ffffff" />
     </svg>
   );
 }
@@ -19,7 +26,7 @@ export function Brand({ light = false }: { light?: boolean }) {
   return (
     <>
       <BrandMark />
-      <span style={light ? { color: '#fbf8f1' } : undefined}>Floreo<span style={{ color: light ? '#7bf583' : '#6d2d93' }}>.</span></span>
+      <span style={light ? { color: '#fbf8f1' } : undefined}>Floreo<span style={{ color: light ? '#7bf583' : '#5FD068' }}>.</span></span>
     </>
   );
 }

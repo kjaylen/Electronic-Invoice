@@ -1,7 +1,7 @@
 {
   "name": "Floreo",
   "short_name": "Floreo",
-  "description": "Electronic tax documents for Belize: issue, sign and get them authorized by BTS.",
+  "description": "Floreo by Altiora Technologies: the commerce platform for Belize, with BTS e-invoicing built in.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

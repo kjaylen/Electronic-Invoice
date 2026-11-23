@@ -324,15 +324,15 @@ A React + TypeScript app (Vite) served by the API server from `web/dist`. It's b
 ```
 docker compose up -d db
 npm run web:build
-npm run demo            # http://localhost:3000
+npm run demo            # http://localhost:4300 (PORT to change it)
 ```
 
 - **Business and certificate:** on the start page choose "Create a business", use TIN **123456**, and upload `test/certs/signer-123456.pfx`, password `test-pfx-password`. This is a throwaway test certificate. Then add users under Settings → Users.
 - **BTS stand-in:** it authorizes every document.
 - **Outage simulation:** create the file `.demo/bts-down` and new documents go into contingency. Delete it, and the worker sends them within about 15 seconds.
 - **Emails** (password resets, welcome links, documents, order confirmations) are written to `.demo/outbox` as `.eml` files; open them with any mail program.
-- **Platform console:** `http://localhost:3000/admin`; the demo creates a staff account on first start and saves its sign-in in `.demo/platform-admin.txt`.
-- **Online store:** add a product under Products, then Settings → Online store → Open the store, and shop at `http://localhost:3000/<your-address>/shop`. Mark the order paid under Orders to issue its receipt.
+- **Platform console:** `http://localhost:4300/admin`; the demo creates a staff account on first start and saves its sign-in in `.demo/platform-admin.txt`.
+- **Online store:** add a product under Products, then Settings → Online store → Open the store, and shop at `http://localhost:4300/<your-address>/shop`. Mark the order paid under Orders to issue its receipt.
 
 ### Browser tests
 
