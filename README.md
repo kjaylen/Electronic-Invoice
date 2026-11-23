@@ -400,6 +400,10 @@ Neither is a tax document: each keeps the `POST /v1/documents` body it will issu
 - **GST return worksheet** (Reports → GST return, also CSV and PDF): sales from the authorized e-invoices of the period by GST rate (credit notes subtract), purchases from the recorded expenses by GST treatment; GST paid is claimable only with a tax invoice from a GST-registered supplier (its TIN). It shows output tax, input tax and what to pay or carry forward, with warnings (documents still waiting for BTS, GST without a supplier TIN, claimed GST without a receipt). A working paper for the return filed with BTS, not the return itself.
 - **Profit and loss** (Reports → Profit and loss): income is sales before GST; costs are expenses before the GST claimed back (GST that cannot be claimed is a cost); by month and by category.
 
+## Repeating expenses (`src/api/recurring-expenses.ts`)
+
+- Rent, internet, a phone plan… (Expenses → Repeating): a supplier, a category, the amount and its GST treatment, every week, month or year from a first date, optionally until an end date. Each date is recorded once as an expense: a bill due on the day or some days later, or already paid (a standing order) by a chosen method. Housekeeping records what has come due, catching up missed dates (up to a year at a time); a first date today or earlier is recorded straight away. Paused ones wait; deleting one keeps what it recorded. The list shows about what they come to each month.
+
 ## Inventory (`src/inventory/stock.ts`, `src/api/inventory.ts`)
 
 - **A ledger**: every change to an item's stock is a movement (`stock_movements`, never changed or deleted) written in the same statement as the new level, with its reason and source: a sale (the tax document), an online order, a refund, stock received (the delivery and its unit cost), a count, damage, loss, a customer return. Each item's history is on its page.

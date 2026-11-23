@@ -6,6 +6,7 @@ import { api, link } from '../api';
 import { useT } from '../i18n';
 import { useSession } from '../session';
 import { useToast } from '../toast';
+import { RecurringExpenses } from './RecurringExpenses';
 import { belizeDate, belizeToday, Combobox, ErrorText, Field, fromCents, Modal, money, PAYMENT_METHOD_TEXT, Segmented, Select, toCents, useDebounced, usePageTitle } from '../ui';
 
 type Treatment = 'standard' | 'zero' | 'exempt' | 'none';
@@ -53,7 +54,7 @@ export function Expenses() {
   usePageTitle(t('Expenses'));
   const { can } = useSession();
   const [params, setParams] = useSearchParams();
-  const tab = (params.get('tab') as 'expenses' | 'bills' | 'suppliers' | null) ?? 'expenses';
+  const tab = (params.get('tab') as 'expenses' | 'bills' | 'repeating' | 'suppliers' | null) ?? 'expenses';
   const [summary, setSummary] = useState<{ month: Totals; bills: Totals } | null>(null);
   const [version, setVersion] = useState(0);
   useEffect(() => {
@@ -93,9 +94,10 @@ export function Expenses() {
           <span className="kpi-note">{t('GST on sales less GST you can claim')}</span>
         </Link>
       </div>
-      <Segmented switches label={t('View')} value={tab} onChange={(v) => setParams({ tab: v }, { replace: true })} options={[['expenses', t('Expenses')], ['bills', t('Bills to pay')], ['suppliers', t('Suppliers')]]} />
+      <Segmented switches label={t('View')} value={tab} onChange={(v) => setParams({ tab: v }, { replace: true })} options={[['expenses', t('Expenses')], ['bills', t('Bills to pay')], ['repeating', t('Repeating')], ['suppliers', t('Suppliers')]]} />
       {tab === 'expenses' && <ExpenseList key={version} />}
       {tab === 'bills' && <BillsToPay onChange={changed} />}
+      {tab === 'repeating' && <RecurringExpenses onChange={changed} />}
       {tab === 'suppliers' && <Suppliers />}
     </div>
   );

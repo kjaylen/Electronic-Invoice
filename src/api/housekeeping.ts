@@ -17,6 +17,7 @@ import { runDailySummaries } from '../notify/daily.ts';
 import { heartbeat, opsStatus, type OpsThresholds, sendAlerts } from '../ops/monitoring.ts';
 import { backfillDueDates } from '../receivables/receivables.ts';
 import { reverseVoidedSales } from '../inventory/stock.ts';
+import { runRecurringExpenses } from './recurring-expenses.ts';
 
 export interface HousekeepingOptions {
   mailer?: Mailer;
@@ -62,6 +63,7 @@ export async function runHousekeepingOnce(db: Queryable, options: HousekeepingOp
   await step('stock', () => reverseVoidedSales(db));
   // Due dates for invoices issued before they were kept (read from the signed XML).
   await step('due dates', () => backfillDueDates(db));
+  await step('repeating expenses', () => runRecurringExpenses(db));
   if (options.recurring) await step('recurring invoices', options.recurring);
   if (options.reminders) await step('reminders', options.reminders);
   if (options.mailer) {
