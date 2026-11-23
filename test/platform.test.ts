@@ -11,6 +11,7 @@ import { createApiKey } from '../src/db/apikeys.ts';
 import { createPlatformAdmin, setPlatformAdminStatus } from '../src/db/platform.ts';
 import { base32Decode, stepAt, totpCode } from '../src/db/twofactor.ts';
 import { createUser } from '../src/db/users.ts';
+import { platformOverview } from '../src/api/platform-overview.ts';
 import { SUBMIT_PATHS } from '../src/engine/transport.ts';
 import { memoryMailer } from '../src/mail/mailer.ts';
 import { AUTHORIZED, setupPipeline, type PipelineFixture } from './pipeline-setup.ts';
@@ -169,4 +170,49 @@ test('back to test works while nothing was issued in production; retiring the ce
     const back = await app.inject({ method: 'POST', url: `/v1/platform/tenants/${f.tenantB}/back-to-test`, headers: staff, payload: { confirmTin: '654321', reason: 'BTS approval was for another TIN' } });
     assert.equal(back.statusCode, 200, back.body);
     assert.equal((await app.inject({ method: 'GET', url: `/v1/platform/tenants/${f.tenantB}`, headers: staff })).json().environment, 'test');
+  }));
+
+test('overview: growth, documents, health and the businesses that need a person, for staff only', () =>
+  withConsole(async ({ f, app, staff, key }) => {
+    assert.equal((await app.inject({ method: 'GET', url: '/v1/platform/overview', headers: { ...CSRF, authorization: `Bearer ${key}` } })).statusCode, 401, 'staff only');
+
+    // A test receipt that BTS authorizes, and one left waiting for BTS.
+    f.bts.script(SUBMIT_PATHS['02'], AUTHORIZED);
+    assert.equal((await app.inject({ method: 'POST', url: '/v1/documents', headers: { authorization: `Bearer ${key}` }, payload: receipt })).statusCode, 201);
+    f.deps.contingency = { enabled: false };
+    f.bts.script(SUBMIT_PATHS['02'], { status: 500, body: 'Rejection: Server error' });
+    await app.inject({ method: 'POST', url: '/v1/documents', headers: { authorization: `Bearer ${key}` }, payload: receipt });
+    const waiting = (await f.db.query<{ status: string }>("select status from documents where tenant_id = $1 order by created_at desc limit 1", [f.tenantB])).rows[0]!.status;
+    assert.equal(waiting, 'pending');
+    // Tenant A: its certificate runs out in 10 days, and it is issuing offline.
+    await f.db.query("update certificates set valid_to = now() + interval '10 days' where tenant_id = $1 and status = 'active'", [f.tenantA]);
+    await f.db.query("insert into contingency_periods (id, tenant_id, reason, started_at) values (gen_random_uuid(), $1, 'BTS unreachable', now() - interval '2 hours')", [f.tenantA]);
+
+    const res = await app.inject({ method: 'GET', url: '/v1/platform/overview', headers: staff });
+    assert.equal(res.statusCode, 200, res.body);
+    const o = res.json();
+    const total = (await f.db.query<{ n: number }>('select count(*)::int as n from tenants')).rows[0]!.n;
+    assert.equal(o.businesses.total, total);
+    assert.equal(o.businesses.new7, total);
+    assert.equal(o.businesses.signups.length, 12);
+    assert.equal(o.businesses.signups.at(-1).count, total, 'all of them this week');
+    assert.equal(o.documents.last30, 0, 'nothing in production yet');
+    assert.ok(o.documents.test30 >= 1);
+    assert.equal(o.health.queue.pending, 1);
+    assert.ok(!o.attention.some((a: { kind: string }) => a.kind === 'documents_stuck'), 'not stuck yet');
+
+    // An hour later the waiting document is stuck.
+    const later = await platformOverview(f.db, new Date(Date.now() + 3600_000));
+    const kinds = later.attention.map((a: { kind: string; tenant: { id: string } }) => `${a.kind}:${a.tenant.id === f.tenantA ? 'A' : a.tenant.id === f.tenantB ? 'B' : '?'}`);
+    assert.ok(kinds.includes('documents_stuck:B'), kinds.join());
+    assert.ok(kinds.includes('outage:A'), kinds.join());
+    assert.ok(kinds.includes('certificate_expiring:A'), kinds.join());
+    const cert = o.attention.find((a: { kind: string }) => a.kind === 'certificate_expiring');
+    assert.equal(cert.days, 10);
+    assert.equal(cert.severity, 'reminder');
+    assert.ok(o.attention.some((a: { kind: string }) => a.kind === 'outage'));
+    // Problems come before reminders.
+    const severities = later.attention.map((a: { severity: string }) => a.severity);
+    assert.deepEqual(severities, [...severities].sort((x: string, y: string) => (x === y ? 0 : x === 'problem' ? -1 : 1)));
+    assert.deepEqual(o.newest.map((n: { tenant: { id: string } }) => n.tenant.id).sort(), [f.tenantA, f.tenantB].sort());
   }));

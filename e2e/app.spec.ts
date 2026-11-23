@@ -613,6 +613,10 @@ test('platform console: staff move the business to BTS production', async ({ pag
   await staffPage.getByRole('button', { name: 'Download' }).click();
   await download;
   await staffPage.getByRole('button', { name: 'I saved them' }).click();
+  // The console opens on the overview: the new business is among the newest.
+  await expect(staffPage.getByRole('heading', { name: 'Overview' })).toBeVisible();
+  await expect(staffPage.locator('.plain-list')).toContainText('Corner Store');
+  await staffPage.getByRole('navigation', { name: 'Console' }).getByRole('link', { name: 'Businesses' }).click();
   await staffPage.getByRole('link', { name: 'Corner Store' }).click();
   await expect(staffPage.locator('ul.checks li.ok')).toHaveCount(3);
   await staffPage.getByRole('button', { name: /Move to production/ }).click();

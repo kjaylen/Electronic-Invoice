@@ -65,7 +65,7 @@ interface AuditRow {
 }
 
 const date = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString(undefined, { dateStyle: 'medium' }) : '—');
-const when = (iso: string) => new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+const when = (iso: string | undefined) => (iso ? new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '—');
 
 const CHECK_LABEL: Record<string, string> = {
   certificate: 'BTS certificate installed and valid',
@@ -104,7 +104,8 @@ export function PlatformConsole() {
   return (
     <Routes>
       <Route element={<ConsoleLayout admin={admin} onSignOut={() => setAdmin(null)} />}>
-        <Route index element={<Businesses />} />
+        <Route index element={<Overview />} />
+        <Route path="businesses" element={<Businesses />} />
         <Route path="businesses/:id" element={<Business />} />
         <Route path="billing" element={<ConsoleBilling />} />
         <Route path="activity" element={<Activity />} />
@@ -212,7 +213,8 @@ function ConsoleLayout({ admin, onSignOut }: { admin: StaffAdmin; onSignOut: () 
       <header className="topbar console-bar">
         <Link to="/admin" className="brand"><BrandMark /><span>{t('Platform console')}</span></Link>
         <nav aria-label={t('Console')}>
-          <NavLink to="/admin" end>{t('Businesses')}</NavLink>
+          <NavLink to="/admin" end>{t('Overview')}</NavLink>
+          <NavLink to="/admin/businesses">{t('Businesses')}</NavLink>
           <NavLink to="/admin/billing">{t('Billing')}</NavLink>
           <NavLink to="/admin/activity">{t('Staff log')}</NavLink>
         </nav>
@@ -221,6 +223,180 @@ function ConsoleLayout({ admin, onSignOut }: { admin: StaffAdmin; onSignOut: () 
         <button className="secondary" onClick={() => void signOut()}>{t('Sign out')}</button>
       </header>
       <main id="main"><div className="page stack"><Outlet context={admin} /></div></main>
+    </div>
+  );
+}
+
+// ---------- overview ----------
+
+type AttentionKind = 'certificate_expired' | 'certificate_expiring' | 'documents_stuck' | 'outage' | 'webhooks_failing' | 'invoice_overdue' | 'trial_ending';
+interface AttentionItem { kind: AttentionKind; tenant: { id: string; name: string; slug: string }; severity: 'problem' | 'reminder'; n?: number; at?: string; days?: number; amount?: string }
+interface PlatformOverview {
+  asOf: string;
+  health: {
+    status: 'ok' | 'degraded';
+    worker: { lastBeatAt: string | null; ageSeconds: number | null; stale: boolean };
+    queue: { pending: number; stuckPending: number; contingencyPending: number; openOutages: number; oldestPendingMinutes: number | null };
+    certificates: { expiringSoon: number; expired: number };
+    problems: Array<{ key: string; message: string }>;
+  };
+  businesses: { total: number; production: number; new7: number; new30: number; active30: number; stores: number; signups: Array<{ week: string; count: number }> };
+  documents: { today: number; last30: number; value30: string; test30: number; rejected30: number; change: number | null };
+  store: { open: number; orders30: number; paid30: string };
+  billing: { mrr: string; active: number; trialing: number; pastDue: number; suspended: number; openAmount: string; overdueAmount: string };
+  top: Array<{ tenant: { id: string; name: string; slug: string }; documents: number; value: string }>;
+  newest: Array<{ tenant: { id: string; name: string; slug: string }; environment: 'test' | 'production'; createdAt: string }>;
+  attention: AttentionItem[];
+}
+
+
+function attentionLabel(t: ReturnType<typeof useT>, kind: AttentionKind): string {
+  switch (kind) {
+    case 'certificate_expired': return t('Certificate expired');
+    case 'certificate_expiring': return t('Certificate expiring');
+    case 'documents_stuck': return t('Stuck with BTS');
+    case 'outage': return t('Issuing offline');
+    case 'webhooks_failing': return t('Webhooks failing');
+    case 'invoice_overdue': return t('Invoice overdue');
+    case 'trial_ending': return t('Trial ending');
+  }
+}
+
+function attentionText(t: ReturnType<typeof useT>, a: AttentionItem): string {
+  switch (a.kind) {
+    case 'certificate_expired': return t('Their BTS certificate expired on {date}; they cannot issue until a new one is installed', { date: date(a.at ?? null) });
+    case 'certificate_expiring': return t('Their BTS certificate expires in {n} days ({date})', { n: a.days ?? 0, date: date(a.at ?? null) });
+    case 'documents_stuck': return t('{n} documents waiting for BTS since {time}', { n: a.n ?? 0, time: when(a.at) });
+    case 'outage': return t('Issuing offline since {time}; {n} documents still to send', { n: a.n ?? 0, time: when(a.at) });
+    case 'webhooks_failing': return t('{n} webhook deliveries failed this week', { n: a.n ?? 0 });
+    case 'invoice_overdue': return t('{amount} of your invoices overdue since {date}', { amount: money(a.amount ?? '0'), date: date(a.at ?? null) });
+    case 'trial_ending': return t('Their trial ends on {date}', { date: date(a.at ?? null) });
+  }
+}
+
+function healthProblem(t: ReturnType<typeof useT>, o: PlatformOverview, p: { key: string; message: string }): string {
+  switch (p.key) {
+    case 'worker_stale': return o.health.worker.lastBeatAt ? t('The background worker last reported at {time}: documents, emails and webhooks are not going out', { time: when(o.health.worker.lastBeatAt) }) : t('The background worker has never reported in: documents, emails and webhooks are not going out');
+    case 'documents_stuck': return t('{n} documents have been waiting for BTS for more than 15 minutes', { n: o.health.queue.stuckPending });
+    case 'contingency_queue': return t('{n} documents issued offline are waiting to be sent to BTS', { n: o.health.queue.contingencyPending });
+    case 'certificates_expired': return t('{n} businesses have an expired BTS certificate', { n: o.health.certificates.expired });
+    default: return p.message;
+  }
+}
+
+function SignupBars({ weeks }: { weeks: PlatformOverview['businesses']['signups'] }) {
+  const t = useT();
+  const max = Math.max(1, ...weeks.map((w) => w.count));
+  const label = (w: { week: string; count: number }) => t('Week of {date}: {n} new', { date: date(w.week), n: w.count });
+  return (
+    <div>
+      <div className="signup-bars" aria-hidden="true">
+        {weeks.map((w) => (
+          <div key={w.week} className={`bar${w.count === 0 ? ' zero' : ''}`}>
+            <span data-tip={label(w)} style={{ height: `${w.count === 0 ? 0 : Math.max(4, (w.count / max) * 100)}%` }} />
+          </div>
+        ))}
+      </div>
+      <div className="signup-axis small muted" aria-hidden="true"><span>{date(weeks[0]?.week ?? null)}</span><span>{t('This week')}</span></div>
+      <table className="sr-only">
+        <caption>{t('New businesses per week')}</caption>
+        <thead><tr><th>{t('Week of')}</th><th>{t('New businesses')}</th></tr></thead>
+        <tbody>{weeks.map((w) => <tr key={w.week}><td>{date(w.week)}</td><td>{w.count}</td></tr>)}</tbody>
+      </table>
+    </div>
+  );
+}
+
+function Overview() {
+  const t = useT();
+  usePageTitle(t('Overview'));
+  const [o, setO] = useState<PlatformOverview | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  const load = useCallback(() => api<PlatformOverview>('/v1/platform/overview').then(setO).catch(setError), []);
+  useEffect(() => {
+    void load();
+    // Fresh numbers while the page stays open.
+    const timer = setInterval(() => void load(), 60_000);
+    return () => clearInterval(timer);
+  }, [load]);
+  if (!o) return error ? <ErrorText error={error} /> : <div className="skeleton" style={{ height: '14rem' }} />;
+  const change = o.documents.change;
+  return (
+    <div className="stack">
+      <div><span className="kicker">{t('Platform console')}</span><h1>{t('Overview')}</h1></div>
+      {o.health.status === 'ok' ? (
+        <div className="banner ok"><div><strong>{t('Everything is running')}</strong>{t('The background worker is reporting in and nothing is stuck with BTS.')}</div></div>
+      ) : (
+        <div className="banner warn" role="status">
+          <div>
+            <strong>{t('The platform needs a look')}</strong>
+            <ul className="health-problems">{o.health.problems.map((p) => <li key={p.key}>{healthProblem(t, o, p)}</li>)}</ul>
+          </div>
+        </div>
+      )}
+      <div className="kpis">
+        <div className="card stat"><span className="label">{t('Businesses')}</span><span className="value">{o.businesses.total}</span><span className="small muted">{t('{n} new this month', { n: o.businesses.new30 })} · {t('{n} in production', { n: o.businesses.production })}</span></div>
+        <div className="card stat"><span className="label">{t('Documents, last 30 days')}</span><span className="value">{o.documents.last30.toLocaleString()}</span><span className="small muted">{t('{n} today', { n: o.documents.today })}{change !== null && <> · {change >= 0 ? t('up {n}% on the month before', { n: change }) : t('down {n}% on the month before', { n: -change })}</>}</span></div>
+        <div className="card stat"><span className="label">{t('Monthly revenue')}</span><span className="value">{money(o.billing.mrr)}</span><span className="small muted">{t('{n} paying', { n: o.billing.active + o.billing.pastDue })} · {t('{n} on trial', { n: o.billing.trialing })}</span></div>
+        <div className="card stat"><span className="label">{t('Online stores')}</span><span className="value">{o.store.open}</span><span className="small muted">{t('{n} orders, {amount} paid in 30 days', { n: o.store.orders30, amount: money(o.store.paid30) })}</span></div>
+      </div>
+      <div className="grid two">
+        <section className="card stack">
+          <h2>{t('Needs attention')}</h2>
+          {o.attention.length === 0 ? <p className="muted">{t('No business needs a person right now.')}</p> : (
+            <ul className="attention-list">
+              {o.attention.map((a, i) => (
+                <li key={`${a.kind}-${a.tenant.id}-${i}`} className={a.severity}>
+                  <div className="row">
+                    <Link to={`/admin/businesses/${a.tenant.id}`}><strong>{a.tenant.name}</strong></Link>
+                    <span className={`badge ${a.severity === 'problem' ? 'rejected' : 'pending'}`}>{attentionLabel(t, a.kind)}</span>
+                  </div>
+                  <span className="small">{attentionText(t, a)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+        <section className="card stack">
+          <h2>{t('New businesses per week')}</h2>
+          <SignupBars weeks={o.businesses.signups} />
+          <p className="small muted">{t('{n} signed up this week; {active} of {total} issued a document in the last 30 days.', { n: o.businesses.new7, active: o.businesses.active30, total: o.businesses.total })}</p>
+          <h3>{t('Newest')}</h3>
+          <ul className="plain-list">
+            {o.newest.map((n) => (
+              <li key={n.tenant.id} className="row"><Link to={`/admin/businesses/${n.tenant.id}`}>{n.tenant.name}</Link><EnvBadge env={n.environment} /><span className="spacer" /><span className="small muted">{date(n.createdAt)}</span></li>
+            ))}
+          </ul>
+        </section>
+      </div>
+      <div className="grid two">
+        <section className="card stack">
+          <h2>{t('Busiest this month')}</h2>
+          {o.top.length === 0 ? <p className="muted">{t('No documents in production in the last 30 days yet.')}</p> : (
+            <table>
+              <thead><tr><th>{t('Business')}</th><th className="num">{t('Documents')}</th><th className="num">{t('Value')}</th></tr></thead>
+              <tbody>
+                {o.top.map((r) => (
+                  <tr key={r.tenant.id}><td data-label={t('Business')}><Link to={`/admin/businesses/${r.tenant.id}`}>{r.tenant.name}</Link></td><td className="num" data-label={t('Documents')}>{r.documents.toLocaleString()}</td><td className="num" data-label={t('Value')}>{money(r.value)}</td></tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </section>
+        <section className="card stack">
+          <h2>{t('System')}</h2>
+          <dl className="facts">
+            <dt>{t('Background worker')}</dt><dd>{o.health.worker.stale ? <span className="badge rejected">{t('Not reporting')}</span> : <span className="badge authorized">{t('Running')}</span>} <span className="small muted">{o.health.worker.lastBeatAt ? when(o.health.worker.lastBeatAt) : t('never')}</span></dd>
+            <dt>{t('Waiting for BTS')}</dt><dd>{o.health.queue.pending}{o.health.queue.oldestPendingMinutes !== null && <span className="small muted"> · {t('oldest {n} min', { n: o.health.queue.oldestPendingMinutes })}</span>}</dd>
+            <dt>{t('Issued offline, to send')}</dt><dd>{o.health.queue.contingencyPending}{o.health.queue.openOutages > 0 && <span className="small muted"> · {t('{n} businesses offline', { n: o.health.queue.openOutages })}</span>}</dd>
+            <dt>{t('Certificates')}</dt><dd>{t('{n} expiring this week', { n: o.health.certificates.expiringSoon })} · {t('{n} expired', { n: o.health.certificates.expired })}</dd>
+            <dt>{t('Rejected by BTS, 30 days')}</dt><dd>{o.documents.rejected30}</dd>
+            <dt>{t('Test documents, 30 days')}</dt><dd>{o.documents.test30.toLocaleString()}</dd>
+            <dt>{t('Your open invoices')}</dt><dd>{money(o.billing.openAmount)} <span className="small muted">· {t('{amount} overdue', { amount: money(o.billing.overdueAmount) })}</span></dd>
+          </dl>
+          <p className="small muted">{t('Updated {time}', { time: when(o.asOf) })}</p>
+        </section>
+      </div>
     </div>
   );
 }
@@ -294,7 +470,7 @@ function Business() {
     <div className="stack">
       <div className="row">
         <div>
-          <span className="kicker"><Link to="/admin" style={{ color: 'inherit' }}>{t('Businesses')}</Link> / TIN {d.tin}</span>
+          <span className="kicker"><Link to="/admin/businesses" style={{ color: 'inherit' }}>{t('Businesses')}</Link> / TIN {d.tin}</span>
           <h1>{d.name}</h1>
           <p className="muted">{d.legalName} · <span className="mono">/{d.slug}</span> · {d.contact.city}</p>
         </div>

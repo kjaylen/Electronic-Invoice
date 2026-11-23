@@ -3,6 +3,7 @@
  *
  *   POST /v1/platform/auth/login | logout,  GET /v1/platform/auth/session
  *   POST /v1/platform/auth/login/verify    { challenge, code }: two-step sign-in, always required for staff
+ *   GET  /v1/platform/overview                     the front page: growth, documents, stores, revenue, health, who needs a person
  *   GET  /v1/platform/tenants                      every business: q, environment
  *   GET  /v1/platform/tenants/:id                  details, people, certificate, documents, readiness for production
  *   POST /v1/platform/tenants/:id/go-live          move to the BTS production environment (BTS approval reference required)
@@ -49,6 +50,7 @@ import { type BillingContext, type BillingInvoiceRow, billingSummary, getSubscri
 import { type PlanCode, PLANS } from '../billing/plans.ts';
 import { toBigInt } from '../db/database.ts';
 import { formatCents, parseCents } from '../engine/decimal.ts';
+import { platformOverview } from './platform-overview.ts';
 
 export const PLATFORM_COOKIE = 'etd_admin';
 
@@ -163,6 +165,10 @@ export function registerPlatformRoutes(app: FastifyInstance, deps: PipelineDeps,
     if (!request.platformAdmin) throw new ApiError(401, 'unauthorized', 'Sign in to the platform console');
     return { admin: request.platformAdmin };
   });
+
+  // ---------- overview ----------
+
+  app.get('/overview', async () => platformOverview(db));
 
   // ---------- billing ----------
 

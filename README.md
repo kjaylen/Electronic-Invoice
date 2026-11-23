@@ -505,6 +505,7 @@ All three are the same web code (`web/src/pos`). It reuses the counter and the s
 For the team that runs this service, not for businesses. Staff move a business from the BTS **test** environment to **production** once BTS has approved it; before, that was a manual database step.
 
 - **Staff accounts** are created from the command line, never by sign-up: `npm run platform-admin -- add|reset|disable|enable|list` (uses `DATABASE_URL`; prints a generated password once, or set `PLATFORM_ADMIN_PASSWORD`). Staff sign in at `<PUBLIC_URL>/admin` with their own `etd_admin` cookie (`SameSite=Strict`), separate from business accounts. Failed sign-ins are throttled.
+- **Overview** (the console's front page, refreshed every minute): whether the platform is healthy (the background worker reporting in, documents stuck with BTS, offline queues, expired certificates); businesses (total, new this month, in production, active in the last 30 days, new ones per week for 12 weeks, the newest); production documents today and in the last 30 days against the month before; online stores and their orders; monthly revenue, trials and the platform's open invoices; the busiest businesses; and **Needs attention**: each business with an expired or expiring certificate, documents stuck with BTS, an open outage, failing webhooks, an overdue invoice or a trial ending this week, urgent ones first, each linked to the business (`GET /v1/platform/overview`).
 - **Businesses:** every business with its TIN, address, environment, users, authorized test documents and certificate expiry; search and filter.
 - **Readiness for production**, checked again inside the switch itself:
   - required: an active, valid certificate for the business's TIN
@@ -520,6 +521,7 @@ For the team that runs this service, not for businesses. Staff move a business f
 | Method and path | What it does |
 |---|---|
 | `POST /v1/platform/auth/login`, `/logout`, `GET /v1/platform/auth/session` | Staff sign-in |
+| `GET /v1/platform/overview` | The front page: health, growth, documents, stores, revenue, who needs attention |
 | `GET /v1/platform/tenants`, `GET /v1/platform/tenants/:id` | Businesses; one business with its readiness checks and staff history |
 | `POST /v1/platform/tenants/:id/go-live` | `{ confirmTin, approvalReference, retireCertificate? }` |
 | `POST /v1/platform/tenants/:id/back-to-test` | `{ confirmTin, reason }` |
