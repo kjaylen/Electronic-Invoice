@@ -207,6 +207,58 @@ export function registerReportRoutes(app: FastifyInstance, deps: PipelineDeps) {
     return { data };
   });
 
+  // Gross margin: catalog items' sales before GST against their cost (the item's average cost when sold), by category or by item.
+  // Lines with no known cost (typed in, or items never received with a cost) are counted apart.
+  app.get<{ Querystring: { from: string; to: string; format?: 'json' | 'csv'; by?: 'category' | 'item' } }>(
+    '/reports/margins',
+    { schema: { querystring: { ...periodQuery, properties: { ...periodQuery.properties, by: { type: 'string', enum: ['category', 'item'] } } } } },
+    async (request, reply) => {
+      const q = request.query;
+      requirePermission(request, 'reports.view');
+      checkPeriod(q);
+      const byItem = q.by === 'item';
+      // Cost of a line in cents (signed: credit notes give it back).
+      const cost = `case when d.etd_type = '04' then -1 else 1 end * round(l.quantity * l.unit_cost * 100)`;
+      const rows = (await db.query<{ key: string | null; name: string | null; category: string | null; quantity: string; net: string; cost: string }>(
+        `select ${byItem ? 'l.item_id::text as key, min(i.name) as name, min(i.category) as category' : 'lower(i.category) as key, min(i.category) as name, min(i.category) as category'},
+           ${signed('l.quantity')}::text as quantity, ${signed('l.net_cents')} as net, sum(${cost}) as cost
+         from document_lines l join documents d on d.id = l.document_id join items i on i.id = l.item_id
+         where ${base} and l.unit_cost is not null
+         group by 1 order by sum(${cost}) - ${signed('l.net_cents')} limit ${byItem ? 200 : 100}`, args(request.tenantId, q),
+      )).rows;
+      const totals = (await db.query<{ costed: string | null; uncosted: string | null; cost: string | null }>(
+        `select sum(case when l.unit_cost is not null then case when d.etd_type = '04' then -l.net_cents else l.net_cents end end) as costed,
+           sum(case when l.unit_cost is null then case when d.etd_type = '04' then -l.net_cents else l.net_cents end end) as uncosted,
+           sum(case when l.unit_cost is not null then ${cost} end) as cost
+         from document_lines l join documents d on d.id = l.document_id where ${base}`, args(request.tenantId, q),
+      )).rows[0]!;
+      const pct = (net: number, c: number) => (net > 0 ? Math.round(((net - c) / net) * 1000) / 10 : null);
+      const data = rows.map((r) => {
+        const net = Number(r.net);
+        const c = Number(r.cost);
+        return { ...(byItem && { itemId: r.key }), name: r.name, ...(byItem && { category: r.category }), quantity: String(Number(r.quantity)), net: cents(r.net), cost: cents(r.cost), margin: cents(net - c), marginPercent: pct(net, c) };
+      });
+      if (q.format === 'csv') {
+        return sendCsv(reply, byItem ? 'margins-by-item' : 'margins-by-category', q.from, q.to, toCsv(
+          [byItem ? 'Item' : 'Category', ...(byItem ? ['Category'] : []), 'Quantity', 'Sales before GST (BZD)', 'Cost (BZD)', 'Margin (BZD)', 'Margin %'],
+          rows.map((r) => {
+            const net = Number(r.net);
+            const c = Number(r.cost);
+            const m = pct(net, c);
+            return [txt(r.name ?? 'No category'), ...(byItem ? [txt(r.category ?? '')] : []), num(Number(r.quantity)), money(r.net), money(r.cost), money(net - c), num(m === null ? '' : m)];
+          }),
+        ));
+      }
+      const costed = Number(totals.costed ?? 0);
+      const totalCost = Number(totals.cost ?? 0);
+      return {
+        by: byItem ? 'item' : 'category',
+        totals: { sales: cents(costed), cost: cents(totalCost), margin: cents(costed - totalCost), marginPercent: pct(costed, totalCost), withoutCost: cents(totals.uncosted ?? 0) },
+        data,
+      };
+    },
+  );
+
   // When customers buy: sales and documents by hour of the day (invoices and receipts, Belize time).
   app.get<PeriodQuery>('/reports/hours', { schema: { querystring: periodQuery } }, async (request) => {
     const q = request.query;

@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import { api, link } from '../api';
 import { useT } from '../i18n';
-import { ErrorText, money, toCents } from '../ui';
+import { ErrorText, money, Segmented, toCents } from '../ui';
 
 interface GstReturn {
   environment: 'test' | 'production';
@@ -139,6 +139,7 @@ export function ProfitView({ from, to }: { from: string; to: string }) {
           </div>
         </section>
       )}
+      <MarginPanel from={from} to={to} />
       <section className="card">
         <h2>{t('Expenses by category')}</h2>
         {p.categories.length === 0 ? <div className="empty">{t('No expenses recorded in this period.')} <Link to="/expenses/new" viewTransition>{t('Add expense')}</Link></div> : (
@@ -155,5 +156,63 @@ export function ProfitView({ from, to }: { from: string; to: string }) {
         <p className="small muted">{t('Income is sales before GST, from your e-invoices. Expenses are what you recorded, before the GST you claim back (GST you cannot claim counts as a cost).')}</p>
       </section>
     </div>
+  );
+}
+
+interface MarginRow { itemId?: string; name: string | null; category?: string | null; quantity: string; net: string; cost: string; margin: string; marginPercent: number | null }
+interface Margins { by: 'category' | 'item'; totals: { sales: string; cost: string; margin: string; marginPercent: number | null; withoutCost: string }; data: MarginRow[] }
+
+/** Gross margin: what items sold for against what they cost, by category or by item. */
+function MarginPanel({ from, to }: { from: string; to: string }) {
+  const t = useT();
+  const [by, setBy] = useState<'category' | 'item'>('category');
+  const [m, setM] = useState<Margins | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  useEffect(() => {
+    if (!from || !to || from > to) return;
+    setM(null);
+    api<Margins>(`/v1/reports/margins?from=${from}&to=${to}&by=${by}`).then(setM).catch(setError);
+  }, [from, to, by]);
+  const pct = (v: number | null) => (v === null ? '—' : `${v.toFixed(1)}%`);
+  return (
+    <section className="card stack">
+      <div className="row">
+        <h2>{t('Gross margin')}</h2>
+        <span className="spacer" />
+        <Segmented label={t('By')} value={by} onChange={setBy} options={[['category', t('Category')], ['item', t('Item')]]} />
+        <a className="button secondary" href={link(`/v1/reports/margins?from=${from}&to=${to}&by=${by}&format=csv`)} download>CSV</a>
+      </div>
+      <ErrorText error={error} />
+      {!m ? <div className="skeleton" style={{ height: '8rem' }} /> : m.data.length === 0 ? (
+        <div className="empty">{t('No sales with a known cost in this period. Items get a cost when you receive stock with its unit cost.')}</div>
+      ) : (
+        <>
+          <div className="margin-sum">
+            <div><span className="kicker">{t('Sales before GST')}</span><strong className="num">{money(m.totals.sales)}</strong></div>
+            <div><span className="kicker">{t('Cost')}</span><strong className="num">{money(m.totals.cost)}</strong></div>
+            <div><span className="kicker">{t('Margin')}</span><strong className={`num ${toCents(m.totals.margin) < 0n ? 'late' : ''}`}>{money(m.totals.margin)} <span className="small muted">{pct(m.totals.marginPercent)}</span></strong></div>
+          </div>
+          <div className="table-wrap">
+            <table className="responsive">
+              <thead><tr><th scope="col">{by === 'item' ? t('Item') : t('Category')}</th><th scope="col" className="right">{t('Qty')}</th><th scope="col" className="right">{t('Sales')}</th><th scope="col" className="right">{t('Cost')}</th><th scope="col" className="right">{t('Margin')}</th><th scope="col" className="right">%</th></tr></thead>
+              <tbody>
+                {m.data.map((r, i) => (
+                  <tr key={r.itemId ?? r.name ?? `none-${i}`}>
+                    <td data-label={by === 'item' ? t('Item') : t('Category')}>{r.name ?? <span className="muted">{t('No category')}</span>}{by === 'item' && r.category && <span className="small muted"> · {r.category}</span>}</td>
+                    <td data-label={t('Qty')} className="right">{r.quantity}</td>
+                    <td data-label={t('Sales')} className="right">{money(r.net)}</td>
+                    <td data-label={t('Cost')} className="right">{money(r.cost)}</td>
+                    <td data-label={t('Margin')} className={`right ${toCents(r.margin) < 0n ? 'late' : ''}`}>{money(r.margin)}</td>
+                    <td data-label="%" className={`right ${r.marginPercent !== null && r.marginPercent < 0 ? 'late' : ''}`}>{pct(r.marginPercent)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+      {m && toCents(m.totals.withoutCost) > 0n && <p className="small muted">{t('{amount} of sales are not included: lines typed in, or items with no cost yet.', { amount: money(m.totals.withoutCost) })}</p>}
+      <p className="small muted">{t('Cost is each item’s average cost before GST when it was sold, from the stock you received.')}</p>
+    </section>
   );
 }

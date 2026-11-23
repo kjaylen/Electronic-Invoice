@@ -131,6 +131,15 @@ test('purchase orders: suggest, order, send, receive in parts, and close', async
     assert.equal(open.length, 0);
     const all = (await call('GET', '/v1/purchase-orders?q=po-2')).json().data as Array<{ number: string; progress: number }>;
     assert.deepEqual(all.map((p) => [p.number, p.progress]), [['PO-2', 0.4]]);
+    // The supplier's page: the unpaid bill, deliveries, and what was bought with its last cost.
+    const sum = (await call('GET', `/v1/suppliers/${supplier.id}/summary`)).json();
+    assert.equal(sum.supplier.name, 'Bze Wholesale Ltd.');
+    assert.equal(sum.owed.total, '134.44'); // (8 × 12.50 + 6 × 3.25) + 12.5% GST
+    assert.equal(sum.orders.length, 0);
+    assert.equal(sum.deliveries.length, 3);
+    assert.deepEqual(sum.items.map((i: { name: string; lastCost: string; received: string }) => [i.name, i.lastCost, i.received]), [['Coffee beans 1lb', '12.50', '30'], ['Paper cups (50)', '6.00', '4'], ['Sugar 4 lb', '3.25', '6']]);
+    assert.equal((await call('GET', `/v1/suppliers/${supplier.id}/summary`, undefined, cashier)).statusCode, 403);
+
     const logged = (await f.db.query<{ action: string }>(`select action from audit_events where tenant_id = $1 and action like 'purchase_order.%' order by id`, [f.tenantA])).rows.map((r) => r.action);
     assert.deepEqual(logged, ['purchase_order.created', 'purchase_order.sent', 'purchase_order.created', 'purchase_order.sent', 'purchase_order.closed']);
   } finally {

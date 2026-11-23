@@ -170,7 +170,16 @@ export function PurchaseOrderEditor() {
     }
   }, [t, toast]);
   useEffect(() => {
-    if (!id && params.get('suggest')) void suggest(null);
+    // From a supplier's page: that supplier, with what is low from them.
+    const from = params.get('supplier');
+    if (!id && from) {
+      void api<{ supplier: SupplierLite & { email: string | null } }>(`/v1/suppliers/${from}/summary`).then((r) => {
+        setSupplier(r.supplier);
+        setSupplierName(r.supplier.name);
+        if (r.supplier.email) setEmail(r.supplier.email);
+        void suggest(r.supplier.id);
+      }).catch(setError);
+    } else if (!id && params.get('suggest')) void suggest(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

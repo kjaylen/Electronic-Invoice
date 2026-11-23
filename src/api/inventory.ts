@@ -210,11 +210,13 @@ export function registerInventoryRoutes(app: FastifyInstance, deps: PipelineDeps
       }
       // Against a purchase order: its supplier, and its number as the reference when none is given.
       let reference = b.reference?.trim() || null;
+      let supplierId = b.supplierId ?? null;
       if (b.purchaseOrderId) {
         const po = (await db.query<{ number: number; supplier_id: string | null; supplier_name: string }>('select number, supplier_id, supplier_name from purchase_orders where id = $1 and tenant_id = $2', [b.purchaseOrderId, request.tenantId])).rows[0];
         if (!po) throw new ApiError(422, 'invalid_receipt', 'That purchase order is not yours');
         if (!b.supplierId && !supplierName) {
           supplierName = po.supplier_name;
+          supplierId = po.supplier_id;
           if (po.supplier_id) supplierTin = supplierTin ?? (await db.query<{ tin: string | null }>('select tin from suppliers where id = $1', [po.supplier_id])).rows[0]?.tin ?? null;
         }
         reference = reference ?? poNumber(po.number);
@@ -234,14 +236,14 @@ export function registerInventoryRoutes(app: FastifyInstance, deps: PipelineDeps
           await tx.query(
             `insert into expenses (id, tenant_id, supplier_id, supplier_name, supplier_tin, reference, expense_date, due_date, category, description, gst_treatment, net_cents, gst_cents, total_cents, claim_gst, paid_on, payment_method, created_by)
              values ($1, $2, $3, $4, $5, $6, $7, $8, 'Stock for resale', $9, $10, $11, $12, $13, true, $14, $15, $16)`,
-            [expenseId, request.tenantId, b.supplierId ?? null, supplierName, supplierTin, reference, b.receivedOn, b.expense.paid ? null : b.expense.dueDate ?? null,
+            [expenseId, request.tenantId, supplierId, supplierName, supplierTin, reference, b.receivedOn, b.expense.paid ? null : b.expense.dueDate ?? null,
               `Stock received: ${b.lines.length} item${b.lines.length === 1 ? '' : 's'}`, b.expense.gstTreatment, String(net), String(gst), String(net + gst),
               b.expense.paid?.on ?? null, b.expense.paid?.method ?? null, request.userId || null],
           );
         }
         await tx.query(
           'insert into stock_receipts (id, tenant_id, supplier_id, supplier_name, reference, received_on, total_cost_cents, expense_id, note, created_by, purchase_order_id) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)',
-          [receiptId, request.tenantId, b.supplierId ?? null, supplierName, reference, b.receivedOn, String(net), expenseId, b.note?.trim() || null, request.userId || null, b.purchaseOrderId ?? null],
+          [receiptId, request.tenantId, supplierId, supplierName, reference, b.receivedOn, String(net), expenseId, b.note?.trim() || null, request.userId || null, b.purchaseOrderId ?? null],
         );
         if (b.purchaseOrderId) await receiveAgainstOrder(tx, request.tenantId, b.purchaseOrderId, b.lines);
         for (const l of b.lines) {

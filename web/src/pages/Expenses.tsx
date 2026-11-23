@@ -34,7 +34,7 @@ interface Expense {
 
 interface Totals { count: number; net: string; gst: string; total: string; claimableGst: string; unpaid: string; overdue: string }
 
-interface Supplier { id: string; name: string; tin: string | null; email: string | null; telephone: string | null; address: string | null; notes: string | null; spent?: string; unpaid?: string }
+export interface Supplier { id: string; name: string; tin: string | null; email: string | null; telephone: string | null; address: string | null; notes: string | null; spent?: string; unpaid?: string }
 
 const TREATMENT: Record<Treatment, string> = { standard: 'Standard rate, GST included', zero: 'Zero-rated', exempt: 'Exempt', none: 'No GST (supplier not registered)' };
 
@@ -266,7 +266,7 @@ function Suppliers() {
             <tbody>
               {rows.map((s) => (
                 <tr key={s.id} className={can('expenses.manage') ? 'clickable' : ''} onClick={() => can('expenses.manage') && setEditing(s)}>
-                  <td data-label={t('Supplier')}><strong>{s.name}</strong></td>
+                  <td data-label={t('Supplier')}><Link className="strong" to={`/suppliers/${s.id}`} viewTransition onClick={(e) => e.stopPropagation()}>{s.name}</Link></td>
                   <td data-label="TIN">{s.tin ?? <span className="muted small">{t('none')}</span>}</td>
                   <td data-label={t('Contact')} className="small">{[s.telephone, s.email].filter(Boolean).join(' · ') || '—'}</td>
                   <td data-label={t('Spent')} className="right">{money(s.spent ?? '0')}</td>
@@ -282,7 +282,7 @@ function Suppliers() {
   );
 }
 
-function SupplierModal({ supplier, onClose, onDone, initialName }: { supplier: Supplier | null; onClose: () => void; onDone: (s: Supplier) => void; initialName?: string }) {
+export function SupplierModal({ supplier, onClose, onDone, initialName }: { supplier: Supplier | null; onClose: () => void; onDone: (s: Supplier) => void; initialName?: string }) {
   const t = useT();
   const [f, setF] = useState({ name: supplier?.name ?? initialName ?? '', tin: supplier?.tin ?? '', email: supplier?.email ?? '', telephone: supplier?.telephone ?? '', address: supplier?.address ?? '', notes: supplier?.notes ?? '' });
   const [error, setError] = useState<unknown>(null);
@@ -364,6 +364,17 @@ export function ExpenseEditor() {
     setCategories(r.data);
     setCategory((c) => c || r.data[0] || 'Other');
   }).catch(() => {}), []);
+  // From a supplier's page: that supplier, chosen.
+  const [params] = useSearchParams();
+  const presetSupplier = editing ? null : params.get('supplier');
+  useEffect(() => {
+    if (!presetSupplier) return;
+    void api<{ supplier: Supplier }>(`/v1/suppliers/${presetSupplier}/summary`).then((r) => {
+      setSupplier(r.supplier);
+      setSupplierName(r.supplier.name);
+      setSupplierTin(r.supplier.tin ?? '');
+    }).catch(() => {});
+  }, [presetSupplier]);
   useEffect(() => {
     if (!editing) return;
     void api<Expense>(`/v1/expenses/${id}`).then((e) => {

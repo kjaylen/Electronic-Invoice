@@ -1821,3 +1821,9 @@ button.cat-tag:hover:not(:disabled) { background: var(--brand); border-color: va
 .plain-list li { padding-bottom: 0.45rem; border-bottom: 1px dashed var(--hairline); }
 .plain-list li:last-child { border-bottom: 0; padding-bottom: 0; }
 .receive-line .line-hint { grid-column: 1 / -1; margin-top: -0.25rem; }
+
+/* Gross margin summary. */
+.margin-sum { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.75rem; }
+.margin-sum > div { display: grid; gap: 0.15rem; padding: 0.7rem 0.85rem; border-radius: var(--radius); background: var(--sheet-2); border: 1px solid var(--hairline); }
+.margin-sum strong { font-size: 1.15rem; }
+@media (max-width: 640px) { .margin-sum { grid-template-columns: 1fr; } }

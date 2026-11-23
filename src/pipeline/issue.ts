@@ -292,8 +292,9 @@ async function prepare(
     for (const line of totals.lines) {
       await tx.query(
         `insert into document_lines (document_id, tenant_id, line_number, description, quantity, unit_code, unit_price,
-           net_cents, gst_category, gst_cents, tax_cents, line_total_cents, item_id)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+           net_cents, gst_category, gst_cents, tax_cents, line_total_cents, item_id, unit_cost)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+           (select average_cost from items where id = $13::uuid and tenant_id = $2::uuid))`,
         [documentId, ctx.tenantId, line.lineNumber, line.description, line.quantity, line.unitCode, line.unitPrice,
           line.netAmount, line.gstCategory, line.gstAmount, line.taxAmount, line.lineTotal, req.lineItemIds?.[line.lineNumber - 1] ?? null],
       );
