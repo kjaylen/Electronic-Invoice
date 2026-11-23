@@ -195,15 +195,19 @@ export function CounterPanel(props: {
   }, [sale, storageKey]);
   useEffect(() => {
     void (async () => {
-      const local = store.get<HeldSale[]>(heldKey) ?? [];
-      for (const h of local.reverse()) {
+      // Oldest first; each one leaves the device only once the server has it (the rest wait for the next time).
+      const local = [...(store.get<HeldSale[]>(heldKey) ?? [])].reverse();
+      while (local.length) {
+        const h = local[0]!;
         try {
           await api('/v1/held-sales', { method: 'POST', body: { label: h.label, total: h.total, count: Math.max(1, h.count), sale: h.sale } });
         } catch {
           break;
         }
+        local.shift();
+        if (local.length) store.set(heldKey, [...local].reverse());
+        else store.remove(heldKey);
       }
-      if (local.length) store.remove(heldKey);
       await loadHeld();
     })();
     // Other tills hold and recall too: keep the count fresh.
