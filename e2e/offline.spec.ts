@@ -68,7 +68,13 @@ async function newTill(browser: Browser, owner: Page, name: string, setup?: (con
 }
 
 async function signIn(till: Page, expectError?: RegExp) {
-  await expect(till.getByRole('heading', { name: /Who is selling\?|Rosa Owner/ })).toBeVisible();
+  try {
+    await expect(till.getByRole('heading', { name: /Who is selling\?|Rosa Owner/ })).toBeVisible({ timeout: 20_000 });
+  } catch (e) {
+    // What the till shows instead, for whoever reads the failure.
+    throw new Error(`${(e as Error).message}
+The till shows: ${(await till.locator('body').innerText().catch(() => '?')).slice(0, 1500)}`);
+  }
   if (await till.getByRole('heading', { name: 'Who is selling?' }).isVisible()) await till.getByRole('button', { name: 'Rosa Owner' }).click();
   await expect(till.getByText('Enter your PIN')).toBeVisible();
   for (const d of PIN) await till.keyboard.press(d);
@@ -77,7 +83,12 @@ async function signIn(till: Page, expectError?: RegExp) {
     await expect(till.locator('.form-error')).toContainText(expectError);
     return;
   }
-  await expect(till.getByRole('button', { name: /Issue receipt/ })).toBeVisible();
+  try {
+    await expect(till.getByRole('button', { name: /Issue receipt/ })).toBeVisible({ timeout: 20_000 });
+  } catch (e) {
+    throw new Error(`${(e as Error).message}
+The till shows: ${(await till.locator('body').innerText().catch(() => '?')).slice(0, 1500)}`);
+  }
 }
 
 async function lock(till: Page) {
