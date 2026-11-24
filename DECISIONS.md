@@ -129,3 +129,203 @@ make, and things I could not resolve. Newest at the bottom of each part.
 
 None that stopped an item. Two things to know: nothing was pushed (the work
 is local, on `site-builder-flagship`), and GitHub Actions has not run on it.
+
+---
+
+# Connect your own site (24 Nov 2026)
+
+Judgment calls made while working through the second PLAN.md (a site built
+outside Floreo, connected to it for the catalogue, cart, checkout, payments
+and receipts). The part above this line is the earlier job's and is unchanged.
+
+## How the work was done
+
+- **The brief's blanks.** The brief's bracketed blanks were unfilled, so they
+  were filled from the project. The customers: small businesses in Belize and
+  the developers and agencies who build their sites. "Frameworks customers
+  use" was taken as **plain HTML and JavaScript first, React second**: the
+  embed and the first worked example need no build step at all, and React
+  gets one worked example. No other framework was targeted.
+- **A branch, not `main`.** Everything is on `connect-your-site`, cut from
+  `ac3fc5f`. Nothing was pushed, and GitHub Actions was not relied on: the
+  checks were run here.
+- **A server and a web build of my own.** The demo on port 4300 serves
+  `web/dist`, so `web/dist` was never rebuilt. The web app was built into a
+  scratch folder and served with `WEB_ROOT` by a private copy of the demo
+  server (its own database `einvoicing_integ`, port 3130) and by the browser
+  tests. **`web/dist` in the working tree is therefore the old build**: run
+  `npm run web:build` and restart the demo to see the new dashboard and
+  `/embed.js` there.
+- **Acting as a customer first.** Before changing anything, a business was
+  signed up on the private server and a static site on another origin called
+  the API as the README described. The first `fetch` failed: the store API
+  sent no CORS headers, so no browser on another site could use it at all.
+  PLAN.md lists the thirteen things found; the plan is ranked from them.
+- **Commits.** One concern each where files allowed it. The first commit
+  (keys, which sites may call, the answers a site needs, coming back after
+  paying) is one because each part is useless without the others and they
+  share the same lines of `storefront.ts` and one test file.
+
+## Choices that could have gone another way
+
+- **Publishable keys live in the store's settings, not in a table.** The
+  rules forbid schema changes. A publishable key is not a secret, the store
+  is loaded by its name on every store request anyway, and the settings
+  column is JSON, so `store_settings.connect.keys` needs no migration and no
+  extra query. The price: a key cannot be looked up without the store's name
+  (it is always in the address), and there is no index over keys. The keys
+  are saved with `jsonb_set`, and Settings' own save now keeps whatever keys
+  are stored, so neither can overwrite the other.
+- **A key is required from browsers on other sites only.** Requests with no
+  `Origin` (servers, curl) and pages of the app itself work exactly as before
+  with no key: that is what existing integrations and the hosted store do.
+  The origin rule is a browser rule; outside a browser an `Origin` can be
+  made up, but the store API is public by design (it is what buyers see).
+- **The browser's preflight is answered yes for any site, and refusals echo
+  the `Origin`.** Stricter would be to answer neither, but then a developer
+  sees only "blocked by CORS policy" and cannot tell a missing key from an
+  unlisted site. The request itself is what gets checked, a refusal carries
+  only its reason, and credentials are never allowed, so nothing but the
+  reason reaches a site that is not on the list.
+- **A test key works from `localhost` and from a file opened from disk
+  (`Origin: null`), with no list.** That is what makes a first page work in
+  minutes. It is safe because a test store moves no money and its documents
+  have no fiscal value. A live key works only from its listed https sites.
+- **Test and live are the business's own state, not a mode per request.** A
+  business is in the BTS test environment or in production as a whole. Keys
+  are named for the one they were made in and refused in the other, so a
+  test key stops the moment the store goes live (with the reason). A sandbox
+  after going live is a second business that stays in test mode. Test data
+  inside a live business would need the schema changed (see below).
+- **The embed is one hand-written file, `web/public/embed.js`** (60 kB as
+  written, 15 kB with Brotli), like `sw.js` beside it: no build step, no
+  dependency, readable by the people who load it. Custom elements with
+  shadow roots, so a site's CSS cannot break it and it cannot break the
+  site; the site styles it through CSS variables and `::part`.
+- **The checkout runs inside the embed, on the site's own page**, not in a
+  frame or on the hosted store, so it takes the site's look. Paying online
+  still happens on the provider's page, as it must.
+- **Coming back after paying puts the order's token in the site's address**
+  (`floreo_token`), as the hosted order link already does (`?t=`). The embed
+  takes it out of the address at once. `returnUrl` is only accepted with a
+  publishable key and only for a page on one of that key's sites.
+- **Buyer accounts stay on the hosted pages.** They sign in with a cookie of
+  the app, which another site can neither send nor read, and the auth flow
+  is to be left as it is. From another site the account routes answer
+  `hosted_only` and point at the hosted account page; the embed's checkout
+  is a guest checkout.
+- **Error messages changed their words, for every route.** The shape
+  (`{ error: { code, message, details } }`), the codes and the statuses are
+  the same; `message` for a request that does not fit used to be the
+  validator's sentence and now names the field in plain words, and `details`
+  still carries the validator's findings. A program that matched on the old
+  sentence would notice; nothing in the app or its tests did.
+- **Unknown addresses under `/v1` say more.** "Route not found" became
+  "There is no GET /v1/... in this API"; the code and status are unchanged.
+- **`/v1/orders` without `limit` still answers the newest 300.** `limit` and
+  `cursor` are new and optional; `nextCursor` is an added field.
+- **Store orders reuse the documents' idempotency table** under a scope
+  (`store-order:<key>`), with the answer sealed by the key ring because it
+  carries the buyer's link token, and swept after two days.
+- **New webhook events are written by the code, not by triggers.** A trigger
+  is a schema change. So `product.*`, `stock.changed` and
+  `order.payment_failed` are raised where the change is made (in the same
+  transaction when there is one); a change made straight in the database
+  would not raise them, unlike the older events. `stock.changed` fires on
+  every change of a tracked item's level, counter sales included; several in
+  one run for one item are one delivery. Endpoints subscribed to "all events,
+  including ones added later" now get these too, as that choice says.
+- **A test delivery of an event sends a sample, marked `"test": true`**, not a
+  real past event: it works before anything real has happened and cannot be
+  mistaken for one. The test's answer gained `deliveryId` (an added field).
+- **The request log is in the server's memory; the counts are in the
+  rate-limit table.** See "A durable request log" below. Counts are exactly
+  what that table holds (a key, a count, a window), so usage by day, key,
+  endpoint and error code is durable and shared by every server process. The
+  list of latest requests is per process and lost on restart; the page says
+  since when.
+- **Limits.** 300 requests a minute per publishable key per visitor; a
+  server that sends the key (no `Origin`) is not counted as a visitor, as a
+  server with no key never was.
+- **`/docs` reference groups got ids of their own (`#api-documents`).** Two
+  sections shared the id `webhooks` (the guide and the group). Links from the
+  app go to the guides; an old bookmark to a group (`/docs#documents`) now
+  opens the page at its top.
+- **All new interface text is in English and Spanish**, the docs' guides
+  included. The embed carries its own small Spanish dictionary, since it runs
+  on other people's pages and cannot load the app's.
+
+## Worth doing, deliberately not done
+
+Each of these needs something the ground rules keep as it is (the schema,
+pricing, the auth flow, the payment setup), or is a piece of work of its own.
+
+- **A durable request log.** One table would let the latest requests survive
+  a restart and be the same on every server process:
+  `api_requests (id bigint identity, tenant_id uuid, key_kind text, key_id
+  text, at timestamptz, method text, route text, path text, status int, code
+  text, message text, ms int, origin text)`, indexed on `(tenant_id, id
+  desc)`, pruned after a week by housekeeping. `src/api/devlog.ts` already
+  builds exactly these rows; only `record` and `recent` would change.
+- **Scoped secret keys.** A secret key acts as the whole business. Read-only
+  keys, keys for one area (orders, products), an expiry date and a test/live
+  mark all need columns on `api_keys`.
+- **Per-attempt history of a webhook delivery.** Only the last attempt's
+  answer is kept (`webhook_deliveries` has one answer per row); showing each
+  try needs a table.
+- **Test data inside a live business.** A real test mode beside live data
+  (as payment providers have) means an environment on orders, products and
+  keys. Today the sandbox is the business being in test mode, or a second
+  business.
+- **Webhooks while trying things out.** Webhooks are on the Pro plan, and a
+  new business's trial is the Business plan, so a developer cannot try a
+  webhook during the trial at all. Allowing webhooks while a business is in
+  test mode would fix the first integration without giving anything away.
+  It is a pricing rule, so it was left alone.
+- **Webhooks to a developer's own computer.** Endpoints must be public https
+  (the server can allow private ones, for tests only, and nothing in the
+  environment turns that on). The docs say to use a tunnel. A small
+  forwarder ("listen and replay to localhost") would be the real answer.
+- **Buyer accounts from another site.** Needs sessions that are not cookies
+  (a token the site holds), which is a change to the auth flow.
+- **Checkout reminders and "email me when it is back" from the embed.** The
+  endpoints exist and are in the reference; the embed does not call them. A
+  reminder's link opens the cart on the hosted store, not on the site it was
+  left on, which wants a decision of its own.
+- **Search and category filters as components**, and a minified build of the
+  embed. The grid takes `search` and `category` as attributes; there is no
+  search box of its own.
+- **A package for developers** (`npm install`, TypeScript types, React
+  components). The React example is a small client and an app to copy.
+- **Old idempotency rows of documents are never deleted** (they were not
+  before either); only the store orders' are swept.
+- **Paging by time can skip a row made in the same millisecond as the last
+  one of a page.** The cursor keeps milliseconds and the database
+  microseconds. This is how documents and customers already paged; orders
+  now page the same way.
+
+## Found, not fixed
+
+- **The embed and the docs were checked in Edge (the browser tests' browser)
+  and in the app's built-in browser pane.** Not in Safari or Firefox, and not
+  on a real phone. Everything used is long standard (custom elements, shadow
+  roots, `<dialog>`, `fetch`), but it was not run there.
+- **Real payment providers were not run** (the rule is test mode only).
+  `returnUrl` goes to Belize Bank, E-Kyash and PayPal through the same code
+  path that carried the hosted return address, and the test gateway was run
+  end to end; whether a provider restricts return addresses on its side for
+  a given merchant account was not checked.
+- **The built-in browser pane logs "An unknown error occurred when fetching
+  the script" on every page of the app**, old pages included. It looks like
+  the service worker's registration in that pane; the browser tests (Edge)
+  load the same pages with a clean console. Not looked into further.
+- **Screenshots in the built-in pane were taken while it was hidden**, which
+  pauses animations, so dialogs looked half faded. Layout was judged from
+  those and from reading the pages' text and computed styles; a look by a
+  person at the embed's cart, checkout and the dashboard's logs is still
+  worth having.
+
+## Blockers
+
+None that stopped an item. Nothing was pushed (the work is local, on
+`connect-your-site`), and GitHub Actions has not run on it.

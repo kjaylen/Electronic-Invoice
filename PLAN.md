@@ -79,75 +79,100 @@ origin (`http://localhost:3140`) calling the API with what the README says.
 
 ### A. A first integration that works
 
-- [ ] 1. **Publishable keys.** `pk_test_…` / `pk_live_…`, safe in a page: they
+- [x] 1. **Publishable keys.** `pk_test_…` / `pk_live_…`, safe in a page: they
   open only the public store API, only for the sites on their list (any
   `localhost` for a test key). Made, listed, changed and revoked by owners
   (`/v1/publishable-keys`); kept in the store's settings, no schema change.
-- [ ] 2. **The store API answers other sites.** CORS for requests that carry a
+- [x] 2. **The store API answers other sites.** CORS for requests that carry a
   publishable key from an allowed site, never with cookies; a refusal says
   what is wrong and where to fix it, and is readable from the page. Requests
   with no `Origin` (servers, the hosted store) work as before.
-- [ ] 3. **Answers an outside site can use.** Full addresses beside the old
+- [x] 3. **Answers an outside site can use.** Full addresses beside the old
   fields (`imageUrl`, `url`, `orderUrl`, `payment.url`), `GET
   /v1/store/:slug/info` (the store without its hosted design), `returnUrl` on
   orders and payments so the buyer comes back to the site they bought on, and
   the pretend card page returning there too.
-- [ ] 4. **The embed script.** One tag (`/embed.js`): `<floreo-products>`,
+- [x] 4. **The embed script.** One tag (`/embed.js`): `<floreo-products>`,
   `<floreo-product>`, `<floreo-buy-button>`, `<floreo-cart>`,
   `<floreo-checkout>`, styled with CSS variables and `::part`, English and
   Spanish, a test-mode mark, and `window.Floreo` for developers. Served from a
   fixed address with a short cache.
-- [ ] 5. **"Connect your site" in Settings → Developers.** Numbered steps, the
+- [x] 5. **"Connect your site" in Settings → Developers.** Numbered steps, the
   key made in place, the snippet to copy with the store and key filled in, and
   a check that the site has called.
-- [ ] 6. **Docs that match.** The store API in the OpenAPI description and on
+- [x] 6. **Docs that match.** The store API in the OpenAPI description and on
   `/docs`; a quick start; the components' reference; worked examples for plain
   HTML/JS and React, each one run.
 
 ### B. A predictable API
 
-- [ ] 7. **Errors that say what to do.** Validation errors in plain words with
+- [x] 7. **Errors that say what to do.** Validation errors in plain words with
   the field named; one list of codes in the docs; unknown routes point at the
   reference. The `{ error: { code, message, details } }` shape stays.
-- [ ] 8. **One way to page.** `limit` + `cursor` → `nextCursor` on store
+- [x] 8. **One way to page.** `limit` + `cursor` → `nextCursor` on store
   products and on `/v1/orders`, as documents and customers already do.
-- [ ] 9. **`Idempotency-Key` on store orders.** A retry returns the first
+- [x] 9. **`Idempotency-Key` on store orders.** A retry returns the first
   answer and never orders twice.
 
 ### C. Events
 
-- [ ] 10. **More events.** `product.created`, `product.updated`,
+- [x] 10. **More events.** `product.created`, `product.updated`,
   `product.deleted`, `stock.changed`, `order.payment_failed`, written by the
   code that makes the change (no new triggers).
-- [ ] 11. **A delivery log that explains.** One delivery with its payload, the
-  answer and each attempt's result; a test delivery of any event type with a
-  sample payload.
+- [x] 11. **A delivery log that explains.** One delivery with its payload and
+  the endpoint's answer; a test delivery of any event type with a sample
+  payload. The answer shown is the last attempt's: a history of every attempt
+  needs a table (DECISIONS.md).
 
 ### D. A safe sandbox
 
-- [ ] 12. **Test and live kept apart.** Keys named for the environment they
+- [x] 12. **Test and live kept apart.** Keys named for the environment they
   work in, a test key refused on a live store (and the reverse) with the
   reason, `test: true` on what a test store answers, test cards that come back
   to the site. Documented as it is: a business is in test or live as a whole.
 
 ### E. Security
 
-- [ ] 13. **Limits and rules.** Requests per minute per publishable key and
+- [x] 13. **Limits and rules.** Requests per minute per publishable key and
   visitor; exact-match origins, `Vary: Origin`, no credentials; a secret key
-  sent from a web page is refused and says why; replacing a key without
-  downtime in the dashboard.
+  sent from a web page to the store API is refused and says why (to the rest
+  of the API a browser on another site never gets as far as sending one);
+  replacing a key without downtime in the dashboard.
 
 ### F. A dashboard to debug with
 
-- [ ] 14. **Usage and errors per key.** Requests and failures by day, by
+- [x] 14. **Usage and errors per key.** Requests and failures by day, by
   endpoint and error code (counters in the existing rate-limit table), and
-  the most recent requests with their answers (`/v1/developer/...`).
-- [ ] 15. **Settings → Developers as a dashboard.** Connect your site, keys
+  the most recent requests with their answers (`/v1/developer/...`). The list
+  of recent requests is kept in the server's memory; the table that would
+  make it durable is written up in DECISIONS.md.
+- [x] 15. **Settings → Developers as a dashboard.** Connect your site, keys
   (publishable and secret), webhooks, logs and usage, in tabs.
 
 ### G. Proof
 
-- [ ] 16. **The test site again, from the docs alone.** A fresh business, a
+- [x] 16. **The test site again, from the docs alone.** A fresh business, a
   fresh folder, only what `/docs` and the dashboard say; browse to checkout to
   a paid test order with its receipt.
-- [ ] 17. **README, DECISIONS, the full check and the browser tests.**
+- [x] 17. **README, DECISIONS, the full check and the browser tests.**
+
+## How it ended
+
+Every item is done; none was skipped. Three stop short of what was first
+written, each for the same reason (no schema changes), and say so above:
+item 11 (the last attempt's answer, not every attempt's), item 13 (where a
+secret key from a page is refused) and item 14 (the latest requests are kept
+in memory). What was deliberately left for later, and what was found and not
+fixed, is in DECISIONS.md under "Connect your own site".
+
+The proof (item 16) was run on a fresh database: a new business, a key made
+in Settings → Developers → Connect your site, the lines it gives pasted into
+a new page on another origin, then products → a product → the cart → the
+checkout → the test card → back on the site, paid, with its receipt PDF; the
+guide's check and the Logs page showed the ten requests it took.
+
+Checks at the end (item 17), run here rather than by GitHub Actions:
+`npm run check` (types, and 374 of 375 unit tests passing with one skipped as
+before) and the whole browser suite, 49 of 49, the older specs included
+(run on a web build in a scratch folder with `WEB_ROOT`, so the demo's
+`web/dist` was left alone).
