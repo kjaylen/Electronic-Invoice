@@ -17,7 +17,7 @@ const cert = (name: string) => readFileSync(new URL(`../test/certs/${name}`, imp
 const PRODUCTS = [
   { title: 'Hot sauce trio', description: 'Three habanero sauces.\n\nMade in Belize.', status: 'active', variants: [{ price: '18.00', gstCategory: 'S', sellerCode: 'HOT-3' }] },
   { title: 'Island T-shirt', description: 'Soft cotton, printed in San Pedro.', status: 'active', option1Name: 'Size', variants: [{ option1: 'S', price: '40.00', gstCategory: 'S', stock: 50 }, { option1: 'M', price: '40.00', gstCategory: 'S', stock: 3 }, { option1: 'L', price: '40.00', gstCategory: 'S', stock: 0 }] },
-  { title: 'Reef-safe sunscreen', description: 'Mineral sunscreen, SPF 30.', status: 'active', variants: [{ price: '24.00', gstCategory: 'S' }] },
+  { title: 'Reef-safe sunscreen', description: 'Mineral sunscreen, SPF 30.', status: 'active', variants: [{ price: '24.00', compareAtPrice: '32.00', gstCategory: 'S' }] },
 ];
 
 export interface Store {
@@ -42,6 +42,11 @@ export async function setUpStore(playwright: { request: { newContext: (options: 
   const have = new Set(((await (await api.get('/v1/products')).json()).data as Array<{ handle: string }>).map((x) => x.handle));
   for (const product of PRODUCTS) {
     if (!have.has(product.title.toLowerCase().replace(/[^a-z0-9]+/g, '-'))) expect((await api.post('/v1/products', { data: product })).status()).toBe(201);
+  }
+  // A collection, for pages that show one (its products are named by their handles).
+  const collections = (await (await api.get('/v1/collections')).json()).data as Array<{ handle: string }>;
+  if (!collections.some((c) => c.handle === 'for-the-beach')) {
+    expect((await api.post('/v1/collections', { data: { title: 'For the beach', products: ['island-t-shirt', 'reef-safe-sunscreen'], published: true } })).status()).toBe(201);
   }
   const settings = await api.put('/v1/store-settings', {
     data: {

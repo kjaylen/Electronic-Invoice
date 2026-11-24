@@ -70,7 +70,7 @@ async function withStore(fn: (c: { app: FastifyInstance; slug: string; owner: Re
     png.data.fill(200);
     const photo = await app.inject({ method: 'POST', url: `/v1/products/${product.json().id}/images`, headers: owner, payload: { dataBase64: PNG.sync.write(png).toString('base64') } });
     assert.equal(photo.statusCode, 201, photo.body);
-    const collection = await app.inject({ method: 'POST', url: '/v1/collections', headers: owner, payload: { title: 'Summer', description: 'For the beach.', products: [product.json().id], published: true } });
+    const collection = await app.inject({ method: 'POST', url: '/v1/collections', headers: owner, payload: { title: 'Summer', description: 'For the beach.', products: ['island-t-shirt'], published: true } });
     assert.equal(collection.statusCode, 201, collection.body);
     await fn({ app, slug, owner, variant: product.json().variants[0].id, f });
   } finally {
@@ -123,6 +123,8 @@ test('the reference\'s example answers are what the store API really answers', (
     assert.ok((real['GET /v1/store/{slug}/orders/{number}'] as { document: unknown }).document, 'the receipt is there to compare');
     assert.ok((real['POST /v1/store/{slug}/quote'] as { delivery: unknown }).delivery, 'delivery is there to compare');
     assert.ok((real['GET /v1/store/{slug}/products'] as { data: Array<{ imageUrl: string }> }).data[0]!.imageUrl, 'the photo is there to compare');
+    assert.equal((real['GET /v1/store/{slug}/collections/{handle}'] as { products: unknown[] }).products.length, 1, 'the product of the collection is there to compare');
+    assert.equal((real['GET /v1/store/{slug}/collections'] as { data: Array<{ productCount: number }> }).data[0]!.productCount, 1);
   }));
 
 test('the reference lists every store route, with example answers and the errors it can give', () =>

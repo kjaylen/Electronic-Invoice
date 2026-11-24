@@ -35,6 +35,9 @@ const PAGES: Record<string, () => string> = {
   '/button.html': () => page('<floreo-buy-button handle="hot-sauce-trio" label="Buy the hot sauce"></floreo-buy-button><floreo-buy-button handle="island-t-shirt" action="checkout"></floreo-buy-button>', `data-key="${key}"`,
     ':root { --floreo-accent: rgb(11, 110, 105); --floreo-accent-text: rgb(255, 255, 240); --floreo-radius: 2px; } floreo-buy-button::part(button) { text-transform: uppercase; }'),
   '/es.html': () => page('<floreo-products></floreo-products>', `data-key="${key}" data-lang="es"`),
+  '/choices.html': () => page('<floreo-products id="picked" handles="reef-safe-sunscreen,hot-sauce-trio"></floreo-products><floreo-products id="found" search="sauce"></floreo-products><floreo-products id="beach" collection="for-the-beach" sort="title"></floreo-products><floreo-products id="sale" on-sale></floreo-products>', `data-key="${key}"`),
+  '/script.html': () => page('<p id="heard"></p>', `data-key="${key}" data-cart="none"`),
+  '/floating.html': () => page('<floreo-cart floating label="Basket"></floreo-cart>', `data-key="${key}"`),
   '/no-key.html': () => page('<floreo-products></floreo-products>'),
   '/wrong-key.html': () => page('<floreo-products></floreo-products>', 'data-key="pk_test_AAAAAAAAAAAAAAAAAAAAAAAA"'),
   '/secret-key.html': () => page('<floreo-products></floreo-products>', 'data-key="etd_abcdefghijkl_notARealSecretJustItsShape"'),
@@ -228,4 +231,55 @@ test('set up wrong: the page says what is missing, and what the store answered',
   await expect(p.locator('floreo-products')).toContainText('Never put a secret key (etd_…) in a page');
   await p.goto(`${siteUrl}/wrong-key.html`);
   await expect(p.locator('floreo-products')).toContainText(`This publishable key is not one of the store "${SLUG}"`);
+});
+
+test('which products a grid shows: chosen ones in order, a search, a collection, what is on sale', async ({ page: p }) => {
+  await p.goto(`${siteUrl}/choices.html`);
+  const titles = (id: string) => p.locator(`#${id} .title`);
+  await expect(titles('picked')).toHaveText(['Reef-safe sunscreen', 'Hot sauce trio']);
+  await expect(titles('found')).toHaveText(['Hot sauce trio']);
+  await expect(titles('beach')).toHaveText(['Island T-shirt', 'Reef-safe sunscreen']);
+  await expect(titles('sale')).toHaveText(['Reef-safe sunscreen']);
+  // On sale: the price, what it was, and a mark.
+  await expect(p.locator('#sale .card')).toContainText('BZ$27.00');
+  await expect(p.locator('#sale .was')).toHaveText('BZ$36.00');
+  await expect(p.locator('#sale .tag')).toHaveText('Sale');
+});
+
+test('window.Floreo for the page\'s own code: the cart, the store\'s API, events, and no cart button when asked', async ({ page: p }) => {
+  await p.goto(`${siteUrl}/script.html`);
+  await p.waitForFunction(() => Boolean((window as unknown as { Floreo?: unknown }).Floreo));
+  const result = await p.evaluate(async () => {
+    const Floreo = (window as unknown as { Floreo: any }).Floreo;
+    const heard: string[] = [];
+    const stop = Floreo.on('cart', (c: { count: number }) => heard.push(`cart ${c.count}`));
+    const variant = await Floreo.cart.addProduct('hot-sauce-trio');
+    await Floreo.cart.addProduct('island-t-shirt', undefined, 2);
+    Floreo.cart.setQuantity(variant.id, 3);
+    const cart = Floreo.cart.get();
+    stop();
+    Floreo.cart.remove(variant.id);
+    const page = await Floreo.api.products({ limit: 1, sort: 'title' });
+    const quote = await Floreo.api.quote({ lines: Floreo.cart.get().lines.map((l: { variantId: string; quantity: number }) => ({ variantId: l.variantId, quantity: l.quantity })), fulfillment: 'pickup' });
+    let refused = '';
+    try {
+      await Floreo.api.product('no-such-product');
+    } catch (e) {
+      refused = `${(e as { code: string }).code} ${(e as { status: number }).status}`;
+    }
+    return { store: Floreo.store, test: Floreo.test, version: Floreo.version, heard, count: cart.count, subtotal: cart.subtotal, first: page.data[0].title, next: Boolean(page.nextCursor), total: quote.totals.total, refused };
+  });
+  expect(result).toEqual({ store: SLUG, test: true, version: '1', heard: ['cart 1', 'cart 3', 'cart 5'], count: 5, subtotal: '150.75', first: 'Hot sauce trio', next: true, total: '90.00', refused: 'not_found 404' });
+  // data-cart="none": no cart button appears by itself; the page opens the checkout when it wants to.
+  await expect(p.locator('floreo-cart')).toHaveCount(0);
+  await p.evaluate(() => (window as unknown as { Floreo: any }).Floreo.checkout.open());
+  await expect(p.locator('floreo-overlay dialog').getByRole('heading', { name: 'Checkout' })).toBeVisible();
+  await expect(p.locator('floreo-overlay dialog .summary')).toContainText('2 × Island T-shirt (S)');
+
+  // A cart button fixed to the corner, with the page's own word on it; the cart is the same one.
+  await p.goto(`${siteUrl}/floating.html`);
+  const button = p.locator('floreo-cart').getByRole('button');
+  await expect(button).toContainText('Basket');
+  await expect(p.locator('floreo-cart .count')).toHaveText('2');
+  expect(await p.locator('floreo-cart').evaluate((el) => getComputedStyle(el).position)).toBe('fixed');
 });
