@@ -72,8 +72,9 @@ export function StoreSettingsTab() {
 
       <section className="card stack">
         <h2>{t('Storefront')}</h2>
+        <p className="small muted" style={{ margin: 0 }}>{t('How your store looks (its pages, colours, menu and footer) is made in the site builder.')} <Link to="/site">{t('Open the site builder')} →</Link></p>
         <Field label={t('Tagline')} hint={t('One line under your name, e.g. "Fresh coffee from Cayo".')}><input maxLength={160} value={s.tagline} onChange={(e) => setS({ ...s, tagline: e.target.value })} /></Field>
-        <Field label={t('About')} hint={t('Shown at the bottom of your store.')}><textarea rows={3} maxLength={4000} value={s.about} onChange={(e) => setS({ ...s, about: e.target.value })} /></Field>
+        <Field label={t('About')} hint={t('What search engines and link previews say about you. Your store’s footer starts with this text; after that, change the footer in the site builder.')}><textarea rows={3} maxLength={4000} value={s.about} onChange={(e) => setS({ ...s, about: e.target.value })} /></Field>
         <div className="form-grid">
           <Field label={t('WhatsApp number')} hint={t('Buyers can message you about an order.')}><input type="tel" value={s.whatsapp} onChange={(e) => setS({ ...s, whatsapp: e.target.value })} /></Field>
           <Field label={t('New-order emails to')} hint={t('Defaults to the business email.')}><input type="email" value={s.notifyEmail} onChange={(e) => setS({ ...s, notifyEmail: e.target.value })} /></Field>

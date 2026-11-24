@@ -3531,4 +3531,7 @@ export const ES: Record<string, string> = {
   "For people who cannot see it, and for search engines. Leave empty if it is only decoration.": "Para quienes no pueden verla y para los buscadores. Déjelo vacío si es solo decoración.",
   "You have no shift open here. One is open on a till or by someone else: it is in the list below.": "No tiene un turno abierto aquí. Hay uno abierto en una caja o por otra persona: está en la lista de abajo.",
   "You have no shift open here. {n} are open on tills or by others: they are in the list below.": "No tiene un turno abierto aquí. Hay {n} abiertos en cajas o por otras personas: están en la lista de abajo.",
+  "How your store looks (its pages, colours, menu and footer) is made in the site builder.": "El aspecto de su tienda (sus páginas, colores, menú y pie) se hace en el editor del sitio.",
+  "Open the site builder": "Abrir el editor del sitio",
+  "What search engines and link previews say about you. Your store’s footer starts with this text; after that, change the footer in the site builder.": "Lo que los buscadores y las vistas previas de enlaces dicen de usted. El pie de su tienda empieza con este texto; después, cambie el pie en el editor del sitio.",
 };
