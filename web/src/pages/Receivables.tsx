@@ -137,6 +137,9 @@ export function Receivables() {
 function OpenInvoices() {
   const t = useT();
   const navigate = useNavigate();
+  const { can } = useSession();
+  const mayRemind = can('payments.record') || can('documents.send');
+  const [whatsapp, setWhatsapp] = useState<Receivable | null>(null);
   const [status, setStatus] = useState<'open' | 'overdue' | 'all'>('open');
   const [rows, setRows] = useState<Receivable[] | null>(null);
   const [error, setError] = useState<unknown>(null);
@@ -152,7 +155,7 @@ function OpenInvoices() {
         <div className="table-wrap">
           <table className="responsive">
             <thead>
-              <tr><th scope="col">{t('Due')}</th><th scope="col">{t('Document')}</th><th scope="col">{t('Customer')}</th><th scope="col" className="right">{t('Total')}</th><th scope="col" className="right">{t('Balance')}</th><th scope="col">{t('Status')}</th></tr>
+              <tr><th scope="col">{t('Due')}</th><th scope="col">{t('Document')}</th><th scope="col">{t('Customer')}</th><th scope="col" className="right">{t('Total')}</th><th scope="col" className="right">{t('Balance')}</th><th scope="col">{t('Status')}</th>{mayRemind && <th scope="col"><span className="sr-only">{t('Remind')}</span></th>}</tr>
             </thead>
             <tbody>
               {rows.map((r) => (
@@ -163,13 +166,59 @@ function OpenInvoices() {
                   <td data-label={t('Total')} className="right">{money(r.total)}</td>
                   <td data-label={t('Balance')} className="right strong">{money(r.balance)}</td>
                   <td data-label={t('Status')}><PaymentBadge status={r.status} /></td>
+                  {mayRemind && <td className="right">{toCents(r.balance) > 0n && <button type="button" className="secondary small-button" onClick={(e) => { e.stopPropagation(); setWhatsapp(r); }} aria-label={t('Remind {name} by WhatsApp', { name: r.customer.name })}>WhatsApp</button>}</td>}
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       )}
+      {whatsapp && <WhatsAppModal invoice={whatsapp} onClose={() => setWhatsapp(null)} />}
     </section>
+  );
+}
+
+/** A reminder for WhatsApp: the message is written for you; you open the chat and press send. */
+export function WhatsAppModal({ invoice, onClose }: { invoice: Receivable; onClose: () => void }) {
+  const t = useT();
+  const [phone, setPhone] = useState(invoice.customer.telephone ?? '');
+  const [ready, setReady] = useState<{ phone: string; text: string; url: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const write = async (number: string) => {
+    setBusy(true);
+    setError(null);
+    try {
+      setReady(await api<{ phone: string; text: string; url: string }>(`/v1/documents/${invoice.documentId}/whatsapp-reminder`, { method: 'POST', body: number.trim() ? { phone: number.trim() } : {} }));
+    } catch (e) {
+      setReady(null);
+      setError(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+  // A customer with a number on the invoice: the message is ready when the dialog opens.
+  useEffect(() => {
+    if (invoice.customer.telephone) void write(invoice.customer.telephone);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return (
+    <Modal title={t('Remind {name} by WhatsApp', { name: invoice.customer.name })} onClose={onClose}>
+      <form className="stack" onSubmit={(e) => { e.preventDefault(); void write(phone); }}>
+        <p className="small muted">{t('For customers who read WhatsApp and not email. The message is written for you, with a link to the invoice; WhatsApp opens with it typed in, and you press send.')}</p>
+        <div className="row whatsapp-phone">
+          <Field label={t('Their WhatsApp number')} hint={t('Seven digits for a Belize number; with the country code for any other.')} className="grow"><input type="tel" inputMode="tel" required maxLength={40} value={phone} onChange={(e) => { setPhone(e.target.value); setReady(null); }} placeholder="610-1234" autoFocus={!invoice.customer.telephone} /></Field>
+          {!ready && <button className="secondary" disabled={busy || !phone.trim()}>{busy ? t('Writing…') : t('Write the message')}</button>}
+        </div>
+        <ErrorText error={error} />
+        {ready && (
+          <>
+            <div className="whatsapp-message" aria-label={t('The message')}>{ready.text}</div>
+            <div className="row"><span className="small muted">{t('To {phone}', { phone: ready.phone })}</span><span className="spacer" /><button type="button" className="secondary" onClick={onClose}>{t('Close')}</button><a className="button" href={ready.url} target="_blank" rel="noreferrer noopener" onClick={onClose}>{t('Open WhatsApp')}</a></div>
+          </>
+        )}
+      </form>
+    </Modal>
   );
 }
 
@@ -349,6 +398,7 @@ export function PaymentsCard({ doc, onChange }: { doc: DocumentDetailInfo; onCha
   const [recording, setRecording] = useState(false);
   const [voiding, setVoiding] = useState<InvoicePayment | null>(null);
   const [reminding, setReminding] = useState(false);
+  const [whatsapp, setWhatsapp] = useState(false);
   const load = useCallback(() => api<PaymentsData>(`/v1/documents/${doc.id}/payments`).then(setData).catch(() => {}), [doc.id]);
   useEffect(() => void load(), [load, doc.status]);
   const changed = () => {
@@ -393,10 +443,12 @@ export function PaymentsCard({ doc, onChange }: { doc: DocumentDetailInfo; onCha
         <div className="action-grid">
           {can('payments.record') && <button onClick={() => setRecording(true)}>{t('Record payment')}</button>}
           <button className="secondary" onClick={() => setReminding(true)}>{t('Send reminder')}</button>
+          <button className="secondary" onClick={() => setWhatsapp(true)}>{t('Remind by WhatsApp')}</button>
         </div>
       )}
       {recording && <RecordPaymentModal invoice={inv} onClose={() => setRecording(false)} onDone={() => { setRecording(false); toast(t('Payment recorded')); changed(); }} />}
       {voiding && <VoidPaymentModal payment={voiding} onClose={() => setVoiding(null)} onDone={() => { setVoiding(null); toast(t('Payment voided')); changed(); }} />}
+      {whatsapp && <WhatsAppModal invoice={inv} onClose={() => setWhatsapp(false)} />}
       {reminding && <RemindModal documentId={doc.id} email={inv.customer.email} onClose={() => setReminding(false)} onDone={(to) => { setReminding(false); toast(t('Reminder sent to {to}', { to })); }} />}
     </section>
   );

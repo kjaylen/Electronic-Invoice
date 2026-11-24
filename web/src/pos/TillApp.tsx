@@ -11,7 +11,7 @@
 
 import { createContext, type FormEvent, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { api, ApiError, apiBlob, type Account, type Me, type Permission, type Role, setTillTransport, UNAUTHORIZED_EVENT } from '../api';
-import { LanguageToggle, useT } from '../i18n';
+import { LanguagePicker, useT } from '../i18n';
 import { SessionContext, type SessionState } from '../session';
 import { useToast } from '../toast';
 import { ErrorText, Field, usdOf } from '../ui';
@@ -411,7 +411,7 @@ function Pair({ platform, initialServer, onPaired }: { platform: Platform; initi
         </Field>
         <ErrorText error={error} />
         <button className="big" disabled={busy || code.replace('-', '').length !== 8}>{busy ? t('Pairing…') : t('Pair this till')}</button>
-        <div className="row"><span className="spacer" /><LanguageToggle /></div>
+        <div className="row"><span className="spacer" /><LanguagePicker /></div>
       </form>
       {camera && <CameraScanner onClose={() => setCamera(false)} onScan={scanned} />}
     </div>
@@ -463,7 +463,7 @@ function Lock({ till, deviceToken, offline, status, onSignedIn, onRefresh }: { t
             <button type="button" className="secondary" onClick={() => setSetup(true)}>{t('Set up my PIN')}</button>
             <button type="button" className="link" onClick={onRefresh}>{t('Refresh')}</button>
             <span className="spacer" />
-            <LanguageToggle />
+            <LanguagePicker />
           </div>
         </main>
       )}

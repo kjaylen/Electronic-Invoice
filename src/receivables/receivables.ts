@@ -83,7 +83,7 @@ function shape(r: ReceivableRow) {
     issueDate: r.issue_date,
     dueDate: r.due_date,
     daysOverdue: balance > 0n ? Math.max(0, r.days_overdue) : 0,
-    customer: { id: r.customer_id, key: r.customer_key, name: r.customer_snapshot?.name ?? 'Walk-in customer', tin: r.customer_snapshot?.tin ?? null, email: r.customer_snapshot?.contact?.email ?? null },
+    customer: { id: r.customer_id, key: r.customer_key, name: r.customer_snapshot?.name ?? 'Walk-in customer', tin: r.customer_snapshot?.tin ?? null, email: r.customer_snapshot?.contact?.email ?? null, telephone: r.customer_snapshot?.contact?.telephone ?? null },
     total: formatCents(total),
     paid: formatCents(paid),
     credited: formatCents(credited),

@@ -6,7 +6,7 @@
 import { type FormEvent, useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { api, type Account, type AuditEvent, type BusinessProfile, type ManagedAccount, type Role } from '../api';
-import { type T, useI18n, useT } from '../i18n';
+import { LanguagePicker, type T, useI18n, useT } from '../i18n';
 import { assignableRoles, ROLE_DESCRIPTION, ROLE_LABEL } from '../permissions';
 import { useSession } from '../session';
 import { useToast } from '../toast';
@@ -148,6 +148,13 @@ function AccountTab() {
         <ErrorText error={signOutAll.error} />
       </section>
       <TwoFactorCard />
+      <section className="card stack">
+        <div>
+          <h2>{t('Language')}</h2>
+          <p className="small muted">{t('For you, on this device. Chinese covers the counter, the till, shifts and devices; the rest stays in English.')}</p>
+        </div>
+        <LanguagePicker />
+      </section>
       {can('documents.issue') && <PinCard hasPin={Boolean(user.hasPin)} onChanged={() => void refresh()} />}
     </div>
   );

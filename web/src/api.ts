@@ -282,7 +282,7 @@ export interface Receivable {
   issueDate: string;
   dueDate: string;
   daysOverdue: number;
-  customer: { id: string | null; key: string; name: string; tin: string | null; email: string | null };
+  customer: { id: string | null; key: string; name: string; tin: string | null; email: string | null; telephone?: string | null };
   total: string;
   paid: string;
   credited: string;

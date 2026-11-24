@@ -92,10 +92,10 @@ constants in the code, because they change and because sources disagree.
 
 ### F. Reaching customers and shopkeepers
 
-- [ ] F1. **Reminders by WhatsApp.** Getting paid lists who to remind today;
+- [x] F1. **Reminders by WhatsApp.** Getting paid lists who to remind today;
   each has a WhatsApp button that opens the chat with the message and the
   pay link written, for customers who do not read email.
-- [ ] F2. **The till in Chinese.** The counter, the till app and its receipts
+- [x] F2. **The till in Chinese.** The counter, the till app and its receipts
   screens in Simplified Chinese, chosen per person like Spanish.
 
 ### G. Looked at, and not built here
