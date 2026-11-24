@@ -517,7 +517,7 @@ All three are the same web code (`web/src/pos`). It reuses the counter and the s
   - Anyone signed in on that till may record cash in and out and close the shift.
   - In the web app, a person's own shift stays theirs.
 - **Receipts:**
-  - Printed from the document as signed (`GET /v1/documents/:id/view`, with the printed copy's authorization and regulatory texts), laid out like the PDF receipt.
+  - A receipt made on the till is printed from the till's own copy (`src/engine/receipt-view.ts`, the same fields the server reads from the signed XML; a test checks they are equal). Other documents print from the server's copy (`GET /v1/documents/:id/view`, with the printed copy's authorization and regulatory texts). Both are laid out like the PDF receipt.
   - The QR code is 22 mm, error correction M.
   - Encoded as ESC/POS for thermal printers, or as HTML for installed and browser printers (`web/src/pos/ticket.ts`).
   - Options per printer:
@@ -544,16 +544,25 @@ All three are the same web code (`web/src/pos`). It reuses the counter and the s
     - the camera: ML Kit in the apps, BarcodeDetector in browsers.
   - Customer display: a second screen, desktop.
   - The till reports what it has to the server (`POST /v1/pos/heartbeat`), and Settings → Tills shows it.
-- **Online only:**
-  - Every sale is signed and sent to BTS through the server.
-  - When BTS is out, the server's contingency mode issues and queues documents as usual.
-  - When the till has no connection, it says so.
+- **Offline first** (`web/src/pos/offline/`, `src/api/pos-sync.ts`; plan and decisions in `docs/offline-tills/`):
+  - The till sells from its own copy of the catalog, customers, people and settings (`GET /v1/pos/snapshot`, with the till's token), fetched on start and every few minutes while online. It needs the internet once, when it is set up.
+  - Every Tax Receipt is made on the till, online or not: numbered in the till's own series (one per install, 101 to 899, given by the server and never to anyone else) with its own serial, its ETDUI, security code and QR made on the device, under subsequent authorization (operMode 3, "Pending of BTS authorization" on the receipt). The sale, its event for the server and the next number are written to the device in one transaction before the receipt prints.
+  - What the till did (sales, shifts opened and closed, cash in and out) goes up in order (`POST /v1/pos/sync`), as soon as it can: batches of 50, retried with backoff after a failure, after restarts and crashes. Each event carries the till's own id; the server does each once (`pos_sync_events`) and answers a repeat with its first result. The server signs each receipt with the till's values and sends it to BTS (or queues it if BTS is out).
+  - A completed sale is never refused: a price changed, a product, customer or person deleted since are noted and the sale kept as sold. Stock may go below zero; it is flagged (activity log, the sync screen). A failure that cannot pass is set aside for a manager, never dropped.
+  - Offline: cash, card (on its own terminal), transfer and split payments; customers and TINs; discounts within the cashier limit; printing and reprinting; the drawer; shifts with their X and Z reports; held sales; the sales list. Needs the server (and says why on the screen): gift cards, points, sales on account, refunds, cancelling, emailing, the time clock.
+  - Signing in offline: whoever signed in on this till online can sign in with their PIN for 7 days without the server (a PBKDF2 verifier, never the PIN). Five wrong PINs lock them out for 15 minutes. A PIN changed on the server is forgotten at the next snapshot.
+  - The bar shows the connection: online, offline or sending, and how many events are waiting. Managers have a Sync tab: what waits, what the server refused and why, try again.
+  - Local data (IndexedDB) is encrypted with AES-256-GCM; the key and the till's token are kept in the platform's secure storage (Electron safeStorage, the Android Keystore, the iOS Keychain; a non-extractable key in a browser). A till with unsent sales cannot be unpaired.
+  - The till's clock is corrected by the server's, so receipts carry the right time.
 - **Building the apps:** see `apps/desktop/README.md` and `apps/mobile/README.md`. `VITE_TILL_SERVER` pre-fills the server address.
 - **Tests:**
   - `test/pos.test.ts`: pairing, PINs, lockout, the shared drawer, the route limits, CORS, removal.
   - `test/till-print.test.ts`: a real receipt as ESC/POS and HTML, the Z report.
   - The e2e till test: pair from the link, PIN, shift, scan, sell, lock.
-  - `apps/desktop` `npm run smoke`.
+  - `test/pos-sync.test.ts`: the snapshot and its series, exactly-once uploads (also two at once), the order of events and what holds them back, prices, products, customers and stock changed meanwhile, a shift left open, 150 sales in one go, the till's printed copy equal to the server's.
+  - `e2e/offline.spec.ts` (a real browser): selling offline, restarting and signing in offline, reconnecting; the connection dropping mid-upload; the app closed mid-sale; sending again; two tills selling the last item offline; a long time offline and the 7-day sign-in limit. Every sale reaches the server exactly once.
+  - `apps/desktop` `npm run smoke`, and `node scripts/offline-check.mjs`: the desktop app with the server really stopped and started again.
+  - `E2E_DB`, `E2E_PORT` and `E2E_BTS_PORT` run the browser tests on their own database and ports, beside another run.
 
 ## Platform console (`/admin`)
 

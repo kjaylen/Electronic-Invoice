@@ -69,7 +69,7 @@ Decisions and judgment calls: [DECISIONS.md](DECISIONS.md).
 
 ### 7. Platforms and the end-to-end check
 - [x] Desktop: build, then offline: sign in, several sales, restart, reconnect, every sale on the server exactly once. (`apps/desktop/scripts/offline-check.mjs` with the server really stopped; passed on the source and on the packaged app, `Floreo-Till-Setup-1.0.0.exe`.)
-- [ ] Android: secure storage in the plugin, build, the same check where it can be run.
+- [x] Android: secure storage in the plugin (Keystore), build, the same check where it can be run. (`apps/mobile/scripts/offline-check.mjs` on an emulator, Android API 37, the debug APK; passed.)
 - [x] iOS: secure storage in the plugin (Keychain).
 - [-] iOS: build and check. No Mac or Xcode here (see DECISIONS.md).
 - [x] README, Spanish, commits.

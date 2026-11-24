@@ -7,7 +7,7 @@ The native side adds:
   - network printers on the local network: Android (`android/.../TillHardwarePlugin.java`) and iOS (`ios/App/App/TillHardwarePlugin.swift`);
   - paired Bluetooth printers: Android only.
 - **The camera barcode scanner:** `@capacitor-mlkit/barcode-scanning`.
-- **Storage:** `@capacitor/preferences`.
+- **Storage:** `@capacitor/preferences` for settings. Secrets (the till's token, the key of its local data) go through `TillHardware`: encrypted with a key in the Android Keystore, or in the iOS Keychain (this device only). The sales and catalog the till keeps offline are in the web view's IndexedDB, encrypted with that key; they survive app updates, not uninstalling.
 - **The app version:** `@capacitor/app`.
 
 The screen stays on while the till is open.
