@@ -714,6 +714,9 @@ above this line are the earlier jobs' and are unchanged.
   `e2e/locations.spec.ts`, `e2e/business-tax.spec.ts`, `e2e/reach.spec.ts`
   (WhatsApp; the counter in Chinese).
 - **The offline till's own tests** were run after the counter changed.
+- **Everything together, at the end**: `npm run check` (the typecheck and 446
+  unit tests: 445 passed, 1 skipped as before) and every browser test on a
+  fresh database (63 passed, the phone layout among them).
 
 ## Found, not fixed
 

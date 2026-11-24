@@ -108,6 +108,6 @@ constants in the code, because they change and because sources disagree.
 
 ### H. Proof
 
-- [ ] H1. Unit tests for each item; the browser tests drive each new screen.
-- [ ] H2. The offline till still passes its own tests after every change to the counter.
-- [ ] H3. README, DECISIONS.md, and a summary of what changed for each kind of business.
+- [x] H1. Unit tests for each item; the browser tests drive each new screen.
+- [x] H2. The offline till still passes its own tests after every change to the counter.
+- [x] H3. README, DECISIONS.md, and a summary of what changed for each kind of business.
