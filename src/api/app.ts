@@ -276,8 +276,8 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     if (reply.statusCode >= 500) counters.serverErrors++;
   });
   // What each business's integrations asked and were answered, for Settings → Developers → Logs.
-  const devlog = createDevLog();
-  registerDevLogHook(app, db, devlog);
+  const devlog = createDevLog(db);
+  registerDevLogHook(app, devlog);
 
   // For load balancers: 200 while the database answers ("degraded" says something needs a look), 503 when it does not.
   app.get('/health', async (_request, reply) => {

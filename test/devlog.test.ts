@@ -8,7 +8,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { LightMyRequestResponse } from 'fastify';
 import { buildApp } from '../src/api/app.ts';
-import { belizeDay } from '../src/api/devlog.ts';
+import { belizeDay, createDevLog, pruneLoggedRequests } from '../src/api/devlog.ts';
+import { runHousekeepingOnce } from '../src/api/housekeeping.ts';
+import { closeBusiness, eraseBusiness } from '../src/db/closure.ts';
 import { createApiKey } from '../src/db/apikeys.ts';
 import { createUser } from '../src/db/users.ts';
 import { memoryMailer } from '../src/mail/mailer.ts';
@@ -61,8 +63,9 @@ test('the developer log: requests made with secret and publishable keys, what th
     assert.equal((await from(SITE, `/v1/store/${slug}/orders/1001?t=${'s'.repeat(32)}`)).statusCode, 401);
     await settled(6);
 
-    const { data, since } = await log();
-    assert.ok(Date.parse(since) <= Date.now());
+    const { data, keptDays, nextCursor } = await log();
+    assert.equal(keptDays, 7);
+    assert.equal(nextCursor, null);
     assert.deepEqual(data.map((r: { method: string; path: string; status: number; code: string | null }) => [r.method, r.path, r.status, r.code]), [
       ['GET', `/v1/store/${slug}/orders/1001`, 401, 'publishable_key_required'],
       ['GET', `/v1/store/${slug}/products`, 403, 'origin_not_allowed'],
@@ -120,4 +123,116 @@ test('the developer log: requests made with secret and publishable keys, what th
     await app.close();
     await f.close();
   }
+});
+
+test('the developer log is kept in the database: it survives a restart, pages, is pruned, and goes with the business', async () => {
+  const f = await setupPipeline();
+  const options = { pipeline: f.deps, cookieSecure: true, publicUrl: 'https://app.example.test', mailer: memoryMailer() };
+  let app = await buildApp(options);
+  try {
+    const slug = (await f.db.query<{ slug: string }>('select slug from tenants where id = $1', [f.tenantA])).rows[0]!.slug;
+    const olive = await createUser(f.db, { tenantId: f.tenantA, name: 'Olive', email: 'olive@shop.example', role: 'owner', password: PASSWORD });
+    const owner = { ...CSRF, 'x-business': slug, cookie: cookieFrom(await app.inject({ method: 'POST', url: '/v1/auth/login', headers: CSRF, payload: { business: slug, login: 'olive@shop.example', password: PASSWORD } })) };
+    const erp = { authorization: `Bearer ${(await createApiKey(f.db, f.tenantA, 'Our ERP')).key}` };
+    const other = { authorization: `Bearer ${(await createApiKey(f.db, f.tenantB, 'Theirs')).key}` };
+    const log = async (query = '') => (await app.inject({ method: 'GET', url: `/v1/developer/requests${query}`, headers: owner })).json();
+    /** The log is written a moment after the answer: wait until it holds this many. */
+    const holds = async (n: number) => {
+      for (let i = 0; i < 100; i++) {
+        if ((await log('?limit=200')).data.length >= n) return;
+        await new Promise((r) => setTimeout(r, 20));
+      }
+      assert.fail(`the log never held ${n} requests`);
+    };
+
+    // Five requests, in this order: three that work, two that do not. And one by another business.
+    for (const url of ['/v1/me', '/v1/customers', '/v1/customers?limit=lots', '/v1/items', '/v1/orders/00000000-0000-4000-8000-000000000000']) await app.inject({ method: 'GET', url, headers: erp });
+    await app.inject({ method: 'GET', url: '/v1/me', headers: other });
+    await holds(5);
+
+    // The server restarts: the log is as it was (it is in the database, not in the process).
+    await app.close();
+    assert.equal((await f.db.query('select 1 from api_requests')).rows.length, 6);
+    app = await buildApp(options);
+    const all = await log();
+    assert.equal(all.keptDays, 7);
+    assert.equal(all.nextCursor, null);
+    assert.deepEqual(all.data.map((r: { path: string; status: number }) => `${r.path} ${r.status}`), ['/v1/orders/00000000-0000-4000-8000-000000000000 404', '/v1/items 200', '/v1/customers 400', '/v1/customers 200', '/v1/me 200'], 'newest first, this business only');
+    assert.equal(all.data[0].key.name, 'Our ERP');
+    assert.equal(all.data[0].id, undefined, 'the row\'s number is not part of the answer');
+
+    // A page at a time: every request once.
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    let pages = 0;
+    do {
+      const page: { data: Array<{ path: string }>; nextCursor: string | null } = await log(`?limit=2${cursor ? `&cursor=${cursor}` : ''}`);
+      assert.ok(page.data.length <= 2);
+      seen.push(...page.data.map((r) => r.path));
+      cursor = page.nextCursor;
+      pages++;
+    } while (cursor);
+    assert.equal(pages, 3);
+    assert.deepEqual(seen, all.data.map((r: { path: string }) => r.path));
+    // What failed only, and paged the same way.
+    const failed = await log('?errors=1&limit=1');
+    assert.equal(failed.data[0].status, 404);
+    assert.deepEqual((await log(`?errors=1&limit=1&cursor=${failed.nextCursor}`)).data.map((r: { status: number }) => r.status), [400]);
+    assert.equal((await app.inject({ method: 'GET', url: '/v1/developer/requests?cursor=abc', headers: owner })).statusCode, 400);
+
+    // Housekeeping: what is older than a week goes; of the rest, a business keeps its newest (here, two).
+    await f.db.query(`update api_requests set at = now() - interval '8 days' where path = '/v1/me' and tenant_id = $1`, [f.tenantA]);
+    assert.equal(await pruneLoggedRequests(f.db), 1);
+    assert.equal((await log()).data.length, 4);
+    assert.equal(await pruneLoggedRequests(f.db, { perBusiness: 2 }), 2);
+    assert.deepEqual((await log()).data.map((r: { path: string }) => r.path), ['/v1/orders/00000000-0000-4000-8000-000000000000', '/v1/items']);
+    assert.equal((await f.db.query('select 1 from api_requests where tenant_id = $1', [f.tenantB])).rows.length, 1, 'the other business is under its number: untouched');
+    assert.equal(await pruneLoggedRequests(f.db), 0);
+    // The housekeeping run does it.
+    await f.db.query(`update api_requests set at = now() - interval '8 days' where tenant_id = $1`, [f.tenantB]);
+    const failures: unknown[] = [];
+    await runHousekeepingOnce(f.db, { onError: (_step, e) => failures.push(e) });
+    assert.deepEqual(failures, []);
+    assert.equal((await f.db.query('select 1 from api_requests where tenant_id = $1', [f.tenantB])).rows.length, 0);
+
+    // A business that is erased takes its log with it.
+    await closeBusiness(f.db, f.tenantA, olive.id);
+    await eraseBusiness(f.db, f.tenantA, { force: true });
+    assert.equal((await f.db.query('select 1 from api_requests')).rows.length, 0);
+  } finally {
+    await app.close();
+    await f.close();
+  }
+});
+
+test('writing the log never holds a request up: rows wait together, and a database that is away loses them quietly', async () => {
+  const queries: Array<{ sql: string; rows: number }> = [];
+  let down = false;
+  const db = {
+    query: async (sql: string, params?: unknown[]) => {
+      if (down) throw new Error('the database is away');
+      if (sql.includes('api_requests')) queries.push({ sql, rows: (params![0] as unknown[]).length });
+      return { rows: [{ count: 1 }] };
+    },
+    exec: async () => {},
+  };
+  const log = createDevLog(db as never, { flushMs: 20 });
+  const entry = (path: string) => ({ at: new Date().toISOString(), method: 'GET', path, route: path, status: 200, code: null, message: null, ms: 3, key: { kind: 'secret' as const, id: 'k' }, origin: null });
+  // Three requests in quick succession are one write, a moment later.
+  for (const p of ['/a', '/b', '/c']) log.record('00000000-0000-4000-8000-000000000001', entry(p));
+  assert.equal(queries.length, 0, 'nothing is written while the request is answered');
+  await new Promise((r) => setTimeout(r, 80));
+  assert.deepEqual(queries.map((q) => q.rows), [3]);
+  // A hundred waiting go at once, without the wait.
+  for (let i = 0; i < 100; i++) log.record('00000000-0000-4000-8000-000000000001', entry(`/n/${i}`));
+  await log.flush();
+  assert.deepEqual(queries.map((q) => q.rows), [3, 100]);
+  // The database away: recording still never throws, and what could not be written is given up.
+  down = true;
+  log.record('00000000-0000-4000-8000-000000000001', entry('/lost'));
+  await log.flush();
+  down = false;
+  log.record('00000000-0000-4000-8000-000000000001', entry('/after'));
+  await log.stop();
+  assert.deepEqual(queries.map((q) => q.rows), [3, 100, 1]);
 });

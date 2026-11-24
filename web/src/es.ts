@@ -3713,11 +3713,8 @@ export const ES: Record<string, string> = {
   "Times": "Veces",
   "Last": "Última",
   "Latest requests": "Últimas solicitudes",
-  "The last requests made with your keys, newest first, since {when}. Only the address is kept, never what was sent.": "Las últimas solicitudes hechas con sus claves, las más recientes primero, desde {when}. Solo se guarda la dirección, nunca lo que se envió.",
-  "The last requests made with your keys, newest first.": "Las últimas solicitudes hechas con sus claves, las más recientes primero.",
   "Only refused or failed": "Solo rechazadas o fallidas",
   "Nothing was refused.": "No se rechazó nada.",
-  "No requests since then.": "No hay solicitudes desde entonces.",
   "Request": "Solicitud",
   "from {site}": "desde {site}",
   "Connect your site": "Conecte su sitio",
@@ -3829,4 +3826,6 @@ export const ES: Record<string, string> = {
   "Every event, with a sample of the delivery’s body. “Send a test” in Settings → Developers → Webhooks delivers these same samples to your endpoint, marked \"test\": true.": "Cada evento, con un ejemplo del cuerpo de la entrega. “Enviar una prueba” en Ajustes → Desarrolladores → Webhooks entrega estos mismos ejemplos a su endpoint, marcados con \"test\": true.",
   "What the store API answers when it refuses a request, and what to do about each. The answer’s message says the same in words, for the request at hand.": "Lo que responde la API de la tienda cuando rechaza una solicitud, y qué hacer en cada caso. El mensaje de la respuesta dice lo mismo en palabras, para la solicitud en cuestión.",
   "What it means, and what to do": "Qué significa, y qué hacer",
+  "Requests made with your keys in the last {n} days, newest first. Only the address is kept, never what was sent.": "Solicitudes hechas con sus claves en los últimos {n} días, las más recientes primero. Solo se guarda la dirección, nunca lo que se envió.",
+  "No requests in that time.": "No hay solicitudes en ese tiempo.",
 };

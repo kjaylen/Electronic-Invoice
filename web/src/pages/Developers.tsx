@@ -5,7 +5,7 @@
  *   Connect your site   a guide from nothing to products and a checkout on the business's own site
  *   Keys                publishable keys (for pages) and secret keys (for servers)
  *   Webhooks            endpoints, deliveries, tests
- *   Logs                usage by day and by key, what fails, and the latest requests
+ *   Logs                usage by day and by key, what fails, and the requests of the last week, a page at a time
  */
 
 import { type FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
@@ -16,7 +16,7 @@ import { useConfirm } from '../confirm';
 import { useT } from '../i18n';
 import { useSession } from '../session';
 import { useToast } from '../toast';
-import { ErrorText, Field, Modal, Segmented } from '../ui';
+import { ErrorText, Field, Modal, Pager, Segmented, usePages } from '../ui';
 import { UpgradeNotice } from './Billing';
 import { CopyButton, saveFile, Spec, Step } from './NetSuiteAddons';
 import { WebhooksPanel } from './Webhooks';
@@ -430,24 +430,21 @@ function SecretKeys({ mode }: { mode: 'test' | 'live' }) {
 
 function LogsPanel({ usage, loadUsage, usageError }: { usage: Usage | null; loadUsage: () => Promise<void>; usageError: unknown }) {
   const t = useT();
-  const [requests, setRequests] = useState<{ data: LoggedRequest[]; since: string } | null>(null);
   const [onlyErrors, setOnlyErrors] = useState(false);
-  const [error, setError] = useState<unknown>(null);
-  const [busy, setBusy] = useState(false);
-  const load = useCallback(async () => {
-    setBusy(true);
-    try {
-      setRequests(await api<{ data: LoggedRequest[]; since: string }>(`/v1/developer/requests${onlyErrors ? '?errors=1' : ''}`));
-      setError(null);
-    } catch (e) {
-      setError(e);
-    } finally {
-      setBusy(false);
-    }
-  }, [onlyErrors]);
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const [keptDays, setKeptDays] = useState(7);
+  // Kept for a week on the server: a page at a time, newest first.
+  const pages = usePages<LoggedRequest>(async (cursor) => {
+    const p = new URLSearchParams({ limit: '50' });
+    if (onlyErrors) p.set('errors', '1');
+    if (cursor) p.set('cursor', cursor);
+    const r = await api<{ data: LoggedRequest[]; nextCursor: string | null; keptDays: number }>(`/v1/developer/requests?${p}`);
+    setKeptDays(r.keptDays);
+    return { data: r.data, next: r.nextCursor };
+  }, onlyErrors ? 'failed' : 'all');
+  const requests = pages.rows;
+  const error = pages.error;
+  const busy = pages.loading;
+  const load = pages.reload;
   const peak = Math.max(1, ...(usage?.days.map((d) => d.requests) ?? [1]));
   return (
     <>
@@ -524,18 +521,19 @@ function LogsPanel({ usage, loadUsage, usageError }: { usage: Usage | null; load
         <div className="row">
           <div>
             <h2>{t('Latest requests')}</h2>
-            <p className="muted small">{requests ? t('The last requests made with your keys, newest first, since {when}. Only the address is kept, never what was sent.', { when: when(requests.since) }) : t('The last requests made with your keys, newest first.')}</p>
+            <p className="muted small">{t('Requests made with your keys in the last {n} days, newest first. Only the address is kept, never what was sent.', { n: keptDays })}</p>
           </div>
           <span className="spacer" />
           <label className="row small"><input type="checkbox" checked={onlyErrors} onChange={(e) => setOnlyErrors(e.target.checked)} /> {t('Only refused or failed')}</label>
         </div>
         <ErrorText error={error} />
-        {!requests ? !error && <div className="skeleton" style={{ height: '6rem' }} /> : requests.data.length === 0 ? <div className="empty">{onlyErrors ? t('Nothing was refused.') : t('No requests since then.')}</div> : (
+        {!requests ? !error && <div className="skeleton" style={{ height: '6rem' }} /> : requests.length === 0 ? <div className="empty">{onlyErrors ? t('Nothing was refused.') : t('No requests in that time.')}</div> : (
+          <>
           <div className="table-wrap">
             <table className="responsive dev-requests">
               <thead><tr><th scope="col">{t('When')}</th><th scope="col">{t('Request')}</th><th scope="col">{t('Answer')}</th><th scope="col">{t('Key')}</th></tr></thead>
               <tbody>
-                {requests.data.map((r, i) => (
+                {requests.map((r, i) => (
                   <tr key={`${r.at}-${i}`}>
                     <td data-label={t('When')} className="small">{new Date(r.at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' })}<div className="muted">{new Date(r.at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</div></td>
                     <td data-label={t('Request')} className="small"><span className="mono">{r.method} {r.path}</span>{r.origin && <div className="muted">{t('from {site}', { site: r.origin })}</div>}</td>
@@ -549,6 +547,8 @@ function LogsPanel({ usage, loadUsage, usageError }: { usage: Usage | null; load
               </tbody>
             </table>
           </div>
+          <Pager pages={pages} newest />
+          </>
         )}
       </section>
     </>
