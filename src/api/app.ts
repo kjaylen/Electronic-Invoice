@@ -81,7 +81,7 @@ import type { QuickBooksConfig } from '../integrations/quickbooks.ts';
 import { plansJson } from './billing.ts';
 import { TRIAL_DAYS } from '../billing/plans.ts';
 import { type HtmlPdfRenderer, setPdfRenderer } from '../render/browser-pdf.ts';
-import { storePageMeta, storeRobots, storeSitemap, withMeta } from '../commerce/seo.ts';
+import { namesOneThing, storePageMeta, storeRobots, storeSitemap, withMeta, withoutMeta } from '../commerce/seo.ts';
 
 export type Principal = 'api' | Role;
 
@@ -460,9 +460,11 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         if (isFile) return;
         if (!path.startsWith('/shop')) return reply.redirect('/shop', 302);
         // The page's title and picture for link previews and search results.
-        const meta = await storePageMeta(db, slug, path.replace(/^\/shop\/?/, ''), `${origin}/shop`).catch(() => null);
+        const within = path.replace(/^\/shop\/?/, '');
+        const meta = await storePageMeta(db, slug, within, `${origin}/shop`).catch(() => null);
         const html = page().replace('</head>', `<meta name="floreo-store" content="${slug.replace(/[^a-z0-9-]/g, '')}"></head>`);
-        return reply.type('text/html').header('Cache-Control', 'no-cache').send(meta ? withMeta(html, meta) : html);
+        // A product, page or collection that is not there answers "not found" (the app then says so), and stays out of search results.
+        return reply.code(!meta && namesOneThing(within) ? 404 : 200).type('text/html').header('Cache-Control', 'no-cache').send(meta ? withMeta(html, meta) : withoutMeta(html));
       }
       // A store on the app's own address (/<slug>/shop/...): the same, with its sitemap beside it.
       const store = /^\/([a-z0-9][a-z0-9-]{1,38}[a-z0-9])\/shop(?:\/(.*))?$/.exec(path);
@@ -474,7 +476,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       }
       if (isFile) return;
       const meta = await storePageMeta(db, store[1]!, store[2] ?? '', base).catch(() => null);
-      if (meta) return reply.type('text/html').header('Cache-Control', 'no-cache').send(withMeta(page(), meta));
+      return reply.code(!meta && namesOneThing(store[2] ?? '') ? 404 : 200).type('text/html').header('Cache-Control', 'no-cache').send(meta ? withMeta(page(), meta) : withoutMeta(page()));
     });
     await app.register(fastifyStatic, { root: webRoot!, prefix: '/', wildcard: true, index: ['index.html'] });
   }

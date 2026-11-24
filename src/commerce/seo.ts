@@ -18,6 +18,8 @@ export interface PageMeta {
   siteName: string;
   price?: { amount: string; currency: 'BZD' };
   available?: boolean;
+  /** What the page is, in schema.org terms (a product with its price, the store with its address), for search engines. */
+  jsonLd?: Record<string, unknown>;
 }
 
 const plain = (s: string, max: number) => {
@@ -56,15 +58,31 @@ export async function storePageMeta(db: Queryable, slug: string, path: string, b
     const lowest = prices.length ? prices.reduce((a, b) => (Number(b) < Number(a) ? b : a)) : null;
     const varies = new Set(prices).size > 1;
     const lead = lowest ? `${varies ? 'From ' : ''}BZ$${lowest}` : '';
+    const highest = prices.length ? prices.reduce((a, b) => (Number(b) > Number(a) ? b : a)) : null;
+    const available = variants.some((v) => v.stock_quantity === null || v.stock_quantity > 0);
+    const url = `${origin}/products/${p.handle}`;
+    const picture = image ? absolute(`/v1/store/${s.slug}/images/${image.id}`) : logo ? absolute(assetPath(logo)) : null;
+    const availability = `https://schema.org/${available ? 'InStock' : 'OutOfStock'}`;
     return {
       title: `${p.title} · ${s.name}`,
       description: plain([lead, p.description].filter(Boolean).join(' · ') || `${p.title} from ${s.name}`, 200),
-      url: `${origin}/products/${p.handle}`,
-      image: image ? absolute(`/v1/store/${s.slug}/images/${image.id}`) : logo ? absolute(assetPath(logo)) : null,
+      url,
+      image: picture,
       type: 'product',
       siteName: s.name,
       ...(lowest && { price: { amount: lowest, currency: 'BZD' as const } }),
-      available: variants.some((v) => v.stock_quantity === null || v.stock_quantity > 0),
+      available,
+      jsonLd: {
+        '@context': 'https://schema.org', '@type': 'Product', name: p.title, url,
+        ...(p.description && { description: plain(p.description, 500) }),
+        ...(picture && { image: picture }),
+        brand: { '@type': 'Brand', name: s.name },
+        ...(lowest && {
+          offers: varies
+            ? { '@type': 'AggregateOffer', priceCurrency: 'BZD', lowPrice: lowest, highPrice: highest, offerCount: prices.length, availability, url }
+            : { '@type': 'Offer', priceCurrency: 'BZD', price: lowest, availability, url },
+        }),
+      },
     };
   }
   // A picture the site builder chose: one of the business's images, or a product photo.
@@ -99,13 +117,24 @@ export async function storePageMeta(db: Queryable, slug: string, path: string, b
   const first = logo ? null : (await db.query<{ id: string }>(
     `select i.id from product_images i join products p on p.id = i.product_id where p.tenant_id = $1 and p.status = 'active' order by p.created_at desc, i.position limit 1`, [s.tenantId],
   )).rows[0];
+  const description = plain(site.seo.description || s.settings.about || s.settings.tagline || `Shop ${s.name} online${s.city ? ` in ${s.city}` : ''}, Belize.`, 200);
+  const image = shared ?? (first ? absolute(`/v1/store/${s.slug}/images/${first.id}`) : null);
+  const sameAs = Object.values(site.social).filter(Boolean);
   return {
     title: site.seo.title || (s.settings.tagline ? `${s.name} · ${plain(s.settings.tagline, 80)}` : s.name),
-    description: plain(site.seo.description || s.settings.about || s.settings.tagline || `Shop ${s.name} online${s.city ? ` in ${s.city}` : ''}, Belize.`, 200),
+    description,
     url: origin,
-    image: shared ?? (first ? absolute(`/v1/store/${s.slug}/images/${first.id}`) : null),
+    image,
     type: 'website',
     siteName: s.name,
+    jsonLd: {
+      '@context': 'https://schema.org', '@type': 'Store', name: s.name, url: origin, description,
+      ...(image && { image }),
+      ...(logo && { logo: absolute(assetPath(logo)) }),
+      ...(s.telephone && { telephone: s.telephone }),
+      ...((s.street || s.city) && { address: { '@type': 'PostalAddress', ...(s.street && { streetAddress: s.street }), ...(s.city && { addressLocality: s.city }), addressCountry: 'BZ' } }),
+      ...(sameAs.length && { sameAs }),
+    },
   };
 }
 
@@ -125,6 +154,8 @@ export function metaTags(m: PageMeta): string {
     `<meta name="twitter:description" content="${attr(m.description)}">`,
     ...(m.price ? [`<meta property="product:price:amount" content="${attr(m.price.amount)}">`, `<meta property="product:price:currency" content="${m.price.currency}">`] : []),
     ...(m.available !== undefined ? [`<meta property="product:availability" content="${m.available ? 'in stock' : 'out of stock'}">`] : []),
+    // A block of data, not a script that runs; "<" is written so that nothing in it can end the block.
+    ...(m.jsonLd ? [`<script type="application/ld+json">${JSON.stringify(m.jsonLd).replace(/</g, '\\u003c')}</script>`] : []),
   ];
   return tags.join('');
 }
@@ -133,6 +164,14 @@ export function metaTags(m: PageMeta): string {
 export function withMeta(indexHtml: string, m: PageMeta): string {
   return indexHtml.replace(/<title>[^<]*<\/title>/, `<title>${attr(m.title)}</title>`).replace('</head>', `${metaTags(m)}</head>`);
 }
+
+/** A page of a store that is not there (no such product, page or collection, or a closed store): kept out of search results. */
+export function withoutMeta(indexHtml: string): string {
+  return indexHtml.replace('</head>', '<meta name="robots" content="noindex"></head>');
+}
+
+/** Whether `path` (under /shop) names one product, page or collection: when there is none, the answer is "not found". */
+export const namesOneThing = (path: string) => /^(products|pages|collections)\/[^/]+\/?$/.test(path);
 
 /** A store's sitemap: the home page and every active product, with when each last changed. */
 export async function storeSitemap(db: Queryable, slug: string, base: string): Promise<string | null> {

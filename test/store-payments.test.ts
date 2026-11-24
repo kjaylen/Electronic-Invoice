@@ -263,9 +263,13 @@ test('a store on its own domain: DNS verification, then the domain shows the sto
     const root = await app.inject({ method: 'GET', url: '/', headers: { host: 'shop.cornerstore.bz' } });
     assert.equal(root.statusCode, 302);
     assert.equal(root.headers.location, '/shop');
-    const page = await app.inject({ method: 'GET', url: '/shop/products/tee', headers: { host: 'shop.cornerstore.bz' } });
+    const page = await app.inject({ method: 'GET', url: '/shop/cart', headers: { host: 'shop.cornerstore.bz' } });
     assert.equal(page.statusCode, 200);
     assert.ok(page.body.includes(`<meta name="floreo-store" content="${slug}">`), 'the page names the store');
+    // A product that is not there: still the store's app (which says so), answered as "not found".
+    const missing = await app.inject({ method: 'GET', url: '/shop/products/tee', headers: { host: 'shop.cornerstore.bz' } });
+    assert.equal(missing.statusCode, 404);
+    assert.ok(missing.body.includes(`<meta name="floreo-store" content="${slug}">`) && missing.body.includes('noindex'));
     const robots = await app.inject({ method: 'GET', url: '/robots.txt', headers: { host: 'shop.cornerstore.bz' } });
     assert.match(robots.body, /Sitemap: https:\/\/shop\.cornerstore\.bz\/sitemap\.xml/);
     assert.equal((await app.inject({ method: 'GET', url: '/sitemap.xml', headers: { host: 'shop.cornerstore.bz' } })).statusCode, 404, 'no sitemap while the store is closed');

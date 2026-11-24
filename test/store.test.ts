@@ -486,9 +486,30 @@ test('link previews and search: store pages carry their title, price and picture
     assert.match(product.body, /og:description" content="BZ\$45\.00 · Soft cotton/);
     assert.ok(!product.body.includes('"Reef"'), 'quotes in the title are escaped');
 
-    // An unknown product or another store page: the plain app page.
-    assert.ok(!(await c.app.inject({ method: 'GET', url: `/${c.slug}/shop/products/nope` })).body.includes('og:title'));
-    assert.ok(!(await c.app.inject({ method: 'GET', url: `/${c.slug}/shop/checkout` })).body.includes('og:title'));
+    // What the pages are, for search engines: the product with its price and stock, the store with its address.
+    const data = (body: string) => JSON.parse(/<script type="application\/ld\+json">(.*?)<\/script>/.exec(body)![1]!);
+    const productData = data(product.body);
+    assert.deepEqual([productData['@type'], productData.name, productData.offers['@type'], productData.offers.price, productData.offers.priceCurrency, productData.offers.availability], ['Product', 'Island "Reef" T-shirt', 'Offer', '45.00', 'BZD', 'https://schema.org/InStock']);
+    assert.equal(productData.image, `https://app.example.test/v1/store/${c.slug}/images/${photo.id}`);
+    const homeData = data(home.body);
+    assert.deepEqual([homeData['@type'], homeData.url, homeData.address.addressCountry], ['Store', `https://app.example.test/${c.slug}/shop`, 'BZ']);
+    // Nothing a business writes can end the block early.
+    const sneaky = await createProduct(c, { ...TEE, title: 'Tee </script><script>alert(1)</script>' });
+    const sneakyPage = await c.app.inject({ method: 'GET', url: `/${c.slug}/shop/products/${sneaky.handle}` });
+    assert.equal(sneakyPage.body.split('</script>').length, 2, 'one block, closed once');
+    assert.equal(data(sneakyPage.body).name, 'Tee </script><script>alert(1)</script>');
+
+    // A product, page or collection that is not there: "not found", the plain app page, kept out of search results.
+    for (const missing of ['products/nope', 'pages/nope', 'collections/nope']) {
+      const res = await c.app.inject({ method: 'GET', url: `/${c.slug}/shop/${missing}` });
+      assert.equal(res.statusCode, 404, missing);
+      assert.ok(res.body.includes('<div id="root">') && !res.body.includes('og:title') && res.body.includes('<meta name="robots" content="noindex">'), missing);
+    }
+    // The cart, checkout and orders are pages, but not ones to find by searching.
+    const checkout = await c.app.inject({ method: 'GET', url: `/${c.slug}/shop/checkout` });
+    assert.equal(checkout.statusCode, 200);
+    assert.ok(!checkout.body.includes('og:title') && checkout.body.includes('noindex'));
+    assert.ok(!home.body.includes('noindex') && !product.body.includes('noindex'));
 
     const map = await c.app.inject({ method: 'GET', url: `/${c.slug}/shop/sitemap.xml` });
     assert.equal(map.statusCode, 200);
