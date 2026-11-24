@@ -13,6 +13,7 @@ import { useToast } from '../toast';
 import { CodeForm, RecoveryCodes, SetupSteps, type TwoFactorChallenge } from '../twofactor';
 import { type BillingInfo, type BillingInvoice, StatusPill } from './Billing';
 import { ErrorText, Field, Modal, money, Pager, Segmented, Select, usePageTitle, usePages } from '../ui';
+import { ConsoleEmail } from './Email';
 
 interface StaffAdmin {
   id: string;
@@ -124,6 +125,7 @@ export function PlatformConsole() {
         <Route path="businesses" element={<Businesses />} />
         <Route path="businesses/:id" element={<Business />} />
         <Route path="billing" element={<ConsoleBilling />} />
+        <Route path="email" element={<ConsoleEmail defaultTo={admin.email} />} />
         <Route path="activity" element={<Activity />} />
         <Route path="notices" element={<Notices />} />
       </Route>
@@ -229,6 +231,7 @@ function ConsoleLayout({ admin, onSignOut }: { admin: StaffAdmin; onSignOut: () 
           <NavLink to="/admin" end>{t('Overview')}</NavLink>
           <NavLink to="/admin/businesses">{t('Businesses')}</NavLink>
           <NavLink to="/admin/billing">{t('Billing')}</NavLink>
+          <NavLink to="/admin/email">{t('Email')}</NavLink>
           <NavLink to="/admin/notices">{t('Notices')}</NavLink>
           <NavLink to="/admin/activity">{t('Staff log')}</NavLink>
         </nav>

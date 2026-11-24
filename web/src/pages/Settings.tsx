@@ -15,6 +15,7 @@ import { DISTRICTS, ErrorText, Field, Modal, money, Pager, Segmented, Select, us
 import { PlanTab, UpgradeNotice } from './Billing';
 import { DeleteBusinessCard } from './Closed';
 import { DevelopersTab } from './Developers';
+import { EmailTab } from './Email';
 import { IntegrationsTab } from './Integrations';
 import { StoreSettingsTab } from './StoreSettings';
 import { PinCard, TillsTab, UserPinDialog } from './Tills';
@@ -947,7 +948,7 @@ function ActivityTab() {
 
 // ---------- the page ----------
 
-type Tab = 'account' | 'business' | 'plan' | 'store' | 'tills' | 'users' | 'activity' | 'keys' | 'integrations';
+type Tab = 'account' | 'business' | 'plan' | 'store' | 'tills' | 'users' | 'activity' | 'keys' | 'integrations' | 'email';
 
 export function Settings() {
   const t = useT();
@@ -962,6 +963,7 @@ export function Settings() {
     ...(can('business.manage') ? [['tills', t('Tills')] as [Tab, string]] : []),
     ...(can('users.manage') ? [['users', t('Users')] as [Tab, string]] : []),
     ...(can('audit.view') ? [['activity', t('Activity')] as [Tab, string]] : []),
+    ...(can('business.manage') ? [['email', t('Email')] as [Tab, string]] : []),
     ...(can('business.manage') ? [['integrations', t('Integrations')] as [Tab, string]] : []),
     ...(can('apikeys.manage') ? [['keys', t('Developers')] as [Tab, string]] : []),
   ];
@@ -980,6 +982,7 @@ export function Settings() {
       {tab === 'business' && <BusinessTab />}
       {tab === 'plan' && <PlanTab />}
       {tab === 'integrations' && <IntegrationsTab />}
+      {tab === 'email' && <EmailTab defaultTo={session.user.email ?? ''} />}
       {tab === 'store' && (me?.billing && !me.billing.features.includes('store') ? <UpgradeNotice feature="store" /> : <StoreSettingsTab />)}
       {tab === 'tills' && <TillsTab />}
       {tab === 'users' && <UsersTab />}
