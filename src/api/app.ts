@@ -89,6 +89,7 @@ import { plansJson } from './billing.ts';
 import { TRIAL_DAYS } from '../billing/plans.ts';
 import { type HtmlPdfRenderer, setPdfRenderer } from '../render/browser-pdf.ts';
 import { namesOneThing, storePageMeta, storeRobots, storeSitemap, withMeta, withoutMeta } from '../commerce/seo.ts';
+import { registerLayawayRoutes } from './layaways.ts';
 
 export type Principal = 'api' | Role;
 
@@ -428,6 +429,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     registerItemSummaryRoutes(tenant, deps);
     registerLoyaltyRoutes(tenant, deps);
     registerGiftCardRoutes(tenant, deps, ctx);
+    registerLayawayRoutes(tenant, deps);
     registerSiteRoutes(tenant, deps);
     registerConnectRoutes(tenant, deps, ctx);
     registerDeveloperRoutes(tenant, deps, devlog);

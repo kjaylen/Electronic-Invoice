@@ -39,6 +39,7 @@ import { logoForPdf, logoPath } from '../templates/assets.ts';
 import { documentTypeName, emailLanguage } from '../templates/lang.ts';
 import { applyReward, checkRedeem, loyaltyBalance, recordLoyalty, REWARD_REASON, reverseVoidedLoyalty, rewardCents } from './loyalty.ts';
 import { GIFT_CARD_MEANS, payingCard, returnToCard, reverseVoidedGiftCards, useGiftCard } from '../commerce/giftcards.ts';
+import { checkLayaway, type LayawayInput, startLayaway } from './layaways.ts';
 
 const PRINTABLE = ['authorized', 'authorized_with_alert', 'contingency_pending'];
 // Emails per business per hour (shared by every server process), so a compromised account cannot send spam at volume.
@@ -67,6 +68,8 @@ export interface IssueBody {
   tenders?: Array<{ meansCode: string; amount: string }>;
   /** A tip the customer added when paying a receipt by card or wallet: recorded for the staff, never part of the tax document. */
   tip?: { amount: string; meansCode: string };
+  /** A layaway: this invoice's goods stay in the shop until it is paid (layaways.ts). */
+  layaway?: LayawayInput;
   /** Paid (partly) with a gift card: its code and how much it pays; `tenders` then has a part with means code 1 for that amount (or the card pays it all). */
   giftCard?: { code: string; amount: string };
   /** Issue an invoice on account even if it takes the customer over their credit limit (owners, admins, managers). */
@@ -681,10 +684,17 @@ export function registerDocumentRoutes(app: FastifyInstance, deps: PipelineDeps,
     let documentId: string | undefined;
     try {
       if (request.body.overrideCreditLimit && !can(request.principal, 'documents.adjust')) throw new ApiError(403, 'forbidden', 'Only an owner, admin or manager can go over a customer\'s credit limit');
-      const result = await issueFromBody(deps, tenantId, request.body, request.userId || null, {
-        deviceId: request.posDevice?.id ?? null, limitDiscounts: request.principal === 'cashier', accountLimit: request.body.overrideCreditLimit ? 'override' : 'check',
+      // A layaway: an invoice due the day the goods are kept until. The goods stay in the shop, so the customer's credit limit does not come into it.
+      const layaway = request.body.layaway;
+      if (layaway) checkLayaway(request.body, layaway);
+      const issueBody: IssueBody = layaway
+        ? { ...request.body, payment: { meansCode: '30', dueDate: layaway.holdUntil, terms: `Layaway: the goods are kept until paid in full, by ${layaway.holdUntil}` } }
+        : request.body;
+      const result = await issueFromBody(deps, tenantId, issueBody, request.userId || null, {
+        deviceId: request.posDevice?.id ?? null, limitDiscounts: request.principal === 'cashier', accountLimit: layaway ? 'skip' : request.body.overrideCreditLimit ? 'override' : 'check',
       });
       documentId = result.documentId;
+      if (layaway && result.status !== 'rejected') await startLayaway(deps, tenantId, result.documentId, issueBody, layaway, request.userId || null, request.posDevice?.id ?? null);
       // Paid on the spot: record it, once the invoice has legal value (a rejected one is never owed).
       const paid = request.body.paid;
       if (paid && (request.body.type === '01' || request.body.type === '03') && can(request.principal, 'payments.record')) {

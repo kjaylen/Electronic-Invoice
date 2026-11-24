@@ -50,7 +50,7 @@ export const AREA_COVERS: Record<KeyArea, string> = {
 /** The first part of a route's address after /v1/ → its area; 'people' for what is only ever done signed in. */
 const AREA_OF: Record<string, KeyArea | 'people'> = {
   documents: 'documents', payments: 'documents', receivables: 'documents', 'receivable-settings': 'documents', quotes: 'documents', recurring: 'documents',
-  work: 'documents', 'held-sales': 'documents', 'bill-payments': 'documents',
+  work: 'documents', 'held-sales': 'documents', 'bill-payments': 'documents', layaways: 'documents',
   customers: 'customers', 'loyalty-settings': 'customers',
   items: 'catalog', products: 'catalog', collections: 'catalog', discounts: 'catalog', inventory: 'catalog', 'inventory.csv': 'catalog', 'purchase-orders': 'catalog',
   'store-settings': 'catalog', 'store-site': 'catalog', 'store-domains': 'catalog',
