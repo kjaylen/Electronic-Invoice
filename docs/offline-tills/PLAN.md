@@ -34,41 +34,42 @@ Decisions and judgment calls: [DECISIONS.md](DECISIONS.md).
 ## Work, top to bottom
 
 ### 1. Server: what sync needs (backward compatible)
-- [ ] Migration: a series purpose `offline`; a table of series given to tills (one per install, never reused).
-- [ ] `GET /v1/pos/snapshot?install=<id>` (device token): business, receipt header, tax settings, items, categories, customers, people, the till's register, its offline series and next serial, the QR address, the logo.
-- [ ] `POST /v1/pos/sync` (device token): ordered events (sale, shift open, cash in/out, shift close), each with a device-made UUID. Applying one twice returns the first result. Sales keep the device's number, time, ETDUI and prices, and are sent to BTS under subsequent authorization (operMode 3); a completed sale is never refused for price, product, customer or stock changes.
-- [ ] Negative stock after an offline sale is flagged (activity log and in the sync reply).
-- [ ] Server tests for both endpoints.
+- [x] Migration: a series purpose `offline`; a table of series given to tills (one per install, never reused).
+- [x] `GET /v1/pos/snapshot?install=<id>` (device token): business, receipt header, tax settings, items, categories, customers, people, the till's register, its offline series and next serial, the QR address, the logo.
+- [x] `POST /v1/pos/sync` (device token): ordered events (sale, shift open, cash in/out, shift close), each with a device-made UUID. Applying one twice returns the first result. Sales keep the device's number, time, ETDUI and prices, and are sent to BTS under subsequent authorization (operMode 3); a completed sale is never refused for price, product, customer or stock changes.
+- [x] Negative stock after an offline sale is flagged (activity log and in the sync reply).
+- [x] Server tests for both endpoints.
 
 ### 2. Device: local store and catalog (shared web code)
-- [ ] IndexedDB store with AES-GCM encryption; the key kept in the platform's secure storage (desktop: Electron safeStorage; Android: Keystore; iOS: Keychain; browser: a non-extractable key).
-- [ ] Device token moved to secure storage.
-- [ ] Catalog sync: the snapshot on start, every few minutes while online, and after each upload.
+- [x] IndexedDB store with AES-GCM encryption; the key kept in the platform's secure storage (desktop: Electron safeStorage; Android: Keystore; iOS: Keychain; browser: a non-extractable key).
+- [x] Device token moved to secure storage.
+- [x] Catalog sync: the snapshot on start, every few minutes while online, and after each upload.
 
 ### 3. Device: local-first selling
-- [ ] Shared engine in the browser: `calc.ts`, `decimal.ts`, `etdui.ts` (Web Crypto for the security code).
-- [ ] A local API for the till's screens: items, customers, preview, sale, sale list and detail, print view, held sales, shifts, `/v1/me`; everything else goes to the server when online and says plainly when it needs a connection.
-- [ ] A sale is one atomic, durable write: the sale, its outbox entry and the next serial. Printing happens after it is saved.
-- [ ] Receipt numbering: the till's own series (one per install) and a local serial; never collides across devices.
-- [ ] Payments: cash, card (on the separate terminal), transfer and split work offline; gift cards, points and on-account invoices are disabled offline with a reason.
+- [x] Shared engine in the browser: `calc.ts`, `decimal.ts`, `etdui.ts` (Web Crypto for the security code).
+- [x] A local API for the till's screens: items, customers, preview, sale, sale list and detail, print view, held sales, shifts, `/v1/me`; everything else goes to the server when online and says plainly when it needs a connection.
+- [x] A sale is one atomic, durable write: the sale, its outbox entry and the next serial. Printing happens after it is saved.
+- [x] Receipt numbering: the till's own series (one per install) and a local serial; never collides across devices.
+- [x] Payments: cash, card (on the separate terminal), transfer and split work offline; gift cards, points and on-account invoices are disabled offline with a reason.
 
 ### 4. Device: sync engine
-- [ ] Uploads the outbox oldest first, in batches, with exponential backoff and jitter; one uploader at a time (Web Locks); resumes after restarts and crashes.
-- [ ] Never uploads the same sale twice in effect: device UUIDs plus idempotent server endpoints; a sale is marked synced only from the server's reply.
-- [ ] Permanent failures are kept (never dropped), shown with the reason, and retried by a manager.
+- [x] Uploads the outbox oldest first, in batches, with exponential backoff and jitter; one uploader at a time (Web Locks); resumes after restarts and crashes.
+- [x] Never uploads the same sale twice in effect: device UUIDs plus idempotent server endpoints; a sale is marked synced only from the server's reply.
+- [x] Permanent failures are kept (never dropped), shown with the reason, and retried by a manager.
 
 ### 5. Device: sign-in, status, sync screen
-- [ ] Offline sign-in with a local PIN verifier (PBKDF2) for people who signed in on this till before; expires after 7 days without an online sign-in; five wrong PINs lock that person for 15 minutes.
-- [ ] Status indicator: online, offline or syncing, and unsynced sales; replaces the "Cannot reach the server" screen and the "no connection" banner.
-- [ ] Sync screen for managers: pending, failed and why, synced recently; retry now.
-- [ ] Unpairing or signing out with unsynced sales is refused while they exist.
+- [x] Offline sign-in with a local PIN verifier (PBKDF2) for people who signed in on this till before; expires after 7 days without an online sign-in; five wrong PINs lock that person for 15 minutes.
+- [x] Status indicator: online, offline or syncing, and unsynced sales; replaces the "Cannot reach the server" screen and the "no connection" banner.
+- [x] Sync screen for managers: pending, failed and why, synced recently; retry now.
+- [x] Unpairing with unsynced sales is refused while they exist (locking or signing out keeps them: they are on the device and go up with the till's own token).
 
 ### 6. Tests
-- [ ] Sync engine: offline sale then reconnect; connection dropping mid-upload; app killed mid-sale; duplicate uploads; two devices selling the same item offline; a long offline period with many sales.
-- [ ] Server: idempotency, ordering, conflicts (price changed, product deleted, stock run out, customer deleted).
+- [x] Sync engine: offline sale then reconnect; connection dropping mid-upload; app killed mid-sale; duplicate uploads; two devices selling the same item offline; a long offline period with many sales. (`e2e/offline.spec.ts`, in a real browser against the server; duplicates also in `test/pos-sync.test.ts`.)
+- [x] Server: idempotency, ordering, conflicts (price changed, product deleted, stock run out, customer deleted).
 
 ### 7. Platforms and the end-to-end check
-- [ ] Desktop: build, then offline: sign in, several sales, restart, reconnect, every sale on the server exactly once.
+- [x] Desktop: build, then offline: sign in, several sales, restart, reconnect, every sale on the server exactly once. (`apps/desktop/scripts/offline-check.mjs` with the server really stopped; passed on the source and on the packaged app, `Floreo-Till-Setup-1.0.0.exe`.)
 - [ ] Android: secure storage in the plugin, build, the same check where it can be run.
-- [ ] iOS: secure storage in the plugin; build and check if possible here.
-- [ ] README, Spanish, commits.
+- [x] iOS: secure storage in the plugin (Keychain).
+- [-] iOS: build and check. No Mac or Xcode here (see DECISIONS.md).
+- [x] README, Spanish, commits.

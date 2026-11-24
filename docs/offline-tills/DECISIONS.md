@@ -205,3 +205,13 @@ bottom of each part.
   printed copy as the server (a test checks they are equal field by field).
 - Nothing else changes for existing clients: the web app, the API, and older
   till versions keep working as before.
+
+## Could not be done here
+
+- **iOS was not built or run.** Building an iOS app needs macOS and Xcode;
+  this machine runs Windows. The Keychain methods (`secretGet`, `secretSet`,
+  `secretRemove` in `ios/App/App/TillHardwarePlugin.swift`) are written
+  against the same plugin interface as Android's and use only the standard
+  Security framework calls, but they have not been compiled. Everything else
+  on iOS is the same web code that was tested in the desktop app, Android
+  and a browser.

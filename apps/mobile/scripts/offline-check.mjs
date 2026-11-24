@@ -28,7 +28,7 @@ const OWNER = { business: 'corner-store', login: 'rosa@cornerstore.test', passwo
 const PIN = process.env.CHECK_PIN ?? '4826';
 const COCONUT = '7501000000017';
 const step = (s) => console.log(`✓ ${s}`);
-const adb = (...args) => execFileSync(ADB, args, { encoding: 'utf8' }).trim();
+const adb = (...args) => execFileSync(ADB, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function up() {
