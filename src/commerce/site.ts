@@ -30,7 +30,7 @@ const MAX_VERSIONS = 30;
 
 export class SiteError extends Error {
   override name = 'SiteError';
-  readonly code: 'invalid_site' | 'not_found';
+  readonly code: 'invalid_site' | 'not_found' | 'conflict';
   constructor(code: SiteError['code'], message: string) {
     super(message);
     this.code = code;
@@ -65,6 +65,8 @@ const color = (v: unknown, def: string) => (typeof v === 'string' && /^#[0-9a-fA
 const HANDLE = /^[a-z0-9](?:[a-z0-9-]{0,78}[a-z0-9])?$/;
 export const imageRef = (v: unknown) => (typeof v === 'string' && /^(a|p):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(v) ? v : '');
 export const newId = () => randomBytes(6).toString('hex');
+/** An address made from any text ("Our Story!" gives "our-story"). */
+export const slugOf = (v: unknown) => (typeof v === 'string' ? v : '').normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60).replace(/-+$/, '');
 
 /** A link a customer may follow: the store's own pages, or a web, email, phone or WhatsApp address. */
 export function safeUrl(v: string): string {
@@ -215,8 +217,10 @@ export function normalizeSite(input: unknown): SiteDoc {
   const pages: SitePage[] = [];
   for (const p of (Array.isArray(input.pages) ? input.pages : []).slice(0, MAX_PAGES)) {
     if (!isObj(p)) continue;
-    const slug = typeof p.slug === 'string' && HANDLE.test(p.slug) && !slugs.has(p.slug) ? p.slug : '';
-    if (!slug) continue;
+    // A page is never dropped for its address: a bad one is made from the title, a taken one gets a number.
+    const wanted = typeof p.slug === 'string' && HANDLE.test(p.slug) ? p.slug : slugOf(p.slug) || slugOf(p.title) || 'page';
+    let slug = wanted;
+    for (let i = 2; slugs.has(slug); i++) slug = `${wanted.slice(0, 70)}-${i}`;
     slugs.add(slug);
     pages.push({ id: pageId(p.id), slug, title: line(p.title, 120) || slug, seoTitle: line(p.seoTitle, 120), seoDescription: line(p.seoDescription, 300), sections: sections(p.sections, 'page', seen) });
   }
@@ -313,13 +317,23 @@ export async function publishedSite(db: Queryable, tenantId: string): Promise<Si
   return row?.published ? normalizeSite(row.published) : defaultSite(await storeFacts(db, tenantId));
 }
 
-export async function saveDraft(db: Queryable, tenantId: string, input: unknown, userId: string | null): Promise<SiteDoc> {
+/**
+ * Save the draft. With `base` (when the editor last saw the draft change), the save is refused if
+ * someone else has saved since, so two people editing never overwrite each other without knowing.
+ */
+export async function saveDraft(db: Queryable, tenantId: string, input: unknown, userId: string | null, base?: string | null): Promise<SiteDoc> {
   const site = normalizeSite(input);
-  await db.query(
+  const saved = (await db.query(
     `insert into store_sites (tenant_id, draft, draft_updated_by) values ($1, $2, $3)
-     on conflict (tenant_id) do update set draft = excluded.draft, draft_updated_at = now(), draft_updated_by = excluded.draft_updated_by`,
-    [tenantId, JSON.stringify(site), userId],
-  );
+     on conflict (tenant_id) do update set draft = excluded.draft, draft_updated_at = now(), draft_updated_by = excluded.draft_updated_by
+     where $4::timestamptz is null or date_trunc('milliseconds', store_sites.draft_updated_at) = date_trunc('milliseconds', $4::timestamptz)
+     returning tenant_id`,
+    [tenantId, JSON.stringify(site), userId, base ?? null],
+  )).rows.length;
+  if (!saved) {
+    const other = (await db.query<{ name: string | null }>('select u.name from store_sites s left join users u on u.id = s.draft_updated_by where s.tenant_id = $1', [tenantId])).rows[0];
+    throw new SiteError('conflict', `${other?.name ?? 'Someone else'} changed the site while you were editing`);
+  }
   return site;
 }
 

@@ -98,7 +98,7 @@ test('site builder: a starting site from the store, drafts checked on save, publ
     assert.equal(d.home.sections[0].settings.text.length, 160);
     assert.equal(d.home.sections[0].settings.background, 'primary');
     assert.deepEqual(d.home.sections[0].settings.buttonLink, { type: 'collections' });
-    assert.deepEqual(d.pages.map((p: { slug: string; sections: unknown[] }) => [p.slug, p.sections.length]), [['about', 1]], 'one page per slug; home-only sections dropped');
+    assert.deepEqual(d.pages.map((p: { slug: string; sections: unknown[] }) => [p.slug, p.sections.length]), [['about', 1], ['about-2', 0], ['bad-slug', 0]], 'no page is dropped for its address: a taken one gets a number, a bad one is repaired; home-only sections dropped');
     assert.ok(d.home.sections.every((s: { id: string }) => /^[a-z0-9-]{4,40}$/.test(s.id)));
 
     // Not published yet: customers still see the old site.
@@ -247,7 +247,49 @@ test('the contact form emails the store (reply goes to the buyer); robots are ig
     assert.equal((await send({})).statusCode, 429);
   }));
 
+test('two people editing: a save on top of a draft someone else changed is refused, unless it says to replace it', () =>
+  withStore(async (c) => {
+    const put = (headers: Record<string, string>, payload: unknown) => c.app.inject({ method: 'PUT', url: '/v1/store-site/draft', headers, payload });
+    const start = (await c.app.inject({ method: 'GET', url: '/v1/store-site', headers: c.owner })).json();
+    assert.equal(start.draftUpdatedAt, null);
+    const mine = structuredClone(start.draft);
+    mine.seo.title = 'Mine';
+    const first = await put(c.owner, { site: mine });
+    assert.equal(first.statusCode, 200, first.body);
+    const base = first.json().draftUpdatedAt as string;
+
+    // Someone else (another tab, another owner) saves in between.
+    await createUser(c.f.db, { tenantId: c.f.tenantA, name: 'Ana', email: 'ana@shop.example', role: 'owner', password: PASSWORD });
+    const ana = await c.login('ana@shop.example');
+    const theirs = structuredClone(mine);
+    theirs.seo.title = 'Theirs';
+    assert.equal((await put(ana, { site: theirs, base })).statusCode, 200);
+
+    // My next save was made on top of what I last saw: refused, and theirs is still there.
+    mine.seo.title = 'Mine again';
+    const refused = await put(c.owner, { site: mine, base });
+    assert.equal(refused.statusCode, 409, refused.body);
+    assert.equal(refused.json().error.code, 'draft_changed');
+    assert.match(refused.json().error.message, /Ana changed the site/);
+    assert.equal((await c.app.inject({ method: 'GET', url: '/v1/store-site', headers: c.owner })).json().draft.seo.title, 'Theirs');
+
+    // Keeping mine anyway (no base), then carrying on from there.
+    const forced = await put(c.owner, { site: mine });
+    assert.equal(forced.statusCode, 200);
+    mine.seo.title = 'Mine, later';
+    assert.equal((await put(c.owner, { site: mine, base: forced.json().draftUpdatedAt })).statusCode, 200);
+    // Discarding and restoring say when the draft changed, for the next save.
+    await c.app.inject({ method: 'POST', url: '/v1/store-site/publish', headers: c.owner, payload: {} });
+    const discarded = (await c.app.inject({ method: 'POST', url: '/v1/store-site/discard', headers: c.owner, payload: {} })).json();
+    assert.equal((await put(c.owner, { site: mine, base: discarded.draftUpdatedAt })).statusCode, 200);
+    assert.equal((await put(c.owner, { site: mine, base: 'yesterday' })).statusCode, 400);
+  }));
+
 test('normalizeSite keeps a site sound whatever it is given', () => {
+  // Pages are kept whatever their address: made from the title, numbered when taken.
+  const pages = normalizeSite({ pages: [{ slug: 'about', title: 'About' }, { slug: 'about', title: 'About (copy)' }, { slug: '', title: 'Envíos y Devoluciones' }, { title: '***' }, { slug: 'about-2', title: 'x' }] }).pages;
+  assert.deepEqual(pages.map((p) => p.slug), ['about', 'about-2', 'envios-y-devoluciones', 'page', 'about-2-2']);
+
   assert.throws(() => normalizeSite('nope'));
   const s = normalizeSite({ theme: { preset: 'fresh', radius: 'huge', logoHeight: 500 }, social: { instagram: 'http://insecure.example', facebook: 'https://facebook.com/x' }, footer: { columns: Array.from({ length: 9 }, () => ({ title: 'c' })) } });
   assert.equal(s.theme.preset, 'fresh');

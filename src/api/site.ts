@@ -4,7 +4,8 @@
  *
  *   GET  /v1/store-site                         the draft, whether it differs from what is published, and the builder's catalog
  *                                         (section types and their fields, theme presets, fonts, icons, categories, collections)
- *   PUT  /v1/store-site/draft { site }          save the draft (checked and completed; returns it as saved)
+ *   PUT  /v1/store-site/draft { site, base? }   save the draft (checked and completed; returns it as saved).
+ *                                         With base (the draftUpdatedAt last seen), 409 draft_changed if someone else saved since
  *   POST /v1/store-site/publish { note? }       customers see the draft from now on; the version is kept
  *   POST /v1/store-site/discard                 back to what is published
  *   GET  /v1/store-site/versions                published versions kept (the last 30)
@@ -67,7 +68,7 @@ export function registerSiteRoutes(app: FastifyInstance, deps: PipelineDeps) {
     try {
       return await f();
     } catch (e) {
-      if (e instanceof SiteError) throw new ApiError(e.code === 'not_found' ? 404 : 422, e.code, e.message);
+      if (e instanceof SiteError) throw new ApiError(e.code === 'not_found' ? 404 : e.code === 'conflict' ? 409 : 422, e.code === 'conflict' ? 'draft_changed' : e.code, e.message);
       if (e instanceof CatalogError) throw new ApiError(e.code === 'not_found' ? 404 : e.code === 'conflict' ? 409 : 422, e.code, e.message);
       throw e;
     }
@@ -89,10 +90,10 @@ export function registerSiteRoutes(app: FastifyInstance, deps: PipelineDeps) {
     };
   });
 
-  app.put<{ Body: { site: unknown } }>('/store-site/draft', { bodyLimit: 1024 * 1024, schema: { body: { type: 'object', required: ['site'], additionalProperties: false, properties: { site: { type: 'object' } } } } }, async (request) => {
+  app.put<{ Body: { site: unknown; base?: string | null } }>('/store-site/draft', { bodyLimit: 1024 * 1024, schema: { body: { type: 'object', required: ['site'], additionalProperties: false, properties: { site: { type: 'object' }, base: { type: ['string', 'null'], format: 'date-time' } } } } }, async (request) => {
     requirePermission(request, 'business.manage');
     return wrap(async () => {
-      const draft = await saveDraft(db, request.tenantId, request.body.site, request.userId || null);
+      const draft = await saveDraft(db, request.tenantId, request.body.site, request.userId || null, request.body.base);
       const site = await loadSite(db, request.tenantId);
       return { draft, changed: site.changed, draftUpdatedAt: site.draftUpdatedAt };
     });
@@ -107,7 +108,8 @@ export function registerSiteRoutes(app: FastifyInstance, deps: PipelineDeps) {
 
   app.post('/store-site/discard', async (request) => {
     requirePermission(request, 'business.manage');
-    return { draft: await discardDraft(db, request.tenantId, request.userId || null), changed: false };
+    const draft = await discardDraft(db, request.tenantId, request.userId || null);
+    return { draft, changed: false, draftUpdatedAt: (await loadSite(db, request.tenantId)).draftUpdatedAt };
   });
 
   app.get('/store-site/versions', async (request) => {
@@ -119,7 +121,8 @@ export function registerSiteRoutes(app: FastifyInstance, deps: PipelineDeps) {
     requirePermission(request, 'business.manage');
     return wrap(async () => {
       const draft = await restoreVersion(db, request.tenantId, request.params.id, request.userId || null);
-      return { draft, changed: (await loadSite(db, request.tenantId)).changed };
+      const site = await loadSite(db, request.tenantId);
+      return { draft, changed: site.changed, draftUpdatedAt: site.draftUpdatedAt };
     });
   });
 
