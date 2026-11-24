@@ -66,16 +66,16 @@ constants in the code, because they change and because sources disagree.
 
 ### C. More than one shop
 
-- [ ] C1. **Locations.** A business with a second shop adds it; stock is
+- [x] C1. **Locations.** A business with a second shop adds it; stock is
   kept per location; a till belongs to a location and sells from its stock;
   receiving and counting are done per location; the stock report shows each
   and the total.
-- [ ] C2. **Transfers** between locations: sent from one, received at the
+- [x] C2. **Transfers** between locations: sent from one, received at the
   other, with what is on the way.
 
 ### D. Buying stock from abroad
 
-- [ ] D1. **Landed cost.** When stock is received, freight, duty, brokerage
+- [x] D1. **Landed cost.** When stock is received, freight, duty, brokerage
   and other costs of bringing it in are entered once and spread over the
   items by value, so the cost per item (and the margin the till shows) is
   what the goods really cost.

@@ -11,6 +11,7 @@ import { useT } from '../i18n';
 import { qrSvg } from '../pos/ticket';
 import { useToast } from '../toast';
 import { ErrorText, Field, Modal, Select } from '../ui';
+import { LocationsCard } from './Locations';
 
 interface TillHardware {
   device?: string;
@@ -226,6 +227,7 @@ export function TillsTab() {
       <CounterSettingsCard />
       <TablesCard />
       <TillsCard />
+      <LocationsCard />
     </div>
   );
 }

@@ -1963,6 +1963,14 @@ button.tpl-img-upload { margin: 0.6rem 0.3rem 0.3rem; justify-content: center; }
 .station-categories { display: flex; flex-wrap: wrap; gap: 0.4rem; }
 .chip-toggle { min-height: 0; padding: 0.25rem 0.7rem; border-radius: 999px; font-size: 0.85rem; background: var(--sheet); color: var(--ink); border: 1px solid var(--hairline); box-shadow: none; }
 .chip-toggle[aria-pressed="true"] { background: var(--brand-soft); border-color: var(--brand-line); color: var(--brand-ink); font-weight: 600; }
+.location-select { width: auto; min-width: 10rem; }
+.stock-places { margin-top: 0.1rem; }
+.stock-at { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.stock-at-place { display: grid; gap: 0.05rem; padding: 0.4rem 0.75rem; border: 1px solid var(--hairline); border-radius: var(--radius); min-width: 6.5rem; }
+.stock-at-place strong { font-family: var(--figures); font-size: 1.1rem; }
+.locations-list li { padding: 0.45rem 0; border-bottom: 1px solid var(--hairline); min-height: 2.6rem; }
+.locations-add { align-items: flex-end; }
+.totals .landed-total { font-weight: 620; }
 .tender .layaway-deposit { max-width: none; }
 .tender .layaway-deposit .row { gap: 0.5rem; flex-wrap: nowrap; }
 .tender .layaway-deposit select { flex: none; width: auto; }

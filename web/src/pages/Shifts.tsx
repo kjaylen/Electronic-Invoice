@@ -8,6 +8,7 @@ import { printPdf } from '../print';
 import { useSession } from '../session';
 import { useToast } from '../toast';
 import { ErrorText, Field, fromCents, Modal, money, Select, toCents, usePageTitle } from '../ui';
+import { useLocations } from './Locations';
 
 type Means = 'cash' | 'card' | 'bank_transfer' | 'wallet' | 'cheque' | 'other';
 const MEANS: Array<[Means, string]> = [['cash', 'Cash'], ['card', 'Card'], ['bank_transfer', 'Bank transfer'], ['wallet', 'Mobile wallet'], ['cheque', 'Cheque'], ['other', 'Other']];
@@ -47,7 +48,7 @@ export interface ShiftReport {
   movements: Array<{ id: string; kind: 'pay_in' | 'pay_out'; amount: string; reason: string; at: string; by: string | null }>;
 }
 
-interface Register { id: string; name: string; openBy: string | null; openSince: string | null }
+interface Register { id: string; name: string; openBy: string | null; openSince: string | null; location?: { id: string; name: string } }
 
 const time = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 const MONEY = /^\d{1,13}(\.\d{1,2})?$/;
@@ -378,6 +379,17 @@ function Registers() {
   const [error, setError] = useState<unknown>(null);
   const load = useCallback(() => api<{ data: Register[] }>('/v1/registers').then((r) => setRows(r.data)).catch(setError), []);
   useEffect(() => void load(), [load]);
+  // More than one shop: each register is at one of them, and sells from its stock.
+  const [places] = useLocations();
+  const moveTo = async (r: Register, locationId: string) => {
+    try {
+      await api(`/v1/registers/${r.id}`, { method: 'PUT', body: { name: r.name, locationId } });
+      toast(t('{register} now sells from {location}', { register: r.name, location: places.find((p) => p.id === locationId)?.name ?? '' }));
+      void load();
+    } catch (err) {
+      setError(err);
+    }
+  };
   const add = async (e: FormEvent) => {
     e.preventDefault();
     try {
@@ -402,6 +414,11 @@ function Registers() {
               <strong>{r.name}</strong>
               <span className="small muted">{r.openBy ? t('open by {name}', { name: r.openBy }) : t('closed')}</span>
               <span className="spacer" />
+              {places.length > 1 && (
+                <Select value={r.location?.id ?? places.find((p) => p.main)?.id ?? ''} onChange={(e) => void moveTo(r, e.target.value)} aria-label={t('Location of {register}', { register: r.name })} className="location-select">
+                  {places.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </Select>
+              )}
               {!r.openBy && <button type="button" className="link danger-link small" onClick={() => void api(`/v1/registers/${r.id}`, { method: 'DELETE' }).then(load).catch(setError)}>{t('Archive')}</button>}
             </li>
           ))}
