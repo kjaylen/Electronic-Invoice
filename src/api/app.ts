@@ -478,7 +478,15 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       const meta = await storePageMeta(db, store[1]!, store[2] ?? '', base).catch(() => null);
       return reply.code(!meta && namesOneThing(store[2] ?? '') ? 404 : 200).type('text/html').header('Cache-Control', 'no-cache').send(meta ? withMeta(page(), meta) : withoutMeta(page()));
     });
-    await app.register(fastifyStatic, { root: webRoot!, prefix: '/', wildcard: true, index: ['index.html'] });
+    await app.register(fastifyStatic, {
+      root: webRoot!, prefix: '/', wildcard: true, index: ['index.html'],
+      // The compressed copy made at build time (npm run web:compress), for browsers that accept it.
+      preCompressed: true,
+      // Built scripts, styles and fonts have their content in their names: they never change, so browsers keep them.
+      setHeaders: (reply, path) => {
+        if (/[\\/]assets[\\/][^\\/]+-[\w-]{8,}\.[a-z0-9]+(\.(br|gz))?$/.test(path)) reply.header('Cache-Control', 'public, max-age=31536000, immutable');
+      },
+    });
   }
   const hasTill = Boolean(webRoot && existsSync(join(webRoot, 'pos.html')));
   app.setNotFoundHandler((request, reply) => {

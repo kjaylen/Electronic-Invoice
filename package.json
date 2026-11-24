@@ -17,6 +17,7 @@
     "start": "node --disable-warning=ExperimentalWarning src/server.ts",
     "web:dev": "vite --config web/vite.config.ts",
     "web:build": "vite build --config web/vite.config.ts",
+    "web:compress": "node --disable-warning=ExperimentalWarning scripts/compress-web.ts",
     "demo": "node --disable-warning=ExperimentalWarning scripts/demo.ts",
     "icons": "node --disable-warning=ExperimentalWarning scripts/make-icons.ts",
     "e2e": "npm run web:build && playwright test",

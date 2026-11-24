@@ -10,7 +10,9 @@ COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
 COPY tsconfig.json ./
 COPY web ./web
-RUN npm run web:build
+COPY scripts/compress-web.ts ./scripts/compress-web.ts
+# Built, then compressed ahead of time: the server sends scripts and styles a third of the size.
+RUN npm run web:build && npm run web:compress
 
 FROM node:22-bookworm-slim AS runtime
 ENV NODE_ENV=production
