@@ -27,6 +27,8 @@ export interface ZReportInput {
     refundCount: number;
     voided: { count: number; total: string };
     discounts?: { count: number; total: string };
+    serviceCharge?: { count: number; total: string };
+    tips?: { count: number; total: string };
     giftCards?: { sold: { count: number; total: string }; used: string };
     cash: { float: string; in: string; payIn: string; payOut: string; expected: string; counted: string | null; difference: string | null };
     movements: Array<{ kind: 'pay_in' | 'pay_out'; amount: string; reason: string; at: string; by: string | null }>;
@@ -62,6 +64,8 @@ export function renderZReport(z: ZReportInput): Promise<Buffer> {
   line('GST', formatAmount(r.gst));
   if (r.voided.count) line(`Cancelled (${r.voided.count})`, formatAmount(r.voided.total));
   if (r.discounts?.count) line(`Discounts given (${r.discounts.count})`, `-${formatAmount(r.discounts.total)}`);
+  if (r.serviceCharge?.count) line(`Service charge (${r.serviceCharge.count}, before GST)`, formatAmount(r.serviceCharge.total));
+  if (r.tips?.count) line(`Tips for the staff (${r.tips.count})`, formatAmount(r.tips.total));
   rule();
   title('Takings by payment');
   for (const m of means) if (r.takings[m] !== '0.00') line(MEANS_NAME[m], formatAmount(r.takings[m]));

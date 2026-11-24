@@ -88,6 +88,12 @@ export function money(value: string | undefined | null): string {
 }
 
 /** "61.85" -> 6185n, exactly (no floating point). */
+/** A BZ$ amount in US dollars at the fixed 2 to 1, half a cent rounded up: "33.75" for "67.50". */
+export function usdOf(value: string | undefined | null): string {
+  const cents = toCents(value ?? '0');
+  return fromCents((cents + 1n) / 2n);
+}
+
 export function toCents(value: string): bigint {
   const negative = value.startsWith('-');
   const [whole = '0', fraction = ''] = value.replace('-', '').split('.');

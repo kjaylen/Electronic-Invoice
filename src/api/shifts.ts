@@ -107,13 +107,27 @@ export async function shiftReport(db: Queryable, tenantId: string, s: ShiftRow) 
     'select method, coalesce(sum(amount_cents), 0) as total, count(*)::int as n from invoice_payments where tenant_id = $1 and shift_id = $2 and voided_at is null group by method',
     [tenantId, s.id],
   )).rows;
-  // Discounts given on the shift's sales: each line's full price (quantity x price) less what it sold for, before GST.
+  // Discounts given on the shift's sales: each line's full price (quantity x price, plus what was charged on top) less what it sold for, before GST.
   const discounts = (await db.query<{ n: number; total: unknown }>(
-    `select count(distinct d.id)::int as n, coalesce(sum(greatest(round(l.quantity * l.unit_price * 100)::bigint - l.net_cents, 0)), 0) as total
+    `select count(distinct d.id)::int as n, coalesce(sum(greatest(round(l.quantity * l.unit_price * 100)::bigint + l.charge_cents - l.net_cents, 0)), 0) as total
      from documents d join document_lines l on l.document_id = d.id and l.tenant_id = d.tenant_id
-     where d.tenant_id = $1 and d.shift_id = $2 and d.etd_type in ('01', '02') and d.status in ${COUNTED} and round(l.quantity * l.unit_price * 100)::bigint > l.net_cents`,
+     where d.tenant_id = $1 and d.shift_id = $2 and d.etd_type in ('01', '02') and d.status in ${COUNTED} and round(l.quantity * l.unit_price * 100)::bigint + l.charge_cents > l.net_cents`,
     [tenantId, s.id],
   )).rows[0]!;
+  // The service charge collected (before GST), and the tips customers added: both are what the business holds for its staff.
+  const service = (await db.query<{ n: number; total: unknown }>(
+    `select count(distinct d.id)::int as n, coalesce(sum(l.service_cents), 0) as total
+     from documents d join document_lines l on l.document_id = d.id and l.tenant_id = d.tenant_id
+     where d.tenant_id = $1 and d.shift_id = $2 and d.etd_type in ('01', '02') and d.status in ${COUNTED} and l.service_cents > 0`,
+    [tenantId, s.id],
+  )).rows[0]!;
+  const tipRows = (await db.query<{ means: string; total: unknown; n: number }>(
+    `select t.means, coalesce(sum(t.amount_cents), 0) as total, count(*)::int as n from sale_tips t join documents d on d.id = t.document_id
+     where t.tenant_id = $1 and t.shift_id = $2 and d.status in ${COUNTED} group by t.means`,
+    [tenantId, s.id],
+  )).rows;
+  const tips = zero();
+  for (const r of tipRows) tips[fromCode(r.means)] += toBigInt(r.total);
   const voided = (await db.query<{ n: number; total: unknown }>(
     "select count(*)::int as n, coalesce(sum(payable_cents), 0) as total from documents where tenant_id = $1 and shift_id = $2 and status = 'cancelled'",
     [tenantId, s.id],
@@ -136,7 +150,7 @@ export async function shiftReport(db: Queryable, tenantId: string, s: ShiftRow) 
   for (const g of giftSold) giftCardsSold[fromMethod(g.paid_by)] += toBigInt(g.total);
   const takings = zero();
   for (const m of MEANS) takings[m] = sales[m] + invoicePayments[m] + giftCardsSold[m] - refunded[m];
-  const expectedCash = float + takings.cash + payIn - payOut;
+  const expectedCash = float + takings.cash + tips.cash + payIn - payOut;
   const counted = s.counted_cash_cents === null ? null : toBigInt(s.counted_cash_cents);
   const typeName: Record<string, string> = { '01': 'Tax invoices', '02': 'Tax receipts', '03': 'Debit notes', '04': 'Credit notes' };
   return {
@@ -154,6 +168,9 @@ export async function shiftReport(db: Queryable, tenantId: string, s: ShiftRow) 
       used: formatCents(giftUsed),
     },
     discounts: { count: discounts.n, total: c(discounts.total) },
+    serviceCharge: { count: service.n, total: c(service.total) },
+    // Tips are not takings: they came in with the card or wallet payments and are owed to the staff. A cash tip is in the drawer.
+    tips: { count: tipRows.reduce((a, r) => a + r.n, 0), total: formatCents(MEANS.reduce((a, m) => a + tips[m], 0n)), byMeans: asMoney(tips) },
     cash: {
       float: formatCents(float),
       in: formatCents(takings.cash),

@@ -102,6 +102,8 @@ interface SaleEvent {
   etdui: string;
   request: { lines: LineInput[]; customer?: Customer; customerId?: string | null; payment?: { meansCode?: string; terms?: string }; note?: string; lineItemIds?: Array<string | null> };
   tenders?: Array<{ means: string; cents: string }>;
+  /** A tip added to the payment: for the staff, not on the receipt. */
+  tip?: { means: string; cents: string };
 }
 interface ShiftOpenEvent { id: string; kind: 'shift_open'; at: string; userId: string; shiftId: string; openingFloat: string }
 interface CashEvent { id: string; kind: 'cash'; at: string; userId?: string | null; shiftId: string; type: 'pay_in' | 'pay_out'; amount: string; reason: string }
@@ -148,6 +150,7 @@ const eventSchema = {
           etdui: { type: 'string', pattern: '^\\d{44}$' },
           request: { type: 'object' },
           tenders: { type: 'array', maxItems: 6, items: { type: 'object', required: ['means', 'cents'], additionalProperties: false, properties: { means: { type: 'string', pattern: '^\\d{1,3}$' }, cents: { type: 'string', pattern: '^\\d{1,15}$' } } } },
+          tip: { type: 'object', required: ['means', 'cents'], additionalProperties: false, properties: { means: { type: 'string', pattern: '^\\d{1,3}$' }, cents: { type: 'string', pattern: '^[1-9]\\d{0,14}$' } } },
           openingFloat: money,
           type: { type: 'string', enum: ['pay_in', 'pay_out'] },
           amount: money,
@@ -340,6 +343,10 @@ export function registerPosSyncRoutes(app: FastifyInstance, deps: PipelineDeps) 
       // Who sold, on which till and shift, and how it was paid, written with the document.
       await tx.query('update documents set issued_by = $3, device_id = $4, shift_id = $5, tenders = $6 where tenant_id = $1 and id = $2',
         [d.tenant_id, documentId, userId, d.id, shiftId, ev.tenders && ev.tenders.length > 1 ? JSON.stringify(ev.tenders) : null]);
+      if (ev.tip) {
+        await tx.query('insert into sale_tips (document_id, tenant_id, shift_id, user_id, means, amount_cents) values ($1, $2, $3, $4, $5, $6) on conflict do nothing',
+          [documentId, d.tenant_id, shiftId, userId, ev.tip.means, ev.tip.cents]);
+      }
     });
 
     // 2. Its stock and points, once, with the event's row. If this fails the sale is kept and the till sends it again:

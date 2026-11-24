@@ -1915,6 +1915,13 @@ button.tpl-img-upload { margin: 0.6rem 0.3rem 0.3rem; justify-content: center; }
 .line-discount-editor .short { color: #ff9d90; font-size: 0.78rem; }
 .cart .cart-discount span:last-child { color: var(--lime); }
 .cart-sale-discount { align-self: flex-start; font-size: 0.85rem; margin-top: -0.3rem; }
+.cart .cart-service span:last-child { color: var(--sheet); }
+.cart .grand-usd { font-family: var(--figures); font-size: 1rem; color: rgba(255, 255, 255, 0.8); margin-top: -0.2rem; }
+.counter-extras { border-top: 1px solid var(--hairline); padding-top: 1rem; max-width: 40rem; }
+.counter-extras label.check { display: flex; gap: 0.6rem; align-items: flex-start; font-weight: 400; }
+.counter-extras label.check > span { display: grid; gap: 0.15rem; }
+.counter-extras label.check input { margin-top: 0.25rem; flex: none; }
+.narrow-input { max-width: 8rem; }
 .cart .cart-customer { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; padding: 0.55rem 0.7rem !important; border-radius: var(--radius); background: rgba(255, 255, 255, 0.07); border: 1px solid rgba(255, 255, 255, 0.14); font-family: var(--sans) !important; animation: pop 240ms var(--ease-out) both; }
 .cart .cart-customer-name { display: flex; flex-direction: column; color: #fff !important; font-weight: 560; min-width: 0; overflow-wrap: anywhere; }
 .cart .cart-customer-name .kicker { color: var(--lime); }

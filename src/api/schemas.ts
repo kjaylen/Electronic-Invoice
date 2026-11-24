@@ -166,6 +166,8 @@ export const issueSchema = {
       type: 'object', required: ['code', 'amount'], additionalProperties: false,
       properties: { code: { type: 'string', minLength: 16, maxLength: 40 }, amount: money },
     },
+    // A tip added to a card or wallet payment of a receipt: kept for the staff, not on the document.
+    tip: { type: 'object', required: ['amount', 'meansCode'], additionalProperties: false, properties: { amount: money, meansCode: { type: 'string', pattern: '^\\d{1,3}$' } } },
     tenders: {
       type: 'array',
       minItems: 2,

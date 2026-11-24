@@ -65,6 +65,8 @@ export interface IssueBody {
   payableRoundingAmount?: string;
   paid?: { method: PaymentMethod; reference?: string };
   tenders?: Array<{ meansCode: string; amount: string }>;
+  /** A tip the customer added when paying a receipt by card or wallet: recorded for the staff, never part of the tax document. */
+  tip?: { amount: string; meansCode: string };
   /** Paid (partly) with a gift card: its code and how much it pays; `tenders` then has a part with means code 1 for that amount (or the card pays it all). */
   giftCard?: { code: string; amount: string };
   /** Issue an invoice on account even if it takes the customer over their credit limit (owners, admins, managers). */
@@ -362,12 +364,21 @@ export async function issueFromBody(deps: PipelineDeps, tenantId: string, body: 
   if (split) {
     await deps.db.query('update documents set tenders = $3 where tenant_id = $1 and (id = $2 or supersedes_document_id = $2)', [tenantId, result.documentId, JSON.stringify(split.parts)]);
   }
+  const tip = body.tip && issueRequest.etdType === '02' && result.status !== 'rejected' ? { cents: parseDecimalCents(body.tip.amount), means: body.tip.meansCode } : null;
   // Who issued it, on which till and in which shift (not part of the signed record). Also on the contingency reissue, if there was one.
   if (userId) {
     await deps.db.query(
       `update documents set issued_by = $3, device_id = $4, shift_id = ${openShiftSql('$1', '$3', '$4')}
        where tenant_id = $1 and (id = $2 or supersedes_document_id = $2)`,
       [tenantId, result.documentId, userId, options.deviceId ?? null],
+    );
+  }
+  // The tip belongs to the shift the sale went into.
+  if (tip && tip.cents > 0n) {
+    await deps.db.query(
+      `insert into sale_tips (document_id, tenant_id, shift_id, user_id, means, amount_cents)
+       select id, tenant_id, shift_id, $3, $4, $5 from documents where tenant_id = $1 and id = $2 on conflict do nothing`,
+      [tenantId, result.documentId, userId || null, tip.means, String(tip.cents)],
     );
   }
   // A sale takes the items off the shelf (tracked ones), once it has legal value or is on its way to BTS.
@@ -718,6 +729,8 @@ export function registerDocumentRoutes(app: FastifyInstance, deps: PipelineDeps,
         tax: formatCents(t.taxAmount),
         taxInclusive: formatCents(t.taxInclusiveAmount),
         payable: formatCents(t.payableAmount),
+        // Added on top of the prices, before GST (a service charge), inside lineExtension.
+        charges: formatCents(t.lines.reduce((n, l) => n + l.allowanceCharges.filter((a) => a.isCharge).reduce((m, a) => m + a.amount, 0n), 0n)),
       },
     };
   });

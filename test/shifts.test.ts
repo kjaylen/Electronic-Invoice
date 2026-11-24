@@ -208,3 +208,65 @@ test('a mobile wallet is a way to pay of its own: on the receipt, in a split, an
     const z = await c.app.inject({ method: 'GET', url: `/v1/shifts/${shift.id}/report.pdf`, headers: c.owner });
     assert.equal(z.statusCode, 200);
   }));
+
+test('counter settings: US$ totals, a service charge and tips are set by owners, one at a time, and reach every till', () =>
+  withBusiness(async (c) => {
+    const put = (headers: Record<string, string>, payload: Record<string, unknown>) => c.app.inject({ method: 'PUT', url: '/v1/counter-settings', headers, payload });
+    const counter = async () => (await c.app.inject({ method: 'GET', url: '/v1/me', headers: c.owner })).json().counter;
+    assert.deepEqual(await counter(), { cashierDiscountLimit: null, loyalty: null, showUsd: false, serviceChargePercent: null, tips: false });
+
+    const saved = await put(c.owner, { showUsd: true, serviceChargePercent: '10.00', tips: true });
+    assert.equal(saved.statusCode, 200, saved.body);
+    assert.deepEqual(saved.json(), { cashierDiscountLimit: null, showUsd: true, serviceChargePercent: '10', tips: true });
+    // A page that only knows the discount limit (a till not updated yet) changes only that.
+    assert.equal((await put(c.owner, { cashierDiscountLimit: '5' })).statusCode, 200);
+    assert.deepEqual(await counter(), { cashierDiscountLimit: '5', loyalty: null, showUsd: true, serviceChargePercent: '10', tips: true });
+    assert.deepEqual((await put(c.owner, { serviceChargePercent: null })).json(), { cashierDiscountLimit: '5', showUsd: true, serviceChargePercent: null, tips: true });
+
+    for (const bad of [{ serviceChargePercent: '45' }, { serviceChargePercent: '-1' }, { serviceChargePercent: 'ten' }, { showUsd: 'yes' }, {}, { other: true }]) {
+      assert.equal((await put(c.owner, bad)).statusCode, 400, JSON.stringify(bad));
+    }
+    await createUser(c.f.db, { tenantId: c.f.tenantA, name: 'Cass', email: 'cass@biz.example', role: 'cashier', password: PASSWORD });
+    assert.equal((await put(await c.login('cass@biz.example'), { tips: false })).statusCode, 403);
+  }));
+
+test('a service charge is part of the sale (on the receipt, with GST); a tip is not; the shift report says what is held for the staff', () =>
+  withBusiness(async (c) => {
+    await c.app.inject({ method: 'PUT', url: '/v1/counter-settings', headers: c.owner, payload: { serviceChargePercent: '10', tips: true } });
+    await c.app.inject({ method: 'POST', url: '/v1/shifts', headers: c.owner, payload: { openingFloat: '50.00' } });
+    const service = { isCharge: true, reason: 'Service charge 10%', percent: '10' };
+    const dinner = { type: '02', lines: [{ ...line('40.00'), description: 'Dinner for two', allowanceCharges: [service] }], payment: { meansCode: '48', terms: 'Paid by card' }, tip: { amount: '5.00', meansCode: '48' } };
+
+    // What the till shows before the sale: the charge on its own, inside the subtotal.
+    const preview = await c.app.inject({ method: 'POST', url: '/v1/documents/preview', headers: c.owner, payload: { ...dinner, tip: undefined } });
+    assert.equal(preview.statusCode, 200, preview.body);
+    assert.deepEqual(preview.json().totals, { lineExtension: '44.00', gst: '5.50', tax: '5.50', taxInclusive: '49.50', payable: '49.50', charges: '4.00' });
+
+    const sold = await c.app.inject({ method: 'POST', url: '/v1/documents', headers: c.owner, payload: dinner });
+    assert.equal(sold.statusCode, 201, sold.body);
+    assert.equal(sold.json().totals.payable, '49.50', 'the tip is not in the total');
+    const xml = (await c.f.db.query<{ signed_xml: string }>('select signed_xml from documents where id = $1', [sold.json().id])).rows[0]!.signed_xml;
+    assert.match(xml, /<cbc:AllowanceChargeReason>Service charge 10%<\/cbc:AllowanceChargeReason>/);
+    assert.ok(!xml.includes('5.00'), 'nothing of the tip on the tax document');
+
+    // A discount and a service charge on the same line: both are counted, neither hides the other.
+    const lunch = await c.app.inject({ method: 'POST', url: '/v1/documents', headers: c.owner, payload: { type: '02', lines: [{ ...line('20.00'), allowanceCharges: [{ isCharge: false, reason: 'Discount', percent: '10' }, service] }], payment: { meansCode: '10', terms: 'Paid by cash' } } });
+    assert.equal(lunch.statusCode, 201, lunch.body);
+    assert.equal(lunch.json().totals.payable, '22.50', '20 − 2 + 2, plus GST');
+    // A cash sale with no charge, and a tip left on a wallet payment.
+    await receipt(c, c.owner, '8.00', '10');
+    const coffee = await c.app.inject({ method: 'POST', url: '/v1/documents', headers: c.owner, payload: { type: '02', lines: [line('8.00')], payment: { meansCode: '68', terms: 'Paid by mobile wallet' }, tip: { amount: '1.50', meansCode: '68' } } });
+    assert.equal(coffee.statusCode, 201, coffee.body);
+
+    const r = (await c.app.inject({ method: 'GET', url: '/v1/shifts/current', headers: c.owner })).json().report;
+    assert.deepEqual(r.serviceCharge, { count: 2, total: '6.00' });
+    assert.deepEqual([r.tips.count, r.tips.total, r.tips.byMeans.card, r.tips.byMeans.wallet, r.tips.byMeans.cash], [2, '6.50', '5.00', '1.50', '0.00']);
+    assert.deepEqual(r.discounts, { count: 1, total: '2.00' });
+    assert.deepEqual([r.takings.card, r.takings.cash, r.takings.wallet, r.totalTakings], ['49.50', '31.50', '9.00', '90.00'], 'tips are not takings');
+    assert.equal(r.cash.expected, '81.50', 'tips paid by card and wallet are not in the drawer');
+
+    // A tip on a sale BTS rejects, or on an invoice, is not kept.
+    const invoice = await c.app.inject({ method: 'POST', url: '/v1/documents', headers: c.owner, payload: { type: '01', customer: { name: 'Island Logistics Ltd.', tin: '777888', address: { street: '4 Mile', city: 'Belize City', districtCode: '1' } }, lines: [line('10.00')], payment: { meansCode: '30', dueDate: '2026-12-31' }, tip: { amount: '2.00', meansCode: '48' } } });
+    assert.equal(invoice.statusCode, 201, invoice.body);
+    assert.equal((await c.f.db.query('select 1 from sale_tips')).rows.length, 2);
+  }));

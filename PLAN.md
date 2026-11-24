@@ -34,13 +34,13 @@ constants in the code, because they change and because sources disagree.
 - [x] A1. **Mobile wallets as a way to pay** (DigiWallet, E-Kyash by hand):
   a "Wallet" button beside Cash, Card and Transfer, with the reference typed
   in; counted on its own line in the shift report and the Z report.
-- [ ] A2. **Prices in US dollars too.** A setting: the receipt, the customer
+- [x] A2. **Prices in US dollars too.** A setting: the receipt, the customer
   display and price labels show the total in US$ beside BZ$ (2 to 1), for
   shops that sell to visitors.
-- [ ] A3. **Service charge.** A setting (off, or a percentage, usually 10%):
+- [x] A3. **Service charge.** A setting (off, or a percentage, usually 10%):
   added to a sale with one tap, on by default for sales opened on a table,
   shown as its own line on the receipt, with GST as the business has set it.
-- [ ] A4. **Tips.** When a customer adds a tip on a card or wallet payment,
+- [x] A4. **Tips.** When a customer adds a tip on a card or wallet payment,
   the till records it with the sale; it is not part of the receipt or the
   sales figures, and the shift report says how much is owed to staff.
 - [ ] A5. **Layaway.** Goods put aside for a customer who pays over time: a

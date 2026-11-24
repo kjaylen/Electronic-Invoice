@@ -178,7 +178,16 @@ export interface Me {
   /** Notices from the platform (maintenance, a BTS outage, news). */
   notices?: Array<{ id: string; message: string; messageEs: string | null; level: 'info' | 'warning' }>;
   /** How the counter works: the most a cashier may take off a line (percent), or no limit. */
-  counter?: { cashierDiscountLimit: string | null; loyalty?: { pointValue: string; minRedeem: number } | null };
+  counter?: {
+    cashierDiscountLimit: string | null;
+    loyalty?: { pointValue: string; minRedeem: number } | null;
+    /** Totals also shown in US dollars (BZ$2 to US$1). */
+    showUsd?: boolean;
+    /** A service charge a cashier can add to a sale, in percent; null: none. */
+    serviceChargePercent?: string | null;
+    /** A tip can be recorded with a card or wallet payment. */
+    tips?: boolean;
+  };
   billing?: { plan: 'starter' | 'business' | 'pro'; planName: string; status: 'trialing' | 'active' | 'past_due' | 'suspended'; trialDaysLeft: number | null; overdueInvoices: number; features: Array<'store' | 'api' | 'webhooks' | 'integrations'> };
 }
 
@@ -246,7 +255,7 @@ export interface DocumentInfo {
   customerId: string | null;
   customer: { name?: string; tin?: string; contact?: { telephone?: string; email?: string } } | null;
   referencedEtdui: string | null;
-  totals: { lineExtension: string; gst: string; tax: string; taxInclusive: string; payable: string };
+  totals: { lineExtension: string; gst: string; tax: string; taxInclusive: string; payable: string; charges?: string };
   conditions: Condition[];
   problem?: { kind: string; reason: string | null };
   supersedes: string | null;

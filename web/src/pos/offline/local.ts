@@ -85,6 +85,7 @@ interface SaleBody {
   lines: Array<{ itemId?: string; description?: string; quantity: string; unitCode?: string; unitPrice?: string; gstCategory?: 'S' | 'Z' | 'E'; exemptionReasonCode?: string; sellerItemCode?: string; allowanceCharges?: LineInput['allowanceCharges'] }>;
   payment?: { meansCode?: string; terms?: string; dueDate?: string };
   tenders?: Array<{ meansCode: string; amount: string }>;
+  tip?: { amount: string; meansCode: string };
   giftCard?: unknown;
   redeemPoints?: number;
   note?: string;
@@ -369,10 +370,15 @@ export class LocalApi {
       payment = { meansCode, terms: body.payment?.terms?.trim() || 'Paid' };
       tenders = [{ means: meansCode, cents: totals.payableAmount.toString() }];
     }
+    const chargesOf = (l: (typeof totals.lines)[number], service = false) =>
+      l.allowanceCharges.filter((a) => a.isCharge && (!service || a.reason.startsWith('Service charge'))).reduce((n, a) => n + a.amount, 0n);
     const discountCents = totals.lines.reduce((a, l) => {
-      const full = BigInt(Math.round(Number(l.quantity) * Number(l.unitPrice) * 100));
+      const full = BigInt(Math.round(Number(l.quantity) * Number(l.unitPrice) * 100)) + chargesOf(l);
       return a + (full > l.netAmount ? full - l.netAmount : 0n);
     }, 0n);
+    const serviceCents = totals.lines.reduce((a, l) => a + chargesOf(l, true), 0n);
+    const tipCents = body.tip && /^\d+(\.\d{1,2})?$/.test(body.tip.amount) ? toCents(body.tip.amount) : 0n;
+    const tip: Tender | null = tipCents > 0n ? { means: body.tip!.meansCode, cents: tipCents.toString() } : null;
     const shiftId = (await this.ctx.db.meta<string | null>('currentShift')) ?? null;
     // The key and the contents together: the same sale sent again is found; a different sale under
     // an old key (a cart restored from long ago) is a new sale, not the old one.
@@ -418,8 +424,9 @@ export class LocalApi {
         id, kind: 'sale', at: now.toISOString(), userId: person.id, shiftId, environment, series, serial, issueDate: local.date, issueTime: local.time, securityCode, etdui,
         request: { lines, ...(customer && { customer }), ...(customerId && { customerId }), payment, ...(body.note && { note: body.note }), lineItemIds: itemIds },
         ...(tenders.length > 1 && { tenders }),
+        ...(tip && { tip }),
       };
-      const sale: LocalSale = { doc, lines: docLines, view, tenders, discountCents: discountCents.toString(), userId: person.id };
+      const sale: LocalSale = { doc, lines: docLines, view, tenders, discountCents: discountCents.toString(), userId: person.id, ...(serviceCents > 0n && { serviceCents: serviceCents.toString() }), ...(tip && { tip }) };
       const [salePayload, eventPayload] = await Promise.all([db.seal(sale), db.seal(event)]);
       // The sale, its event for the server and the next number: all on the disk, or none of it.
       await db.write({
@@ -685,6 +692,8 @@ export class LocalApi {
       }
     }
     const discounted = receipts.filter((r) => BigInt(r.discountCents) > 0n);
+    const served = receipts.filter((r) => BigInt(r.serviceCents ?? '0') > 0n);
+    const tipped = receipts.filter((r) => r.tip);
     const payIn = s.movements.filter((m) => m.kind === 'pay_in').reduce((a, m) => a + BigInt(m.cents), 0n);
     const payOut = s.movements.filter((m) => m.kind === 'pay_out').reduce((a, m) => a + BigInt(m.cents), 0n);
     const takings = zero();
@@ -727,6 +736,14 @@ export class LocalApi {
       discounts: {
         count: discounted.length + (b?.discounts?.count ?? 0),
         total: money(discounted.reduce((a, r) => a + BigInt(r.discountCents), 0n) + (b?.discounts ? toCents(b.discounts.total) : 0n)),
+      },
+      serviceCharge: {
+        count: served.length + (b?.serviceCharge?.count ?? 0),
+        total: money(served.reduce((a, r) => a + BigInt(r.serviceCents ?? '0'), 0n) + (b?.serviceCharge ? toCents(b.serviceCharge.total) : 0n)),
+      },
+      tips: {
+        count: tipped.length + (b?.tips?.count ?? 0),
+        total: money(tipped.reduce((a, r) => a + BigInt(r.tip!.cents), 0n) + (b?.tips ? toCents(b.tips.total) : 0n)),
       },
       cash: {
         float: money(float), in: money(takingsAll.cash), payIn: money(payInAll), payOut: money(payOutAll), expected: money(expected),
@@ -802,6 +819,7 @@ function totalsJson(t: DocumentTotals) {
     tax: formatCents(t.taxAmount),
     taxInclusive: formatCents(t.taxInclusiveAmount),
     payable: formatCents(t.payableAmount),
+    charges: formatCents(t.lines.reduce((n, l) => n + l.allowanceCharges.filter((a) => a.isCharge).reduce((m, a) => m + a.amount, 0n), 0n)),
   };
 }
 

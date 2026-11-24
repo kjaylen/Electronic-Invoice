@@ -316,3 +316,35 @@ test('a long time offline: many sales in one upload, in order', () =>
     assert.equal(await count(c, 'select count(*) as n from documents where tenant_id = $1', [c.f.tenantA]), 150);
     assert.equal(await count(c, 'select count(distinct etdui) as n from documents where tenant_id = $1', [c.f.tenantA]), 150);
   }));
+
+test('a sale made offline with a service charge, paid by wallet with a tip, arrives as it was sold', () =>
+  withBusiness(async (c) => {
+    const front = await c.till('Front');
+    const snap = await snapshot(c, front, randomUUID());
+    const shiftId = randomUUID();
+    const opened = new Date(Date.now() - 2 * 3600_000);
+    const dinner = sale(snap, 1, { userId: c.ownerId, shiftId, at: new Date(opened.getTime() + 60_000), lines: [{ ...COFFEE, allowanceCharges: [{ isCharge: true, reason: 'Service charge 10%', percent: '10' }] }] });
+    const events = [
+      { id: randomUUID(), kind: 'shift_open', at: opened.toISOString(), userId: c.ownerId, shiftId, openingFloat: '20.00' },
+      { ...dinner, request: { ...dinner.request, payment: { meansCode: '68', terms: 'Paid by mobile wallet (ref DW-1)' } }, tip: { means: '68', cents: '250' } },
+    ];
+    const first = await sync(c, front, events);
+    assert.deepEqual(first.map((r) => r.status), ['applied', 'applied'], JSON.stringify(first));
+    // Sent again (the answer was lost): nothing twice.
+    assert.deepEqual((await sync(c, front, events)).map((r) => r.status), ['duplicate', 'duplicate']);
+
+    const line = (await c.f.db.query<{ charge_cents: string; service_cents: string; net_cents: string }>('select charge_cents::text, service_cents::text, net_cents::text from document_lines where tenant_id = $1', [c.f.tenantA])).rows;
+    assert.equal(line.length, 1);
+    assert.equal(line[0]!.charge_cents, line[0]!.service_cents);
+    assert.ok(Number(line[0]!.service_cents) > 0);
+    assert.deepEqual((await c.f.db.query<{ means: string; amount_cents: string; shift_id: string }>('select means, amount_cents::text, shift_id from sale_tips')).rows, [{ means: '68', amount_cents: '250', shift_id: shiftId }]);
+    const report = (await c.app.inject({ method: 'GET', url: `/v1/shifts/${shiftId}`, headers: c.owner })).json().report;
+    assert.deepEqual([report.serviceCharge.count, report.tips.total, report.tips.byMeans.wallet], [1, '2.50', '2.50']);
+    assert.equal(report.takings.cash, '0.00');
+    assert.ok(Number(report.takings.wallet) > 0, 'the sale itself is wallet takings; the tip is not');
+    assert.equal(report.cash.expected, '20.00');
+
+    // A tip that is not an amount is refused before anything is stored.
+    const bad = await c.app.inject({ method: 'POST', url: '/v1/pos/sync', headers: front, payload: { events: [{ ...sale(snap, 2, { userId: c.ownerId, shiftId }), tip: { means: '68', cents: '-5' } }] } });
+    assert.equal(bad.statusCode, 400);
+  }));

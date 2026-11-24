@@ -37,6 +37,7 @@ export function Sell() {
       lines: cart.lines.map((l) => ({ name: l.name, quantity: l.quantity, amount: lineAmount(l.quantity, l.unitPrice) })),
       total: cart.total,
       change: cart.change,
+      ...(cart.usd && { usd: cart.usd }),
     });
   }, [display, business]);
 

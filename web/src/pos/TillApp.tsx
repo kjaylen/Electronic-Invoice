@@ -14,7 +14,7 @@ import { api, ApiError, apiBlob, type Account, type Me, type Permission, type Ro
 import { LanguageToggle, useT } from '../i18n';
 import { SessionContext, type SessionState } from '../session';
 import { useToast } from '../toast';
-import { ErrorText, Field } from '../ui';
+import { ErrorText, Field, usdOf } from '../ui';
 import { HardwareSettings } from './Devices';
 import { type HardwareConfig, hardwareReport, HardwareError, loadHardware, openDrawer as kickDrawer, type PrinterConfig, printTicket as sendTicket, saveHardware } from './hardware';
 import { browserCanScan, type Platform, platform as getPlatform } from './platform';
@@ -724,7 +724,10 @@ function SignedInTill(props: {
       if (!view.printed.printable) throw new HardwareError(t('This document has no valid printed copy'));
       // The business's logo on top (fetched once; printed without it if it cannot be had).
       const logo = view.logo ? await ticketLogo(view.logo, logoBlob).catch(() => null) : null;
-      const ticket = documentTicket(view, { message: hardware.receiptMessage, ...(options.copy && { copy: true }), logo });
+      // For visitors: the total in US dollars, in the receipt's message space (the rest of a printed copy is only what the signed document holds).
+      const usd = me?.counter?.showUsd ? `US$ ${usdOf(view.view.totals.taxInclusive)} (BZ$2 = US$1)` : '';
+      const message = [usd, hardware.receiptMessage].filter((x) => x?.trim()).join('\n');
+      const ticket = documentTicket(view, { message, ...(options.copy && { copy: true }), logo });
       for (let i = 0; i < (options.copy ? 1 : hardware.copies); i++) await printTicket(ticket, { openDrawer: i === 0 && options.openDrawer, title: view.view.typeName });
     },
     openDrawer: async () => {

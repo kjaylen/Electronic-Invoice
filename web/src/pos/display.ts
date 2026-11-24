@@ -44,6 +44,7 @@ function render(state: DisplayState | null) {
     const total = el('div', 'display-total');
     total.append(el('span', '', 'Total'), el('span', '', money(state.total)));
     page.append(lines, total);
+    if (state.usd) page.append(el('div', 'display-change', `US$${Number(state.usd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`));
     if (state.change) page.append(el('div', 'display-change', `Change ${money(state.change)}`));
   }
   root.append(page);

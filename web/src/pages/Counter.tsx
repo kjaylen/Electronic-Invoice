@@ -23,7 +23,7 @@ import { useT } from '../i18n';
 import { printPdf } from '../print';
 import { useSession } from '../session';
 import { useToast } from '../toast';
-import { belizeDate, Combobox, CountUp, ErrorText, fromCents, Modal, money, Segmented, StatusBadge, store, toCents, useDebounced, usePageTitle } from '../ui';
+import { belizeDate, Combobox, CountUp, ErrorText, fromCents, Modal, money, Segmented, StatusBadge, store, toCents, useDebounced, usePageTitle, usdOf } from '../ui';
 import { searchItems } from './NewDocument';
 import { ClockButton } from './TimeClock';
 
@@ -65,6 +65,10 @@ interface Sale {
   split?: { means: '48' | '30' | '68'; amount: string };
   /** The wallet's confirmation number, when the cashier types it. */
   walletRef?: string;
+  /** The business's service charge is on this sale. */
+  service?: boolean;
+  /** A tip the customer adds to a card or wallet payment (not part of the sale). */
+  tip?: string;
   /** Charged to the customer's account: days until it is due. */
   dueDays?: number;
   /** Loyalty points the customer uses on this sale. */
@@ -84,6 +88,8 @@ export interface CounterCart {
   gst: string;
   total: string;
   change: string | null;
+  /** The total in US dollars, when the business shows it. */
+  usd?: string;
 }
 
 let key = 0;
@@ -300,11 +306,15 @@ export function CounterPanel(props: {
   };
 
   const saleDiscount = percentOk(sale.discount) ? sale.discount! : null;
+  // The business's service charge, when this sale carries it: a charge on every line, so it is on the receipt with its GST.
+  const servicePercent = me?.counter?.serviceChargePercent ?? null;
+  const serviceOn = Boolean(servicePercent) && sale.service === true;
   const valid = sale.lines.filter((l) => l.name.trim() && DECIMAL.test(l.quantity) && Number(l.quantity) > 0 && DECIMAL.test(l.unitPrice) && (l.gstCategory !== 'E' || l.exemptionReasonCode) && discountOk(l));
   const linesBody = valid.map((l) => {
     const allowances = [
       ...(l.discount ? [{ isCharge: false, reason: 'Discount', ...(l.discount.kind === 'percent' ? { percent: l.discount.value } : { amount: l.discount.value }) }] : []),
       ...(saleDiscount ? [{ isCharge: false, reason: `Sale discount ${saleDiscount}%`, percent: saleDiscount }] : []),
+      ...(serviceOn ? [{ isCharge: true, reason: `Service charge ${servicePercent}%`, percent: servicePercent! }] : []),
     ];
     return {
       ...(l.itemId && !l.custom ? { itemId: l.itemId } : {}),
@@ -367,7 +377,9 @@ export function CounterPanel(props: {
   const totalCents = toCents(total);
   // What was taken off, before GST: the lines at full price less the subtotal.
   const fullPrice = valid.reduce((a, l) => a + (lineBase(l) ?? 0n), 0n);
-  const discounted = totals ? fullPrice - toCents(totals.lineExtension) : 0n;
+  const chargeCents = totals?.charges ? toCents(totals.charges) : 0n;
+  const discounted = totals ? fullPrice + chargeCents - toCents(totals.lineExtension) : 0n;
+  const showUsd = Boolean(me?.counter?.showUsd);
 
   // A gift card pays what it can; the rest is paid by cash, card or transfer (not split, not on account).
   const gift = sale.giftCard ?? null;
@@ -388,7 +400,11 @@ export function CounterPanel(props: {
     const net = preview.lines[i]?.net;
     return base !== null && base > 0n && net !== undefined && Number(base - toCents(net)) * 100 > Number(limitText) * Number(base) + 50;
   });
-  const canIssue = valid.length > 0 && valid.length === sale.lines.length && Boolean(totals) && previewFresh && Boolean(me?.certificate) && (change === null || change >= 0n) && splitOk && !overLimit;
+  // A tip rides with a card or wallet payment; cash tips go straight to the staff.
+  const tipAllowed = Boolean(me?.counter?.tips) && (means === '48' || means === '68') && !gift;
+  const tipOk = !tipAllowed || !sale.tip || MONEY.test(sale.tip);
+  const tipCents = tipAllowed && sale.tip && MONEY.test(sale.tip) ? toCents(sale.tip) : 0n;
+  const canIssue = tipOk && valid.length > 0 && valid.length === sale.lines.length && Boolean(totals) && previewFresh && Boolean(me?.certificate) && (change === null || change >= 0n) && splitOk && !overLimit;
 
   const issue = async (e?: FormEvent, overrideCreditLimit = false) => {
     e?.preventDefault();
@@ -404,6 +420,7 @@ export function CounterPanel(props: {
         lines: linesBody,
         ...(overrideCreditLimit && { overrideCreditLimit: true }),
         ...(redeem && { redeemPoints: redeem }),
+        ...(tipCents > 0n && { tip: { amount: fromCents(tipCents), meansCode: means } }),
         ...(onAccount
           ? { payment: { meansCode: '30', dueDate: belizeDate(days), terms: `Payment due in ${days} days` } }
           : gift
@@ -500,6 +517,7 @@ export function CounterPanel(props: {
       gst: totals?.gst ?? '0.00',
       total,
       change: change !== null && change >= 0n ? fromCents(change) : null,
+      ...(showUsd && { usd: usdOf(total) }),
     });
     // Only when what the customer sees changes.
   }, [cartKey, onCart]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -637,13 +655,20 @@ export function CounterPanel(props: {
               ))}
             </ul>
           )}
-          <div><span>{t('Subtotal')}</span><span>{money(totals?.lineExtension ?? '0.00')}</span></div>
+          <div><span>{t('Subtotal')}</span><span>{money(fromCents(toCents(totals?.lineExtension ?? '0.00') - chargeCents))}</span></div>
+          {chargeCents > 0n && <div className="cart-service"><span>{t('Service charge ({n}%)', { n: servicePercent ?? '' })}</span><span>{money(fromCents(chargeCents))}</span></div>}
           {discounted > 0n && <div className="cart-discount"><span>{saleDiscount ? t('Discounts (incl. {n}% on the sale)', { n: saleDiscount }) : t('Discounts')}</span><span>−{money(fromCents(discounted))}</span></div>}
           <div><span>GST</span><span>{money(totals?.gst ?? '0.00')}</span></div>
           <div className="grand"><span>{t('Total')}</span><span aria-live="polite"><CountUp value={Number(totalCents)} duration={420} format={(n) => money(fromCents(BigInt(Math.round(n))))} /></span></div>
+          {showUsd && totalCents > 0n && <div className="grand-usd"><span>{t('In US dollars')}</span><span>US${usdOf(total)}</span></div>}
           {sale.lines.length > 0 && (
             <button type="button" className="link on-dark cart-sale-discount" onClick={() => setDialog('discount')}>
               {saleDiscount ? t('Sale discount: {n}% (change)', { n: saleDiscount }) : t('Discount the whole sale')}
+            </button>
+          )}
+          {sale.lines.length > 0 && servicePercent && (
+            <button type="button" className="link on-dark cart-sale-discount" aria-pressed={serviceOn} onClick={() => set({ service: !serviceOn })}>
+              {serviceOn ? t('Service charge {n}%: on (remove)', { n: servicePercent }) : t('Add the service charge ({n}%)', { n: servicePercent })}
             </button>
           )}
 
@@ -719,6 +744,17 @@ export function CounterPanel(props: {
                 <input aria-label={t('Wallet reference (optional)')} value={sale.walletRef ?? ''} maxLength={40} autoComplete="off" onChange={(e) => set({ walletRef: e.target.value })} />
               </label>
               <span className="small muted">{t('The number the customer’s DigiWallet or E-Kyash shows after paying. It prints on the receipt.')}</span>
+            </div>
+          )}
+          {tipAllowed && (
+            <div className="tender wallet">
+              <label>
+                <span>{t('Tip (optional)')}</span>
+                <input inputMode="decimal" placeholder="0.00" aria-label={t('Tip (optional)')} value={sale.tip ?? ''} onChange={(e) => set({ tip: e.target.value })} />
+              </label>
+              <span className="small muted">
+                {tipCents > 0n ? t('Charge {amount} in all. The tip is not on the receipt.', { amount: money(fromCents(rest + tipCents)) }) : t('What the customer adds for the staff. It is not on the receipt.')}
+              </span>
             </div>
           )}
           {means === 'account' && sale.customer && (

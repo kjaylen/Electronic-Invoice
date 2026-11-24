@@ -49,7 +49,7 @@ function ago(t: (s: string, v?: Record<string, string | number>) => string, iso:
   return new Date(iso).toLocaleDateString();
 }
 
-/** How selling at the counter and on tills works: for now, how much a cashier may take off. */
+/** How selling at the counter and on tills works: a cashier's discount limit, US$ totals, a service charge, tips. */
 function CounterSettingsCard() {
   const t = useT();
   const toast = useToast();
@@ -60,6 +60,33 @@ function CounterSettingsCard() {
   const [error, setError] = useState<unknown>(null);
   useEffect(() => setLimit(current ?? ''), [current]);
   const valid = limit === '' || (/^\d{1,3}(\.\d{1,2})?$/.test(limit) && Number(limit) <= 100);
+  // For shops that sell to visitors, and for bars and restaurants.
+  const saved = { showUsd: Boolean(me?.counter?.showUsd), service: me?.counter?.serviceChargePercent ?? '', tips: Boolean(me?.counter?.tips) };
+  const [showUsd, setShowUsd] = useState(saved.showUsd);
+  const [service, setService] = useState(saved.service);
+  const [tips, setTips] = useState(saved.tips);
+  useEffect(() => {
+    setShowUsd(saved.showUsd);
+    setService(saved.service);
+    setTips(saved.tips);
+  }, [saved.showUsd, saved.service, saved.tips]);
+  const serviceValid = service === '' || (/^\d{1,2}(\.\d{1,2})?$/.test(service) && Number(service) > 0 && Number(service) <= 30);
+  const extrasChanged = showUsd !== saved.showUsd || service !== saved.service || tips !== saved.tips;
+  const saveExtras = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!serviceValid) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api('/v1/counter-settings', { method: 'PUT', body: { showUsd, serviceChargePercent: service === '' ? null : service, tips } });
+      await refreshMe();
+      toast(t('Counter settings saved. Tills pick them up within a few minutes.'));
+    } catch (err) {
+      setError(err);
+    } finally {
+      setBusy(false);
+    }
+  };
   const save = async (e: FormEvent) => {
     e.preventDefault();
     if (!valid) return;
@@ -88,6 +115,27 @@ function CounterSettingsCard() {
         <button type="submit" disabled={!valid || busy || limit === (current ?? '')}>{busy ? t('Saving…') : t('Save')}</button>
       </form>
       {!valid && <p className="form-error">{t('0 to 100, or empty')}</p>}
+      <form className="stack counter-extras" onSubmit={saveExtras}>
+        <label className="check">
+          <input type="checkbox" checked={showUsd} onChange={(e) => setShowUsd(e.target.checked)} />
+          <span>
+            <strong>{t('Show totals in US dollars too')}</strong>
+            <span className="small muted">{t('For shops that sell to visitors: the total in US$ (BZ$2 to US$1) on the till, the customer display and the printed receipt.')}</span>
+          </span>
+        </label>
+        <Field label={t('Service charge (%)')} hint={t('For bars and restaurants, usually 10. A cashier adds it to a sale with one tap; it is on the receipt, and GST applies to it. Empty: none.')}>
+          <input inputMode="decimal" placeholder={t('None')} value={service} onChange={(e) => setService(e.target.value)} className="narrow-input" />
+        </Field>
+        {!serviceValid && <p className="form-error">{t('Up to 30, or empty')}</p>}
+        <label className="check">
+          <input type="checkbox" checked={tips} onChange={(e) => setTips(e.target.checked)} />
+          <span>
+            <strong>{t('Take tips with card and wallet payments')}</strong>
+            <span className="small muted">{t('The cashier types the tip the customer adds. It is never on the receipt or in your sales; the shift report says how much to pay out to staff.')}</span>
+          </span>
+        </label>
+        <div><button type="submit" disabled={!serviceValid || busy || !extrasChanged}>{busy ? t('Saving…') : t('Save')}</button></div>
+      </form>
       <ErrorText error={error} />
     </section>
   );
