@@ -5,9 +5,10 @@ import type { ObjectStore } from '../storage/objects.ts';
 import { ApiError } from './errors.ts';
 
 export interface ServerContext {
+  /** The mail service: every email goes through it (queued, then sent in the background). */
   mailer: Mailer;
-  /** Whether a real mailer (SMTP or outbox) is configured. */
-  mailConfigured: boolean;
+  /** Whether mail can go out at all: the platform has a mail server (or a development outbox). */
+  readonly mailConfigured: boolean;
   /** Public base URL of the web app, e.g. https://app.example.bz. Links in emails are built from it, never from the Host header. */
   publicUrl?: string;
   cookieSecure: boolean;

@@ -59,6 +59,15 @@ export function toApiError(error: unknown): ApiError {
       return new ApiError(422, 'invalid_account', e.message);
     case 'MailNotConfigured':
       return new ApiError(503, 'email_unavailable', 'Email is not set up on this server');
+    // An address, name or header that cannot go into an email: the message says which and why.
+    case 'MailAddressError':
+      return new ApiError(422, 'invalid_email', e.message);
+    case 'MailSettingsError':
+      return new ApiError(422, 'invalid_mail_settings', e.message, { fields: (e as unknown as { fields: Record<string, string> }).fields });
+    case 'MailError': {
+      const code = (e as unknown as { code: string }).code;
+      return new ApiError(code === 'not_found' ? 404 : code === 'too_big' ? 413 : 409, code === 'not_found' ? 'not_found' : `email_${code}`, e.message);
+    }
     case 'StoreError': {
       const code = (e as unknown as { code: string }).code;
       const status = code === 'not_found' || code === 'store_closed' ? 404 : code === 'invalid_order' ? 422 : 409;

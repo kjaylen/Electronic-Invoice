@@ -25,7 +25,9 @@ import { timingSafeEqual } from 'node:crypto';
 import fastifyStatic from '@fastify/static';
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import { authenticateApiKey } from '../db/apikeys.ts';
-import { type Mailer, noMailer } from '../mail/mailer.ts';
+import type { MailTransport } from '../mail/mailer.ts';
+import { createMailService, type MailService, type MailServiceOptions } from '../mail/service.ts';
+import { registerMailRoutes, registerPlatformMailRoutes, registerUnsubscribeRoutes } from './mail.ts';
 import type { PipelineDeps } from '../pipeline/issue.ts';
 import { registerAdminRoutes } from './admin.ts';
 import { registerAuthRoutes, requireCsrfHeader, sessionFromRequest } from './auth.ts';
@@ -112,8 +114,15 @@ export interface AppOptions {
   cookieSecure?: boolean;
   /** Allow self-service sign-up. Default true. */
   allowSignup?: boolean;
-  /** Sends password resets, invitations and documents. Unset: those answer 503 (invitations still return a link). */
-  mailer?: Mailer;
+  /**
+   * Where email goes when no mail server is set up in the platform console: a development outbox, or memory in tests.
+   * Without it (and without `mail` or saved settings), routes that need email answer 503 (invitations still return a link).
+   */
+  mailer?: MailTransport;
+  /** The mail service, when the caller made it (the server does, to deliver in the background). Otherwise one is made here around `mailer`, delivering as part of each send. */
+  mail?: MailService;
+  /** Options for the mail service made here (tests: retry timing, private hosts). */
+  mailOptions?: MailServiceOptions;
   /** Public base URL of the web app, for links in emails and share links. Never taken from the Host header. */
   publicUrl?: string;
   /** Enables /metrics for a scraper sending this bearer token. At least 32 characters. */
@@ -248,9 +257,17 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
   const deps = options.pipeline;
   const db = deps.db;
+  const mail = options.mail ?? await createMailService(db, deps.keys, {
+    ...(options.mailer && { transport: options.mailer }),
+    ...(options.publicUrl && { publicUrl: options.publicUrl }),
+    onError: (e) => app.log.error({ err: e }, 'mail delivery'),
+    ...options.mailOptions,
+  });
   const ctx: ServerContext = {
-    mailer: options.mailer ?? noMailer,
-    mailConfigured: Boolean(options.mailer),
+    mailer: mail,
+    get mailConfigured() {
+      return mail.configured;
+    },
     ...(options.publicUrl && { publicUrl: options.publicUrl }),
     cookieSecure: options.cookieSecure ?? true,
     allowSignup: options.allowSignup ?? true,
@@ -407,6 +424,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     registerPosAdminRoutes(tenant, deps);
     registerTemplateRoutes(tenant, deps);
     registerImportRoutes(tenant, deps);
+    registerMailRoutes(tenant, deps, ctx, mail);
   }, { prefix: '/v1' });
 
   // The till apps before anyone signs in: pairing, who can sign in, PIN sign-in (the till's own token).
@@ -437,7 +455,12 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   await app.register(async (n) => registerNetSuiteNotifyRoutes(n, deps, { ...(options.netsuite?.onNotify && { onNotify: options.netsuite.onNotify }) }), { prefix: '/v1/netsuite' });
 
   // The platform console, for our own staff.
-  await app.register(async (platform) => registerPlatformRoutes(platform, deps, ctx, billingContext), { prefix: '/v1/platform' });
+  await app.register(async (platform) => {
+    registerPlatformRoutes(platform, deps, ctx, billingContext);
+    registerPlatformMailRoutes(platform, deps, ctx, mail);
+  }, { prefix: '/v1/platform' });
+  // The link in an email that stops emails like it: no sign-in, the link's token is the permission.
+  await registerUnsubscribeRoutes(app, mail);
 
   // Paying an invoice from its link: no sign-in, the link's token is the permission.
   const slugOfTenant = async (tenantId: string) => (await db.query<{ slug: string }>('select slug from tenants where id = $1', [tenantId])).rows[0]!.slug;

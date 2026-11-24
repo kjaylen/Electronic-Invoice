@@ -1,72 +1,91 @@
 /**
- * Outgoing email: password resets, invitations, documents sent to customers.
+ * Outgoing email, as the rest of the app sees it.
  *
- *   smtpMailer(url, from)    real delivery (SMTP_URL, e.g. smtps://user:pass@smtp.example.com)
- *   outboxMailer(dir, from)  writes each message as an .eml file (local demo, development)
- *   memoryMailer()           keeps messages in memory (tests)
+ *   Mailer          what every part of the app calls: `mailer.send(message)`.
+ *                   In the running app this is the mail service (service.ts):
+ *                   it checks the message, queues it and returns; delivery,
+ *                   retries and the log happen behind it.
+ *   MailTransport   where a message finally goes when no SMTP server is set
+ *                   up: a folder of .eml files (development, the demo) or a
+ *                   list in memory (tests). Real delivery is SMTP (smtp.ts),
+ *                   from the settings saved in the app or SMTP_URL.
  *
- * Without any of them configured, routes that need email answer 503.
+ * Without any of them, routes that need email answer 503.
  */
 
 import { mkdirSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import nodemailer from 'nodemailer';
+import { composeEml, type Delivery, type MailAttachment, type OutgoingMail } from './smtp.ts';
+import type { MailType } from './types.ts';
 
-export interface MailAttachment {
-  filename: string;
-  content: Buffer | string;
-  contentType: string;
-}
+export type { MailAttachment, OutgoingMail } from './smtp.ts';
+export { simpleHtml, escapeHtml } from './layout.ts';
 
 export interface MailMessage {
+  /** What this email is (types.ts): decides who it is from and how it is treated. (Optional only until every caller names it.) */
+  type?: MailType;
+  /** The business it is from or about; its log shows it. Leave out for the platform's own. */
+  tenantId?: string | null;
   to: string;
   subject: string;
   text: string;
   html?: string;
   replyTo?: string;
   attachments?: MailAttachment[];
-  /** Extra headers, e.g. List-Unsubscribe. */
+  /** Extra headers; only List-Unsubscribe, List-Unsubscribe-Post and Auto-Submitted are kept. */
   headers?: Record<string, string>;
+  /** Who caused it, for the log. */
+  userId?: string | null;
+}
+
+export interface MailReceipt {
+  id: string;
+  /** 'suppressed': not sent, because the address is on the do-not-send list. */
+  status: 'queued' | 'sent' | 'failed' | 'suppressed';
 }
 
 export interface Mailer {
-  send(message: MailMessage): Promise<void>;
+  /** Resolves once the message is safely queued. Rejects only when it cannot be (no mail set up, a bad address). */
+  send(message: MailMessage): Promise<MailReceipt | void>;
+}
+
+export interface MailTransport {
+  deliver(mail: OutgoingMail, about: { type: MailType; tenantId: string | null }): Promise<Delivery>;
 }
 
 export class MailNotConfigured extends Error {
   override name = 'MailNotConfigured';
 }
 
-export function smtpMailer(url: string, from: string): Mailer {
-  const transport = nodemailer.createTransport(url);
-  return {
-    async send(m) {
-      await transport.sendMail({ from, ...m });
-    },
-  };
-}
-
-export function outboxMailer(dir: string, from: string): Mailer {
+/** Writes each message as an .eml file (the local demo, development). */
+export function outboxTransport(dir: string): MailTransport {
   mkdirSync(dir, { recursive: true });
-  const transport = nodemailer.createTransport({ streamTransport: true, buffer: true, newline: 'unix' });
   return {
-    async send(m) {
-      const info = await transport.sendMail({ from, ...m });
-      const name = `${new Date().toISOString().replace(/[:.]/g, '-')}-${m.to.replace(/[^a-z0-9@.-]/gi, '_')}.eml`;
+    async deliver(mail) {
+      const message = await composeEml(mail);
+      const name = `${new Date().toISOString().replace(/[:.]/g, '-')}-${mail.to.replace(/[^a-z0-9@.-]/gi, '_')}.eml`;
       // Write then rename, so anyone watching the folder never reads a half-written message.
       const tmp = join(dir, `.${name}.tmp`);
-      writeFileSync(tmp, info.message as Buffer);
+      writeFileSync(tmp, message);
       renameSync(tmp, join(dir, name));
+      return { response: `250 written to ${name}`, messageId: name };
     },
   };
 }
 
-export function memoryMailer(): Mailer & { sent: MailMessage[] } {
-  const sent: MailMessage[] = [];
+export type SentMail = OutgoingMail & { type?: MailType; tenantId?: string | null };
+
+/** Keeps messages in memory (tests). A transport for the mail service, and a Mailer on its own for code tested without one. */
+export function memoryMailer(): Mailer & MailTransport & { sent: SentMail[] } {
+  const sent: SentMail[] = [];
   return {
     sent,
     async send(m) {
-      sent.push(m);
+      sent.push({ ...m, from: '' });
+    },
+    async deliver(mail, about) {
+      sent.push({ ...mail, ...about });
+      return { response: '250 kept in memory', messageId: `<${sent.length}@memory>` };
     },
   };
 }
@@ -76,19 +95,3 @@ export const noMailer: Mailer = {
     throw new MailNotConfigured('Email is not set up on this server');
   },
 };
-
-/** Minimal HTML escaping for the few values put into email bodies. */
-export function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
-}
-
-/** A plain, readable HTML email: one heading, paragraphs, an optional button. */
-export function simpleHtml(opts: { heading: string; paragraphs: string[]; button?: { label: string; url: string } }): string {
-  const p = opts.paragraphs.map((t) => `<p style="margin:0 0 14px;line-height:1.5">${escapeHtml(t)}</p>`).join('');
-  const b = opts.button
-    ? `<p style="margin:22px 0"><a href="${escapeHtml(opts.button.url)}" style="background:#160923;color:#fbf8f1;padding:11px 20px;border-radius:999px;text-decoration:none;font-weight:600">${escapeHtml(opts.button.label)}</a></p>`
-    : '';
-  return `<!doctype html><html><body style="margin:0;background:#efe7d6;padding:24px;font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#160923">
-<div style="max-width:520px;margin:0 auto;background:#fbf8f1;border:1px solid #e0d6c3;border-radius:12px;padding:28px">
-<h1 style="font-size:20px;margin:0 0 16px">${escapeHtml(opts.heading)}</h1>${p}${b}</div></body></html>`;
-}

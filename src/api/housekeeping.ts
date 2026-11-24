@@ -27,6 +27,10 @@ import { reverseVoidedGiftCards } from '../commerce/giftcards.ts';
 
 export interface HousekeepingOptions {
   mailer?: Mailer;
+  /** Whether mail can go out right now (a mail server can be set up while the server runs). Default: yes when `mailer` is given. */
+  mailReady?: () => boolean;
+  /** Drops old rows of the email log, and old message bodies. */
+  purgeMail?: () => Promise<unknown>;
   publicUrl?: string;
   alertWebhookUrl?: string;
   environment?: string;
@@ -77,7 +81,7 @@ export async function runHousekeepingOnce(db: Queryable, options: HousekeepingOp
   if (options.recurring) await step('recurring invoices', options.recurring);
   if (options.eraseClosed) await step('closed businesses', options.eraseClosed);
   if (options.reminders) await step('reminders', options.reminders);
-  if (options.mailer) {
+  if (options.mailer && (options.mailReady?.() ?? true)) {
     const mailer = options.mailer;
     result.notifications = await step('notifications', () => runNotifications(db, { mailer, ...(options.publicUrl && { publicUrl: options.publicUrl }) }));
     await step('daily summaries', () => runDailySummaries(db, { mailer, ...(options.publicUrl && { publicUrl: options.publicUrl }) }));
@@ -94,6 +98,7 @@ export async function runHousekeepingOnce(db: Queryable, options: HousekeepingOp
   // Webhook bookkeeping: handled outbox rows after a week, deliveries after 30 days.
   await step('outbox', () => db.query("delete from event_outbox where processed_at < now() - interval '7 days'"));
   await step('deliveries', () => db.query("delete from webhook_deliveries where status <> 'pending' and created_at < now() - interval '30 days'"));
+  if (options.purgeMail) await step('email log', options.purgeMail);
   // Answers kept so a retried store order is not placed twice.
   await step('order retries', () => sweepIdempotency(db));
   await step('heartbeat', () => heartbeat(db, 'housekeeping', { notifications: result.notifications, alerts: result.alerts }));

@@ -56,7 +56,10 @@ import { runQuickBooksSync } from './integrations/quickbooks.ts';
 import { migrate, pgDatabase } from './db/database.ts';
 import { eraseDueBusinesses } from './db/closure.ts';
 import { keyringFromEnv } from './db/keystore.ts';
-import { type Mailer, noMailer, outboxMailer, smtpMailer } from './mail/mailer.ts';
+import { parseFrom } from './mail/address.ts';
+import { outboxTransport } from './mail/mailer.ts';
+import { createMailService } from './mail/service.ts';
+import { settingsFromEnv } from './mail/settings.ts';
 import { cachingClientProvider } from './pipeline/clients.ts';
 import { chromiumRenderer } from './render/browser-pdf.ts';
 import { processConnectorImports } from './connectors/imports.ts';
@@ -80,7 +83,24 @@ const pipeline = { db, keys: keyringFromEnv(env), clients };
 const defaultWebRoot = fileURLToPath(new URL('../web/dist/', import.meta.url));
 const webRoot = env.WEB_ROOT ?? (existsSync(defaultWebRoot) ? defaultWebRoot : undefined);
 const mailFrom = env.MAIL_FROM ?? 'Floreo <no-reply@localhost>';
-const mailer: Mailer | undefined = env.SMTP_URL ? smtpMailer(env.SMTP_URL, mailFrom) : env.MAIL_OUTBOX_DIR ? outboxMailer(env.MAIL_OUTBOX_DIR, mailFrom) : undefined;
+// Every email goes through the mail service: queued, sent in the background, retried, logged.
+// Its server is the one saved in the platform console; until then SMTP_URL, or an outbox of files.
+let mailError: (e: unknown) => void = (e) => console.error('mail delivery', e);
+const number = (v: string | undefined) => (v && Number.isFinite(Number(v)) ? Number(v) : undefined);
+const mail = await createMailService(db, pipeline.keys, {
+  ...(env.SMTP_URL && { envSettings: settingsFromEnv(env.SMTP_URL, mailFrom) }),
+  ...(!env.SMTP_URL && env.MAIL_OUTBOX_DIR && { transport: outboxTransport(env.MAIL_OUTBOX_DIR) }),
+  from: { name: parseFrom(mailFrom).name || 'Floreo', address: parseFrom(mailFrom).address },
+  ...(env.PUBLIC_URL && { publicUrl: env.PUBLIC_URL }),
+  background: true,
+  ...(number(env.MAIL_MAX_ATTEMPTS) && { maxAttempts: number(env.MAIL_MAX_ATTEMPTS)! }),
+  ...(number(env.MAIL_RATE_PER_HOUR) && { ratePerHour: number(env.MAIL_RATE_PER_HOUR)! }),
+  ...(number(env.MAIL_RATE_PER_DAY) && { ratePerDay: number(env.MAIL_RATE_PER_DAY)! }),
+  ...(number(env.MAIL_LOG_DAYS) && { logDays: number(env.MAIL_LOG_DAYS)! }),
+  ...(number(env.MAIL_CONTENT_DAYS) && { contentDays: number(env.MAIL_CONTENT_DAYS)! }),
+  ...(env.MAIL_ALLOW_PRIVATE_HOSTS === 'true' && { allowPrivateHosts: true }),
+  onError: (e) => mailError(e),
+});
 const objectStore = objectStoreFromEnv(env);
 // E-Kyash's API addresses, given by Belize Bank (the same for every merchant).
 const ekyash = env.EKYASH_SANDBOX_URL || env.EKYASH_LIVE_URL
@@ -93,7 +113,7 @@ const app = await buildApp({
   // NetSuite's script said a sale was saved: read it, issue it and write the answer back now.
   netsuite: { onNotify: () => hurryNetSuite() },
   pipeline,
-  ...(mailer && { mailer }),
+  mail,
   ...(env.PUBLIC_URL && { publicUrl: env.PUBLIC_URL }),
   ...(ekyash && { ekyash }),
   ...(env.ADMIN_TOKEN && { adminToken: env.ADMIN_TOKEN }),
@@ -114,7 +134,8 @@ const app = await buildApp({
   logger: true,
 });
 if (applied.length) app.log.info({ applied }, 'database migrations applied');
-if (!mailer) app.log.warn('No SMTP_URL or MAIL_OUTBOX_DIR: password reset and emailing documents are off');
+mailError = (e) => app.log.error({ err: e }, 'mail delivery');
+if (!mail.configured) app.log.warn('No mail server yet (set one up in the platform console under Email, or set SMTP_URL): password reset and emailing documents are off');
 if (!env.PUBLIC_URL) app.log.warn('No PUBLIC_URL: password reset, welcome links and share links are off');
 
 const intervalMs = Number(env.WORKER_INTERVAL_MS ?? 60_000);
@@ -128,8 +149,10 @@ const worker = intervalMs > 0
 
 const billingSettings = { ...(env.PLATFORM_BILLING_TENANT && { tenantSlug: env.PLATFORM_BILLING_TENANT }), ...(env.PLATFORM_PAYMENT_INSTRUCTIONS && { paymentInstructions: env.PLATFORM_PAYMENT_INSTRUCTIONS }) };
 const backgroundCtx = {
-  mailer: mailer ?? noMailer,
-  mailConfigured: Boolean(mailer),
+  mailer: mail,
+  get mailConfigured() {
+    return mail.configured;
+  },
   ...(env.PUBLIC_URL && { publicUrl: env.PUBLIC_URL }),
   cookieSecure: env.COOKIE_SECURE !== 'false',
   allowSignup: env.ALLOW_SIGNUP !== 'false',
@@ -149,13 +172,18 @@ const housekeeping = housekeepingMs > 0
       eraseClosed: async () => {
         for (const e of await eraseDueBusinesses(db, { ...(objectStore && { objects: objectStore }), onError: (id, err) => app.log.error({ tenantId: id, err }, 'could not erase a closed business') })) app.log.info({ slug: e.slug, rows: e.rows, files: e.files }, 'closed business erased');
       },
-      ...(mailer && { mailer }),
+      mailer: mail,
+      mailReady: () => mail.configured,
+      purgeMail: () => mail.purge(),
       ...(env.PUBLIC_URL && { publicUrl: env.PUBLIC_URL }),
       ...(env.ALERT_WEBHOOK_URL && { alertWebhookUrl: env.ALERT_WEBHOOK_URL }),
       ...(env.DEPLOY_ENVIRONMENT && { environment: env.DEPLOY_ENVIRONMENT }),
       onError: (step, e) => app.log.error({ step, err: e }, 'housekeeping failure'),
     })
   : undefined;
+
+// Email goes out from the process that runs the worker: every few seconds, and at once when a message is queued here.
+if (intervalMs > 0) mail.start(Number(env.MAIL_INTERVAL_MS ?? 5_000));
 
 // Webhooks go out from the process that runs the worker.
 const webhooks = intervalMs > 0
@@ -245,6 +273,7 @@ const shutdown = async (signal: string) => {
   if (connectorTimer) clearInterval(connectorTimer);
   if (netsuiteTimer) clearInterval(netsuiteTimer);
   await housekeeping?.stop();
+  await mail.stop();
   await app.close();
   clients.closeAll();
   await db.close();
