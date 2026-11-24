@@ -12,6 +12,7 @@
  *   PLATFORM_BILLING_TENANT        address (slug) of the platform's own business, which issues subscribers' e-invoices
  *   PLATFORM_PAYMENT_INSTRUCTIONS  how subscribers pay (bank details), shown on the plan page and invoices
  *   API_RATE_LIMIT_PER_MINUTE   requests per minute per API key (default 600)
+ *   STORE_RATE_LIMIT_PER_MINUTE requests per minute for one publishable key from one visitor, on the store API (default 300)
  *   WEBHOOK_INTERVAL_MS         how often webhooks are sent, from the worker's process (default 5000)
  *   STORE_DOMAIN_TARGET         the host businesses point their store domains at (CNAME), e.g. stores.example.bz
  *   QBO_CLIENT_ID, QBO_CLIENT_SECRET, QBO_ENVIRONMENT   the platform's Intuit app (QuickBooks Online integration); needs PUBLIC_URL
@@ -99,6 +100,7 @@ const app = await buildApp({
   ...(env.METRICS_TOKEN && { metricsToken: env.METRICS_TOKEN }),
   ...(objectStore && { objectStore }),
   ...(env.API_RATE_LIMIT_PER_MINUTE && { apiRateLimitPerMinute: Number(env.API_RATE_LIMIT_PER_MINUTE) }),
+  ...(env.STORE_RATE_LIMIT_PER_MINUTE && { storeRateLimitPerMinute: Number(env.STORE_RATE_LIMIT_PER_MINUTE) }),
   ...(env.STORE_DOMAIN_TARGET && { storeDomainTarget: env.STORE_DOMAIN_TARGET }),
   ...(quickbooksApp && { quickbooks: quickbooksApp }),
   site: { legalName: env.LEGAL_NAME || 'Altiora Technologies', ...(env.CONTACT_EMAIL && { contactEmail: env.CONTACT_EMAIL }) },
