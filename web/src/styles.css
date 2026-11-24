@@ -378,6 +378,7 @@ td .num, td.right { font-family: var(--figures); font-variant-numeric: tabular-n
 .badge.authorized::before { background: var(--success-dot); }
 .badge.rejected { background: var(--coral-soft); color: var(--coral-ink); border-color: var(--coral-line); }
 .badge.pending, .badge.contingency_pending { background: var(--ochre-soft); color: var(--ochre-ink); border-color: var(--ochre-line); }
+.badge.on_till { background: var(--brand-soft); color: var(--brand-ink); border-color: var(--brand-line); }
 .badge.pending::before, .badge.contingency_pending::before { animation: breathe 1.8s ease-in-out infinite; background: var(--ochre); }
 .badge.cancelled, .badge.superseded { background: var(--sheet-2); color: var(--muted); border-color: var(--hairline); }
 .badge.test { background: var(--brand-soft); color: var(--brand); border-color: var(--brand-line); }

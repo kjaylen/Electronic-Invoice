@@ -18,6 +18,7 @@ import { ShiftBar } from './Shifts';
 import { type FormEvent, type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { api, ApiError, type Customer, type DocumentDetailInfo, type DocumentInfo, type Item, link, type Page } from '../api';
+import { useConnectivity } from '../connectivity';
 import { useT } from '../i18n';
 import { printPdf } from '../print';
 import { useSession } from '../session';
@@ -171,6 +172,8 @@ export function CounterPanel(props: {
   const t = useT();
   const toast = useToast();
   const { me, session, can } = useSession();
+  // On a till without the server: cash, card and transfer only (gift cards, points and accounts need it).
+  const { serverFeatures } = useConnectivity();
   const storageKey = `etd.counter.${session?.business.id}.${session?.user.id}`;
   // Held sales are shared by every till of the business (they used to stay on the device: those are moved up once).
   const heldKey = `etd.counter.held.${session?.business.id}`;
@@ -366,7 +369,7 @@ export function CounterPanel(props: {
   const giftApplied = gift && totals ? (toCents(gift.balance) < totalCents ? toCents(gift.balance) : totalCents) : 0n;
   const rest = totalCents - giftApplied;
   // Payment: cash (with change), card, transfer, split (card or transfer plus cash), or the customer's account.
-  const means: Means = (sale.meansCode === 'account' && !sale.customer) || (gift && (sale.meansCode === 'split' || sale.meansCode === 'account')) ? '10' : sale.meansCode;
+  const means: Means = (sale.meansCode === 'account' && (!sale.customer || !serverFeatures)) || (gift && (sale.meansCode === 'split' || sale.meansCode === 'account')) ? '10' : sale.meansCode;
   const splitOther = means === 'split' && sale.split && MONEY.test(sale.split.amount) ? toCents(sale.split.amount) : null;
   const splitOk = means !== 'split' || (splitOther !== null && splitOther > 0n && splitOther < totalCents);
   const cashDue = gift && rest === 0n ? null : means === '10' ? rest : means === 'split' && splitOther !== null ? totalCents - splitOther : null;
@@ -506,7 +509,7 @@ export function CounterPanel(props: {
     }
   };
 
-  const meansOptions: Array<[Means, string]> = [['10', t('Cash')], ['48', t('Card')], ['30', t('Transfer')], ...(sale.giftCard ? [] : [['split', t('Split')] as [Means, string], ...(sale.customer ? [['account', t('On account')] as [Means, string]] : [])])];
+  const meansOptions: Array<[Means, string]> = [['10', t('Cash')], ['48', t('Card')], ['30', t('Transfer')], ...(sale.giftCard ? [] : [['split', t('Split')] as [Means, string], ...(sale.customer && serverFeatures ? [['account', t('On account')] as [Means, string]] : [])])];
   const lineNet = (l: CartLine) => {
     const i = valid.indexOf(l);
     if (previewFresh && preview && i >= 0 && preview.lines[i]) return preview.lines[i]!.net;
@@ -594,7 +597,7 @@ export function CounterPanel(props: {
                 )}
                 {props.lastSaleActions?.(last.doc)}
               </div>
-              {['authorized', 'authorized_with_alert', 'contingency_pending'].includes(last.doc.status) && <EmailReceipt key={last.doc.id} doc={last.doc} initial={last.email ?? ''} />}
+              {serverFeatures && ['authorized', 'authorized_with_alert', 'contingency_pending'].includes(last.doc.status) && <EmailReceipt key={last.doc.id} doc={last.doc} initial={last.email ?? ''} />}
             </div>
           )}
         </div>
@@ -662,7 +665,9 @@ export function CounterPanel(props: {
             );
           })()}
 
-          <GiftCardTender gift={gift} applied={giftApplied} rest={rest} disabled={!sale.lines.length} onUse={(g) => set({ giftCard: g })} onRemove={() => set({ giftCard: undefined })} />
+          {serverFeatures || gift
+            ? <GiftCardTender gift={gift} applied={giftApplied} rest={rest} disabled={!sale.lines.length || !serverFeatures} onUse={(g) => set({ giftCard: g })} onRemove={() => set({ giftCard: undefined })} />
+            : <p className="small offline-note">{t('Offline: cash, card and transfer sales work and are sent when the connection is back. Gift cards, points and sales on account need a connection.')}</p>}
           {!(gift && rest === 0n) && <Segmented label={gift ? t('The rest') : t('Payment')} value={means} onChange={(v) => set({ meansCode: v })} options={meansOptions} />}
           {means === 'split' && (
             <div className="tender split">
