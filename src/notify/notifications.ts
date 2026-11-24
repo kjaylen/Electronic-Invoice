@@ -73,7 +73,7 @@ async function send(options: NotifyOptions, db: Queryable, business: Business, m
   const text = [...message.paragraphs, ...(url ? [url] : []), '', footer].join('\n\n');
   const html = simpleHtml({ heading: message.heading, paragraphs: [...message.paragraphs, footer], ...(url && message.button && { button: { label: message.button.label, url } }) });
   for (const to of await recipients(db, business)) {
-    await options.mailer.send({ to, subject: `${business.name}: ${message.subject}`, text, html, replyTo: business.email });
+    await options.mailer.send({ type: 'notice', tenantId: business.id, to, subject: `${business.name}: ${message.subject}`, text, html, replyTo: business.email });
   }
 }
 

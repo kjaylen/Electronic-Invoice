@@ -195,7 +195,7 @@ export async function runDailySummaries(db: Queryable, options: DailyOptions): P
       const html = simpleHtml({ heading: longDay(day), paragraphs: [...paragraphs, footer], ...(url && { button: { label: 'Open the reports', url } }) });
       const text = [longDay(day), ...paragraphs, ...(url ? [url] : []), '', footer].join('\n\n');
       for (const to of await recipients(db, { id: t.id, slug: t.slug, name: t.name, email: t.email })) {
-        await options.mailer.send({ to, subject, text, html, replyTo: t.email });
+        await options.mailer.send({ type: 'daily-summary', tenantId: t.id, to, subject, text, html, replyTo: t.email });
       }
       result.sent++;
     } catch {
