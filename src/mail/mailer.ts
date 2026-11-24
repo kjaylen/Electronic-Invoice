@@ -15,7 +15,8 @@
 
 import { mkdirSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { composeEml, type Delivery, type MailAttachment, type OutgoingMail } from './smtp.ts';
+import { settingsFromEnv } from './settings.ts';
+import { composeEml, type Delivery, type MailAttachment, type OutgoingMail, smtpSend } from './smtp.ts';
 import type { MailType } from './types.ts';
 
 export type { MailAttachment, OutgoingMail } from './smtp.ts';
@@ -75,16 +76,29 @@ export function outboxTransport(dir: string): MailTransport {
 
 export type SentMail = OutgoingMail & { type?: MailType; tenantId?: string | null };
 
-/** Keeps messages in memory (tests). A transport for the mail service, and a Mailer on its own for code tested without one. */
+/**
+ * Keeps messages in memory (tests). A transport for the mail service, and a Mailer on its own for code tested without one.
+ *
+ * To look at what the tests send: with MAIL_MIRROR_SMTP=smtp://127.0.0.1:1025 set, every message kept here
+ * is also sent to that server, which must be a mail catcher (`npm run mail:proof` does this for the whole suite).
+ */
 export function memoryMailer(): Mailer & MailTransport & { sent: SentMail[] } {
   const sent: SentMail[] = [];
+  const mirrorTo = process.env.MAIL_MIRROR_SMTP;
+  const mirror = async (mail: OutgoingMail, type: MailType) => {
+    if (!mirrorTo) return;
+    const server = settingsFromEnv(mirrorTo, 'Floreo <no-reply@localhost>');
+    await smtpSend(server, { ...mail, from: mail.from || 'Floreo <no-reply@localhost>', headers: { ...mail.headers, 'X-Floreo-Type': type } }, { connectTimeoutMs: 5000 }).catch(() => {});
+  };
   return {
     sent,
     async send(m) {
       sent.push({ ...m, from: '' });
+      await mirror({ from: '', to: m.to, subject: m.subject, text: m.text, html: m.html, replyTo: m.replyTo, attachments: m.attachments, headers: m.headers }, m.type);
     },
     async deliver(mail, about) {
       sent.push({ ...mail, ...about });
+      await mirror(mail, about.type);
       return { response: '250 kept in memory', messageId: `<${sent.length}@memory>` };
     },
   };

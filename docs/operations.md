@@ -13,7 +13,7 @@ do when something goes wrong.
 | Housekeeping | Recurring invoices, notification emails, payment reminders to businesses' customers, operations alerts, clean-up | inside the app server (`HOUSEKEEPING_INTERVAL_MS`) |
 | PostgreSQL 16 | Everything, including the signed XML (the legal record) | managed service recommended |
 | Object storage + CDN | Product photos (optional) | S3, R2, Spaces, MinIO |
-| SMTP | Password links, documents, notices | any provider |
+| SMTP | Every email, through one queue (see the README's Email section) | any provider; set in the platform console under Email, or `SMTP_URL` |
 
 Settings are environment variables; `deploy/env.example` lists them all with
 comments. A single machine can run `deploy/docker-compose.prod.yml`.

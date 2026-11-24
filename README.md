@@ -122,8 +122,8 @@ Local database: `docker compose up -d db`, then `DATABASE_URL=postgres://einvoic
 | `COOKIE_SECURE` | `false` only for local plain-HTTP development; default `true` |
 | `ALLOW_SIGNUP` | `false` to close self-service sign-up |
 | `PUBLIC_URL` | Public address of the web app, e.g. `https://app.example.bz`. Links in emails and share links are built from it, never from the request's Host header. Without it, password reset, welcome links and share links are off |
-| `SMTP_URL`, `MAIL_FROM` | Outgoing mail (password resets, welcome links, documents), e.g. `smtps://user:pass@smtp.example.com:465` |
-| `MAIL_OUTBOX_DIR` | Instead of SMTP, write each email as an `.eml` file here (development and the demo) |
+| `SMTP_URL`, `MAIL_FROM` | The platform's mail server until one is saved in the platform console (Email), e.g. `smtps://user:pass@smtp.example.com:465`. See [Email](#email-srcmail-srcapimailts-websrcpagesemailtsx) for the rest (`MAIL_*`) |
+| `MAIL_OUTBOX_DIR` | Without `SMTP_URL`: write each email as an `.eml` file here instead of sending it |
 | `PDF_RENDERER` | `chromium` to print documents from the businesses' templates (the Docker image sets it). Unset: the built-in layouts |
 | `CHROMIUM_PATH`, `CHROMIUM_CHANNEL` | The browser that prints them: a Chromium or Chrome at a path, or an installed `chrome` / `msedge`. Default: the one `npx playwright install chromium` downloads |
 | `KEY_ENCRYPTION_KEYS_PREVIOUS` | While rotating the key: older keys still accepted for reading, comma separated |
@@ -333,7 +333,7 @@ npm run demo            # http://localhost:4300 (PORT to change it)
 - **Business and certificate:** on the start page choose "Create a business", use TIN **123456**, and upload `test/certs/signer-123456.pfx`, password `test-pfx-password`. This is a throwaway test certificate. Then add users under Settings → Users.
 - **BTS stand-in:** it authorizes every document.
 - **Outage simulation:** create the file `.demo/bts-down` and new documents go into contingency. Delete it, and the worker sends them within about 15 seconds.
-- **Emails** (password resets, welcome links, documents, order confirmations) are written to `.demo/outbox` as `.eml` files; open them with any mail program.
+- **Emails** (password resets, welcome links, documents, order confirmations) are sent by SMTP to a mail catcher the demo starts: nothing reaches a real person. Read them at `http://localhost:4380`, or as `.eml` files in `.demo/outbox`. To try a business's own mail server, enter `127.0.0.1`, port `4325`, no encryption in Settings → Email.
 - **Platform console:** `http://localhost:4300/admin`; the demo creates a staff account on first start and saves its sign-in in `.demo/platform-admin.txt`.
 - **Online store:** add a product under Products, then Settings → Online store → Open the store, and shop at `http://localhost:4300/<your-address>/shop`. Mark the order paid under Orders to issue its receipt.
 
@@ -555,6 +555,39 @@ All three are the same web code (`web/src/pos`). It reuses the counter and the s
   - `test/till-print.test.ts`: a real receipt as ESC/POS and HTML, the Z report.
   - The e2e till test: pair from the link, PIN, shift, scan, sell, lock.
   - `apps/desktop` `npm run smoke`.
+
+## Email (`src/mail`, `src/api/mail.ts`, `web/src/pages/Email.tsx`)
+
+Every email leaves through one mail service. `mailer.send({ type, tenantId, to, subject, text, html })` checks the message, writes it to `mail_messages` and returns; delivery happens in the background, so a slow or dead mail server never holds up a checkout or a sign-up. Nothing but `src/mail/smtp.ts` talks SMTP (nodemailer), and a test keeps it so.
+
+- **Where it goes.** An email from a business (invoices, order confirmations, reminders) goes through that business's own mail server when it has set one up in **Settings → Email**. Otherwise, or when its server fails, it goes through the platform's server with the business's name as the from name and the business's address as the reply-to. Emails from the platform itself (sign-in links, invitations, notices, billing) always go through the platform's server. The platform's server is set in the **platform console → Email**; until something is saved there, `SMTP_URL` and `MAIL_FROM` are used, as before.
+- **Settings**, the same for both: server, port, encryption (none, STARTTLS, SSL/TLS), username, password, from name, from address, reply-to. Each field is checked and explained in plain words. Presets fill in Gmail / Google Workspace, Outlook / Microsoft 365, Zoho and Amazon SES, with a note where an app password is needed. The password is encrypted with `KEY_ENCRYPTION_KEY`, bound to its row, and never returned: the form shows it as saved, with "Replace". A business's server must be a public address on port 25, 465, 587 or 2525.
+- **Send test email** sends a real message outside the queue and shows the server's own answer, or its refusal with the likely cause (wrong password, blocked port, encryption that does not match the port, a from address the server will not send as).
+- **The queue.** A temporary failure is tried again after 1 minute, 5 minutes, 30 minutes and 2 hours, and the message is marked failed after 5 attempts (`MAIL_MAX_ATTEMPTS`). A refusal that will not change fails at once. Several server processes can deliver at the same time: each message is claimed by one. A business's server that fails three times in a row is left alone for 15 minutes, and the business is emailed once about it.
+- **The log** (the same table): recipient, subject, type, status, error, times; staff see every business's, a business sees its own. "Send again" queues a copy while the message's body is kept (30 days, `MAIL_CONTENT_DAYS`); the log itself is kept 90 days (`MAIL_LOG_DAYS`). An email whose text holds a link or code that lets someone in (password reset, sign-in code, gift card, account link) has its body deleted once it is delivered, is never resent, and is not sent at all once the link or code has stopped working.
+- **Safeguards.** One recipient per message, checked. Nothing with a line break reaches a header. Each business may send 300 emails an hour and 2,000 a day (`MAIL_RATE_PER_HOUR`, `MAIL_RATE_PER_DAY`); more wait their turn. An address a mail server says does not exist goes on that business's do-not-send list. Emails that are not transactional (checkout reminders, the daily summary) carry an unsubscribe link and the one-click header, and are not sent to people who used it.
+- **Templates.** The twelve emails a business's customers get are Liquid templates it can edit and preview under Templates. Emails built in code share one layout (`src/mail/layout.ts`), with an HTML and a plain-text version and every value escaped.
+- **Deliverability.** Both settings pages explain SPF, DKIM and DMARC and check the sending domain's DNS for them.
+- **Types.** `src/mail/types.ts` lists every email the platform sends: who it is from, whether a person can opt out of it, whether it holds a secret. An email not in the list does not compile.
+
+| Variable | |
+|---|---|
+| `SMTP_URL`, `MAIL_FROM` | The platform's mail server until one is saved in the console, e.g. `smtps://user:pass@smtp.example.com:465` |
+| `MAIL_OUTBOX_DIR` | Without `SMTP_URL`: write each email as an `.eml` file here instead of sending it |
+| `MAIL_MAX_ATTEMPTS` | Attempts before a message is marked failed. Default `5` |
+| `MAIL_RATE_PER_HOUR`, `MAIL_RATE_PER_DAY` | What one business may send. Defaults `300` and `2000` |
+| `MAIL_LOG_DAYS`, `MAIL_CONTENT_DAYS` | How long the log, and message bodies, are kept. Defaults `90` and `30` |
+| `MAIL_INTERVAL_MS` | How often the queue is looked at. Default `5000` (a message is also tried the moment it is queued) |
+| `MAIL_ALLOW_PRIVATE_HOSTS` | `true` lets a business's server be a private address on any port. Development only |
+
+**Never send test email to real people.** `npm run demo` and the browser tests start a mail catcher (`test/mail-catcher.ts`): an SMTP server that keeps what it is given and delivers nothing, with a page to look at it (`http://localhost:4380` for the demo). `npm run mail:catch` runs one by hand on port 1025 (page on 1080). `npm run mail:proof` runs the tests with their mail mirrored to a catcher and lists one of every type to look at.
+
+### Going live with email
+
+1. In the platform console (`/admin` → Email), choose your provider, enter the server's details and a from address on your own domain, save, and press **Send test email**.
+2. Open **Deliverability** on the same page and add the three DNS records it asks for at your domain's DNS host: SPF (a TXT record at the domain that lists your mail provider), DKIM (the record your provider gives you when you turn signing on), DMARC (a TXT record at `_dmarc.<domain>`, `v=DMARC1; p=none; rua=mailto:...` to start). Press **Check again** until all three say "In place".
+3. Remove `SMTP_URL` from the server's environment if you like: the saved settings have taken over. Keep `PUBLIC_URL` set, or unsubscribe links cannot be made.
+4. Each business that wants to send from its own address does the same two steps in Settings → Email, for its own domain.
 
 ## Platform console (`/admin`)
 

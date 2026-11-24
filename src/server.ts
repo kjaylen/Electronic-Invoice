@@ -29,9 +29,14 @@
  *   COOKIE_SECURE        "false" only for local plain-HTTP development; default true
  *   ALLOW_SIGNUP         "false" to close self-service sign-up; default true
  *   PUBLIC_URL           public address of the web app (links in emails, share links), e.g. https://app.example.bz
- *   SMTP_URL             outgoing mail server, e.g. smtps://user:pass@smtp.example.com:465
- *   MAIL_FROM            sender address, e.g. "Floreo <no-reply@example.bz>"
- *   MAIL_OUTBOX_DIR      instead of SMTP: write each email as an .eml file here (development)
+ *   SMTP_URL             the platform's mail server until one is saved in the platform console, e.g. smtps://user:pass@smtp.example.com:465
+ *   MAIL_FROM            its sender, e.g. "Floreo <no-reply@example.bz>"
+ *   MAIL_OUTBOX_DIR      without SMTP_URL: write each email as an .eml file here (development)
+ *   MAIL_MAX_ATTEMPTS    attempts before an email is marked failed, default 5
+ *   MAIL_RATE_PER_HOUR, MAIL_RATE_PER_DAY   what one business may send, default 300 and 2000
+ *   MAIL_LOG_DAYS, MAIL_CONTENT_DAYS        days the email log and message bodies are kept, default 90 and 30
+ *   MAIL_INTERVAL_MS     how often the mail queue is looked at, default 5000
+ *   MAIL_ALLOW_PRIVATE_HOSTS  "true": a business's mail server may be a private address (development)
  *   PDF_RENDERER         "chromium" to print documents from the businesses' templates (needs a Chromium:
  *                        `npx playwright install chromium`); unset: the built-in layouts
  *   CHROMIUM_PATH        a Chromium or Chrome to use instead of Playwright's

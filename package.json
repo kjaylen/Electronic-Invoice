@@ -20,6 +20,7 @@
     "web:compress": "node --disable-warning=ExperimentalWarning scripts/compress-web.ts",
     "demo": "node --disable-warning=ExperimentalWarning scripts/demo.ts",
     "mail:catch": "node --disable-warning=ExperimentalWarning scripts/mail-catcher.ts",
+    "mail:proof": "node --disable-warning=ExperimentalWarning scripts/mail-proof.ts",
     "icons": "node --disable-warning=ExperimentalWarning scripts/make-icons.ts",
     "e2e": "npm run web:build && playwright test",
     "platform-admin": "node --disable-warning=ExperimentalWarning scripts/platform-admin.ts",

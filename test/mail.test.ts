@@ -847,3 +847,36 @@ test('only src/mail/smtp.ts talks to nodemailer, and every email names a type in
     assert.ok(def.label && (def.sender === 'business' || def.sender === 'platform'), key);
   }
 });
+
+// ---------- the templates a business can edit ----------
+
+test('every email template renders with hostile values as text, and with values missing as a tidy email', async () => {
+  const { TEMPLATES } = await import('../src/templates/catalog.ts');
+  const { businessContext, renderEmail, sampleContext } = await import('../src/templates/render.ts');
+  await withMail(async ({ f }) => {
+    const evil = '<script>alert(1)</script>"><img src=x onerror=alert(2)>';
+    // A business and a customer whose names are markup.
+    await f.db.query('update tenants set trade_name = $2 where id = $1', [f.tenantA, evil]);
+    const biz = await businessContext(f.db, f.tenantA);
+    const hostile = (value: unknown): unknown => (typeof value === 'string' ? (/^https?:/.test(value) ? value : evil) : Array.isArray(value) ? value.map(hostile)
+      : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).map(([k, v]) => [k, hostile(v)])) : value);
+    const emails = TEMPLATES.filter((t) => t.group === 'emails');
+    assert.equal(emails.length, 12);
+    for (const def of emails) {
+      for (const lang of ['en', 'es'] as const) {
+        const { context } = await sampleContext(def, biz, lang);
+        const mail = await renderEmail(f.db, f.tenantA, def.key, hostile(context) as Record<string, unknown>, { publicUrl: PUBLIC_URL, lang });
+        assert.ok(!/<script/i.test(mail.html), `${def.key} ${lang}: a script tag got through`);
+        assert.ok(!/<img src=x/i.test(mail.html) && !/onerror=alert\(2\)>/.test(mail.html.replace(/&[a-z]+;/g, '')), `${def.key} ${lang}: markup got through`);
+        assert.ok(mail.html.includes('&lt;script&gt;'), `${def.key} ${lang}: the value is there, as text`);
+        assert.ok(!/[\r\n]/.test(mail.subject), `${def.key} ${lang}: a subject is one line`);
+        assert.ok(mail.text.trim().length > 20, `${def.key} ${lang}: a plain-text version`);
+        assert.match(mail.html, /max-width:\d+px/, `${def.key} ${lang}: sized for a phone`);
+
+        // Nothing given at all: no crash, no "undefined", no leftover template syntax.
+        const bare = await renderEmail(f.db, f.tenantA, def.key, {}, { publicUrl: PUBLIC_URL, lang });
+        assert.ok(!/undefined|\[object Object\]|\{\{|\{%/.test(bare.html + bare.subject + bare.text), `${def.key} ${lang}: missing values leave a tidy email`);
+      }
+    }
+  });
+});
