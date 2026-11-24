@@ -59,7 +59,7 @@ export function DifferenceText({ difference }: { difference: string | null }) {
 
 // ---------- the bar at the top of the counter ----------
 
-export function ShiftBar({ refreshKey }: { refreshKey?: string | null } = {}) {
+export function ShiftBar({ refreshKey, openElsewhere = 0 }: { refreshKey?: string | null; /** Shifts open on tills (or by someone else), so "no shift open" is not said beside a list that shows one. */ openElsewhere?: number } = {}) {
   const t = useT();
   const navigate = useNavigate();
   const [current, setCurrent] = useState<{ shift: Shift | null; report: ShiftReport | null } | null>(null);
@@ -85,7 +85,7 @@ export function ShiftBar({ refreshKey }: { refreshKey?: string | null } = {}) {
         </div>
       ) : (
         <div className="shift-bar">
-          <span>{t('No shift open. Open one to count the drawer at the end of the day.')}</span>
+          <span>{openElsewhere === 0 ? t('No shift open. Open one to count the drawer at the end of the day.') : openElsewhere === 1 ? t('You have no shift open here. One is open on a till or by someone else: it is in the list below.') : t('You have no shift open here. {n} are open on tills or by others: they are in the list below.', { n: openElsewhere })}</span>
           <span className="spacer" />
           <button type="button" className="small-button" onClick={() => setDialog('open')}>{t('Open shift')}</button>
         </div>
@@ -330,7 +330,7 @@ export function Shifts() {
         <span className="spacer" />
         <Link className="button secondary" to="/counter" viewTransition>{t('Counter')}</Link>
       </div>
-      <ShiftBar key={current?.shift?.id ?? 'none'} />
+      <ShiftBar key={current?.shift?.id ?? 'none'} openElsewhere={(history ?? []).filter((s) => s.status === 'open' && s.id !== current?.shift?.id).length} />
       <ErrorText error={error} />
       {current?.shift && current.report && (
         <>

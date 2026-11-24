@@ -3529,4 +3529,6 @@ export const ES: Record<string, string> = {
   "Remove “{name}” from your saved sections? Pages that use it keep their copy.": "¿Quitar “{name}” de sus secciones guardadas? Las páginas que la usan conservan su copia.",
   "Describe the picture": "Describa la imagen",
   "For people who cannot see it, and for search engines. Leave empty if it is only decoration.": "Para quienes no pueden verla y para los buscadores. Déjelo vacío si es solo decoración.",
+  "You have no shift open here. One is open on a till or by someone else: it is in the list below.": "No tiene un turno abierto aquí. Hay uno abierto en una caja o por otra persona: está en la lista de abajo.",
+  "You have no shift open here. {n} are open on tills or by others: they are in the list below.": "No tiene un turno abierto aquí. Hay {n} abiertos en cajas o por otras personas: están en la lista de abajo.",
 };
