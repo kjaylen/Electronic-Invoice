@@ -8,6 +8,7 @@
  * Every step is safe to run from several processes at once.
  */
 
+import { sweepIdempotency } from './idempotency.ts';
 import { type BillingContext, type BillingRunResult, runBilling } from '../billing/billing.ts';
 import type { Queryable } from '../db/database.ts';
 import { sweepRateLimits } from '../db/ratelimit.ts';
@@ -93,6 +94,8 @@ export async function runHousekeepingOnce(db: Queryable, options: HousekeepingOp
   // Webhook bookkeeping: handled outbox rows after a week, deliveries after 30 days.
   await step('outbox', () => db.query("delete from event_outbox where processed_at < now() - interval '7 days'"));
   await step('deliveries', () => db.query("delete from webhook_deliveries where status <> 'pending' and created_at < now() - interval '30 days'"));
+  // Answers kept so a retried store order is not placed twice.
+  await step('order retries', () => sweepIdempotency(db));
   await step('heartbeat', () => heartbeat(db, 'housekeeping', { notifications: result.notifications, alerts: result.alerts }));
   return result;
 }

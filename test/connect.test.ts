@@ -381,3 +381,69 @@ test('paying online from another site: the buyer comes back to it, and the order
     assert.match(retry.json().url, /^https:\/\/app\.example\.test\//);
     assert.match((await c.app.inject({ method: 'POST', url: `/v1/store/${c.slug}/test-payments/${retry.json().paymentId}`, payload: { decision: 'approved' } })).json().returnUrl, /^https:\/\/www\.reefgoods\.example\/thanks\?floreo_order=/);
   }));
+
+test('a retried order is not placed twice: Idempotency-Key on store orders', () =>
+  withSite(async (c) => {
+    const key = await c.newKey();
+    const orders = `/v1/store/${c.slug}/orders`;
+    const body = { lines: [{ variantId: c.variants[0], quantity: 1 }], fulfillment: 'pickup', paymentMethod: 'bank_transfer', customer: { name: 'Ana Buyer', phone: '+501 610-0000' } };
+    const send = (payload: unknown, idempotency?: string) => c.from(LOCAL, orders, { method: 'POST', key: key.key, payload, ...(idempotency && { headers: { 'idempotency-key': idempotency } }) });
+    const count = async () => (await c.f.db.query('select 1 from orders')).rows.length;
+
+    const first = await send(body, 'checkout-1');
+    assert.equal(first.statusCode, 201, first.body);
+    assert.equal(first.headers['idempotent-replayed'], undefined);
+    const again = await send(body, 'checkout-1');
+    assert.equal(again.statusCode, 201);
+    assert.equal(again.headers['idempotent-replayed'], 'true');
+    assert.deepEqual(again.json(), first.json(), 'the first answer, token and all');
+    assert.match(String(again.headers['access-control-expose-headers']), /Idempotent-Replayed/);
+    assert.equal(await count(), 1);
+
+    // The same key for something else is a mistake, said as one.
+    const other = await send({ ...body, lines: [{ variantId: c.variants[1], quantity: 2 }] }, 'checkout-1');
+    assert.equal(other.statusCode, 422);
+    assert.equal(code(other), 'idempotency_key_reused');
+    assert.equal(await count(), 1);
+
+    // An order that was refused frees its key: the corrected one goes through with it.
+    const refused = await send({ ...body, lines: [{ variantId: c.variants[0], quantity: 500 }] }, 'checkout-2');
+    assert.equal(refused.statusCode, 409, refused.body);
+    assert.equal(code(refused), 'out_of_stock');
+    const corrected = await send({ ...body, lines: [{ variantId: c.variants[0], quantity: 2 }] }, 'checkout-2');
+    assert.equal(corrected.statusCode, 201, corrected.body);
+    assert.equal(await count(), 2);
+
+    // Without a key, as before: each request is an order.
+    assert.equal((await send(body)).statusCode, 201);
+    assert.equal((await send(body)).statusCode, 201);
+    assert.equal(await count(), 4);
+
+    // The answer is kept sealed (it carries the buyer's link token), and not for long.
+    const kept = (await c.f.db.query<{ key: string; response_body: Record<string, unknown> }>(`select key, response_body from idempotency_keys where key like 'store-order:%' order by key`)).rows;
+    assert.deepEqual(kept.map((k) => k.key), ['store-order:checkout-1', 'store-order:checkout-2']);
+    assert.deepEqual(Object.keys(kept[0]!.response_body), ['sealed']);
+    assert.ok(!JSON.stringify(kept[0]!.response_body).includes(first.json().token));
+    assert.equal((await send(body, 'x'.repeat(201))).statusCode, 400);
+  }));
+
+test('orders for the business page like the rest of the API: limit and cursor', () =>
+  withSite(async (c) => {
+    const body = { lines: [{ variantId: c.variants[0], quantity: 1 }], fulfillment: 'pickup', paymentMethod: 'bank_transfer', customer: { name: 'Ana Buyer', phone: '+501 610-0000' } };
+    for (let i = 0; i < 5; i++) assert.equal((await c.app.inject({ method: 'POST', url: `/v1/store/${c.slug}/orders`, payload: body })).statusCode, 201);
+    const all = (await c.app.inject({ method: 'GET', url: '/v1/orders?view=all', headers: c.owner })).json();
+    assert.equal(all.data.length, 5);
+    assert.equal(all.nextCursor, null);
+    assert.ok(all.counts, 'the counts are still there');
+
+    const numbers: number[] = [];
+    let cursor: string | null = null;
+    do {
+      const page: { data: Array<{ number: number }>; nextCursor: string | null } = (await c.app.inject({ method: 'GET', url: `/v1/orders?view=all&limit=2${cursor ? `&cursor=${cursor}` : ''}`, headers: c.owner })).json();
+      assert.ok(page.data.length <= 2);
+      numbers.push(...page.data.map((o) => o.number));
+      cursor = page.nextCursor;
+    } while (cursor);
+    assert.deepEqual(numbers, [1005, 1004, 1003, 1002, 1001], 'every order once, newest first');
+    assert.equal((await c.app.inject({ method: 'GET', url: '/v1/orders?cursor=nonsense', headers: c.owner })).statusCode, 400);
+  }));

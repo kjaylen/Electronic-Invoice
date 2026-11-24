@@ -67,6 +67,7 @@ import { sessionFromRequest } from './auth.ts';
 import { can } from './permissions.ts';
 import { publicBase } from './connect.ts';
 import { checkedReturnUrl, registerStoreAccess, type StoreAccessOptions } from './store-access.ts';
+import { claimIdempotency, idempotencyKey, STORE_ORDER_SCOPE } from './idempotency.ts';
 import { sendDocumentEmail } from './documents.ts';
 
 
@@ -412,8 +413,15 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
       // Signed in: the order goes in the buyer's account, which remembers what was new in it.
       const { returnUrl: wantedReturn, ...order } = request.body as OrderInput & { returnUrl?: string };
       const returnTo = checkedReturnUrl(request, wantedReturn);
+      // A retry (a dropped connection, a second click) with the same Idempotency-Key gets the first answer back, and no second order.
+      const idempotency = idempotencyKey(request);
+      const claim = idempotency ? await claimIdempotency(db, deps.keys, reply, { tenantId: s.tenantId, scope: STORE_ORDER_SCOPE, key: idempotency, body: request.body }) : null;
+      if (idempotency && !claim) return reply;
       const buyer = await buyerFromRequest(db, request, s);
-      const placed = await placeOrder(db, deps, s, order, { ...(buyer && { buyerId: buyer.id }) });
+      const placed = await placeOrder(db, deps, s, order, { ...(buyer && { buyerId: buyer.id }) }).catch(async (e) => {
+        await claim?.release();
+        throw e;
+      });
       if (buyer) await rememberFromOrder(db, buyer, request.body).catch((e) => request.log.error({ err: e }, 'account not updated'));
       await markOrdered(db, s.tenantId, placed.id, request.body.checkoutId, request.body.customer.email).catch((e) => request.log.error({ err: e }, 'checkout not closed'));
       const path = `/${s.slug}/shop/orders/${placed.number}?t=${placed.token}`;
@@ -441,13 +449,15 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
           payment = { error: e instanceof PaymentError ? e.message : 'The payment could not be started; try again from your order page' };
         }
       }
-      return reply.code(201).send({
+      const answer = {
         number: placed.number, token: placed.token, path,
         // The buyer's order page on the hosted store (progress, how to pay, the receipt once paid).
         orderUrl: shopUrl(request, s.slug, `/orders/${placed.number}?t=${placed.token}`),
         test: s.environment === 'test',
         totals: placed.quote.totals, ...(payment && { payment }),
-      });
+      };
+      await claim?.complete(201, answer).catch((e) => request.log.error({ err: e }, 'order answer not kept for retries'));
+      return reply.code(201).send(answer);
     },
   );
 
