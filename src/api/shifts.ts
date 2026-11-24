@@ -30,6 +30,7 @@ import type { PipelineDeps } from '../pipeline/issue.ts';
 import { renderZReport } from '../render/zreport.ts';
 import { ApiError, notFound } from './errors.ts';
 import { can, requirePermission } from './permissions.ts';
+import { stockLocation } from '../inventory/locations.ts';
 import { money, uuid } from './schemas.ts';
 
 /** How money came in. 'wallet': a mobile wallet (DigiWallet, E-Kyash) or another online payment service. */
@@ -228,30 +229,44 @@ export function registerShiftRoutes(app: FastifyInstance, deps: PipelineDeps) {
 
   // ---------- registers ----------
   app.get('/registers', async (request) => {
-    const rows = (await db.query<{ id: string; name: string; open_by: string | null; open_since: Date | string | null }>(
-      `select r.id, r.name, u.name as open_by, s.opened_at as open_since from registers r
+    const rows = (await db.query<{ id: string; name: string; open_by: string | null; open_since: Date | string | null; location_id: string | null; location_name: string | null }>(
+      `select r.id, r.name, u.name as open_by, s.opened_at as open_since, l.id as location_id, l.name as location_name from registers r
        left join register_shifts s on s.register_id = r.id and s.closed_at is null left join users u on u.id = s.opened_by
+       left join locations l on l.tenant_id = r.tenant_id and l.archived_at is null and (l.id = r.location_id or (r.location_id is null and l.is_main))
        where r.tenant_id = $1 and r.archived_at is null order by lower(r.name)`,
       [request.tenantId],
     )).rows;
-    return { data: rows.map((r) => ({ id: r.id, name: r.name, openBy: r.open_by, openSince: r.open_since ? new Date(r.open_since).toISOString() : null })) };
+    // A business with more than one shop: which one each drawer is at (it sells from that shop's stock).
+    return { data: rows.map((r) => ({ id: r.id, name: r.name, openBy: r.open_by, openSince: r.open_since ? new Date(r.open_since).toISOString() : null, ...(r.location_id && { location: { id: r.location_id, name: r.location_name } }) })) };
   });
 
-  const nameBody = { type: 'object', required: ['name'], additionalProperties: false, properties: { name: { type: 'string', minLength: 1, maxLength: 60 } } } as const;
-  app.post<{ Body: { name: string } }>('/registers', { schema: { body: nameBody } }, async (request, reply) => {
+  const nameBody = { type: 'object', required: ['name'], additionalProperties: false, properties: { name: { type: 'string', minLength: 1, maxLength: 60 }, locationId: { anyOf: [uuid, { type: 'null' }] } } } as const;
+  /** The location to store for a register: none for the main one. */
+  const registerLocation = async (tenantId: string, locationId: string | null | undefined): Promise<string | null> => {
+    try {
+      return await stockLocation(db, tenantId, locationId);
+    } catch (e) {
+      throw new ApiError(422, 'invalid_location', (e as Error).message);
+    }
+  };
+  app.post<{ Body: { name: string; locationId?: string | null } }>('/registers', { schema: { body: nameBody } }, async (request, reply) => {
     requirePermission(request, 'business.manage');
     const id = randomUUID();
+    const locationId = await registerLocation(request.tenantId, request.body.locationId);
     try {
-      await db.query('insert into registers (id, tenant_id, name) values ($1, $2, $3)', [id, request.tenantId, request.body.name.trim()]);
+      await db.query('insert into registers (id, tenant_id, name, location_id) values ($1, $2, $3, $4)', [id, request.tenantId, request.body.name.trim(), locationId]);
     } catch (e) {
       if (/unique|duplicate/i.test(String((e as Error).message))) throw new ApiError(409, 'duplicate', 'There is already a register with that name');
       throw e;
     }
     return reply.code(201).send({ id, name: request.body.name.trim() });
   });
-  app.put<{ Params: { id: string }; Body: { name: string } }>('/registers/:id', { schema: { params: idParams, body: nameBody } }, async (request) => {
+  app.put<{ Params: { id: string }; Body: { name: string; locationId?: string | null } }>('/registers/:id', { schema: { params: idParams, body: nameBody } }, async (request) => {
     requirePermission(request, 'business.manage');
-    const r = await db.query('update registers set name = $3 where id = $1 and tenant_id = $2 and archived_at is null returning id', [request.params.id, request.tenantId, request.body.name.trim()]);
+    const move = request.body.locationId !== undefined;
+    const locationId = move ? await registerLocation(request.tenantId, request.body.locationId) : null;
+    const r = await db.query(`update registers set name = $3${move ? ', location_id = $4' : ''} where id = $1 and tenant_id = $2 and archived_at is null returning id`,
+      [request.params.id, request.tenantId, request.body.name.trim(), ...(move ? [locationId] : [])]);
     if (!r.rows.length) throw notFound('Register');
     return { id: request.params.id, name: request.body.name.trim() };
   });

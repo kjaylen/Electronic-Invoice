@@ -242,7 +242,10 @@ async function saveVariants(tx: Queryable, tenantId: string, productId: string, 
     }
     // Stock changed here is a count (recorded in the item's history); left empty, it stops being tracked.
     const wanted = v.stock ?? null;
-    if (wanted === null && before !== null) await tx.query('update items set stock_quantity = null where id = $1', [itemId]);
+    if (wanted === null && before !== null) {
+      await tx.query('update items set stock_quantity = null where id = $1', [itemId]);
+      await tx.query('delete from location_stock where item_id = $1', [itemId]);
+    }
     else if (wanted !== null && (before === null || Number(before) !== wanted)) {
       await moveStock(tx, { tenantId, itemId, quantity: String(wanted), mode: 'set', reason: 'count', startTracking: true, note: 'Changed in the product editor', userId: userId ?? null });
     }

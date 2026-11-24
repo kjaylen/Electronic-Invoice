@@ -24,6 +24,7 @@ import { audit } from '../db/audit.ts';
 import type { Queryable } from '../db/database.ts';
 import { toBigInt } from '../db/database.ts';
 import { formatCents } from '../engine/decimal.ts';
+import { documentLocation } from '../inventory/locations.ts';
 import { moveStock } from '../inventory/stock.ts';
 import type { PipelineDeps } from '../pipeline/issue.ts';
 import { type PaymentMethod, receivable, recordPayment } from '../receivables/receivables.ts';
@@ -193,8 +194,9 @@ export function registerLayawayRoutes(app: FastifyInstance, deps: PipelineDeps) 
           if (result.status === 'rejected') throw new ApiError(409, 'credit_rejected', 'BTS rejected the credit note, so the layaway stays open. Look at the credit note for why.');
           credit = result.documentId;
           // The goods go back on the shelf.
+          const locationId = await documentLocation(db, r.document_id);
           for (const l of r.lines) {
-            if (l.itemId) await moveStock(db, { tenantId, itemId: l.itemId, quantity: l.quantity, reason: 'returned', documentId: result.documentId, note: 'Layaway cancelled', userId });
+            if (l.itemId) await moveStock(db, { tenantId, itemId: l.itemId, quantity: l.quantity, reason: 'returned', documentId: result.documentId, note: 'Layaway cancelled', userId, locationId });
           }
           // What was paid is given back: a payment the other way, so the customer's account and the drawer both show it.
           refund = toCents(owed.paid);

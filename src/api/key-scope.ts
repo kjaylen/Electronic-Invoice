@@ -52,7 +52,7 @@ const AREA_OF: Record<string, KeyArea | 'people'> = {
   documents: 'documents', payments: 'documents', receivables: 'documents', 'receivable-settings': 'documents', quotes: 'documents', recurring: 'documents',
   work: 'documents', 'held-sales': 'documents', 'bill-payments': 'documents', layaways: 'documents',
   customers: 'customers', 'loyalty-settings': 'customers',
-  items: 'catalog', products: 'catalog', collections: 'catalog', discounts: 'catalog', inventory: 'catalog', 'inventory.csv': 'catalog', 'purchase-orders': 'catalog',
+  items: 'catalog', products: 'catalog', collections: 'catalog', discounts: 'catalog', inventory: 'catalog', 'inventory.csv': 'catalog', 'purchase-orders': 'catalog', locations: 'catalog', transfers: 'catalog',
   'store-settings': 'catalog', 'store-site': 'catalog', 'store-domains': 'catalog',
   orders: 'orders', 'gift-cards': 'orders', 'store-checkouts': 'orders', 'store-buyers': 'orders',
   reports: 'reports',
