@@ -348,7 +348,7 @@ export function registerPurchasingRoutes(app: FastifyInstance, deps: PipelineDep
           order: { number: j.number, expected_on: po.expected_on, total: j.total, lines: j.lines.map((l) => ({ description: l.description, code: l.code, quantity: l.quantity, unit_cost: l.unitCost, total: l.total })) },
           message: request.body?.message?.trim() || null,
         }, { publicUrl: ctx.publicUrl });
-        await ctx.mailer.send({
+        await ctx.mailer.send({ type: 'purchase-order', tenantId: request.tenantId, userId: request.userId || null,
           to, replyTo: biz.email, subject: mail.subject, text: mail.text, html: mail.html,
           attachments: [{ filename: `${j.number}.pdf`, content: await poPdf(db, request.tenantId, po, lines), contentType: 'application/pdf' }],
         });

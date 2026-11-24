@@ -308,7 +308,7 @@ export function registerQuoteRoutes(app: FastifyInstance, deps: PipelineDeps, ct
         view_url: url,
         message: request.body?.message?.trim() || null,
       }, { publicUrl: ctx.publicUrl });
-      await ctx.mailer.send({
+      await ctx.mailer.send({ type: 'quote', tenantId: request.tenantId, userId: request.userId || null,
         to, replyTo: biz.email, subject: mail.subject, text: mail.text, html: mail.html,
         attachments: [{ filename: `quote-${q.number}.pdf`, content: await quotePdf(deps, request.tenantId, q), contentType: 'application/pdf' }],
       });
@@ -392,7 +392,7 @@ export function registerPublicQuoteRoutes(app: FastifyInstance, deps: PipelineDe
   const notify = async (q: QuoteRow, line: string) => {
     if (!ctx.mailConfigured) return;
     const biz = await businessContact(db, q.tenant_id);
-    await ctx.mailer.send({ to: biz.email, subject: `Quote ${quoteNumber(q.number)}: ${line}`, text: line, html: simpleHtml({ heading: `Quote ${quoteNumber(q.number)}`, paragraphs: [line] }) }).catch(() => {});
+    await ctx.mailer.send({ type: 'quote-answer', tenantId: q.tenant_id, to: biz.email, subject: `Quote ${quoteNumber(q.number)}: ${line}`, text: line, html: simpleHtml({ heading: `Quote ${quoteNumber(q.number)}`, paragraphs: [line] }) }).catch(() => {});
   };
 
   app.post<{ Params: { token: string }; Body: { name: string } }>(
