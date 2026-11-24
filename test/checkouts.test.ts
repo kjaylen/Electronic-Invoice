@@ -18,6 +18,9 @@ const CSRF = { 'x-requested-with': 'etd-web' };
 const PASSWORD = 'correct horse battery';
 const PUBLIC = 'https://app.example.test';
 
+/** The newest checkout reminder sent (an order's own emails may arrive after it). */
+const lastReminder = (c: Ctx) => c.mail.sent.filter((m) => m.type === 'checkout-reminder').at(-1)!;
+
 interface Ctx { f: PipelineFixture; app: FastifyInstance; mail: ReturnType<typeof memoryMailer>; slug: string; owner: Record<string, string>; variant: string; other: string }
 
 function cookieFrom(res: LightMyRequestResponse): string {
@@ -70,7 +73,7 @@ test('checkout reminders: an hour after leaving, then a day later; the link puts
     assert.deepEqual(await remind(c), { sent: 0, ended: 0 });
     await ago(c, id, 1.1);
     assert.equal((await remind(c)).sent, 1);
-    const first = c.mail.sent.at(-1)!;
+    const first = lastReminder(c);
     assert.equal(first.to, 'ana@example.com');
     assert.match(first.subject, /You left something in your cart at /);
     assert.match(first.html!, /Hello Ana/);
@@ -86,8 +89,8 @@ test('checkout reminders: an hour after leaving, then a day later; the link puts
     assert.equal((await remind(c)).sent, 0);
     await ago(c, id, 25);
     assert.equal((await remind(c)).sent, 1);
-    assert.match(c.mail.sent.at(-1)!.subject, /Still thinking it over\?/);
-    assert.match(c.mail.sent.at(-1)!.html!, /it is the last reminder/);
+    assert.match(lastReminder(c).subject, /Still thinking it over\?/);
+    assert.match(lastReminder(c).html!, /it is the last reminder/);
     await ago(c, id, 48);
     assert.equal((await remind(c)).sent, 0, 'two at most');
 
@@ -131,7 +134,7 @@ test('checkout reminders end with an order from another device, an unsubscribe, 
     await save(c, b, { email: 'cara@example.com', lines: [{ variantId: c.other, quantity: 1 }] });
     await ago(c, b, 2);
     assert.equal((await remind(c)).sent, 1);
-    const token = linkIn(c.mail.sent.at(-1)!.html!, 'unsubscribe')!;
+    const token = linkIn(lastReminder(c).html!, 'unsubscribe')!;
     const unsub = await c.app.inject({ method: 'POST', url: `/v1/store/${c.slug}/checkouts/unsubscribe?t=${token}` });
     assert.equal(unsub.statusCode, 200, unsub.body);
     assert.equal(unsub.json().email, 'cara@example.com');
@@ -162,7 +165,7 @@ test('checkout reminders end with an order from another device, an unsubscribe, 
     assert.equal((await remind(c)).sent, 0);
     await ago(c, g, 7);
     assert.equal((await remind(c)).sent, 1);
-    assert.match(c.mail.sent.at(-1)!.html!, /it is the last reminder/, 'no second one in this store');
+    assert.match(lastReminder(c).html!, /it is the last reminder/, 'no second one in this store');
     await ago(c, g, 30);
     assert.equal((await remind(c)).sent, 0);
 

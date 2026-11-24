@@ -111,11 +111,11 @@ From the platform, to a business and its people:
 
 ## D. Settings
 
-- [ ] D1. Platform console → Email: host, port, encryption, username,
+- [x] D1. Platform console → Email: host, port, encryption, username,
   password, from name, from address, reply-to; presets; the password shown as
   set with "Replace".
-- [ ] D2. Settings → Email for a business (optional), the same fields.
-- [ ] D3. "Send test email" on both: a real message, the server's own answer,
+- [x] D2. Settings → Email for a business (optional), the same fields.
+- [x] D3. "Send test email" on both: a real message, the server's own answer,
   and the likely cause in plain words.
 - [x] D4. Presets: Gmail / Google Workspace, Outlook / Microsoft 365, Zoho,
   Amazon SES, with the note where an app password is needed.
@@ -130,12 +130,12 @@ From the platform, to a business and its people:
 
 ## F. Log, safeguards, deliverability
 
-- [ ] F1. The email log: recipient, subject, type, status, error, times. Staff
+- [x] F1. The email log: recipient, subject, type, status, error, times. Staff
   see all; a business sees its own. Resend.
-- [ ] F2. Suppression list: an address a server says does not exist, and
+- [x] F2. Suppression list: an address a server says does not exist, and
   people who opt out. Shown and removable on the settings page.
-- [ ] F3. An unsubscribe link (and one-click header) on every email that is not transactional.
-- [ ] F4. Deliverability guide: SPF, DKIM, DMARC in plain language, and a
+- [x] F3. An unsubscribe link (and one-click header) on every email that is not transactional.
+- [x] F4. Deliverability guide: SPF, DKIM, DMARC in plain language, and a
   check of the sending domain's DNS.
 
 ## G. Proof
@@ -143,7 +143,7 @@ From the platform, to a business and its people:
 - [x] G1. Tests: valid and invalid settings, each encryption mode, wrong
   password, server unreachable, retry then success, retry then failure,
   fallback to the platform, templates with missing and hostile values.
-- [ ] G2. A local mail catcher (`npm run mail:catch`); the demo and the
+- [x] G2. A local mail catcher (`npm run mail:catch`); the demo and the
   browser tests send through it by SMTP.
-- [ ] G3. Every type triggered end to end and looked at in the catcher.
-- [ ] G4. README, `deploy/env.example`, DECISIONS.md, and the steps to go live.
+- [x] G3. Every type triggered end to end and looked at in the catcher.
+- [x] G4. README, `deploy/env.example`, DECISIONS.md, and the steps to go live.

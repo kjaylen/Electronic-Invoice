@@ -523,3 +523,58 @@ system). The parts above this line are the earlier jobs' and are unchanged.
   English. The screens themselves, field errors, hints and preset notes are
   in both languages.
 - **Scheduled and bulk (marketing) email.** Not in the brief's list.
+
+## How it was proved
+
+- **Tests.** 36 new unit tests in `test/mail.test.ts` and
+  `test/mail-api.test.ts`, against a real SMTP conversation with a local
+  catcher (`test/mail-catcher.ts`): valid and invalid settings, each
+  encryption mode and each mismatch, a wrong password, an unreachable server,
+  retry then success, retry then failure after five attempts, falling back
+  from a business's server to the platform's, the do-not-send list, header
+  injection, and all twelve templates with hostile and with missing values.
+- **The browser tests send by SMTP.** The demo server they run against now
+  delivers through the queue to a catcher, so the existing tests that read an
+  email (an invoice, an invitation, a password reset, an order, a sign-in
+  code, a gift card) prove the whole road. Two new tests drive Settings →
+  Email and the console's Email page.
+- **Every type, looked at.** `npm run mail:proof` runs the unit tests with
+  their mail mirrored to a catcher and lists one message of each of the 27
+  types: all 27 arrived, each with an HTML and a plain-text part, sized for a
+  phone, with no unfilled value, and the two optional ones with a way to stop
+  them. Seven were opened at desktop and phone width. Three of the 27 are
+  sent by background jobs that their tests call without the mail service
+  (payment reminders, back-in-stock, checkout reminders), so in that run they
+  show a placeholder sender; their real sender is covered by the service's
+  own tests.
+
+## Found, not fixed
+
+- **No real mail provider was connected to.** There are no credentials here,
+  and the rule is that nothing goes to real people. The presets' servers and
+  ports are the ones each provider publishes; the notes on app passwords are
+  from their documentation. The first real test is yours: "Send test email"
+  in the console.
+- **No real mail app was looked at** (Gmail, Outlook, Apple Mail). The emails
+  were viewed in a browser at two widths. The layout is tables and inline
+  styles, as mail apps need, and is the one the existing templates already used.
+- **The deliverability check was not run against a real sending domain.** Its
+  logic is tested with made-up DNS answers; the browser test ran it against a
+  domain that does not exist.
+- **"Emailed to X" is said when the email is queued.** A document's own
+  history (`document_messages`) records "sent" at that moment too. If the
+  email later fails, the email log says so, the document's history does not.
+- **A business with its own mail server on a platform with none.** The mail
+  service would send its emails, but the routes that check "is email set up"
+  first still answer 503. In practice the platform always has a server.
+- **The main folder's demo on port 4300 still runs the code before this
+  work.** It was left alone because another session was using that folder.
+- **The built-in browser pane was hidden**, so it could not draw screenshots.
+  The screens were checked by the browser tests, by reading the pages and
+  measuring the layout at 375 px, and the emails by screenshots from a
+  headless browser.
+
+## Blockers
+
+None that stopped an item. Nothing was pushed, and GitHub Actions has not run
+on this branch.
