@@ -93,6 +93,14 @@ export const TEMPLATES: TemplateDef[] = [
     variables: [...BUSINESS, IMAGES, ...CUSTOMER, { name: 'statement.as_of', description: 'The date of the statement' }, { name: 'statement.open', description: 'What is still owed: label, number, issue_date, due_date, days_overdue, total, paid, balance, pay_url' }, { name: 'statement.total_due', description: 'Everything owed' }, { name: 'statement.overdue', description: 'What is past due' }, { name: 'statement.note', description: 'Your payment instructions' }, { name: 'statement.account_url', description: 'The customer\'s account page (saved customers; may be empty)' }],
   },
   {
+    key: 'email.account-link', group: 'emails', name: 'Customer account link', preview: 'email', language: 'html', file: 'email-account-link.liquid',
+    description: 'Sent when you email a customer the link to their account page: what they owe, paying online, their invoices.',
+    subject: 'Your account with {{ business.name }}',
+    subjectEs: 'Su cuenta con {{ business.name }}',
+    requires: [{ pattern: /\{\{-?\s*account_url\b/, message: 'Keep {{ account_url }}: without the link the customer cannot open their account.' }],
+    variables: [...BUSINESS, IMAGES, ...CUSTOMER, { name: 'account_url', description: 'The link to the customer\'s account page (keep it in the email)' }],
+  },
+  {
     key: 'email.quote', group: 'emails', name: 'Quotation email', preview: 'email', language: 'html', file: 'email-quote.liquid',
     description: 'Sent with a quotation; the customer views and accepts it online.',
     subject: 'Quotation {{ quote.number }} from {{ business.name }}',

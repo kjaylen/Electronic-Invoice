@@ -2157,6 +2157,8 @@ export const ES: Record<string, string> = {
   "Payment reminder": "Recordatorio de pago",
   "Statement of account": "Estado de cuenta",
   "Quotation email": "Correo de cotización",
+  "Customer account link": "Enlace a la cuenta del cliente",
+  "Sent when you email a customer the link to their account page: what they owe, paying online, their invoices.": "Se envía cuando manda a un cliente el enlace a su página de cuenta: lo que debe, pagar en línea, sus facturas.",
   "Order confirmation": "Confirmación de pedido",
   "Invoice and notes (A4)": "Factura y notas (A4)",
   "Receipt (80 mm roll)": "Recibo (rollo de 80 mm)",

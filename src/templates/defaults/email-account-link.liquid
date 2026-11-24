@@ -1,0 +1,36 @@
+{%- comment -%}
+  The link to a customer's own account page with you: what they owe, paying online, their invoices and statement.
+  Keep the button's link ({{ account_url }}): it is the customer's way in.
+{% endcomment -%}
+<!doctype html>
+<html lang="en">
+<body style="margin:0;padding:0;background:#f4f5f7;font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;color:#0f1117">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f5f7;padding:32px 12px">
+    <tr><td align="center">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border:1px solid #e6e8ec;border-radius:14px">
+        <tr><td style="padding:28px 32px 6px">
+          {%- if business.logo %}
+          <img src="{{ business.logo }}" alt="{{ business.name }}" height="40" style="display:block;height:40px;width:auto;max-width:220px;border:0;margin:0 0 14px">
+          {%- else %}
+          <div style="font-size:13px;color:#646b7b">{{ business.name }}</div>
+          {%- endif %}
+          <h1 style="margin:6px 0 0;font-size:22px;line-height:1.25;letter-spacing:-0.02em">Your account with {{ business.name }}</h1>
+        </td></tr>
+        <tr><td style="padding:14px 32px 4px;font-size:15px;line-height:1.6">
+          <p style="margin:0 0 14px">Hello{% if customer.name %} {{ customer.name }}{% endif %},</p>
+          <p style="margin:0 0 14px">With this link you can see what you owe {{ business.name }}, pay online, and download your invoices and your statement, whenever you like.</p>
+        </td></tr>
+        <tr><td style="padding:8px 32px 4px">
+          <a href="{{ account_url }}" style="display:inline-block;background:#6d2d93;color:#ffffff;padding:12px 22px;border-radius:9px;text-decoration:none;font-weight:600;font-size:15px">Open my account</a>
+        </td></tr>
+        <tr><td style="padding:14px 32px 4px;font-size:15px;line-height:1.6">
+          <p style="margin:0 0 14px">The link is personal: please do not share it.</p>
+        </td></tr>
+        <tr><td style="padding:22px 32px 28px;font-size:12px;line-height:1.6;color:#646b7b">
+          {{ business.name }}{% if business.telephone %} · {{ business.telephone }}{% endif %}{% if business.email %} · {{ business.email }}{% endif %}
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>

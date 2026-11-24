@@ -20,10 +20,9 @@ import type { Queryable } from '../db/database.ts';
 import { toBigInt } from '../db/database.ts';
 import { overLimit } from '../db/ratelimit.ts';
 import { formatCents } from '../engine/decimal.ts';
-import { simpleHtml } from '../mail/mailer.ts';
 import type { PipelineDeps } from '../pipeline/issue.ts';
 import { openReceivables, ReceivableError, statement } from '../receivables/receivables.ts';
-import { emailLanguage } from '../templates/lang.ts';
+import { businessContext, renderEmail } from '../templates/render.ts';
 import { accountTokenHash as hash, createAccountLink } from './account-links.ts';
 import { requireMail, type ServerContext } from './context.ts';
 import { createShareLink } from './documents.ts';
@@ -59,18 +58,12 @@ export function registerAccountLinkRoutes(app: FastifyInstance, deps: PipelineDe
       const link = await createAccountLink(db, ctx, request.tenantId, request.params.id, request.userId || null);
       const to = request.body?.to ?? link.customer.email;
       if (!to) throw new ApiError(422, 'no_email', 'This customer has no email address; enter one');
-      const biz = await businessContact(db, request.tenantId);
-      const es = (await emailLanguage(db, request.tenantId)) === 'es';
-      const subject = es ? `Su cuenta con ${biz.name}` : `Your account with ${biz.name}`;
-      const paragraphs = es
-        ? [`Hola ${link.customer.name}:`, `Con este enlace puede ver lo que debe a ${biz.name}, pagar en línea y descargar sus facturas y su estado de cuenta, cuando quiera.`, 'El enlace es personal: no lo comparta.']
-        : [`Hello ${link.customer.name},`, `With this link you can see what you owe ${biz.name}, pay online, and download your invoices and your statement, whenever you like.`, 'The link is personal: please do not share it.'];
-      const label = es ? 'Abrir mi cuenta' : 'Open my account';
-      await ctx.mailer.send({
-        to, replyTo: biz.email, subject,
-        text: [...paragraphs, link.url, '', `${biz.name} · ${biz.telephone} · ${biz.email}`].join('\n\n'),
-        html: simpleHtml({ heading: subject, paragraphs: [...paragraphs, `${biz.name} · ${biz.telephone} · ${biz.email}`], button: { label, url: link.url } }),
-      });
+      // The business's own wording (Templates → Customer account link), in the language its customers are written to.
+      const biz = await businessContext(db, request.tenantId);
+      const mail = await renderEmail(db, request.tenantId, 'email.account-link', {
+        business: biz, customer: { name: link.customer.name, email: to }, account_url: link.url,
+      }, { publicUrl: ctx.publicUrl });
+      await ctx.mailer.send({ type: 'account-link', tenantId: request.tenantId, userId: request.userId || null, to, replyTo: biz.email, subject: mail.subject, text: mail.text, html: mail.html });
       await audit(db, { tenantId: request.tenantId, userId: request.userId || null, action: 'customer.account_link_sent', target: link.customer.name, details: { to }, ip: request.ip });
       return { sent: true, to, expiresAt: link.expiresAt };
     },

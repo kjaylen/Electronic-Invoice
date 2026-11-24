@@ -347,6 +347,7 @@ export async function sampleContext(def: TemplateDef, biz: BusinessContext, lang
         ],
         payments: [{ number: '001-000000031', paid_on: '2026-11-02', method: 'Bank transfer', reference: 'BB-77812', amount: '420.00' }],
       } } };
+    case 'email.account-link': return { context: { business: biz, customer, account_url: 'https://example.bz/a/sample' } };
     case 'email.quote': return { context: { business: biz, customer, quote: { number: 'Q-1007', total: '3400.00', valid_until: '2026-12-22' }, view_url: 'https://example.bz/q/sample', message: es ? 'Como lo conversamos por teléfono.' : 'As discussed on the phone.' } };
     case 'email.purchase-order': return { context: { business: biz, supplier: { name: 'Bze Wholesale Ltd.', email: 'orders@example.bz' }, order: {
       number: 'PO-12', expected_on: '2026-11-29', total: '640.00',
