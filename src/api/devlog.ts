@@ -100,14 +100,14 @@ export function registerDevLogHook(app: FastifyInstance, db: Queryable, log: Dev
     log.record(db, who.tenantId, {
       at: new Date().toISOString(),
       method: request.method,
-      path: request.url.split('?')[0]!,
-      route: request.routeOptions.url ?? request.url.split('?')[0]!,
+      path: request.url.split('?')[0]!.slice(0, 300),
+      route: request.routeOptions.url ?? '(no such endpoint)',
       status: reply.statusCode,
       code: failed ? request.apiError?.code ?? null : null,
-      message: failed ? request.apiError?.message ?? null : null,
+      message: failed ? request.apiError?.message.slice(0, 500) ?? null : null,
       ms: Math.round(reply.elapsedTime),
       key: who.key,
-      origin: typeof request.headers.origin === 'string' ? request.headers.origin : null,
+      origin: typeof request.headers.origin === 'string' ? request.headers.origin.slice(0, 200) : null,
     });
   });
 }
