@@ -11,76 +11,10 @@ import { DOMParser, type Document, type Element } from '@xmldom/xmldom';
 import { parseEtdui } from '../engine/etdui.ts';
 import { ETD_TYPE_NAMES, NS } from '../engine/ubl.ts';
 
-export const QR_BASE_URLS = {
-  /** From the manual (3.5.2). */
-  production: 'https://portal.prod.bz.efdrciat.org/QRCode?UUID=',
-  /** Assumed by analogy with the API hosts; confirm with BTS. */
-  test: 'https://portal.test.bz.efdrciat.org/QRCode?UUID=',
-} as const;
-
-/** Exact texts from manual table 3-3. */
-export const REGULATORY_MESSAGES = {
-  testEnvironment: 'Transmitted to tests environment, no fiscal value',
-  pendingAuthorization: 'Pending of BTS authorization',
-} as const;
-
-export interface PrintParty {
-  name?: string;
-  tin?: string;
-  otherId?: string;
-  addressLines: string[];
-  telephone?: string;
-  email?: string;
-}
-
-export interface PrintLine {
-  number: string;
-  quantity: string;
-  unitCode: string;
-  description: string;
-  code?: string;
-  unitPrice: string;
-  adjustments: Array<{ reason: string; amount: string; isCharge: boolean }>;
-  /** LineExtensionAmount: after allowances and charges, before taxes. */
-  net: string;
-  /** Line TaxTotal/TaxAmount: GST plus any other taxes on the line. */
-  tax: string;
-  /** net + tax. */
-  total: string;
-}
-
-export interface PrintView {
-  etdType: string;
-  typeName: string;
-  etdui: string;
-  number: string;
-  series: string;
-  issueDate: string;
-  issueTime: string;
-  operMode: number;
-  receptionEnv: string;
-  /** Subsequent authorization (operMode 2 or 3). */
-  pendingAuthorization: boolean;
-  testEnvironment: boolean;
-  issuer: PrintParty;
-  customer?: PrintParty;
-  lines: PrintLine[];
-  totals: {
-    taxExclusive: string;
-    /** First document-level TaxTotal: GST. */
-    gst: string;
-    otherTaxes: Array<{ scheme: string; amount: string }>;
-    taxInclusive: string;
-    prepaid?: string;
-    payable: string;
-  };
-  reference?: { etdui: string; documentType: string; reason: string };
-  contingency?: { reason: string; initDate: string; initTime: string };
-  note?: string;
-  payment?: { dueDate?: string; terms?: string };
-  /** Messages required by regulation (table 3-3) for this document. */
-  regulatory: string[];
-}
+export { QR_BASE_URLS, REGULATORY_MESSAGES } from '../engine/print-view.ts';
+export type { PrintLine, PrintParty, PrintView } from '../engine/print-view.ts';
+import { QR_BASE_URLS, REGULATORY_MESSAGES } from '../engine/print-view.ts';
+import type { PrintLine, PrintParty, PrintView } from '../engine/print-view.ts';
 
 export class PrintError extends Error {
   override name = 'PrintError';

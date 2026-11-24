@@ -5,6 +5,8 @@ import Network
 /// Receipt printers for the till (web/src/pos/platform.ts, TillHardware): raw ESC/POS bytes to network
 /// printers (port 9100) on the local network. Bluetooth receipt printers are an Android feature: most use
 /// classic Bluetooth, which iOS apps cannot reach without the printer maker's MFi licence.
+///
+/// Also the till's secrets (its token, the key of its local data), in the Keychain, on this device only.
 @objc(TillHardwarePlugin)
 public class TillHardwarePlugin: CAPPlugin, CAPBridgedPlugin {
     public let identifier = "TillHardwarePlugin"
@@ -13,7 +15,59 @@ public class TillHardwarePlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "sendNetwork", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "listBluetooth", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "sendBluetooth", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "secretGet", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "secretSet", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "secretRemove", returnType: CAPPluginReturnPromise),
     ]
+
+    // MARK: - secrets
+
+    private let secretService = "bz.floreo.till.secrets"
+
+    private func secretQuery(_ key: String) -> [String: Any] {
+        return [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: secretService, kSecAttrAccount as String: key]
+    }
+
+    @objc func secretSet(_ call: CAPPluginCall) {
+        guard let key = call.getString("key"), let value = call.getString("value") else {
+            call.reject("Missing the key or the value")
+            return
+        }
+        SecItemDelete(secretQuery(key) as CFDictionary)
+        var item = secretQuery(key)
+        item[kSecValueData as String] = Data(value.utf8)
+        item[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        let status = SecItemAdd(item as CFDictionary, nil)
+        if status == errSecSuccess { call.resolve() } else { call.reject("Could not keep the secret (\(status))") }
+    }
+
+    @objc func secretGet(_ call: CAPPluginCall) {
+        guard let key = call.getString("key") else {
+            call.reject("Missing the key")
+            return
+        }
+        var query = secretQuery(key)
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        var found: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &found)
+        if status == errSecSuccess, let data = found as? Data, let value = String(data: data, encoding: .utf8) {
+            call.resolve(["value": value])
+        } else if status == errSecItemNotFound {
+            call.resolve(["value": NSNull()])
+        } else {
+            call.reject("Could not read the secret (\(status))")
+        }
+    }
+
+    @objc func secretRemove(_ call: CAPPluginCall) {
+        guard let key = call.getString("key") else {
+            call.reject("Missing the key")
+            return
+        }
+        SecItemDelete(secretQuery(key) as CFDictionary)
+        call.resolve()
+    }
 
     /// One serial queue: every callback for a print runs here, one at a time.
     private let queue = DispatchQueue(label: "bz.floreo.till.printer")

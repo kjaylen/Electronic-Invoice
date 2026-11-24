@@ -25,6 +25,8 @@ export const UNAUTHORIZED_EVENT = 'etd:unauthorized';
 interface TillTransport {
   baseUrl: string;
   token: () => string | null;
+  /** The till's own API (offline-first tills): answers a call on the device, or null to send it to the server. */
+  local?: (path: string, options: { method?: string; body?: unknown; headers?: Record<string, string> }) => Promise<Response | null>;
 }
 let till: TillTransport | null = null;
 
@@ -42,6 +44,11 @@ export function setTillTransport(t: TillTransport | null) {
 type CallOptions = { method?: string; body?: unknown; headers?: Record<string, string>; signal?: AbortSignal; token?: string | null; /** Let the browser finish the request after the page is closed (small bodies only). */ keepalive?: boolean };
 
 async function call(path: string, options: CallOptions): Promise<Response> {
+  // On a till, calls made as the signed-in person go to the till's own API first.
+  if (till?.local && options.token === undefined) {
+    const answered = await till.local(path, options);
+    if (answered) return answered;
+  }
   const token = options.token !== undefined ? options.token : till?.token() ?? null;
   try {
     return await fetch(till ? `${till.baseUrl}${path}` : path, {
@@ -219,7 +226,8 @@ export interface Condition {
   description?: string;
 }
 
-export type DocStatus = 'pending' | 'authorized' | 'authorized_with_alert' | 'rejected' | 'contingency_pending' | 'superseded' | 'cancelled';
+/** on_till: a receipt an offline-first till made that has not reached the server yet (the till's own status). */
+export type DocStatus = 'pending' | 'authorized' | 'authorized_with_alert' | 'rejected' | 'contingency_pending' | 'superseded' | 'cancelled' | 'on_till';
 
 export interface DocumentInfo {
   id: string;

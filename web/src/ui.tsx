@@ -59,6 +59,7 @@ export const STATUS_TEXT: Record<DocStatus, string> = {
   contingency_pending: 'Pending BTS (outage)',
   superseded: 'Replaced',
   cancelled: 'Cancelled',
+  on_till: 'Saved on the till, not sent yet',
 };
 
 export const TYPE_NAMES: Record<string, string> = { '01': 'Tax invoice', '02': 'Tax receipt', '03': 'Debit note', '04': 'Credit note' };

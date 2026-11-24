@@ -420,7 +420,7 @@ system). The parts above this line are the earlier jobs' and are unchanged.
 - **Migration 057.** 054 is taken by the offline-tills branch and 055 and 056
   by `connect-your-site`. Migrations are applied by name, so the gap is harmless.
 - **A database and ports of their own for the browser tests**
-  (`E2E_DATABASE_NAME`, `E2E_PORT`, `E2E_MAIL_PORT`), so two sessions can run
+  (`E2E_DB`, `E2E_PORT`, `E2E_MAIL_PORT`), so two sessions can run
   them at once. The defaults are what they were.
 - **Commits.** The foundation (the service, the queue, settings, SMTP, the
   routes) went in as one commit: its parts do not compile without each other.

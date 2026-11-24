@@ -42,3 +42,12 @@ With `SMOKE_SERVER`, `SMOKE_CODE` and `SMOKE_PIN` it also does the following aga
 - pairs with it;
 - signs in;
 - sets up a network printer and prints a test page.
+
+`node scripts/offline-check.mjs` (after `npm run e2e` at the root, for its business) checks selling
+offline with a real outage: it starts the server, pairs a new till, sells, stops the server, sells
+more, quits and restarts the app without the server, signs in offline and sells again, then starts the
+server and checks that it has every sale exactly once. It also checks that the local database holds no
+business data in plain text and that the data key and the till's token are encrypted by the OS.
+
+The till keeps its sales in the app's own data folder (IndexedDB), which updates and uninstalling keep
+(`deleteAppDataOnUninstall: false`).

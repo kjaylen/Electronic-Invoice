@@ -18,7 +18,7 @@ function usePrintReport() {
   return useCallback(async (shiftId: string) => {
     const { shift, report } = await api<{ shift: Shift; report: ShiftReport }>(`/v1/shifts/${shiftId}`);
     const biz = till.till.business;
-    await till.printTicket(zReportTicket({ business: { name: biz.name, tin: biz.tin }, till: till.till.device.name, shift, report }), { title: `Shift ${shift.number}` });
+    await till.printTicket(zReportTicket({ business: { name: biz.name, tin: biz.tin }, till: till.till.device.name, shift, report }), { title: shift.number ? `Shift ${shift.number}` : 'Shift' });
   }, [till]);
 }
 
@@ -44,7 +44,7 @@ export function TillShiftBar({ refreshKey }: { refreshKey?: string | null }) {
       {s ? (
         <div className="shift-bar open">
           <span className="shift-dot" aria-hidden="true" />
-          <span><strong>{t('Shift #{n}', { n: s.number })}</strong> · {s.openedBy.name} · {t('since {time}', { time: time(s.openedAt) })}</span>
+          <span><strong>{s.number ? t('Shift #{n}', { n: s.number }) : t('New shift')}</strong> · {s.openedBy.name} · {t('since {time}', { time: time(s.openedAt) })}</span>
           <span className="spacer" />
           <span className="small">{t('Cash expected {amount}', { amount: money(current.report?.cash.expected ?? s.openingFloat) })}</span>
           {till.isManager && till.hardware.printers.some((p) => p.drawer) && <button type="button" className="secondary small-button" onClick={() => void till.openDrawer().catch(problem)}>{t('Open drawer')}</button>}
@@ -96,7 +96,7 @@ export function ShiftPanel() {
   return (
     <div className="stack">
       <div className="row">
-        <div><span className="kicker">{till.till.device.register.name}</span><h1>{s ? t('Shift #{n}', { n: s.number }) : t('Cash drawer')}</h1></div>
+        <div><span className="kicker">{till.till.device.register.name}</span><h1>{s ? (s.number ? t('Shift #{n}', { n: s.number }) : t('New shift')) : t('Cash drawer')}</h1></div>
         <span className="spacer" />
         {s ? (
           <>
@@ -122,7 +122,7 @@ export function ShiftPanel() {
             <tbody>
               {history.filter((x) => x.status === 'closed').slice(0, 20).map((x) => (
                 <tr key={x.id}>
-                  <td data-label="#" className="mono">{x.number}</td>
+                  <td data-label="#" className="mono">{x.number || '—'}</td>
                   <td data-label={t('Opened')} className="small">{new Date(x.openedAt).toLocaleString()} · {x.openedBy.name}</td>
                   <td data-label={t('Closed')} className="small">{x.closedAt ? new Date(x.closedAt).toLocaleString() : ''}</td>
                   <td data-label={t('Counted')} className="right mono">{x.countedCash ? money(x.countedCash) : '—'}</td>

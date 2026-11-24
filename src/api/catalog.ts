@@ -208,44 +208,65 @@ export async function loadItems(deps: PipelineDeps, tenantId: string, ids: strin
   return new Map(rows.map((r) => [r.id, itemJson(r)]));
 }
 
+/** The business as the app's screens need it (GET /v1/me; also in a till's offline snapshot). */
+export async function meJson(deps: PipelineDeps, tenantId: string) {
+  const { db } = deps;
+  const t = (await db.query<{ id: string; legal_name: string; trade_name: string | null; tin: string; environment: string; cashier_discount_limit: string | null; sells: 'products' | 'services' | 'both' }>(
+    'select id, legal_name, trade_name, tin, environment, cashier_discount_limit::text, sells from tenants where id = $1', [tenantId],
+  )).rows[0]!;
+  const period = (await db.query<{ started_at: string | Date; reason: string }>(
+    'select started_at, reason from contingency_periods where tenant_id = $1 and ended_at is null', [tenantId],
+  )).rows[0];
+  const queued = (await db.query<{ n: number }>(
+    `select count(*)::int as n from documents where tenant_id = $1 and status = 'contingency_pending'`, [tenantId],
+  )).rows[0]!.n;
+  return {
+    id: t.id,
+    legalName: t.legal_name,
+    tradeName: t.trade_name,
+    tin: t.tin,
+    environment: t.environment,
+    /** What the business sells: products, services or both. */
+    sells: t.sells,
+    certificate: await certificateSummary(deps, tenantId),
+    billing: await billingBanner(db, tenantId),
+    contingency: { active: Boolean(period), since: period ? new Date(period.started_at).toISOString() : null, reason: period?.reason ?? null, queued },
+    // Notices from the platform (maintenance, a BTS outage, news), newest first.
+    notices: (await db.query<{ id: string; message: string; message_es: string | null; level: 'info' | 'warning' }>(
+      `select id, message, message_es, level from platform_notices where starts_at <= now() and (ends_at is null or ends_at > now()) order by created_at desc limit 3`,
+    )).rows.map((n) => ({ id: n.id, message: n.message, messageEs: n.message_es, level: n.level })),
+    counter: {
+      cashierDiscountLimit: t.cashier_discount_limit === null ? null : String(Number(t.cashier_discount_limit)),
+      loyalty: await loyaltySettings(db, tenantId).then((l) => (l.enabled ? { pointValue: l.pointValue, minRedeem: l.minRedeem } : null)),
+    },
+  };
+}
+
+/** Every item a till can sell (not archived), as GET /v1/items lists them, newest first. */
+export async function itemsForTill(db: Queryable, tenantId: string) {
+  const rows = (await db.query<ItemRow>(
+    `select *, exists (select 1 from item_components c where c.item_id = items.id) as is_bundle, ${PRICE_BREAKS_SQL}
+     from items where tenant_id = $1 and archived_at is null order by created_at desc, id desc limit 20000`, [tenantId],
+  )).rows;
+  return rows.map(itemJson);
+}
+
+/** The business's customers for a till (as GET /v1/customers lists them), most recent first. */
+export async function customersForTill(db: Queryable, tenantId: string, limit = 5000) {
+  const rows = (await db.query<CustomerRow>('select * from customers where tenant_id = $1 and archived_at is null order by created_at desc limit $2', [tenantId, limit])).rows;
+  return rows.map(customerJson);
+}
+
 // ---------- routes ----------
 
 export function registerCatalogRoutes(app: FastifyInstance, deps: PipelineDeps) {
   const { db } = deps;
 
-  app.get('/me', async (request) => {
-    const t = (await db.query<{ id: string; legal_name: string; trade_name: string | null; tin: string; environment: string; cashier_discount_limit: string | null; sells: 'products' | 'services' | 'both' }>(
-      'select id, legal_name, trade_name, tin, environment, cashier_discount_limit::text, sells from tenants where id = $1', [request.tenantId],
-    )).rows[0]!;
-    const period = (await db.query<{ started_at: string | Date; reason: string }>(
-      'select started_at, reason from contingency_periods where tenant_id = $1 and ended_at is null', [request.tenantId],
-    )).rows[0];
-    const queued = (await db.query<{ n: number }>(
-      `select count(*)::int as n from documents where tenant_id = $1 and status = 'contingency_pending'`, [request.tenantId],
-    )).rows[0]!.n;
-    return {
-      id: t.id,
-      legalName: t.legal_name,
-      tradeName: t.trade_name,
-      tin: t.tin,
-      environment: t.environment,
-      /** What the business sells: products, services or both. */
-      sells: t.sells,
-      // Asked with a secret key: which key, and what it may do.
-      ...(request.apiKey && { apiKey: { id: request.apiKey.id, name: request.apiKey.name, ...scopeJson(request.apiKey) } }),
-      certificate: await certificateSummary(deps, request.tenantId),
-      billing: await billingBanner(db, request.tenantId),
-      contingency: { active: Boolean(period), since: period ? new Date(period.started_at).toISOString() : null, reason: period?.reason ?? null, queued },
-      // Notices from the platform (maintenance, a BTS outage, news), newest first.
-      notices: (await db.query<{ id: string; message: string; message_es: string | null; level: 'info' | 'warning' }>(
-        `select id, message, message_es, level from platform_notices where starts_at <= now() and (ends_at is null or ends_at > now()) order by created_at desc limit 3`,
-      )).rows.map((n) => ({ id: n.id, message: n.message, messageEs: n.message_es, level: n.level })),
-      counter: {
-        cashierDiscountLimit: t.cashier_discount_limit === null ? null : String(Number(t.cashier_discount_limit)),
-        loyalty: await loyaltySettings(db, request.tenantId).then((l) => (l.enabled ? { pointValue: l.pointValue, minRedeem: l.minRedeem } : null)),
-      },
-    };
-  });
+  app.get('/me', async (request) => ({
+    ...(await meJson(deps, request.tenantId)),
+    // Asked with a secret key: which key, and what it may do.
+    ...(request.apiKey && { apiKey: { id: request.apiKey.id, name: request.apiKey.name, ...scopeJson(request.apiKey) } }),
+  }));
 
   // How the counter and the tills work for this business (owners and admins).
   app.put<{ Body: { cashierDiscountLimit: string | null } }>(

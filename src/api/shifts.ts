@@ -166,6 +166,18 @@ export async function shiftReport(db: Queryable, tenantId: string, s: ShiftRow) 
   };
 }
 
+/** The shift open on a register now, with its report (a till adopts it when it starts selling offline). */
+export async function openShiftOf(db: Queryable, tenantId: string, registerId: string) {
+  const s = (await db.query<ShiftRow>(`select ${SHIFT_COLUMNS} from ${SHIFT_FROM} where s.tenant_id = $1 and s.register_id = $2 and s.closed_at is null`, [tenantId, registerId])).rows[0];
+  return s ? { shift: shiftJson(s), report: await shiftReport(db, tenantId, s) } : null;
+}
+
+/** The cash a shift's drawer should hold now (float + cash takings + paid in - paid out), in cents. */
+export async function expectedCash(db: Queryable, tenantId: string, shiftId: string): Promise<bigint> {
+  const report = await shiftReport(db, tenantId, await loadShift(db, tenantId, shiftId));
+  return parseCents(report.cash.expected);
+}
+
 export function shiftJson(s: ShiftRow) {
   return {
     id: s.id,

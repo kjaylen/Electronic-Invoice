@@ -7,7 +7,10 @@ import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothManager;
 import android.bluetooth.BluetoothSocket;
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.os.Build;
+import android.security.keystore.KeyGenParameterSpec;
+import android.security.keystore.KeyProperties;
 import android.util.Base64;
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
@@ -19,6 +22,13 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
 import com.getcapacitor.annotation.PermissionCallback;
 import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
+import java.security.KeyStore;
+import javax.crypto.Cipher;
+import javax.crypto.KeyGenerator;
+import javax.crypto.SecretKey;
+import javax.crypto.spec.GCMParameterSpec;
+import org.json.JSONObject;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.Socket;
@@ -30,6 +40,9 @@ import java.util.concurrent.Executors;
  * Receipt printers for the till (web/src/pos/platform.ts, TillHardware):
  * raw ESC/POS bytes to network printers (port 9100) on the local network,
  * and to paired Bluetooth printers over the serial port profile.
+ *
+ * Also the till's secrets (its token, the key of its local data): encrypted
+ * with an AES key kept in the Android Keystore, which never leaves it.
  */
 @CapacitorPlugin(
     name = "TillHardware",
@@ -168,6 +181,92 @@ public class TillHardwarePlugin extends Plugin {
                 }
             }
         });
+    }
+
+    // ---------- secrets ----------
+
+    private static final String SECRET_KEY_ALIAS = "floreo-till-secrets";
+    private static final String SECRET_PREFS = "floreo-till-secure";
+
+    private SharedPreferences secrets() {
+        return getContext().getSharedPreferences(SECRET_PREFS, Context.MODE_PRIVATE);
+    }
+
+    /** The Keystore key that encrypts the secrets (made once). */
+    private SecretKey secretKey() throws Exception {
+        KeyStore store = KeyStore.getInstance("AndroidKeyStore");
+        store.load(null);
+        KeyStore.Entry entry = store.getEntry(SECRET_KEY_ALIAS, null);
+        if (entry instanceof KeyStore.SecretKeyEntry) return ((KeyStore.SecretKeyEntry) entry).getSecretKey();
+        KeyGenerator generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore");
+        generator.init(new KeyGenParameterSpec.Builder(SECRET_KEY_ALIAS, KeyProperties.PURPOSE_ENCRYPT | KeyProperties.PURPOSE_DECRYPT)
+            .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+            .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+            .setKeySize(256)
+            .build());
+        return generator.generateKey();
+    }
+
+    @PluginMethod
+    public void secretSet(PluginCall call) {
+        String key = call.getString("key");
+        String value = call.getString("value");
+        if (key == null || value == null) {
+            call.reject("Missing the key or the value");
+            return;
+        }
+        try {
+            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+            cipher.init(Cipher.ENCRYPT_MODE, secretKey());
+            byte[] sealed = cipher.doFinal(value.getBytes(StandardCharsets.UTF_8));
+            String stored = Base64.encodeToString(cipher.getIV(), Base64.NO_WRAP) + ":" + Base64.encodeToString(sealed, Base64.NO_WRAP);
+            // commit, not apply: on the disk before the till goes on.
+            if (!secrets().edit().putString(key, stored).commit()) {
+                call.reject("Could not save the secret");
+                return;
+            }
+            call.resolve();
+        } catch (Exception e) {
+            call.reject("Could not keep the secret: " + e.getMessage());
+        }
+    }
+
+    @PluginMethod
+    public void secretGet(PluginCall call) {
+        String key = call.getString("key");
+        if (key == null) {
+            call.reject("Missing the key");
+            return;
+        }
+        JSObject result = new JSObject();
+        String stored = secrets().getString(key, null);
+        if (stored == null || !stored.contains(":")) {
+            result.put("value", JSONObject.NULL);
+            call.resolve(result);
+            return;
+        }
+        try {
+            String[] parts = stored.split(":", 2);
+            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+            cipher.init(Cipher.DECRYPT_MODE, secretKey(), new GCMParameterSpec(128, Base64.decode(parts[0], Base64.NO_WRAP)));
+            result.put("value", new String(cipher.doFinal(Base64.decode(parts[1], Base64.NO_WRAP)), StandardCharsets.UTF_8));
+            call.resolve(result);
+        } catch (Exception e) {
+            // Sealed with a key this device no longer has (restored from a backup): as if there were none.
+            result.put("value", JSONObject.NULL);
+            call.resolve(result);
+        }
+    }
+
+    @PluginMethod
+    public void secretRemove(PluginCall call) {
+        String key = call.getString("key");
+        if (key == null) {
+            call.reject("Missing the key");
+            return;
+        }
+        secrets().edit().remove(key).commit();
+        call.resolve();
     }
 
     private byte[] decode(PluginCall call) {

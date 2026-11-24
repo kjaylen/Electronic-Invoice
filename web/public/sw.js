@@ -2,13 +2,16 @@
  * Service worker: makes the app installable and quick to open.
  *
  * - The app shell (index.html, built assets, fonts, icons) is cached.
- * - Pages: network first, falling back to the cached shell when offline.
+ * - Pages: network first, falling back to the cached shell when offline. The
+ *   till (/pos) has its own: a till in a browser opens without the server
+ *   (web/src/pos/main.tsx puts its page and files in these caches).
  * - Built assets (/assets/*, fingerprinted): cache first.
  * - The API (/v1/*) and shared documents (/d/*) are never cached: they carry
  *   business data and must always be live.
  */
 
-const VERSION = 'v2';
+// Also named in web/src/pos/main.tsx.
+const VERSION = 'v3';
 const SHELL = `shell-${VERSION}`;
 const ASSETS = `assets-${VERSION}`;
 
@@ -32,14 +35,15 @@ self.addEventListener('fetch', (event) => {
   if (url.pathname.startsWith('/v1/') || url.pathname.startsWith('/d/') || url.pathname === '/health') return;
 
   if (request.mode === 'navigate') {
+    const shell = url.pathname === '/pos' || url.pathname.startsWith('/pos/') ? '/pos' : '/';
     event.respondWith(
       fetch(request)
         .then((res) => {
           const copy = res.clone();
-          if (res.ok) caches.open(SHELL).then((c) => c.put('/', copy));
+          if (res.ok) caches.open(SHELL).then((c) => c.put(shell, copy));
           return res;
         })
-        .catch(() => caches.match('/').then((r) => r || Response.error())),
+        .catch(() => caches.match(shell).then((r) => r || Response.error())),
     );
     return;
   }

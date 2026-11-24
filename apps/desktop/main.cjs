@@ -26,7 +26,8 @@ if (!app.requestSingleInstanceLock()) app.quit();
 // ---------- storage ----------
 
 const storeFile = () => path.join(app.getPath('userData'), 'till.json');
-const SECRET_KEYS = new Set(['till.token']);
+// Encrypted with the operating system's key: the till's token and the key of its local data.
+const SECRET_KEYS = new Set(['till.token', 'till.dbkey']);
 function readStore() {
   try {
     return JSON.parse(fs.readFileSync(storeFile(), 'utf8'));

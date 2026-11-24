@@ -24,7 +24,7 @@ const OWNER = { email: 'rosa@cornerstore.test', password: 'my brand new password
 const SMTP_PORT = process.env.E2E_VIEW === '1' ? Number(process.env.VIEW_MAIL_PORT ?? 3135) : Number(process.env.E2E_MAIL_PORT ?? 3125);
 const DATABASE = (() => {
   const url = new URL(process.env.E2E_ADMIN_DATABASE_URL ?? 'postgres://einvoicing:einvoicing@localhost:5432/einvoicing');
-  url.pathname = `/${process.env.E2E_DATABASE_NAME ?? 'einvoicing_e2e'}`;
+  url.pathname = `/${process.env.E2E_DB ?? 'einvoicing_e2e'}`;
   return url.toString();
 })();
 
