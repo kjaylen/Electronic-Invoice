@@ -2,7 +2,8 @@
  * The public storefront: no sign-in. Everything is scoped by the business's
  * address (slug), and only works while its store is open.
  *
- *   GET  /v1/store/:slug                         store details, delivery zones, payment methods
+ *   GET  /v1/store/:slug                         store details, delivery zones, payment methods, and the hosted site's design
+ *   GET  /v1/store/:slug/info                    the same without the design: what a site built elsewhere needs
  *   GET  /v1/store/:slug/products                active products (q, category, collection, sort, limit, handles, onSale, relatedTo)
  *   GET  /v1/store/:slug/collections[/:handle]   published collections; one with its products
  *   POST /v1/store/:slug/contact                 a message from the contact form, emailed to the store
@@ -26,6 +27,11 @@
  *
  * Prices shown to buyers include GST. Totals come from the same calculation
  * that produces the e-invoice.
+ *
+ * A site built somewhere else calls the same routes with the store's
+ * publishable key (store-access.ts). Answers carry full addresses beside the
+ * older relative ones (imageUrl, url, orderUrl, payment.url), and an order or
+ * a payment may name a returnUrl on that site to send the buyer back to.
  */
 
 import type { FastifyInstance, FastifyRequest } from 'fastify';
@@ -54,16 +60,25 @@ import { formatCents } from '../engine/decimal.ts';
 import { emailLanguage, PHRASES } from '../templates/lang.ts';
 import { addStockAlert, StockAlertError } from '../commerce/stock-alerts.ts';
 import { cardJson, findCard, payingCard } from '../commerce/giftcards.ts';
-import { catalog, type CatalogSort, collectionJson, listCollections, SORTS } from '../commerce/catalog.ts';
+import { catalog, type CatalogSort, collectionJson, listCollections, type ProductCard, SORTS } from '../commerce/catalog.ts';
 import { customCodeSections, publishedSite } from '../commerce/site.ts';
 import { renderStoreSection } from '../templates/render.ts';
 import { sessionFromRequest } from './auth.ts';
 import { can } from './permissions.ts';
+import { publicBase } from './connect.ts';
+import { checkedReturnUrl, registerStoreAccess, type StoreAccessOptions } from './store-access.ts';
 import { sendDocumentEmail } from './documents.ts';
 
 
 // Limits on placing orders (shared by every server process), so a script cannot flood a store.
 const HOUR_MS = 60 * 60 * 1000;
+
+/** Where a page of products starts, from the cursor the page before answered with. */
+function cursorOffset(cursor: string): number {
+  const m = /^o:(\d{1,7})$/.exec(Buffer.from(cursor, 'base64url').toString('utf8'));
+  if (!m) throw new ApiError(400, 'invalid_request', 'cursor is not one this API gave out. Send the nextCursor of the page before, unchanged.');
+  return Number(m[1]);
+}
 
 const slugParams = { slug: { type: 'string', pattern: '^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$' } } as const;
 const cartSchema = {
@@ -75,8 +90,14 @@ const cartSchema = {
 
 const PAYMENT_TEXT = { bank_transfer: 'Bank transfer', cash_on_delivery: 'Cash on delivery', pay_at_pickup: 'Pay at pickup', online: 'Paid online', gift_card: 'Paid with a gift card' } as const;
 
-export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDeps, ctx: ServerContext, payments: GatewayExtras = {}) {
+const returnUrlSchema = { type: 'string', minLength: 8, maxLength: 1000 } as const;
+
+export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDeps, ctx: ServerContext, payments: GatewayExtras = {}, access: StoreAccessOptions = {}) {
   const { db } = deps;
+  registerStoreAccess(app, deps, ctx, access);
+  /** Full addresses, for sites that are not this app: the store's hosted pages, and its API. */
+  const shopUrl = (request: FastifyRequest, slug: string, path = '') => `${publicBase(ctx, request)}/${slug}/shop${path}`;
+  const apiUrl = (request: FastifyRequest, slug: string, path = '') => `${publicBase(ctx, request)}/v1/store/${slug}${path}`;
   const slugOf = async (tenantId: string) => (await db.query<{ slug: string }>('select slug from tenants where id = $1', [tenantId])).rows[0]!.slug;
   const gatewaySettings = gatewayOptions(deps, slugOf, payments);
   // The site builder's preview: staff who can edit the site see their store even while it is closed.
@@ -95,7 +116,6 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
 
   app.get<{ Params: { slug: string } }>('/:slug', { schema: { params: { type: 'object', required: ['slug'], properties: slugParams } } }, async (request) => {
     const s = await store(request);
-    const p = s.settings.payments;
     // On the store's own domain the shop lives at /shop; on ours, at /<slug>/shop.
     const own = ctx.publicUrl ? new URL(ctx.publicUrl).hostname : null;
     const base = own && request.hostname.split(':')[0] !== own ? '/shop' : `/${s.slug}/shop`;
@@ -105,8 +125,16 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
     for (const section of customCodeSections(site)) section.settings.html = await renderStoreSection(db, s.tenantId, String(section.settings.code ?? ''), context);
     return {
       site,
-      slug: s.slug,
       theme: await renderStoreTheme(db, s.tenantId, context),
+      ...storeInfo(request, s),
+    };
+  });
+
+  /** What every kind of storefront needs to know about the store. */
+  const storeInfo = (request: FastifyRequest, s: StoreRef) => {
+    const p = s.settings.payments;
+    return {
+      slug: s.slug,
       email: s.email,
       street: s.street,
       name: s.name,
@@ -124,10 +152,18 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
       reminders: s.settings.reminders.enabled,
       // Buyers can sign in (a code by email) to see their orders and check out faster.
       accounts: accountsOffered(s, ctx),
+      // The store's hosted pages and its API, as full addresses.
+      urls: { store: shopUrl(request, s.slug), cart: shopUrl(request, s.slug, '/cart'), account: shopUrl(request, s.slug, '/account'), api: apiUrl(request, s.slug) },
     };
-  });
+  };
 
-  app.get<{ Params: { slug: string }; Querystring: { q?: string; category?: string; collection?: string; sort?: CatalogSort; limit?: string; handles?: string; onSale?: string; relatedTo?: string } }>(
+  // The store without its hosted design: for a site built somewhere else.
+  app.get<{ Params: { slug: string } }>('/:slug/info', { schema: { params: { type: 'object', required: ['slug'], properties: slugParams } } }, async (request) => storeInfo(request, await store(request)));
+
+  /** A product card with its photo's and its hosted page's full address. */
+  const productCard = (request: FastifyRequest, slug: string, p: ProductCard) => ({ ...p, imageUrl: p.imageId ? apiUrl(request, slug, `/images/${p.imageId}`) : null, url: shopUrl(request, slug, `/products/${p.handle}`) });
+
+  app.get<{ Params: { slug: string }; Querystring: { q?: string; category?: string; collection?: string; sort?: CatalogSort; limit?: string; cursor?: string; handles?: string; onSale?: string; relatedTo?: string } }>(
     '/:slug/products',
     {
       schema: {
@@ -136,7 +172,7 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
           type: 'object', additionalProperties: false,
           properties: {
             q: { type: 'string', maxLength: 100 }, category: { type: 'string', maxLength: 80 }, collection: { type: 'string', maxLength: 80 },
-            sort: { type: 'string', enum: SORTS }, limit: { type: 'string', pattern: '^\\d{1,3}$' }, handles: { type: 'string', maxLength: 1200 },
+            sort: { type: 'string', enum: SORTS }, limit: { type: 'string', pattern: '^\\d{1,3}$' }, cursor: { type: 'string', maxLength: 40 }, handles: { type: 'string', maxLength: 1200 },
             onSale: { type: 'string', enum: ['1'] }, relatedTo: { type: 'string', maxLength: 80 },
           },
         },
@@ -145,12 +181,17 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
     async (request) => {
       const s = await store(request);
       const q = request.query;
+      // Pages like the rest of the API: limit and cursor in, nextCursor out (null when there is no more). Without a limit, up to 500 as before.
+      const limit = Math.min(500, Math.max(1, q.limit ? Number(q.limit) : 500));
+      const offset = q.cursor ? cursorOffset(q.cursor) : 0;
+      const rows = await catalog(db, s.tenantId, {
+        ...(q.q && { q: q.q }), ...(q.category && { category: q.category }), ...(q.collection && { collection: q.collection }), ...(q.sort && { sort: q.sort }),
+        limit: limit + 1, offset, ...(q.handles !== undefined && { handles: q.handles.split(',').map((h) => h.trim()).filter(Boolean).slice(0, 50) }),
+        ...(q.onSale && { onSale: true }), ...(q.relatedTo && { relatedTo: q.relatedTo }),
+      });
       return {
-        data: await catalog(db, s.tenantId, {
-          ...(q.q && { q: q.q }), ...(q.category && { category: q.category }), ...(q.collection && { collection: q.collection }), ...(q.sort && { sort: q.sort }),
-          ...(q.limit && { limit: Number(q.limit) }), ...(q.handles !== undefined && { handles: q.handles.split(',').map((h) => h.trim()).filter(Boolean).slice(0, 50) }),
-          ...(q.onSale && { onSale: true }), ...(q.relatedTo && { relatedTo: q.relatedTo }),
-        }),
+        data: rows.slice(0, limit).map((p) => productCard(request, s.slug, p)),
+        nextCursor: rows.length > limit ? Buffer.from(`o:${offset + limit}`).toString('base64url') : null,
       };
     },
   );
@@ -175,7 +216,7 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
       if (!c) throw new StoreError('not_found', 'This collection is not available');
       return {
         handle: c.handle, title: c.title, description: c.description, image: c.image, seoTitle: c.seo_title, seoDescription: c.seo_description,
-        products: await catalog(db, s.tenantId, { collection: c.handle, ...(request.query.sort && { sort: request.query.sort }) }),
+        products: (await catalog(db, s.tenantId, { collection: c.handle, ...(request.query.sort && { sort: request.query.sort }) })).map((p) => productCard(request, s.slug, p)),
       };
     },
   );
@@ -238,6 +279,8 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
         badge: p.badge,
         options: [p.option1_name, p.option2_name].filter((x): x is string => Boolean(x)),
         images: images.map((i) => i.id),
+        imageUrls: images.map((i) => apiUrl(request, s.slug, `/images/${i.id}`)),
+        url: shopUrl(request, s.slug, `/products/${p.handle}`),
         variants: variants.map((v) => ({
           id: v.id,
           title: variantTitle(v),
@@ -357,6 +400,8 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
             note: { type: 'string', maxLength: 1000 },
             checkoutId: uuid,
             saveAddress: { type: 'boolean' },
+            // Paying online from a site built elsewhere: the page there to come back to.
+            returnUrl: returnUrlSchema,
           },
         },
       },
@@ -365,8 +410,10 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
       const s = await store(request);
       if (await overLimit(db, `order|${request.ip}|${s.slug}`, 20, HOUR_MS) || await overLimit(db, `order|${request.ip}`, 60, HOUR_MS)) throw new ApiError(429, 'too_many_orders', 'Too many orders from here in the last hour; contact the store');
       // Signed in: the order goes in the buyer's account, which remembers what was new in it.
+      const { returnUrl: wantedReturn, ...order } = request.body as OrderInput & { returnUrl?: string };
+      const returnTo = checkedReturnUrl(request, wantedReturn);
       const buyer = await buyerFromRequest(db, request, s);
-      const placed = await placeOrder(db, deps, s, request.body, { ...(buyer && { buyerId: buyer.id }) });
+      const placed = await placeOrder(db, deps, s, order, { ...(buyer && { buyerId: buyer.id }) });
       if (buyer) await rememberFromOrder(db, buyer, request.body).catch((e) => request.log.error({ err: e }, 'account not updated'));
       await markOrdered(db, s.tenantId, placed.id, request.body.checkoutId, request.body.customer.email).catch((e) => request.log.error({ err: e }, 'checkout not closed'));
       const path = `/${s.slug}/shop/orders/${placed.number}?t=${placed.token}`;
@@ -386,15 +433,21 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
       }
       void notify(request, s, placed, path).catch((e) => request.log.error({ err: e }, 'order notification failed'));
       // Paying online: straight to the provider's page. If that fails, the order stands and the buyer can retry from its page.
-      let payment: { redirectUrl: string } | { error: string } | undefined;
+      let payment: { redirectUrl: string; url: string } | { error: string } | undefined;
       if (request.body.paymentMethod === 'online') {
         try {
-          payment = await beginPayment(s, placed.id, placed.number, placed.token);
+          payment = await beginPayment(request, s, placed.id, placed.number, placed.token, returnTo);
         } catch (e) {
           payment = { error: e instanceof PaymentError ? e.message : 'The payment could not be started; try again from your order page' };
         }
       }
-      return reply.code(201).send({ number: placed.number, token: placed.token, path, totals: placed.quote.totals, ...(payment && { payment }) });
+      return reply.code(201).send({
+        number: placed.number, token: placed.token, path,
+        // The buyer's order page on the hosted store (progress, how to pay, the receipt once paid).
+        orderUrl: shopUrl(request, s.slug, `/orders/${placed.number}?t=${placed.token}`),
+        test: s.environment === 'test',
+        totals: placed.quote.totals, ...(payment && { payment }),
+      });
     },
   );
 
@@ -441,8 +494,12 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
     },
   );
 
-  /** Create a checkout with the store's provider; returns where to send the buyer (back to the order's link, or, signed in, its page in the account). */
-  async function beginPayment(s: StoreRef, orderId: string, number: number, token: string | undefined) {
+  /**
+   * Create a checkout with the store's provider; returns where to send the buyer. Afterwards the buyer comes back to the
+   * order's link (or, signed in, its page in the account), or to `returnTo` on the site that asked, which gets
+   * floreo_order, floreo_token and floreo_payment (or floreo_cancelled) added to its address.
+   */
+  async function beginPayment(request: FastifyRequest, s: StoreRef, orderId: string, number: number, token: string | undefined, returnTo?: string) {
     const gateway = await gatewayFor(db, s.tenantId, s.settings.payments.online.provider, await gatewaySettings(s.tenantId));
     const base = ctx.publicUrl?.replace(/\/$/, '') ?? '';
     if (gateway.provider !== 'test' && !base) throw new PaymentError('PUBLIC_URL is not set on this server, so the payment provider cannot send buyers back');
@@ -450,10 +507,22 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
     const order = (await db.query<{ total_cents: unknown }>('select total_cents - gift_card_cents as total_cents from orders where id = $1', [orderId])).rows[0]!;
     const orderPage = `${base}/${s.slug}/shop/orders/${number}${token ? `?t=${token}` : ''}`;
     const and = token ? '&' : '?';
+    const back = (extra: Record<string, string>) => {
+      const u = new URL(returnTo!);
+      for (const [k, v] of Object.entries({ floreo_order: String(number), ...(token && { floreo_token: token }), ...extra })) u.searchParams.set(k, v);
+      return u.toString();
+    };
     const started = await startPayment(db, gateway, {
       tenantId: s.tenantId, orderId, amountCents: toBigInt(order.total_cents), description: `${s.name} order #${number}`, invoiceRef: `${s.tenantId.slice(0, 8)}-${number}`,
-    }, { returnUrl: (paymentId) => `${orderPage}${and}payment=${paymentId}`, cancelUrl: `${orderPage}${and}cancelled=1` });
-    return { redirectUrl: started.redirectUrl, paymentId: started.paymentId };
+    }, returnTo
+      ? { returnUrl: (paymentId) => back({ floreo_payment: paymentId }), cancelUrl: back({ floreo_cancelled: '1' }) }
+      : { returnUrl: (paymentId) => `${orderPage}${and}payment=${paymentId}`, cancelUrl: `${orderPage}${and}cancelled=1` });
+    // The pretend card page is ours: it needs to know where the buyer came from.
+    if (returnTo) {
+      await db.query("update order_payments set detail = coalesce(detail, '{}'::jsonb) || $2::jsonb where id = $1", [started.paymentId, JSON.stringify({ returnUrl: back({ floreo_payment: started.paymentId }) })]);
+    }
+    // `url` is always a full address; `redirectUrl` stays as it was (relative for the test page).
+    return { redirectUrl: started.redirectUrl, paymentId: started.paymentId, url: /^https?:/.test(started.redirectUrl) ? started.redirectUrl : `${publicBase(ctx, request)}${started.redirectUrl}` };
   }
 
   /** Order confirmation to the buyer and a heads-up to the business, by email when set up. */
@@ -572,8 +641,10 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
         online: order.payment_method === 'online' ? await onlineState(order.id, order.status === 'open' && order.payment_status === 'unpaid' && s.settings.payments.online.enabled) : null,
         pickup: order.fulfillment === 'pickup' ? { address: `${s.street}, ${s.city}`, instructions: s.settings.pickup.instructions } : null,
         document: doc && ['authorized', 'authorized_with_alert', 'contingency_pending'].includes(doc.status)
-          ? { type: doc.type, series: doc.series, number: doc.number, status: doc.status }
+          ? { type: doc.type, series: doc.series, number: doc.number, status: doc.status, pdfUrl: apiUrl(request, s.slug, `/orders/${order.number}/document${request.query.t ? `?t=${encodeURIComponent(request.query.t)}` : ''}`) }
           : null,
+        test: s.environment === 'test',
+        orderUrl: shopUrl(request, s.slug, `/orders/${order.number}${request.query.t ? `?t=${encodeURIComponent(request.query.t)}` : ''}`),
       };
     },
   );
@@ -597,16 +668,17 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
     return { canPay, lastStatus: last?.status ?? null, lastProblem: last?.detail?.reason ?? last?.detail?.error ?? null, provider: last?.provider ?? null };
   }
 
-  app.post<{ Params: { slug: string; number: string }; Querystring: { t?: string } }>(
+  app.post<{ Params: { slug: string; number: string }; Querystring: { t?: string }; Body?: { returnUrl?: string } }>(
     '/:slug/orders/:number/pay',
-    { schema: { params: orderParams, querystring: tokenQuery } },
+    { schema: { params: orderParams, querystring: tokenQuery, body: { type: ['object', 'null'], additionalProperties: false, properties: { returnUrl: returnUrlSchema } } } },
     async (request) => {
+      const returnTo = checkedReturnUrl(request, request.body?.returnUrl);
       const { s, order } = await buyerOrder(request);
       if (order.payment_method !== 'online' || order.status !== 'open' || order.payment_status !== 'unpaid') throw new StoreError('conflict', 'This order is not waiting for an online payment');
       if (!s.settings.payments.online.enabled) throw new StoreError('conflict', 'This store is not taking online payments right now; contact it to pay another way');
       if (await overLimit(db, `pay|${order.id}`, 20, HOUR_MS)) throw new ApiError(429, 'too_many_attempts', 'Too many payment attempts for this order; contact the store');
       try {
-        return await beginPayment(s, order.id, order.number, request.query.t);
+        return await beginPayment(request, s, order.id, order.number, request.query.t, returnTo);
       } catch (e) {
         if (e instanceof PaymentError) throw new StoreError('conflict', e.message);
         throw e;
@@ -652,7 +724,8 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
       const p = await testPayment(request.params.slug, request.params.id);
       if (p.status !== 'pending' || p.detail?.testDecision) throw new StoreError('conflict', 'This test payment was already decided');
       await db.query("update order_payments set detail = coalesce(detail, '{}'::jsonb) || $2::jsonb, updated_at = now() where id = $1", [p.id, JSON.stringify({ testDecision: request.body.decision })]);
-      return { ok: true };
+      // An order placed from a site built elsewhere goes back there, the way a real provider would send the buyer back.
+      return { ok: true, returnUrl: typeof p.detail?.returnUrl === 'string' ? p.detail.returnUrl : null };
     },
   );
 }

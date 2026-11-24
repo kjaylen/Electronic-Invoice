@@ -515,7 +515,9 @@ export function registerProductRoutes(app: FastifyInstance, deps: PipelineDeps, 
 
   app.get('/store-settings', async (request) => {
     const row = (await db.query<{ store_settings: Partial<StoreSettings>; slug: string }>('select store_settings, slug from tenants where id = $1', [request.tenantId])).rows[0]!;
-    return { ...withDefaults(row.store_settings), slug: row.slug };
+    // Publishable keys have their own routes (connect.ts); this answer is what Settings saves back.
+    const { connect: _connect, ...settings } = withDefaults(row.store_settings);
+    return { ...settings, slug: row.slug };
   });
 
   app.put<{ Body: Partial<StoreSettings> }>('/store-settings', { schema: { body: settingsSchema } }, async (request) => {
@@ -535,11 +537,16 @@ export function registerProductRoutes(app: FastifyInstance, deps: PipelineDeps, 
     if (merged.enabled && !merged.payments.bankTransfer.enabled && !merged.payments.cashOnDelivery.enabled && !merged.payments.payAtPickup.enabled && !merged.payments.online.enabled) {
       throw new ApiError(422, 'invalid_settings', 'Turn on at least one way to pay');
     }
-    await db.query('update tenants set store_settings = $2 where id = $1', [request.tenantId, JSON.stringify(merged)]);
+    // The keys of connected sites are not Settings' to save: whatever is stored now stays.
+    const { connect: _connect, ...saved } = merged;
+    await db.query(
+      `update tenants set store_settings = $2::jsonb || jsonb_build_object('connect', coalesce(store_settings -> 'connect', '{"keys": []}'::jsonb)) where id = $1`,
+      [request.tenantId, JSON.stringify(saved)],
+    );
     if (Boolean(withDefaults(before).enabled) !== merged.enabled) {
       await audit(db, { tenantId: request.tenantId, userId: request.userId || null, action: merged.enabled ? 'store.opened' : 'store.closed', ip: request.ip });
     }
-    return merged;
+    return saved;
   });
 }
 

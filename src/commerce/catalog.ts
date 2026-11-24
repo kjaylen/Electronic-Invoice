@@ -37,6 +37,8 @@ export interface CatalogQuery {
   relatedTo?: string;
   sort?: CatalogSort;
   limit?: number;
+  /** Skip this many (paging). */
+  offset?: number;
   newWithinDays?: number;
   /** Rules not yet saved (a collection's preview). */
   rules?: CollectionRules;
@@ -104,7 +106,8 @@ const ORDER: Record<CatalogSort, string> = {
 /** Products for a page of the store (active, with at least one variant). */
 export async function catalog(db: Queryable, tenantId: string, query: CatalogQuery = {}): Promise<ProductCard[]> {
   const params: unknown[] = [tenantId];
-  let where = `p.tenant_id = $1 and p.status = 'active'`;
+  // Only products with something to sell, so a page of `limit` is never short while there are more.
+  let where = `p.tenant_id = $1 and p.status = 'active' and exists (select 1 from items i where i.product_id = p.id and i.archived_at is null)`;
   let order = ORDER[query.sort ?? 'newest'];
   if (query.q?.trim()) {
     params.push(`%${escapeLike(query.q.trim())}%`);
@@ -147,12 +150,13 @@ export async function catalog(db: Queryable, tenantId: string, query: CatalogQue
     where += ` and p.handle <> ${self}`;
     order = `(${CATEGORY} is not distinct from (select ${CATEGORY.replace(/p\.id/g, 'x.id')} from products x where x.tenant_id = $1 and x.handle = ${self})) desc, p.created_at desc`;
   }
-  params.push(Math.min(500, Math.max(1, query.limit ?? 500)));
+  params.push(Math.min(501, Math.max(1, query.limit ?? 500)));
+  params.push(Math.max(0, Math.floor(query.offset ?? 0)));
   const rows = (await db.query<{ handle: string; title: string; badge: string | null; image_id: string | null; category: string | null; prices: Array<{ price: string; was: string | null; gst: 'S' | 'Z' | 'E'; stock: number | null }> | null }>(
     `select p.handle, p.title, p.badge, ${CATEGORY} as category,
        (select g.id from product_images g where g.product_id = p.id order by g.position, g.created_at limit 1) as image_id,
        (select json_agg(json_build_object('price', i.unit_price::text, 'was', i.compare_at_price::text, 'gst', i.gst_category, 'stock', i.stock_quantity::float8)) from items i where i.product_id = p.id and i.archived_at is null) as prices
-     from products p where ${where} order by ${order} limit $${params.length}`,
+     from products p where ${where} order by ${order} limit $${params.length - 1} offset $${params.length}`,
     params,
   )).rows;
   return rows.filter((r) => r.prices?.length).map((r) => {

@@ -19,6 +19,7 @@ import { issueDocument, type IssueRequest, type IssueResult, type PipelineDeps }
 import { allocateDiscount, DiscountError, type DiscountKind, discountShare, findUsableDiscount } from './discounts.ts';
 import { openShiftSql } from '../db/shifts.ts';
 import { cannotPay, findCard, returnToCard, useGiftCard } from './giftcards.ts';
+import { connectDefaults, type ConnectSettings } from './connect.ts';
 
 export class StoreError extends Error {
   override name = 'StoreError';
@@ -58,6 +59,8 @@ export interface StoreSettings {
   reminders: { enabled: boolean; afterHours: number; second: boolean };
   /** Buyers can sign in (with a code sent to their email) to see their orders and check out faster. */
   accounts: { enabled: boolean };
+  /** Sites built elsewhere that use this store: their publishable keys (connect.ts). Not part of what Settings saves. */
+  connect: ConnectSettings;
 }
 
 export const DEFAULT_STORE_SETTINGS: StoreSettings = {
@@ -71,6 +74,7 @@ export const DEFAULT_STORE_SETTINGS: StoreSettings = {
   payments: { bankTransfer: { enabled: true, instructions: '' }, cashOnDelivery: { enabled: true }, payAtPickup: { enabled: true }, online: { enabled: false, provider: 'test' } },
   reminders: { enabled: true, afterHours: 1, second: true },
   accounts: { enabled: true },
+  connect: { keys: [] },
 };
 
 /** Stored settings over the defaults, so older or partial settings always have every field. */
@@ -93,6 +97,7 @@ export function withDefaults(stored: Partial<StoreSettings> | null | undefined):
     },
     reminders: { enabled: s.reminders?.enabled ?? d.reminders.enabled, afterHours: s.reminders?.afterHours ?? d.reminders.afterHours, second: s.reminders?.second ?? d.reminders.second },
     accounts: { enabled: s.accounts?.enabled ?? d.accounts.enabled },
+    connect: connectDefaults(s.connect),
   };
 }
 

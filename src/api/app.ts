@@ -68,6 +68,8 @@ import { registerItemSummaryRoutes } from './item-summary.ts';
 import { registerLoyaltyRoutes } from './loyalty.ts';
 import { registerGiftCardRoutes } from './giftcards.ts';
 import { registerSiteRoutes } from './site.ts';
+import { registerConnectRoutes } from './connect.ts';
+import { answerStorePreflight } from './store-access.ts';
 import { registerShiftRoutes } from './shifts.ts';
 import { registerPosAdminRoutes, registerPosDeviceRoutes, SESSION_TOKEN_PREFIX, tillMayUse, touchDevice } from './pos.ts';
 import { lookupSession } from '../db/users.ts';
@@ -121,6 +123,8 @@ export interface AppOptions {
   billing?: { tenantSlug?: string; paymentInstructions?: string };
   /** Requests per minute per API key. Default 600. */
   apiRateLimitPerMinute?: number;
+  /** Requests per minute for one publishable key from one visitor (a site built elsewhere). Default 300. */
+  storeRateLimitPerMinute?: number;
   /** Let webhooks reach private addresses and plain http (development and tests only). */
   webhooksAllowPrivate?: boolean;
   /** For tests: the fetch used to talk to payment providers. */
@@ -198,6 +202,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   app.decorateRequest('principal', 'api');
   app.decorateRequest('userId', '');
   app.decorateRequest('posDevice', null);
+  app.decorateRequest('storeCaller', null);
   app.setErrorHandler(errorHandler);
 
   // The till apps call the API from their own origin with a bearer token. No cookies are allowed
@@ -216,6 +221,8 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       return reply.code(204).send();
     }
   });
+  // A site built elsewhere asking whether it may call the store API (the call itself is what gets checked, in store-access.ts).
+  app.addHook('onRequest', async (request, reply) => answerStorePreflight(request, reply));
   const photoOrigin = (() => {
     const u = options.objectStore?.publicUrl('probe');
     try {
@@ -387,6 +394,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     registerLoyaltyRoutes(tenant, deps);
     registerGiftCardRoutes(tenant, deps, ctx);
     registerSiteRoutes(tenant, deps);
+    registerConnectRoutes(tenant, deps, ctx);
     registerShiftRoutes(tenant, deps);
     registerPosAdminRoutes(tenant, deps);
     registerTemplateRoutes(tenant, deps);
@@ -439,7 +447,9 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   await app.register(async (cb) => registerPaymentCallbacks(cb, deps, ctx, gatewayOptions(deps, slugOfTenant, paymentExtras)), { prefix: '/v1/payment-callbacks' });
 
   // The public storefront: no sign-in, scoped by the business's address.
-  await app.register(async (store) => registerStorefrontRoutes(store, deps, ctx, paymentExtras), { prefix: '/v1/store' });
+  await app.register(async (store) => registerStorefrontRoutes(store, deps, ctx, paymentExtras, {
+    ownOrigins: tillOrigins, ...(options.storeRateLimitPerMinute && { ratePerMinute: options.storeRateLimitPerMinute }),
+  }), { prefix: '/v1/store' });
 
   // The web app: static files, and index.html for any other GET so client-side routes work.
   const webRoot = options.webRoot;

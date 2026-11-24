@@ -1115,7 +1115,12 @@ export function ShopTestPayment() {
   const decide = async (decision: 'approved' | 'declined') => {
     setBusy(true);
     try {
-      await api(shopApi(`/test-payments/${paymentId}`), { method: 'POST', body: { decision } });
+      const r = await api<{ returnUrl?: string | null }>(shopApi(`/test-payments/${paymentId}`), { method: 'POST', body: { decision } });
+      // An order placed on a site built elsewhere: back to that site (the server only gives an address on the key's list).
+      if (r.returnUrl) {
+        window.location.assign(r.returnUrl);
+        return;
+      }
       // Back to the order, the way a real provider would send the buyer back.
       const back = store.get<Record<string, string>>(`etd.orderlinks.${slug}`)?.[String(info!.orderNumber)];
       navigate(back ? `${back}&payment=${paymentId}` : '/shop', { replace: true });
