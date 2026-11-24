@@ -122,7 +122,7 @@ const DEFAULT_CONTINGENCY_SERIES = 900;
 const clock = (deps: PipelineDeps) => (deps.now ?? (() => new Date()))();
 
 /** The series row for this environment: test and production number separately, each with its own hash chain. */
-async function lockSeries(tx: Queryable, tenantId: string, environment: string, etdType: string, seriesNumber: number, purpose: 'normal' | 'contingency') {
+async function lockSeries(tx: Queryable, tenantId: string, environment: string, etdType: string, seriesNumber: number, purpose: 'normal' | 'contingency' | 'offline') {
   await tx.query(
     `insert into series (id, tenant_id, environment, etd_type, series_number, purpose) values ($1, $2, $3, $4, $5, $6)
      on conflict (tenant_id, environment, etd_type, series_number) do nothing`,
@@ -198,7 +198,24 @@ interface PreparedDocument {
 
 type PrepareMode =
   | { kind: 'normal' }
-  | { kind: 'contingency'; period: ContingencyPeriod; supersedes?: { documentId: string } };
+  | { kind: 'contingency'; period: ContingencyPeriod; supersedes?: { documentId: string } }
+  | { kind: 'offline'; sale: OfflineSale };
+
+/**
+ * A Tax Receipt a till made on the device (see issueOfflineReceipt): its id, series,
+ * serial, time and security code were fixed when it was sold and printed.
+ */
+export interface OfflineSale {
+  documentId: string;
+  seriesNumber: number;
+  serial: number;
+  /** Belize local date and time of the sale, as printed. */
+  issueDate: string;
+  issueTime: string;
+  securityCode: string;
+  /** The ETDUI the till printed; the server's must be the same. */
+  etdui: string;
+}
 
 async function prepare(
   deps: PipelineDeps,
@@ -208,10 +225,14 @@ async function prepare(
   inTransaction?: (tx: Queryable, doc: PreparedDocument) => Promise<void>,
 ): Promise<PreparedDocument> {
   const contingency = mode.kind === 'contingency';
-  const seriesNumber = contingency ? (deps.contingency?.seriesNumber ?? DEFAULT_CONTINGENCY_SERIES) : (req.seriesNumber ?? 1);
+  const offline = mode.kind === 'offline' ? mode.sale : null;
+  // Subsequent authorization: queued for BTS (contingency reissues, and receipts made on a till).
+  const subsequent = contingency || Boolean(offline);
+  const seriesNumber = contingency ? (deps.contingency?.seriesNumber ?? DEFAULT_CONTINGENCY_SERIES) : offline ? offline.seriesNumber : (req.seriesNumber ?? 1);
   if (!contingency && seriesNumber === (deps.contingency?.seriesNumber ?? DEFAULT_CONTINGENCY_SERIES)) {
     throw new PipelineError(`Series ${seriesNumber} is reserved for contingency documents`);
   }
+  if (offline && req.etdType !== ETD_TYPES.TAX_RECEIPT) throw new PipelineError('Only Tax Receipts are made on a till offline');
   // Validate amounts before taking the lock, so bad input never holds up the series.
   const totals = calculateDocument(
     {
@@ -221,7 +242,7 @@ async function prepare(
     },
     deps.tax,
   );
-  const operMode: OperMode = !contingency
+  const operMode: OperMode = !subsequent
     ? OPER_MODES.PREVIOUS_AUTHORIZATION
     : req.etdType === ETD_TYPES.TAX_RECEIPT
       ? OPER_MODES.SUBSEQUENT_AUTHORIZATION_TAX_RECEIPT
@@ -233,10 +254,11 @@ async function prepare(
   }
 
   return deps.db.transaction(async (tx) => {
-    const series = await lockSeries(tx, ctx.tenantId, ctx.environment, req.etdType, seriesNumber, contingency ? 'contingency' : 'normal');
-    const serial = Number(series.next_serial);
+    const series = await lockSeries(tx, ctx.tenantId, ctx.environment, req.etdType, seriesNumber, contingency ? 'contingency' : offline ? 'offline' : 'normal');
+    // A till's receipt keeps the serial, time and security code it was printed with.
+    const serial = offline ? offline.serial : Number(series.next_serial);
     const issuedAt = clock(deps);
-    const local = toBelizeDateTime(issuedAt);
+    const local = offline ? { date: offline.issueDate, time: offline.issueTime } : toBelizeDateTime(issuedAt);
     const etdui = buildEtdui({
       etdType: req.etdType,
       tin: ctx.supplier.tin,
@@ -246,8 +268,9 @@ async function prepare(
       issueTime: local.time,
       operMode,
       receptionEnv: RECEPTION_ENV[ctx.environment],
-      securityCode: generateSecurityCode(),
+      securityCode: offline ? offline.securityCode : generateSecurityCode(),
     });
+    if (offline && etdui !== offline.etdui) throw new PipelineError(`The receipt's ETDUI does not match its parts (printed ${offline.etdui}, made ${etdui})`);
     const ubl = buildUblDocument(
       {
         etdType: req.etdType,
@@ -269,7 +292,7 @@ async function prepare(
     const check = verifyDocumentSignature(signed.xml);
     if (!check.valid) throw new PipelineError(`Signature self-check failed: ${check.errors.join('; ')}`);
 
-    const documentId = randomUUID();
+    const documentId = offline ? offline.documentId : randomUUID();
     await tx.query(
       `insert into documents (id, tenant_id, series_id, etd_type, series_number, serial, etdui, issue_date, issue_time,
          oper_mode, reception_env, customer_id, customer_snapshot, referenced_etdui, line_count, line_extension_cents,
@@ -281,7 +304,7 @@ async function prepare(
         operMode, RECEPTION_ENV[ctx.environment], req.customerId ?? null,
         req.customer ? JSON.stringify(req.customer) : null, req.reference?.etdui ?? null, totals.lineCount,
         totals.lineExtensionAmount, totals.gstAmount, totals.taxAmount, totals.taxInclusiveAmount, totals.payableAmount,
-        ubl.sequenceInfoThisEtd, series.last_sequence_hash, signed.xml, contingency ? 'contingency_pending' : 'pending',
+        ubl.sequenceInfoThisEtd, series.last_sequence_hash, signed.xml, subsequent ? 'contingency_pending' : 'pending',
         mode.kind === 'contingency' ? mode.period.id : null,
         mode.kind === 'contingency' ? (mode.supersedes?.documentId ?? null) : null,
         // Invoices and debit notes are owed until paid: due on the payment terms' date, or at once.
@@ -302,7 +325,8 @@ async function prepare(
           line.netAmount, line.gstCategory, line.gstAmount, line.taxAmount, line.lineTotal, req.lineItemIds?.[line.lineNumber - 1] ?? null],
       );
     }
-    await tx.query(`update series set next_serial = $1, last_sequence_hash = $2 where id = $3`, [serial + 1, ubl.sequenceInfoThisEtd, series.id]);
+    // A till's receipts may arrive out of order (a retried one): the next serial never goes back.
+    await tx.query(`update series set next_serial = greatest(next_serial, $1), last_sequence_hash = $2 where id = $3`, [serial + 1, ubl.sequenceInfoThisEtd, series.id]);
 
     const prepared: PreparedDocument = {
       documentId,
@@ -313,7 +337,7 @@ async function prepare(
       signedXml: signed.xml,
       sequenceHash: ubl.sequenceInfoThisEtd,
       previousSequenceHash: series.last_sequence_hash,
-      contingency,
+      contingency: subsequent,
     };
     if (inTransaction) await inTransaction(tx, prepared);
     return prepared;
@@ -419,6 +443,44 @@ export async function issueDocument(deps: PipelineDeps, tenantId: string, req: I
     await unchain(tx, original);
   });
   return { ...queuedResult(reissued), supersededDocumentId: original.documentId };
+}
+
+/**
+ * A Tax Receipt a till made offline (operMode 3, subsequent authorization),
+ * stored with the till's own id, series, serial, time and ETDUI exactly as
+ * printed, then sent to BTS; if BTS cannot be reached it waits in the
+ * subsequent-authorization queue (catchUpContingency). It is never reissued
+ * or renumbered: the customer already has it.
+ *
+ * Safe to call again with the same documentId: the first result is returned
+ * and nothing is issued twice (`duplicate` says so).
+ */
+export async function issueOfflineReceipt(
+  deps: PipelineDeps, tenantId: string, sale: OfflineSale, req: IssueRequest,
+  inTransaction?: (tx: Queryable, documentId: string) => Promise<void>,
+): Promise<IssueResult & { duplicate: boolean }> {
+  const existing = async () => (await deps.db.query<StoredDocumentRow & { protocol_number: string | null }>(
+    `select ${STORED_COLUMNS}, protocol_number from documents where id = $1 and tenant_id = $2`, [sale.documentId, tenantId],
+  )).rows[0];
+  const asResult = (r: StoredDocumentRow & { protocol_number: string | null }) => ({
+    documentId: r.id, etdui: r.etdui, seriesNumber: r.series_number, serial: Number(r.serial), status: r.status,
+    delivery: 'not_sent' as const, ...(r.protocol_number && { protocolNumber: r.protocol_number }),
+    conditions: [], signedXml: r.signed_xml, contingency: true, duplicate: true,
+  });
+  const before = await existing();
+  if (before) return asResult(before);
+  if ((await deps.db.query('select 1 from documents where id = $1', [sale.documentId])).rows.length) throw new PipelineError('That sale id is taken by another business');
+  const ctx = await loadTenantContext(deps.db, deps.keys, tenantId);
+  let doc: PreparedDocument;
+  try {
+    doc = await prepare(deps, ctx, req, { kind: 'offline', sale }, inTransaction ? (tx, d) => inTransaction(tx, d.documentId) : undefined);
+  } catch (e) {
+    // Two uploads of the same sale at once: the second finds the first.
+    const raced = await existing();
+    if (raced) return asResult(raced);
+    throw e;
+  }
+  return { ...(await settle(deps, ctx, doc)), duplicate: false };
 }
 
 function queuedResult(doc: PreparedDocument): IssueResult {

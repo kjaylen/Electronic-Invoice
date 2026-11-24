@@ -145,6 +145,29 @@ export async function addCertificate(
   return id;
 }
 
+/** The business as its documents name it (the supplier party), and its environment; no certificate needed. */
+export async function loadSupplier(db: Queryable, tenantId: string): Promise<{ supplier: Supplier; environment: string }> {
+  const t = (await db.query<TenantRow>('select * from tenants where id = $1', [tenantId])).rows[0];
+  if (!t) throw new TenantError('Unknown tenant');
+  return { supplier: supplierOf(t), environment: t.environment };
+}
+
+function supplierOf(t: TenantRow): Supplier {
+  return {
+    legalName: t.legal_name,
+    ...(t.trade_name && { tradeName: t.trade_name }),
+    tin: t.tin,
+    address: {
+      street: t.street,
+      ...(t.additional_street && { additionalStreet: t.additional_street }),
+      city: t.city,
+      districtName: BELIZE_DISTRICTS[t.district_code],
+      districtCode: t.district_code,
+    },
+    contact: { telephone: t.telephone, email: t.email },
+  };
+}
+
 /** Load what the pipeline needs to issue for a tenant: supplier details and decrypted credentials. */
 export async function loadTenantContext(db: Database, keys: KeyProtector, tenantId: string): Promise<TenantContext> {
   const t = (await db.query<TenantRow>('select * from tenants where id = $1', [tenantId])).rows[0];
@@ -165,18 +188,6 @@ export async function loadTenantContext(db: Database, keys: KeyProtector, tenant
     environment: t.environment,
     certificateId: cert.id,
     credentials,
-    supplier: {
-      legalName: t.legal_name,
-      ...(t.trade_name && { tradeName: t.trade_name }),
-      tin: t.tin,
-      address: {
-        street: t.street,
-        ...(t.additional_street && { additionalStreet: t.additional_street }),
-        city: t.city,
-        districtName: BELIZE_DISTRICTS[t.district_code],
-        districtCode: t.district_code,
-      },
-      contact: { telephone: t.telephone, email: t.email },
-    },
+    supplier: supplierOf(t),
   };
 }
