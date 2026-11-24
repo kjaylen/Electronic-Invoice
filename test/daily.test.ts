@@ -10,6 +10,7 @@ import { buildApp } from '../src/api/app.ts';
 import { createUser } from '../src/db/users.ts';
 import { SUBMIT_PATHS } from '../src/engine/transport.ts';
 import { memoryMailer } from '../src/mail/mailer.ts';
+import { createMailService } from '../src/mail/service.ts';
 import { dailySummary, runDailySummaries } from '../src/notify/daily.ts';
 import { AUTHORIZED, setupPipeline } from './pipeline-setup.ts';
 
@@ -78,12 +79,14 @@ test('the daily summary: sales against last week, how customers paid, best selle
     assert.deepEqual(later.lateOrders, ['PO-7 (Roaster)']);
 
     const mail = memoryMailer();
+    // Through the mail service, as the server sends it: the service adds the way to stop these emails.
+    const mailer = await createMailService(f.db, f.deps.keys, { transport: mail, publicUrl: 'https://app.example.test' });
     // Off by default.
-    assert.deepEqual(await runDailySummaries(f.db, { mailer: mail, now: nextMorning(8) }), { sent: 0, failed: 0 });
+    assert.deepEqual(await runDailySummaries(f.db, { mailer, now: nextMorning(8) }), { sent: 0, failed: 0 });
     assert.equal((await app.inject({ method: 'PUT', url: '/v1/business/daily-summary', headers: owner, payload: { dailySummary: true } })).json().dailySummary, true);
     // Not before 7 am.
-    assert.deepEqual(await runDailySummaries(f.db, { mailer: mail, now: nextMorning(6) }), { sent: 0, failed: 0 });
-    assert.deepEqual(await runDailySummaries(f.db, { mailer: mail, now: nextMorning(8), publicUrl: 'https://app.example.test' }), { sent: 1, failed: 0 });
+    assert.deepEqual(await runDailySummaries(f.db, { mailer, now: nextMorning(6) }), { sent: 0, failed: 0 });
+    assert.deepEqual(await runDailySummaries(f.db, { mailer, now: nextMorning(8), publicUrl: 'https://app.example.test' }), { sent: 1, failed: 0 });
     const email = mail.sent.at(-1)!;
     assert.equal(email.to, 'olive@biz.example');
     assert.match(email.subject, /: BZ\$110\.25 in sales \w+day \d+ \w+$/);
@@ -94,8 +97,14 @@ test('the daily summary: sales against last week, how customers paid, best selle
     assert.match(email.text, /Bills to pay: 1 bill for BZ\$10\.00 due by tomorrow; 1 bill for BZ\$20\.00 overdue\./);
     assert.match(email.text, /Late deliveries: PO-7 \(Roaster\)\./);
     assert.ok(email.text.includes(`https://app.example.test/${slug}/reports`));
+    // Not transactional: it says how to stop it, in the text, in the HTML and for the mail app's own button.
+    assert.match(email.headers!['List-Unsubscribe']!, /^<https:\/\/app\.example\.test\/v1\/mail\/unsubscribe\/[A-Za-z0-9_-]+>$/);
+    assert.equal(email.headers!['List-Unsubscribe-Post'], 'List-Unsubscribe=One-Click');
+    assert.match(email.text, /To stop getting these emails: https:\/\/app\.example\.test\/v1\/mail\/unsubscribe\//);
+    assert.match(email.html!, /Stop getting these emails<\/a>/);
+    assert.equal(email.from, '"Floreo" <no-reply@localhost>');
     // Once a day.
-    assert.deepEqual(await runDailySummaries(f.db, { mailer: mail, now: nextMorning(9) }), { sent: 0, failed: 0 });
+    assert.deepEqual(await runDailySummaries(f.db, { mailer, now: nextMorning(9) }), { sent: 0, failed: 0 });
   } finally {
     await app.close();
     await f.close();

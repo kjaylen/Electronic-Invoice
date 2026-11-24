@@ -196,3 +196,21 @@ test('the trial ends into a monthly invoice; unpaid it goes past due, then issui
     assert.equal(extend.json().status, 'trialing');
     assert.equal(extend.json().plan, 'pro');
   }));
+
+test('a platform with no business of its own to invoice from still emails the plan invoice, as a plain email', () =>
+  withBilling(async (c) => {
+    await c.app.inject({ method: 'GET', url: '/v1/billing', headers: c.owner }); // the trial starts when the plan is first looked at
+    await c.f.db.query("update subscriptions set trial_ends_at = now() - interval '1 hour' where tenant_id = $1", [c.f.tenantA]);
+    const plain = billingContextFactory(c.f.deps, { mailer: c.mail, mailConfigured: true, publicUrl: 'https://app.example.test', cookieSecure: true, allowSignup: true, billing: { paymentInstructions: 'Belize Bank 000-111' } });
+    const before = c.mail.sent.length;
+    assert.equal((await runBilling(await plain())).invoices, 1);
+    const email = c.mail.sent.slice(before).find((m) => /your Floreo invoice/.test(m.subject))!;
+    assert.ok(email, 'the invoice was emailed');
+    assert.equal(email.to, 'billing@caribfuel.example');
+    assert.match(email.subject, /^CaribFuel: your Floreo invoice \(BZ\$\d+\.\d\d\)$/);
+    assert.match(email.text, /Your Floreo \w+ plan for \w+ \d{4}: BZ\$\d+\.\d\d \(GST included\), due \d{4}-\d\d-\d\d\./);
+    assert.match(email.text, /How to pay: Belize Bank 000-111/);
+    assert.ok(email.text.includes(`https://app.example.test/${c.slug}/settings?tab=plan`));
+    assert.match(email.html!, /See your plan/);
+    assert.equal(email.attachments, undefined, 'no e-invoice to attach');
+  }));

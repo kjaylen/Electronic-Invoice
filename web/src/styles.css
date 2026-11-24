@@ -2609,7 +2609,7 @@ main:has(.site-editor) { max-width: none; padding: 0.75rem 1rem 0.75rem; }
 
 /* Email: Settings → Email and the console's Email page (web/src/pages/Email.tsx). */
 .mail-form { max-width: 44rem; }
-.mail-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.9rem 1rem; }
+.mail-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.9rem 1rem; align-items: start; }
 .mail-grid .span-2 { grid-column: span 2; }
 @media (max-width: 640px) { .mail-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .mail-form .field { display: grid; gap: 0.3rem; }
@@ -2639,6 +2639,7 @@ main:has(.site-editor) { max-width: none; padding: 0.75rem 1rem 0.75rem; }
 .mail-log td { vertical-align: top; }
 .mail-log .nowrap, td.nowrap { white-space: nowrap; }
 .mail-to { overflow-wrap: anywhere; }
+@media (min-width: 641px) { .mail-log .mail-to { min-width: 12rem; } }
 .mail-problem { color: var(--coral-ink); margin-top: 0.2rem; max-width: 34rem; }
 .mail-log .muted { max-width: 34rem; }
 .mail-dns { display: grid; gap: 0.4rem; padding: 0.7rem 0.85rem; border: 1px solid var(--hairline); border-radius: var(--radius); background: var(--sheet); font-size: 0.93rem; }

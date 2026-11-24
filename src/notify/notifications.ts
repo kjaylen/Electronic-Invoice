@@ -71,7 +71,7 @@ async function send(options: NotifyOptions, db: Queryable, business: Business, m
   const url = message.button ? link(options, business, message.button.path) : undefined;
   const footer = `You get this email because you are an owner or admin of ${business.name}.`;
   const text = [...message.paragraphs, ...(url ? [url] : []), '', footer].join('\n\n');
-  const html = simpleHtml({ heading: message.heading, paragraphs: [...message.paragraphs, footer], ...(url && message.button && { button: { label: message.button.label, url } }) });
+  const html = simpleHtml({ heading: message.heading, paragraphs: message.paragraphs, footer: [footer], ...(url && message.button && { button: { label: message.button.label, url } }) });
   for (const to of await recipients(db, business)) {
     await options.mailer.send({ type: 'notice', tenantId: business.id, to, subject: `${business.name}: ${message.subject}`, text, html, replyTo: business.email });
   }

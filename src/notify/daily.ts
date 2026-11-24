@@ -192,7 +192,7 @@ export async function runDailySummaries(db: Queryable, options: DailyOptions): P
       const paragraphs = summaryParagraphs(summary);
       const footer = `You get this summary because you are an owner or admin of ${t.name}. Turn it off in Settings, Business.`;
       const subject = `${t.name}: ${money(summary.sales.net)} in sales ${longDay(day)}`;
-      const html = simpleHtml({ heading: longDay(day), paragraphs: [...paragraphs, footer], ...(url && { button: { label: 'Open the reports', url } }) });
+      const html = simpleHtml({ heading: longDay(day), paragraphs, footer: [footer], ...(url && { button: { label: 'Open the reports', url } }) });
       const text = [longDay(day), ...paragraphs, ...(url ? [url] : []), '', footer].join('\n\n');
       for (const to of await recipients(db, { id: t.id, slug: t.slug, name: t.name, email: t.email })) {
         await options.mailer.send({ type: 'daily-summary', tenantId: t.id, to, subject, text, html, replyTo: t.email });

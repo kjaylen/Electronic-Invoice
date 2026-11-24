@@ -45,7 +45,7 @@ const text = (max: number) => ({ type: 'string', maxLength: max }) as const;
 const settingsBody = {
   type: 'object', additionalProperties: false,
   properties: {
-    host: text(253), port: { type: ['integer', 'string'] }, security: text(20), username: text(320), password: { type: ['string', 'null'], maxLength: 1024 },
+    host: text(253), port: { anyOf: [{ type: 'integer' }, { type: 'string', maxLength: 6 }] }, security: text(20), username: text(320), password: { type: ['string', 'null'], maxLength: 1024 },
     fromName: text(200), fromAddress: text(254), replyTo: text(254), enabled: { type: 'boolean' },
   },
 } as const;

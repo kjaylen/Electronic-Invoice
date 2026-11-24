@@ -395,3 +395,131 @@ a webhook delivery (a table), and test data inside a live business.
 
 Checked the same way as before: the web app built into a scratch folder and
 served with `WEB_ROOT`, so the demo's `web/dist` is still the old build.
+
+---
+
+# Email: settings, one mail service, a queue, a log (24 Nov 2026)
+
+Judgment calls made while working through the third PLAN.md (the SMTP email
+system). The parts above this line are the earlier jobs' and are unchanged.
+
+## How the work was done
+
+- **The brief's blanks.** The request had unfilled placeholders. What exists
+  was read from the code (one module, `SMTP_URL`, no queue). The server is "any
+  standard SMTP server". The emails are the 27 found in the code, listed in
+  PLAN.md. The numbers are the brief's own defaults: 5 attempts, 90 days. No
+  must-haves of my own were added: attachments, two languages and editable
+  templates already existed and were kept.
+- **A folder of its own.** Another session had uncommitted work in the main
+  folder, so this was done in a git worktree, `../eInvoicing-email`, on the
+  branch `email-system`. It was cut from `connect-your-site` (not `main`),
+  because that branch changes the same settings pages and was about to be
+  merged; its three later commits were merged in on the way. Merging
+  `email-system` therefore brings `connect-your-site` with it. Nothing was pushed.
+- **Migration 057.** 054 is taken by the offline-tills branch and 055 and 056
+  by `connect-your-site`. Migrations are applied by name, so the gap is harmless.
+- **A database and ports of their own for the browser tests**
+  (`E2E_DATABASE_NAME`, `E2E_PORT`, `E2E_MAIL_PORT`), so two sessions can run
+  them at once. The defaults are what they were.
+- **Commits.** The foundation (the service, the queue, settings, SMTP, the
+  routes) went in as one commit: its parts do not compile without each other.
+  After it, each group of emails was moved in a commit of its own, with the
+  tests that cover it run first.
+
+## Choices that could have gone another way
+
+- **The queue and the log are one table** (`mail_messages`). A message is a
+  row from the moment it is queued to the day the log forgets it. One table
+  means the log can never disagree with the queue.
+- **`send()` means "safely queued", not "delivered".** Callers that said
+  "Emailed to X" still do; what happened next is in the log. A caller is only
+  told of a failure when the message could not be queued at all (no mail
+  server, a bad address). The alternative, waiting for the server's answer, is
+  exactly what made a slow mail server hold up a checkout.
+- **Who an email is from is decided by its type, not by the caller**
+  (`src/mail/types.ts`). Emails to a business's customers and suppliers are
+  from the business. Sign-in links, invitations, notices, billing and the
+  store's contact form are from the platform, even when they are about one
+  business: a business's broken mail server must never be the reason its owner
+  cannot reset a password.
+- **Falling back is immediate.** When a business's server fails for a reason
+  that is the server's (sign-in, connection, encryption, the from address, a
+  quota), the same attempt goes on to the platform's server. The customer gets
+  the invoice now, from the platform's address with the business's name, and
+  the business sees why on its settings page. After three failures in a row
+  its server is left alone for 15 minutes and it is emailed once. A mailbox
+  that does not exist does not fall back: the platform would be told the same.
+- **A business's own server must be a public address on port 25, 465, 587 or
+  2525.** Otherwise the settings form and its test button would let anyone
+  with a business account make the server connect to machines inside the
+  platform's own network. The name is resolved once and the connection goes to
+  that very address. `MAIL_ALLOW_PRIVATE_HOSTS=true` lifts this for development.
+  The platform's own server is the operator's choice and is not restricted.
+- **"None" is offered as an encryption, with a warning**, because the brief
+  asks for it and a relay on the same machine needs it. It is not refused for
+  a business; the form says the password would travel unprotected.
+- **What a message carries is encrypted at rest**, with the key that protects
+  certificates, bound to the message's id. Without this the log would hold,
+  in plain text, the password-reset links that the database otherwise only
+  keeps hashed.
+- **Messages that hold a secret are scrubbed once delivered** (password
+  resets, invitations, sign-in codes, gift cards, account links) and cannot be
+  resent: send a new one instead. They are also not sent after the link or
+  code in them has stopped working.
+- **The log is kept 90 days, message bodies 30.** Bodies carry PDF
+  attachments; ninety days of them for every business would be most of the
+  database. "Send again" works while the body is kept.
+- **Over the rate limit means waiting, not refusing.** A business may send
+  300 emails an hour and 2,000 a day; more stay queued until the window
+  resets. Refusing would break the action that caused the email. Emails from
+  the platform to a business do not count against the business.
+- **The do-not-send list is per business.** An address that bounced for one
+  business is not blocked for another. Sharing the list would let one
+  business's typing mistake stop another's invoices.
+- **Only two emails are "not transactional"**: checkout reminders and the
+  daily summary. Payment reminders and statements are about money the person
+  owes, and "back in stock" is something the buyer asked for once. The mail
+  service refuses to queue an optional email without an unsubscribe link, so a
+  new one cannot be added without it. Checkout reminders keep their own
+  existing link and public address.
+- **The unsubscribe page is plain HTML served by the API**
+  (`/v1/mail/unsubscribe/<token>`), not a page of the web app, so it works
+  without JavaScript and cannot collide with a business's address. Opening it
+  changes nothing (mail scanners open links); the button, or a mail app's
+  one-click, does.
+- **Mail settings and the email log are for signed-in owners and admins, never
+  API keys.** A test found a key could read them; they hold who a business
+  writes to.
+- **`SMTP_URL` keeps working.** It is the platform's server until one is saved
+  in the console, read the way it always was (an `smtp://` address still
+  carries on when the server offers no STARTTLS). Existing deployments change
+  nothing.
+- **The customer account link became a template** (`email.account-link`), as
+  it was the one customer-facing email still built in code. Its link must stay
+  in it.
+- **The eleven existing templates were not rewritten onto a shared layout
+  file.** They already share one design, and businesses may have saved edited
+  copies of them as whole documents. Emails built in code now use one layout
+  module that matches that design.
+- **Presets are four** (Google, Microsoft 365, Zoho, Amazon SES), as the brief
+  lists. Microsoft's note says password sign-in for SMTP is being phased out,
+  without a date: the date has moved more than once.
+
+## Worth doing, deliberately not done
+
+- **Sign-up verification.** There is none, and a new business's owner signs
+  in at once. Adding it changes the auth flow, which the brief says to leave.
+- **OAuth sign-in to a mail server** (XOAUTH2, what Microsoft is moving to).
+  Needs an app registration with each provider.
+- **Bounces that come back later.** A server that accepts a message and
+  bounces it afterwards sends the bounce to the from address as an email.
+  Reading those needs an inbox the platform can read, or a provider's bounce
+  webhook. Only refusals during sending go on the do-not-send list.
+- **DKIM signing by the platform.** Messages are signed by the mail server
+  they go through, which is how every listed provider works.
+- **Spanish for what the server writes**: the DNS check's explanations and
+  some failure texts carry values (a domain, a server's answer) and are in
+  English. The screens themselves, field errors, hints and preset notes are
+  in both languages.
+- **Scheduled and bulk (marketing) email.** Not in the brief's list.

@@ -489,9 +489,11 @@ export async function createMailService(db: Queryable, keys: KeyProtector, optio
 
   // ---------- test, log, resend ----------
 
-  async function sendTest(scope: string, settings: SmtpSettings | null, toRaw: string, opts: { saved?: boolean; userId?: string | null } = {}): Promise<TestResult> {
+  async function sendTest(scope: string, given: SmtpSettings | null, toRaw: string, opts: { saved?: boolean; userId?: string | null } = {}): Promise<TestResult> {
     const to = checkAddress(toRaw, 'The address to send the test to');
     const tenantId = scope === PLATFORM_SCOPE ? null : scope;
+    // The platform with nothing given: whatever it uses now (SMTP_URL, else the development transport).
+    const settings = given ?? (tenantId ? null : options.envSettings ?? null);
     const sender = settings ? { name: settings.fromName, address: settings.fromAddress } : fallbackFrom;
     const from = formatFrom(sender.name, sender.address);
     const at = new Date().toUTCString();

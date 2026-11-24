@@ -126,6 +126,7 @@ function SettingsForm({ scope, base, view, defaultTo, onSaved, onCancel }: { sco
   const [problems, setProblems] = useState<Record<string, string>>({});
   const [warnings, setWarnings] = useState<string[]>([]);
   const [testing, setTesting] = useState(false);
+  const [savedNow, setSavedNow] = useState(false);
   const chosen = view.presets.find((p) => p.key === preset);
 
   const choose = (key: string) => {
@@ -152,6 +153,7 @@ function SettingsForm({ scope, base, view, defaultTo, onSaved, onCancel }: { sco
       setPassword('');
       setReplacing(!saved.settings?.passwordSet);
       toast(t('Email settings saved'));
+      setSavedNow(true);
       onSaved(saved);
     } catch (err) {
       const fields = fieldErrors(err);
@@ -163,8 +165,10 @@ function SettingsForm({ scope, base, view, defaultTo, onSaved, onCancel }: { sco
   };
   const problem = (name: string) => problems[name] && <span className="field-problem" role="alert">{t(problems[name]!)}</span>;
 
+  // The test box is a form of its own, so it sits beside this one, not inside it.
   return (
-    <form className="stack mail-form" onSubmit={(e) => void save(e)} noValidate>
+    <div className="stack mail-form">
+    <form className="stack" onSubmit={(e) => void save(e)} noValidate>
       <Field label={t('Mail provider')} hint={t('Choosing one fills in the server, port and encryption.')}>
         <Select value={preset} onChange={(e) => choose(e.target.value)}>
           <option value="" disabled>{t('Choose…')}</option>
@@ -228,16 +232,17 @@ function SettingsForm({ scope, base, view, defaultTo, onSaved, onCancel }: { sco
       <div className="row mail-actions">
         <button type="submit" disabled={busy}>{busy ? t('Saving…') : t('Save')}</button>
         <button type="button" className="secondary" onClick={() => setTesting((v) => !v)} aria-expanded={testing}>{t('Send test email')}</button>
-        {onCancel && <button type="button" className="link" onClick={onCancel}>{t('Cancel')}</button>}
+        {onCancel && <button type="button" className="link" onClick={onCancel}>{savedNow ? t('Close') : t('Cancel')}</button>}
         <span className="spacer" />
       </div>
+    </form>
       {testing && (
         <>
           <p className="small muted">{t('The test uses what is in the form now, saved or not.')}</p>
           <TestEmail base={base} settings={body()} defaultTo={defaultTo} />
         </>
       )}
-    </form>
+    </div>
   );
 }
 
@@ -340,7 +345,10 @@ function Sending({ scope, base, defaultTo }: { scope: Scope; base: string; defau
           <h2>{s ? t('Mail server details') : t('Set up a mail server')}</h2>
           <SettingsForm
             scope={scope} base={base} view={view} defaultTo={defaultTo}
-            onSaved={(v) => setView(v)}
+            onSaved={(v) => {
+              setView(v);
+              setEditing(true);
+            }}
             {...(s || business || view.route?.source !== 'none' ? { onCancel: () => setEditing(false) } : {})}
           />
         </section>

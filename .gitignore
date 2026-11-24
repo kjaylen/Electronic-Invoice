@@ -27,3 +27,6 @@ apps/mobile/android/app/build/
 apps/mobile/android/.gradle/
 apps/mobile/ios/App/Pods/
 apps/mobile/ios/App/build/
+
+# What `npm run mail:proof` caught
+.mail-proof/

@@ -320,7 +320,8 @@ test('a dead mail server never breaks or slows what a person is doing: the actio
       assert.equal(invited.json().emailSent, true);
       assert.ok(invited.json().welcomeUrl, 'and the link is there to share another way');
       assert.equal(forgot.statusCode, 204);
-      assert.ok(took < 1500, `both answered in ${took} ms while the mail server hung`);
+      // The mail server would keep each of them waiting six seconds; neither waits for it (with room for a busy machine).
+      assert.ok(took < 4000, `both answered in ${took} ms while the mail server hung`);
 
       // The messages are safe in the queue, tried once and waiting. (The reset is queued just after its request is answered.)
       for (let i = 0; i < 100 && (await f.db.query('select 1 from mail_messages')).rows.length < 2; i++) await new Promise((r) => setTimeout(r, 30));
@@ -340,7 +341,7 @@ test('a dead mail server never breaks or slows what a person is doing: the actio
       assert.match((await catcher.waitFor('olive@corner.example')).subject, /Reset your CaribFuel password/);
       assert.deepEqual((await f.db.query<{ status: string; attempts: number }>('select status, attempts from mail_messages')).rows, [{ status: 'sent', attempts: 2 }, { status: 'sent', attempts: 2 }]);
     }, {
-      mail: async (f) => (service = await createMailService(f.db, f.deps.keys, { publicUrl: 'https://app.example.test', background: true, connectTimeoutMs: 1500, socketTimeoutMs: 1500, allowPrivateHosts: true })),
+      mail: async (f) => (service = await createMailService(f.db, f.deps.keys, { publicUrl: 'https://app.example.test', background: true, connectTimeoutMs: 6000, socketTimeoutMs: 6000, allowPrivateHosts: true })),
     });
   } finally {
     for (const socket of held) socket.destroy();

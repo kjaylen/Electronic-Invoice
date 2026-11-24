@@ -57,7 +57,7 @@ async function caught(to: string, subject: RegExp, after: number): Promise<strin
 
 /** Pick from one of the app's select menus (a button that opens a list). */
 async function choose(page: Page, label: string, option: string) {
-  await page.getByRole('combobox', { name: label }).click();
+  await page.getByRole('combobox', { name: new RegExp(`^${label}`) }).click();
   await page.getByRole('option', { name: option, exact: true }).click();
 }
 
@@ -71,40 +71,43 @@ async function logIn(page: Page) {
 
 test('a business sets up its own mail server: preset, explained errors, saved password, a real test email, back to the platform’s sender', async ({ page }) => {
   await logIn(page);
+  // From nothing, whatever an earlier run left.
+  await page.request.delete('/v1/mail/settings', { headers: { 'X-Requested-With': 'etd-web', 'X-Business': SLUG } });
   await page.goto(`/${SLUG}/settings?tab=email`);
   // Without a server of its own, it is told where its email goes.
   await expect(page.getByRole('heading', { name: 'How your email is sent' })).toBeVisible();
   await expect(page.getByText(/Your emails go out from no-reply@floreo\.test under the name “Corner Store”/)).toBeVisible();
 
   await page.getByRole('button', { name: 'Send from your own address' }).click();
-  const form = page.locator('form.mail-form');
+  const form = page.locator('.mail-form');
+  const box = (name: string) => form.getByRole('textbox', { name: new RegExp(`^${name.replace(/[()]/g, '\\$&')}`) });
   // A preset fills in what the provider publishes, and says what it needs.
   await choose(page, 'Mail provider', 'Gmail / Google Workspace');
-  await expect(form.getByLabel('Server')).toHaveValue('smtp.gmail.com');
-  await expect(form.getByLabel('Port')).toHaveValue('587');
-  await expect(form.getByRole('combobox', { name: 'Encryption' })).toHaveText('STARTTLS');
+  await expect(box('Server')).toHaveValue('smtp.gmail.com');
+  await expect(box('Port')).toHaveValue('587');
+  await expect(form.getByRole('combobox', { name: /^Encryption/ })).toHaveText('STARTTLS');
   await expect(form.locator('.mail-note')).toContainText('Gmail / Google Workspace needs an app password');
   await choose(page, 'Mail provider', 'Zoho Mail');
-  await expect(form.getByLabel('Server')).toHaveValue('smtp.zoho.com');
-  await expect(form.getByLabel('Port')).toHaveValue('465');
-  await expect(form.getByRole('combobox', { name: 'Encryption' })).toHaveText('SSL/TLS');
+  await expect(box('Server')).toHaveValue('smtp.zoho.com');
+  await expect(box('Port')).toHaveValue('465');
+  await expect(form.getByRole('combobox', { name: /^Encryption/ })).toHaveText('SSL/TLS');
 
   // The test server's own catcher, with mistakes first: each is explained under its field.
   await choose(page, 'Mail provider', 'Another mail server');
-  await form.getByLabel('Server').fill('smtp://127.0.0.1');
-  await form.getByLabel('Port').fill(String(SMTP_PORT));
+  await box('Server').fill('smtp://127.0.0.1');
+  await box('Port').fill(String(SMTP_PORT));
   await choose(page, 'Encryption', 'None');
-  await form.getByLabel('Username').fill('rosa@cornerstore.test');
-  await form.getByLabel('From address').fill('not an address');
+  await box('Username').fill('rosa@cornerstore.test');
+  await box('From address').fill('not an address');
   await form.getByRole('button', { name: 'Save' }).click();
   await expect(form.locator('.field-problem')).toHaveCount(3);
   await expect(form).toContainText('Leave out the part before the name');
   await expect(form).toContainText('Enter the password for this username');
   await expect(form).toContainText('The from address must be one address');
-  await form.getByLabel('Server').fill('127.0.0.1');
-  await form.getByLabel('Password').fill('an app password 1234');
-  await form.getByLabel('From address').fill('hello@cornerstore.test');
-  await form.getByLabel('Reply-to (optional)').fill('orders@cornerstore.test');
+  await box('Server').fill('127.0.0.1');
+  await form.locator('input[type=password]').fill('an app password 1234');
+  await box('From address').fill('hello@cornerstore.test');
+  await box('Reply-to (optional)').fill('orders@cornerstore.test');
   const saved = page.waitForResponse((r) => r.url().endsWith('/v1/mail/settings') && r.request().method() === 'PUT');
   await form.getByRole('button', { name: 'Save' }).click();
   const answer = await (await saved).text();
@@ -118,11 +121,11 @@ test('a business sets up its own mail server: preset, explained errors, saved pa
   await expect(form.locator('input[type=password]')).toHaveValue('');
   await expect(form).toContainText('Leave empty to keep the saved password.');
   // The catcher asks for no sign-in: clear the username (and with it the password) and save.
-  await form.getByLabel('Username').fill('');
+  await box('Username').fill('');
   await form.getByRole('button', { name: 'Save' }).click();
   await expect(page.locator('.mail-summary')).toContainText('Corner Store <hello@cornerstore.test>');
   await expect(page.locator('.mail-summary')).toContainText(`127.0.0.1, port ${SMTP_PORT}, no encryption`);
-  await form.getByRole('button', { name: 'Cancel' }).click();
+  await form.getByRole('button', { name: 'Close' }).click();
   await expect(page.locator('.card').first().locator('.badge').first()).toHaveText('Not tested yet');
 
   // A real test email, and the server's own answer.
@@ -138,8 +141,8 @@ test('a business sets up its own mail server: preset, explained errors, saved pa
   await expect(page.locator('.card').first().locator('.badge').first()).toHaveText('Working');
 
   // A wrong port: the reason in plain words, and what the server (or the network) said.
-  await page.getByRole('button', { name: 'Change' }).click();
-  await form.getByLabel('Port').fill('2525');
+  await page.getByRole('button', { name: 'Change', exact: true }).click();
+  await box('Port').fill('2525');
   await form.getByRole('button', { name: 'Send test email' }).click();
   await form.locator('.mail-test').getByRole('button', { name: 'Send test email' }).click();
   await expect(form.locator('.mail-result.failed')).toContainText('The test email was not sent.');
@@ -196,21 +199,24 @@ test('platform console: staff see where email goes, every business’s log, and 
   // A staff account of this test's own (the first sign-in shows the authenticator secret once).
   const db = pgDatabase(new pg.Pool({ connectionString: DATABASE, max: 1 }));
   const password = 'staff password for the email page';
+  const staffEmail = `mail-staff-${Date.now()}@demo.test`;
   try {
-    await db.query(`delete from platform_admins where lower(email) = 'mail-staff@demo.test'`);
-    await createPlatformAdmin(db, { email: 'mail-staff@demo.test', name: 'Mail Staff', password });
+    await createPlatformAdmin(db, { email: staffEmail, name: 'Mail Staff', password });
   } finally {
     await db.close();
   }
   const page = await (await browser.newContext()).newPage();
   await page.goto('/admin');
-  await page.getByLabel('Email').fill('mail-staff@demo.test');
+  await page.getByLabel('Email').fill(staffEmail);
   await page.getByLabel('Password').fill(password);
   await page.getByRole('button', { name: /Sign in/ }).click();
   await expect(page.getByRole('heading', { name: 'Set up two-step sign-in' })).toBeVisible();
   const secret = (await page.locator('.secret-key').textContent())!;
   await page.getByLabel(/Enter the 6-digit code/).fill(totp(secret));
   await page.getByRole('button', { name: 'Turn on two-step sign-in' }).click();
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download' }).click();
+  await download;
   await page.getByRole('button', { name: 'I saved them' }).click();
   await page.getByRole('navigation', { name: 'Console' }).getByRole('link', { name: 'Email' }).click();
 
@@ -218,23 +224,24 @@ test('platform console: staff see where email goes, every business’s log, and 
   await expect(page.getByText(/Nothing is saved here\. Email goes through 127\.0\.0\.1, from no-reply@floreo\.test/)).toBeVisible();
   const asked = Date.now();
   await page.getByRole('button', { name: 'Send test email' }).click();
-  await expect(page.getByLabel('Send a test email to')).toHaveValue('mail-staff@demo.test');
+  await expect(page.getByLabel('Send a test email to')).toHaveValue(staffEmail);
   await page.locator('.mail-test').getByRole('button', { name: 'Send test email' }).click();
   await expect(page.locator('.mail-result.ok')).toContainText('The mail server accepted it.');
-  await caught('mail-staff@demo.test', /Subject: Test email from Floreo/, asked);
+  await caught(staffEmail, /Subject: Test email from Floreo/, asked);
 
   // Saving a server here takes over from the environment; the password is only ever "saved".
   await page.getByRole('button', { name: 'Set up a mail server here' }).click();
-  const form = page.locator('form.mail-form');
+  const form = page.locator('.mail-form');
+  const box = (name: string) => form.getByRole('textbox', { name: new RegExp(`^${name}`) });
   await choose(page, 'Mail provider', 'Another mail server');
-  await form.getByLabel('Server').fill('127.0.0.1');
-  await form.getByLabel('Port').fill(String(SMTP_PORT));
+  await box('Server').fill('127.0.0.1');
+  await box('Port').fill(String(SMTP_PORT));
   await choose(page, 'Encryption', 'None');
-  await form.getByLabel('From name').fill('Floreo');
-  await form.getByLabel('From address').fill('hello@floreo.test');
+  await box('From name').fill('Floreo');
+  await box('From address').fill('hello@floreo.test');
   await form.getByRole('button', { name: 'Save' }).click();
   await expect(page.locator('.mail-summary')).toContainText('Floreo <hello@floreo.test>');
-  await form.getByRole('button', { name: 'Cancel' }).click();
+  await form.getByRole('button', { name: 'Close' }).click();
 
   // Every business's email, by name.
   await page.getByRole('group', { name: 'Email' }).getByRole('button', { name: 'Email log' }).click();

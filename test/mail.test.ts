@@ -270,6 +270,8 @@ test('wrong password: the server’s own words and a hint about app passwords; t
     assert.equal(ok.from, '"Corner Store" <hello@corner.example>');
     assert.match(c.mails[0]!.subject, /Test email from Corner Store/);
     assert.match(c.mails[0]!.html, /Your email settings work/);
+    // (When the suite's mail is mirrored to a catcher to be looked at, the test email goes there as well.)
+    if (process.env.MAIL_MIRROR_SMTP) await mail.sendTest(PLATFORM_SCOPE, settingsFromEnv(process.env.MAIL_MIRROR_SMTP, 'Floreo <no-reply@localhost>'), 'owner@corner.example');
   });
 });
 
@@ -878,5 +880,21 @@ test('every email template renders with hostile values as text, and with values 
         assert.ok(!/undefined|\[object Object\]|\{\{|\{%/.test(bare.html + bare.subject + bare.text), `${def.key} ${lang}: missing values leave a tidy email`);
       }
     }
+  });
+});
+
+test('the platform’s test email, with nothing saved, goes through the server set in the environment (SMTP_URL)', async () => {
+  await withMail(async ({ f, catcher }) => {
+    const c = await catcher();
+    const mail = await createMailService(f.db, f.deps.keys, { envSettings: settingsFromEnv(`smtp://127.0.0.1:${c.port}`, 'Floreo <no-reply@platform.example>'), publicUrl: PUBLIC_URL });
+    assert.deepEqual(await mail.describe(), { source: 'environment', host: '127.0.0.1', from: { name: 'Floreo', address: 'no-reply@platform.example' } });
+    const result = await mail.sendTest(PLATFORM_SCOPE, null, 'staff@platform.example');
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(c.mails[0]!.headers.from, 'Floreo <no-reply@platform.example>');
+    // A business with nothing of its own has nothing to test.
+    assert.equal((await mail.sendTest(f.tenantA, null, 'owner@corner.example')).ok, false);
+    // And real mail takes the same road.
+    assert.equal((await mail.send({ type: 'notice', tenantId: f.tenantA, to: 'owner@corner.example', subject: 's', text: 't' })).status, 'sent');
+    assert.equal(c.mails.length, 2);
   });
 });
