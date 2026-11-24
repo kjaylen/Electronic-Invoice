@@ -70,6 +70,7 @@ import { registerGiftCardRoutes } from './giftcards.ts';
 import { registerSiteRoutes } from './site.ts';
 import { registerShiftRoutes } from './shifts.ts';
 import { registerPosAdminRoutes, registerPosDeviceRoutes, SESSION_TOKEN_PREFIX, tillMayUse, touchDevice } from './pos.ts';
+import { registerPosSyncRoutes } from './pos-sync.ts';
 import { lookupSession } from '../db/users.ts';
 import { registerDiscountRoutes } from './discounts.ts';
 import { registerPublicAssetRoutes, registerTemplateRoutes } from './templates.ts';
@@ -394,7 +395,11 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   }, { prefix: '/v1' });
 
   // The till apps before anyone signs in: pairing, who can sign in, PIN sign-in (the till's own token).
-  await app.register(async (pos) => registerPosDeviceRoutes(pos, deps), { prefix: '/v1/pos' });
+  await app.register(async (pos) => {
+    registerPosDeviceRoutes(pos, deps);
+    // Offline-first tills: the snapshot to sell from, and the upload of what they sold.
+    registerPosSyncRoutes(pos, deps);
+  }, { prefix: '/v1/pos' });
 
   registerPublicDocumentRoutes(app, deps);
   registerPublicAssetRoutes(app, deps);

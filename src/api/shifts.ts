@@ -166,6 +166,12 @@ export async function shiftReport(db: Queryable, tenantId: string, s: ShiftRow) 
   };
 }
 
+/** The cash a shift's drawer should hold now (float + cash takings + paid in - paid out), in cents. */
+export async function expectedCash(db: Queryable, tenantId: string, shiftId: string): Promise<bigint> {
+  const report = await shiftReport(db, tenantId, await loadShift(db, tenantId, shiftId));
+  return parseCents(report.cash.expected);
+}
+
 export function shiftJson(s: ShiftRow) {
   return {
     id: s.id,

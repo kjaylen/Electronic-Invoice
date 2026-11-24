@@ -178,7 +178,7 @@ async function registerForTill(db: Queryable, tenantId: string, name: string, re
 }
 
 /** The till behind a device token, if it is paired and not removed. */
-async function deviceFromToken(db: Queryable, request: FastifyRequest): Promise<DeviceRow> {
+export async function deviceFromToken(db: Queryable, request: FastifyRequest): Promise<DeviceRow> {
   const h = request.headers.authorization;
   const token = h?.startsWith('Bearer ') ? h.slice(7).trim() : '';
   if (!token.startsWith(DEVICE_TOKEN_PREFIX)) throw new ApiError(401, 'unauthorized', 'This till is not paired');
