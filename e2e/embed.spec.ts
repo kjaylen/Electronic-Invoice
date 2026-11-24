@@ -337,6 +337,32 @@ test('Settings → Developers: the connect guide, keys replaced and revoked, and
   await expect(publishable.locator('tbody tr', { hasText: 'Revoked' })).not.toHaveCount(0);
   await expect(p.getByRole('heading', { name: 'Secret keys' })).toBeVisible();
 
+  // A secret key that may only read, only two parts, until a day: made, shown with its limits, replaced with the same ones.
+  const secret = p.locator('section', { has: p.getByRole('heading', { name: 'Secret keys' }) });
+  await secret.getByLabel('Key name').fill('Accountant export');
+  await secret.getByText('Limit what this key may do').click();
+  await secret.getByLabel('What it may do').selectOption('read');
+  await secret.getByLabel('Only these').check();
+  await expect(secret.getByRole('button', { name: 'Create key' })).toBeDisabled();
+  await secret.getByLabel(/^Reports/).check();
+  await secret.getByLabel(/^Orders/).check();
+  await secret.getByLabel('Last day it works').fill('2099-12-31');
+  await secret.getByRole('button', { name: 'Create key' }).click();
+  await expect(secret.locator('.key-reveal')).toHaveText(/^etd_[a-z0-9]{12}_/);
+  const limited = secret.locator('tbody tr', { hasText: 'Accountant export' });
+  await expect(limited).toHaveCount(1);
+  await expect(limited).toContainText(/Read only · Orders, Reports · until .*2099/);
+  await limited.getByRole('button', { name: 'Replace' }).click();
+  await expect(limited).toHaveCount(2);
+  await expect(limited.nth(0)).toContainText(/Read only · Orders, Reports · until .*2099/);
+  await expect(limited.nth(1)).toContainText(/Read only · Orders, Reports · until .*2099/);
+  // The new one does what it says: it reads orders, and is refused a change and another part.
+  const made = (await secret.locator('.key-reveal').innerText()).trim();
+  const as = { headers: { Authorization: `Bearer ${made}` } };
+  expect((await p.request.get('/v1/orders?view=all', as)).status()).toBe(200);
+  expect((await (await p.request.post('/v1/orders/00000000-0000-4000-8000-000000000000/paid', as)).json()).error.code).toBe('key_read_only');
+  expect((await (await p.request.get('/v1/customers', as)).json()).error.code).toBe('key_scope');
+
   // Logs: what the site asked and was answered, and what was refused (the page with a wrong key, earlier).
   await p.getByRole('group', { name: 'Developers' }).getByRole('button', { name: 'Logs' }).click();
   await expect(p.getByRole('heading', { name: 'Usage' })).toBeVisible();

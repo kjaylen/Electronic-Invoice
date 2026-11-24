@@ -13,6 +13,7 @@ import type { RouteOptions } from 'fastify';
 import { WEBHOOK_EVENTS } from '../webhooks/webhooks.ts';
 import { SAMPLE_EVENT_DATA } from '../webhooks/samples.ts';
 import { hostedOnly, STORE_ERRORS, STORE_EXAMPLES, STORE_REQUESTS, STORE_SUMMARIES } from './store-reference.ts';
+import { AREA_COVERS, AREA_NAMES, areaOfRoute, KEY_AREAS, readOnlyMayUse } from './key-scope.ts';
 
 interface CollectedRoute {
   method: string;
@@ -221,7 +222,10 @@ There are two kinds of keys, both made in Settings → Developers and both sent 
 
 A publishable key (\`pk_test_…\` or \`pk_live_…\`) is for web pages. It opens only the store API (\`/v1/store/{store}/…\`), which is what buyers see anyway, and only from the sites on the key's list; a test key also works from any page on your own computer. It is safe to show. On a GET it may go in the address instead (\`?key=pk_…\`), which spares the browser a second request.
 
-A secret key (\`etd_…\`) is for servers and your own software. It acts as the whole business (orders, products, documents, reports), so it must never be put in a page or in code others can read; a secret key sent from a page is refused. Every request with a key acts for the business the key belongs to.
+A secret key (\`etd_…\`) is for servers and your own software. It acts as the business (orders, products, documents, reports), so it must never be put in a page or in code others can read; a secret key sent from a page is refused. Every request with a key acts for the business the key belongs to.
+
+## Limiting a secret key
+When you make a secret key you may give it less than everything, so that a program holds only what it needs. Read only: it may GET, and may not change anything (a 403 \`key_read_only\` otherwise; working something out, such as \`POST /v1/documents/preview\`, counts as reading). Some parts only: ${KEY_AREAS.map((a) => `\`${a}\` (${AREA_NAMES[a]}: ${AREA_COVERS[a].toLowerCase()})`).join('; ')}; anything outside them answers 403 \`key_scope\` and names the part it needs. A last day: after it the key answers 401 \`api_key_expired\`. Each endpoint below says which part it belongs to. \`GET /v1/me\` always answers, and with a key says what that key may do (\`apiKey\`). A key keeps the limits it was made with: to change them, make another key and revoke the old one. A key made without limits does everything and does not end.
 
 Calls to the store API from a server (no \`Origin\` header) need no key.
 
@@ -298,6 +302,12 @@ export function buildOpenApi(routes: CollectedRoute[], options: { serverUrl?: st
     };
     // The store API is public: no key from a server, the store's publishable key from a page on another site.
     if (store) op.security = [{}, { publishableKey: [] }];
+    // The part of the API a limited secret key must include to use this endpoint, and whether a read-only key may.
+    const area = store ? undefined : areaOfRoute(r.url);
+    if (area && area !== 'people') {
+      op['x-key-area'] = area;
+      op['x-key-read-only'] = readOnlyMayUse(r.method, r.url);
+    }
     if (r.schema?.body) op.requestBody = { required: true, content: { 'application/json': { schema: r.schema.body, ...(STORE_REQUESTS[key] !== undefined && { example: STORE_REQUESTS[key] }) } } };
     if (key === 'POST /v1/documents' || key === 'POST /v1/store/{slug}/orders') {
       (op.parameters as unknown[]).push({ name: 'Idempotency-Key', in: 'header', required: false, schema: { type: 'string', maxLength: 200 }, description: 'Unique per sale; a retry returns the original answer.' });

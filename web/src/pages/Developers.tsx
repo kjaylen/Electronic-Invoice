@@ -339,6 +339,8 @@ function PublishableKeys({ connect, reload }: { connect: Connect; reload: () => 
   );
 }
 
+type KeyAccess = 'full' | 'read';
+
 interface SecretKeyRow {
   id: string;
   name: string;
@@ -346,34 +348,75 @@ interface SecretKeyRow {
   createdAt: string;
   lastUsedAt: string | null;
   revokedAt: string | null;
+  /** What it may do: everything or only read; in which parts (null: all); until when (null: for good). */
+  access: KeyAccess;
+  areas: string[] | null;
+  expiresAt: string | null;
+  expired: boolean;
 }
+
+/** The parts of the API a key can be limited to: [id, name, what it covers]. The ids are the server's. */
+const keyAreas = (t: ReturnType<typeof useT>): Array<[string, string, string]> => [
+  ['documents', t('Documents'), t('Invoices, receipts and notes, payments received, what customers owe, quotes, recurring invoices')],
+  ['customers', t('Customers'), t('Saved customers and their loyalty points')],
+  ['catalog', t('Catalogue'), t('Items, products, collections, discounts, stock, purchase orders, the store’s settings')],
+  ['orders', t('Orders'), t('Online orders, gift cards, unfinished checkouts, buyers')],
+  ['reports', t('Reports'), t('Totals, GST, sales by customer and item, the register, the archive')],
+  ['expenses', t('Expenses'), t('Suppliers, expenses and bills')],
+  ['webhooks', t('Webhooks'), t('Webhook endpoints and their deliveries')],
+  ['business', t('Business'), t('Business details and certificate, templates, registers, shifts, tills, integrations')],
+];
+
+/** The day (in Belize, six hours behind UTC) a moment falls on: "2026-12-31". */
+const belizeDayOf = (iso: string) => new Date(Date.parse(iso) - 6 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
 function SecretKeys({ mode }: { mode: 'test' | 'live' }) {
   const t = useT();
   const confirm = useConfirm();
   const [keys, setKeys] = useState<SecretKeyRow[]>([]);
   const [name, setName] = useState('');
+  const [access, setAccess] = useState<KeyAccess>('full');
+  const [someParts, setSomeParts] = useState(false);
+  const [areas, setAreas] = useState<string[]>([]);
+  const [expiresOn, setExpiresOn] = useState('');
   const [revealed, setRevealed] = useState<string | null>(null);
   const [error, setError] = useState<unknown>(null);
+  const parts = keyAreas(t);
+  const partName = (id: string) => parts.find(([k]) => k === id)?.[1] ?? id;
   const load = useCallback(() => api<{ data: SecretKeyRow[] }>('/v1/api-keys').then((r) => setKeys(r.data)).catch(setError), []);
   useEffect(() => {
     void load();
   }, [load]);
-  const make = async (keyName: string) => {
+  const make = async (body: { name: string; access?: KeyAccess; areas?: string[]; expiresOn?: string }) => {
     setError(null);
     try {
-      const k = await api<{ key: string }>('/v1/api-keys', { method: 'POST', body: { name: keyName } });
+      const k = await api<{ key: string }>('/v1/api-keys', { method: 'POST', body });
       setRevealed(k.key);
       setName('');
+      setAccess('full');
+      setSomeParts(false);
+      setAreas([]);
+      setExpiresOn('');
       await load();
     } catch (err) {
       setError(err);
     }
   };
+  const create = (e: FormEvent) => {
+    e.preventDefault();
+    void make({ name, ...(access === 'read' && { access }), ...(someParts && areas.length > 0 && { areas }), ...(expiresOn && { expiresOn }) });
+  };
+  // A new key with the same name and the same limits (an end date only while it is still ahead); the old one works until it is revoked.
+  const replace = (k: SecretKeyRow) => make({ name: k.name, ...(k.access === 'read' && { access: k.access }), ...(k.areas && { areas: k.areas }), ...(k.expiresAt && !k.expired && { expiresOn: belizeDayOf(k.expiresAt) }) });
   const revoke = async (k: SecretKeyRow) => {
     if (!(await confirm({ title: t('Revoke the key “{name}”?', { name: k.name }), body: t('Software using it is refused at once. This cannot be undone; you can make a new key.'), confirm: t('Revoke key'), danger: true }))) return;
     await api(`/v1/api-keys/${k.id}`, { method: 'DELETE' }).then(load).catch(setError);
   };
+  const mayDo = (k: SecretKeyRow) => [
+    k.access === 'read' ? t('Read only') : t('Everything'),
+    ...(k.areas ? [k.areas.map(partName).join(', ')] : []),
+    ...(k.expiresAt ? [k.expired ? t('Expired') : t('until {day}', { day: new Date(`${belizeDayOf(k.expiresAt)}T12:00:00`).toLocaleDateString(undefined, { dateStyle: 'medium' }) })] : []),
+  ].join(' · ');
   return (
     <section className="card stack">
       <div className="dev-title">
@@ -392,25 +435,58 @@ function SecretKeys({ mode }: { mode: 'test' | 'live' }) {
           </div>
         </div>
       )}
-      <form className="row" onSubmit={(e) => { e.preventDefault(); void make(name); }}>
-        <input placeholder={t('Name, e.g. Front counter POS')} aria-label={t('Key name')} required value={name} onChange={(e) => setName(e.target.value)} style={{ maxWidth: 320 }} />
-        <button type="submit">{t('Create key')}</button>
+      <form className="stack dev-key-form" onSubmit={create}>
+        <div className="row">
+          <input placeholder={t('Name, e.g. Front counter POS')} aria-label={t('Key name')} required value={name} onChange={(e) => setName(e.target.value)} style={{ maxWidth: 320 }} />
+          <button type="submit" disabled={someParts && areas.length === 0}>{t('Create key')}</button>
+        </div>
+        <details className="dev-limits">
+          <summary className="small">{t('Limit what this key may do')}</summary>
+          <div className="stack dev-limits-body">
+            <p className="small muted" style={{ margin: 0 }}>{t('Give each program only what it needs: a key that leaks can then do less harm. A key keeps the limits it is made with; to change them, make another key and revoke this one.')}</p>
+            <Field label={t('What it may do')}>
+              <select value={access} onChange={(e) => setAccess(e.target.value as KeyAccess)}>
+                <option value="full">{t('Everything: read and change')}</option>
+                <option value="read">{t('Read only: look, never change')}</option>
+              </select>
+            </Field>
+            <fieldset className="plain stack">
+              <legend>{t('Which parts of the API')}</legend>
+              <label className="row small"><input type="radio" name="key-parts" checked={!someParts} onChange={() => setSomeParts(false)} /> {t('All parts')}</label>
+              <label className="row small"><input type="radio" name="key-parts" checked={someParts} onChange={() => setSomeParts(true)} /> {t('Only these')}</label>
+              {someParts && (
+                <div className="dev-areas">
+                  {parts.map(([id, title, covers]) => (
+                    <label key={id} className="dev-area">
+                      <input type="checkbox" checked={areas.includes(id)} onChange={(e) => setAreas(e.target.checked ? [...areas, id] : areas.filter((x) => x !== id))} />
+                      <span><strong>{title}</strong><span className="small muted">{covers}</span></span>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </fieldset>
+            <Field label={t('Last day it works')} hint={t('Leave empty for a key that does not end.')}>
+              <input type="date" value={expiresOn} onChange={(e) => setExpiresOn(e.target.value)} style={{ maxWidth: 220 }} />
+            </Field>
+          </div>
+        </details>
       </form>
       <ErrorText error={error} />
       {keys.length > 0 && (
         <div className="table-wrap">
           <table className="responsive">
-            <thead><tr><th scope="col">{t('Name')}</th><th scope="col">{t('Key')}</th><th scope="col">{t('Last used')}</th><th scope="col"><span className="sr-only">{t('Actions')}</span></th></tr></thead>
+            <thead><tr><th scope="col">{t('Name')}</th><th scope="col">{t('Key')}</th><th scope="col">{t('May do')}</th><th scope="col">{t('Last used')}</th><th scope="col"><span className="sr-only">{t('Actions')}</span></th></tr></thead>
             <tbody>
               {keys.map((k) => (
-                <tr key={k.id} className={k.revokedAt ? 'muted' : ''}>
+                <tr key={k.id} className={k.revokedAt || k.expired ? 'muted' : ''}>
                   <td data-label={t('Name')}>{k.name}</td>
                   <td data-label={t('Key')} className="mono">etd_{k.prefix}_…</td>
+                  <td data-label={t('May do')} className="small">{mayDo(k)}</td>
                   <td data-label={t('Last used')}>{k.revokedAt ? t('Revoked') : k.lastUsedAt ? when(k.lastUsedAt) : t('Never')}</td>
                   <td className="right">
                     {!k.revokedAt && (
                       <span className="row small dev-actions">
-                        <button type="button" className="link" title={t('Make a new key with this name; revoke this one once your software uses the new one')} onClick={() => void make(k.name)}>{t('Replace')}</button>
+                        <button type="button" className="link" title={t('Make a new key with this name; revoke this one once your software uses the new one')} onClick={() => void replace(k)}>{t('Replace')}</button>
                         <button type="button" className="link danger-link" onClick={() => void revoke(k)}>{t('Revoke')}</button>
                       </span>
                     )}

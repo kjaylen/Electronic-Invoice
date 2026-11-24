@@ -11,7 +11,8 @@ import { certificateSummary } from './admin.ts';
 import { audit } from '../db/audit.ts';
 import { can, requirePermission, requirePersonWith } from './permissions.ts';
 import { ApiError, notFound } from './errors.ts';
-import { certificateSchema, customerSchema, itemSchema, listQuery, uuid } from './schemas.ts';
+import { certificateSchema, customerSchema, date, itemSchema, listQuery, uuid } from './schemas.ts';
+import { AREA_COVERS, AREA_NAMES, expiryFromDay, KEY_AREAS, type KeyAccess, type KeyArea, scopeJson } from './key-scope.ts';
 import { assertFeature, getSubscription } from '../billing/billing.ts';
 import { PLANS } from '../billing/plans.ts';
 import type { Queryable } from '../db/database.ts';
@@ -230,6 +231,8 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: PipelineDeps) 
       environment: t.environment,
       /** What the business sells: products, services or both. */
       sells: t.sells,
+      // Asked with a secret key: which key, and what it may do.
+      ...(request.apiKey && { apiKey: { id: request.apiKey.id, name: request.apiKey.name, ...scopeJson(request.apiKey) } }),
       certificate: await certificateSummary(deps, request.tenantId),
       billing: await billingBanner(db, request.tenantId),
       contingency: { active: Boolean(period), since: period ? new Date(period.started_at).toISOString() : null, reason: period?.reason ?? null, queued },
@@ -284,24 +287,52 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: PipelineDeps) 
   );
 
   // API keys for the business's own software (POS, accounting connectors). Owners and admins, signed in.
+  // A key may be limited when it is made: to reading, to some areas, until a day. To change that, make another key.
   const requireOwnerSession = (request: import('fastify').FastifyRequest) => requirePersonWith(request, 'apikeys.manage');
   app.get('/api-keys', async (request) => {
     requireOwnerSession(request);
-    const rows = (await db.query<{ id: string; name: string; prefix: string; created_at: string | Date; last_used_at: string | Date | null; revoked_at: string | Date | null }>(
-      'select id, name, prefix, created_at, last_used_at, revoked_at from api_keys where tenant_id = $1 order by created_at desc', [request.tenantId],
+    const rows = (await db.query<{ id: string; name: string; prefix: string; created_at: string | Date; last_used_at: string | Date | null; revoked_at: string | Date | null; access: KeyAccess; areas: KeyArea[] | null; expires_at: string | Date | null }>(
+      'select id, name, prefix, created_at, last_used_at, revoked_at, access, areas, expires_at from api_keys where tenant_id = $1 order by created_at desc', [request.tenantId],
     )).rows;
     const iso = (v: string | Date | null) => (v ? new Date(v).toISOString() : null);
-    return { data: rows.map((r) => ({ id: r.id, name: r.name, prefix: r.prefix, createdAt: iso(r.created_at), lastUsedAt: iso(r.last_used_at), revokedAt: iso(r.revoked_at) })) };
+    return {
+      data: rows.map((r) => ({
+        id: r.id, name: r.name, prefix: r.prefix, createdAt: iso(r.created_at), lastUsedAt: iso(r.last_used_at), revokedAt: iso(r.revoked_at),
+        ...scopeJson({ access: r.access, areas: r.areas, expiresAt: r.expires_at ? new Date(r.expires_at) : null }),
+      })),
+      // The parts of the API a key can be limited to, and what each covers.
+      areas: KEY_AREAS.map((id) => ({ id, name: AREA_NAMES[id], covers: AREA_COVERS[id] })),
+    };
   });
-  app.post<{ Body: { name: string } }>(
+  app.post<{ Body: { name: string; access?: KeyAccess; areas?: KeyArea[]; expiresOn?: string } }>(
     '/api-keys',
-    { schema: { body: { type: 'object', required: ['name'], additionalProperties: false, properties: { name: { type: 'string', minLength: 1, maxLength: 100 } } } } },
+    {
+      schema: {
+        body: {
+          type: 'object', required: ['name'], additionalProperties: false,
+          properties: {
+            name: { type: 'string', minLength: 1, maxLength: 100 },
+            access: { type: 'string', enum: ['full', 'read'] },
+            areas: { type: 'array', minItems: 1, maxItems: KEY_AREAS.length, uniqueItems: true, items: { type: 'string', enum: [...KEY_AREAS] } },
+            // The last day the key works (in Belize).
+            expiresOn: date,
+          },
+        },
+      },
+    },
     async (request, reply) => {
       requireOwnerSession(request);
       await assertFeature(db, request.tenantId, 'api');
-      const key = await createApiKey(db, request.tenantId, request.body.name);
-      await audit(db, { tenantId: request.tenantId, userId: request.userId, action: 'apikey.created', target: request.body.name, ip: request.ip });
-      return reply.code(201).send({ id: key.id, name: request.body.name, prefix: key.prefix, key: key.key });
+      const b = request.body;
+      // Every area chosen is the same as not limiting it.
+      const areas = b.areas && b.areas.length < KEY_AREAS.length ? KEY_AREAS.filter((a) => b.areas!.includes(a)) : null;
+      const limits = { access: b.access ?? 'full', areas, expiresAt: b.expiresOn ? expiryFromDay(b.expiresOn) : null };
+      const key = await createApiKey(db, request.tenantId, b.name, limits);
+      await audit(db, {
+        tenantId: request.tenantId, userId: request.userId, action: 'apikey.created', target: b.name, ip: request.ip,
+        ...((limits.access !== 'full' || areas || limits.expiresAt) && { details: { access: limits.access, areas, expiresOn: b.expiresOn ?? null } }),
+      });
+      return reply.code(201).send({ id: key.id, name: b.name, prefix: key.prefix, key: key.key, ...scopeJson(limits) });
     },
   );
   app.delete<{ Params: { id: string } }>('/api-keys/:id', { schema: { params: { type: 'object', required: ['id'], properties: { id: uuid } } } }, async (request, reply) => {

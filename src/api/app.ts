@@ -71,6 +71,7 @@ import { registerSiteRoutes } from './site.ts';
 import { registerConnectRoutes } from './connect.ts';
 import { answerStorePreflight } from './store-access.ts';
 import { createDevLog, registerDeveloperRoutes, registerDevLogHook } from './devlog.ts';
+import { assertRouteHasArea, enforceKeyScope, type KeyArea } from './key-scope.ts';
 import { registerShiftRoutes } from './shifts.ts';
 import { registerPosAdminRoutes, registerPosDeviceRoutes, SESSION_TOKEN_PREFIX, tillMayUse, touchDevice } from './pos.ts';
 import { lookupSession } from '../db/users.ts';
@@ -96,6 +97,8 @@ declare module 'fastify' {
     userId: string;
     /** Signed in on a till: the till and its cash drawer. */
     posDevice: { id: string; registerId: string } | null;
+    /** Called with a secret API key: the key and what it may do. */
+    apiKey: { id: string; name: string; access: 'full' | 'read'; areas: KeyArea[] | null; expiresAt: Date | null } | null;
   }
 }
 
@@ -203,6 +206,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   app.decorateRequest('principal', 'api');
   app.decorateRequest('userId', '');
   app.decorateRequest('posDevice', null);
+  app.decorateRequest('apiKey', null);
   app.decorateRequest('storeCaller', null);
   app.decorateRequest('integration', null);
   app.decorateRequest('apiError', null);
@@ -318,6 +322,8 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   const collected = routeCollector();
   await app.register(async (tenant) => {
     tenant.addHook('onRoute', collected.onRoute);
+    // Every route a key can reach belongs to an area a key can be limited to (or is for people only): no route is left outside the scopes.
+    tenant.addHook('onRoute', (route) => assertRouteHasArea(route.url));
     tenant.addHook('onRequest', async (request, reply) => {
       if (request.url.startsWith('/v1/admin') || request.url.startsWith('/v1/auth')) return;
       const key = bearer(request);
@@ -337,6 +343,10 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         const principal = await authenticateApiKey(db, key);
         if (!principal) throw new ApiError(401, 'unauthorized', 'Missing or invalid API key');
         request.integration = { tenantId: principal.tenantId, key: { kind: 'secret', id: principal.keyId } };
+        // What this key may do: nothing once it has expired, only reading, only some parts (key-scope.ts).
+        const scope = { name: principal.name, access: principal.access, areas: principal.areas as KeyArea[] | null, expiresAt: principal.expiresAt };
+        enforceKeyScope(request, scope);
+        request.apiKey = { id: principal.keyId, ...scope };
         // Per key, per minute, shared by every server process.
         const limit = options.apiRateLimitPerMinute ?? 600;
         const used = await countHit(db, `apikey|${principal.keyId}`, 60_000);
