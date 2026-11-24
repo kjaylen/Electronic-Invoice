@@ -38,7 +38,7 @@ import { ApiError } from './errors.ts';
 import { recordLoyalty } from './loyalty.ts';
 import { deviceFromToken, tillPermissions } from './pos.ts';
 import type { Role } from './permissions.ts';
-import { expectedCash } from './shifts.ts';
+import { expectedCash, openShiftOf } from './shifts.ts';
 import { uuid } from './schemas.ts';
 
 const RECEPTION_ENV: Record<string, '01' | '02'> = { production: '01', test: '02' };
@@ -116,6 +116,8 @@ interface EventResult {
   error?: { code: string; message: string };
   document?: { id: string; etdui: string; status: string };
   warnings?: string[];
+  /** A shift the till opened: the number the business gave it. */
+  shift?: { number: number };
 }
 
 const money = { type: 'string', pattern: '^\\d{1,12}(\\.\\d{1,2})?$' } as const;
@@ -188,8 +190,8 @@ export function registerPosSyncRoutes(app: FastifyInstance, deps: PipelineDeps) 
       const t = (await db.query<{ slug: string; legal_name: string; trade_name: string | null; tin: string; environment: string }>(
         'select slug, legal_name, trade_name, tin, environment from tenants where id = $1', [d.tenant_id],
       )).rows[0]!;
-      const users = (await db.query<{ id: string; name: string; role: Role; has_pin: boolean }>(
-        `select u.id, u.name, u.role, u.pos_pin_set_at is not null as has_pin from users u
+      const users = (await db.query<{ id: string; name: string; role: Role; has_pin: boolean; pin_set_at: Date | null }>(
+        `select u.id, u.name, u.role, u.pos_pin_set_at is not null as has_pin, u.pos_pin_set_at as pin_set_at from users u
          where u.tenant_id = $1 and u.status = 'active' and u.role in ('owner', 'admin', 'manager', 'cashier') order by lower(u.name)`, [d.tenant_id],
       )).rows;
       const logo = (await db.query<{ id: string; name: string; content_type: string; bytes: number; data: Buffer | Uint8Array }>(
@@ -204,7 +206,10 @@ export function registerPosSyncRoutes(app: FastifyInstance, deps: PipelineDeps) 
         serverTime: new Date().toISOString(),
         business: { id: d.tenant_id, slug: t.slug, name: t.trade_name ?? t.legal_name, legalName: t.legal_name, tradeName: t.trade_name, tin: t.tin, environment: t.environment },
         device: { id: d.id, name: d.name, register: { id: d.register_id, name: d.register_name } },
-        users: users.map((u) => ({ id: u.id, name: u.name, role: u.role, hasPin: u.has_pin, permissions: tillPermissions(u.role) })),
+        // pinSetAt: a PIN changed since the till remembered it is forgotten there (offline sign-in).
+        users: users.map((u) => ({ id: u.id, name: u.name, role: u.role, hasPin: u.has_pin, pinSetAt: u.pin_set_at ? new Date(u.pin_set_at).toISOString() : null, permissions: tillPermissions(u.role) })),
+        // A shift open on this till's drawer (opened before the till sold offline): the till carries on with it.
+        openShift: await openShiftOf(db, d.tenant_id, d.register_id),
         me: await meJson(deps, d.tenant_id),
         receipt: {
           issuer: await receiptIssuer(deps, d.tenant_id),
@@ -292,8 +297,10 @@ export function registerPosSyncRoutes(app: FastifyInstance, deps: PipelineDeps) 
     if (done && done.tenant_id === d.tenant_id) return { ...done.result, id: ev.id, status: 'duplicate' };
 
     const env = (await db.query<{ environment: string }>('select environment from tenants where id = $1', [d.tenant_id])).rows[0]!.environment;
-    const owned = (await db.query('select 1 from pos_offline_series where tenant_id = $1 and environment = $2 and series_number = $3 and device_id = $4', [d.tenant_id, ev.environment, ev.series, d.id])).rows.length;
-    if (!owned) throw new ApiError(422, 'unknown_series', `Series ${ev.series} was not given to this till`);
+    // A series given to one of the business's tills (not only this one: a till removed and added again
+    // sends the sales it made before with its new token).
+    const owned = (await db.query('select 1 from pos_offline_series where tenant_id = $1 and environment = $2 and series_number = $3', [d.tenant_id, ev.environment, ev.series])).rows.length;
+    if (!owned) throw new ApiError(422, 'unknown_series', `Series ${ev.series} was not given to a till of this business`);
     if (ev.environment !== env) throw new ApiError(422, 'environment_changed', `This sale was made in the ${ev.environment} environment; the business is now in ${env}`);
 
     // Links that no longer exist are dropped; the sale keeps what it printed.
@@ -357,7 +364,8 @@ export function registerPosSyncRoutes(app: FastifyInstance, deps: PipelineDeps) 
 
   async function applyShiftOpen(tx: Queryable, d: Device, ev: ShiftOpenEvent): Promise<EventResult> {
     if (!ev.shiftId || ev.openingFloat === undefined) throw new ApiError(422, 'invalid_shift', 'The shift is missing its id or float');
-    if ((await tx.query('select 1 from register_shifts where id = $1', [ev.shiftId])).rows.length) return { id: ev.id, status: 'applied' };
+    const exists = (await tx.query<{ number: number }>('select number from register_shifts where id = $1 and tenant_id = $2', [ev.shiftId, d.tenant_id])).rows[0];
+    if (exists) return { id: ev.id, status: 'applied', shift: { number: exists.number } };
     const warnings: string[] = [];
     const userId = await knownUser(tx, d.tenant_id, ev.userId);
     if (!userId) throw new ApiError(422, 'unknown_user', 'The person who opened the shift is not in the business');
@@ -379,7 +387,7 @@ export function registerPosSyncRoutes(app: FastifyInstance, deps: PipelineDeps) 
       [ev.shiftId, d.tenant_id, d.register_id, number, userId, ev.at, String(centsOf(ev.openingFloat)), d.id],
     );
     await audit(tx, { tenantId: d.tenant_id, userId, action: 'shift.opened', target: `#${number} ${d.register_name}`, details: { float: ev.openingFloat, till: d.name, offline: true } });
-    return { id: ev.id, status: 'applied', ...(warnings.length && { warnings }) };
+    return { id: ev.id, status: 'applied', shift: { number }, ...(warnings.length && { warnings }) };
   }
 
   async function applyCash(tx: Queryable, d: Device, ev: CashEvent): Promise<EventResult> {

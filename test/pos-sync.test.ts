@@ -256,14 +256,17 @@ test('order and failures: a bad event is reported and skipped; a retryable one h
     const r = await sync(c, front, [bad, good]);
     assert.deepEqual(r.map((x) => [x.status, x.retry ?? null]), [['failed', false], ['applied', null]]);
     assert.match(r[0]!.error!.message, /does not match/);
-    // A series another till owns is refused too.
+    // A series never given to a till of the business is refused.
     const back = await c.till('Back');
-    const [stolen] = await sync(c, back, [sale(snap, 3)]);
-    assert.deepEqual([stolen!.status, stolen!.error!.code], ['failed', 'unknown_series']);
+    const [stray] = await sync(c, back, [{ ...sale(snap, 3), series: 150 }]);
+    assert.deepEqual([stray!.status, stray!.error!.code], ['failed', 'unknown_series']);
+    // A till removed and added again still sends the sales it made before (its old series).
+    const [carried] = await sync(c, back, [sale(snap, 3)]);
+    assert.equal(carried!.status, 'applied', JSON.stringify(carried));
 
     // Without a certificate (expired, being replaced) nothing can be signed: the first sale fails for now, the rest wait.
     await c.f.db.query("update certificates set status = 'revoked' where tenant_id = $1", [c.f.tenantA]);
-    const later = [sale(snap, 3), sale(snap, 4)];
+    const later = [sale(snap, 4), sale(snap, 5)];
     const held = await sync(c, front, later);
     assert.deepEqual(held.map((x) => [x.status, x.retry]), [['failed', true], ['not_processed', true]]);
     assert.equal(await count(c, 'select count(*) as n from documents where id = any($1::uuid[])', [later.map((e) => e.id)]), 0);
@@ -273,7 +276,7 @@ test('order and failures: a bad event is reported and skipped; a retryable one h
 
     // BTS down: the sale is stored and queued for BTS (contingency_pending), not failed.
     c.f.bts.script(SUBMIT_PATHS['02'], { status: 503, body: 'down' });
-    const [queued] = await sync(c, front, [sale(snap, 5)]);
+    const [queued] = await sync(c, front, [sale(snap, 6)]);
     assert.equal(queued!.status, 'applied');
     assert.equal(queued!.document!.status, 'contingency_pending');
   }));
