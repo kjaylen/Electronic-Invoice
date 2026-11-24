@@ -56,6 +56,24 @@ test('held sales: hold, list, recall once, delete; per business', async () => {
     const again = (await app.inject({ method: 'POST', url: '/v1/held-sales', headers: cashier, payload: { total: '7.88', count: 1, sale } })).json();
     assert.equal((await app.inject({ method: 'DELETE', url: `/v1/held-sales/${again.id}`, headers: cashier })).statusCode, 204);
     assert.equal((await app.inject({ method: 'DELETE', url: `/v1/held-sales/${again.id}`, headers: cashier })).statusCode, 404);
+
+    // A table's tab: one per table, whichever till opens it; taken up by one till at a time, and the table is free again once it is.
+    const tab = (table: string, headers = cashier) => app.inject({ method: 'POST', url: '/v1/held-sales', headers, payload: { table, total: '7.88', count: 1, sale: { ...sale, table } } });
+    const four = await tab('Table 4');
+    assert.equal(four.statusCode, 201, four.body);
+    assert.deepEqual([four.json().table, four.json().label], ['Table 4', 'Table 4']);
+    const twice = await tab('  table   4 ');
+    assert.equal(twice.statusCode, 409, 'the same table, however it is typed');
+    assert.equal(twice.json().error.code, 'table_open');
+    assert.match(twice.json().error.message, /already has an open tab/);
+    assert.equal((await tab('Table 5')).statusCode, 201);
+    assert.equal((await tab('Table 4', other)).statusCode, 201, 'another business has its own Table 4');
+    const tabs = (await app.inject({ method: 'GET', url: '/v1/held-sales', headers: cashier })).json().data;
+    assert.deepEqual(tabs.map((x: { table: string }) => x.table).sort(), ['Table 4', 'Table 5']);
+    assert.equal((await app.inject({ method: 'POST', url: `/v1/held-sales/${four.json().id}/recall`, headers: cashier })).json().table, 'Table 4');
+    assert.equal((await tab('Table 4')).statusCode, 201, 'free again');
+    // A held sale with no table is as before: any number of them.
+    assert.equal((await app.inject({ method: 'POST', url: '/v1/held-sales', headers: cashier, payload: { label: 'Walk-in', total: '1.00', count: 1, sale } })).json().table, null);
   } finally {
     await app.close();
     await f.close();

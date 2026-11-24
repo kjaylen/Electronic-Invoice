@@ -21,7 +21,7 @@ import { openReceivables } from '../receivables/receivables.ts';
 import { formatCents, parseCents } from '../engine/decimal.ts';
 import { toBigInt } from '../db/database.ts';
 import { loyaltySettings } from './loyalty.ts';
-import { counterSettings, SERVICE_PERCENT } from '../commerce/counter.ts';
+import { counterSettings, MAX_STATIONS, MAX_TABLES, SERVICE_PERCENT } from '../commerce/counter.ts';
 
 // ---------- pagination ----------
 
@@ -273,7 +273,7 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: PipelineDeps) 
 
   // How the counter and the tills work for this business (owners and admins).
   // Only what is sent changes: a till or page that knows fewer settings leaves the others alone.
-  app.put<{ Body: { cashierDiscountLimit?: string | null; showUsd?: boolean; serviceChargePercent?: string | null; tips?: boolean } }>(
+  app.put<{ Body: { cashierDiscountLimit?: string | null; showUsd?: boolean; serviceChargePercent?: string | null; tips?: boolean; tables?: string[]; stations?: Array<{ name: string; categories: string[] }> } }>(
     '/counter-settings',
     {
       schema: {
@@ -284,6 +284,12 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: PipelineDeps) 
             showUsd: { type: 'boolean' },
             serviceChargePercent: { anyOf: [{ type: 'string', pattern: SERVICE_PERCENT.source }, { type: 'null' }] },
             tips: { type: 'boolean' },
+            // A bar or restaurant's tables, and where its order tickets print (by item category).
+            tables: { type: 'array', maxItems: MAX_TABLES, items: { type: 'string', minLength: 1, maxLength: 30 } },
+            stations: {
+              type: 'array', maxItems: MAX_STATIONS,
+              items: { type: 'object', required: ['name', 'categories'], additionalProperties: false, properties: { name: { type: 'string', minLength: 1, maxLength: 30 }, categories: { type: 'array', maxItems: 60, items: { type: 'string', minLength: 1, maxLength: 80 } } } },
+            },
           },
         },
       },
@@ -294,7 +300,10 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: PipelineDeps) 
       const { cashierDiscountLimit, ...rest } = b;
       if (cashierDiscountLimit !== undefined) await db.query('update tenants set cashier_discount_limit = $2 where id = $1', [request.tenantId, cashierDiscountLimit]);
       if (Object.keys(rest).length) {
-        await db.query(`update tenants set counter_settings = counter_settings || $2::jsonb where id = $1`, [request.tenantId, JSON.stringify(rest)]);
+        // Kept as the app reads them: names trimmed, no blanks, no repeats.
+        const clean = counterSettings(rest);
+        const kept = Object.fromEntries(Object.keys(rest).map((k) => [k, clean[k as keyof typeof clean]]));
+        await db.query(`update tenants set counter_settings = counter_settings || $2::jsonb where id = $1`, [request.tenantId, JSON.stringify(kept)]);
       }
       await audit(db, { tenantId: request.tenantId, userId: request.userId || null, action: 'counter.settings', details: { ...b }, ip: request.ip });
       const t = (await db.query<{ cashier_discount_limit: string | null; counter_settings: unknown }>('select cashier_discount_limit::text, counter_settings from tenants where id = $1', [request.tenantId])).rows[0]!;

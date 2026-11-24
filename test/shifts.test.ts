@@ -213,15 +213,15 @@ test('counter settings: US$ totals, a service charge and tips are set by owners,
   withBusiness(async (c) => {
     const put = (headers: Record<string, string>, payload: Record<string, unknown>) => c.app.inject({ method: 'PUT', url: '/v1/counter-settings', headers, payload });
     const counter = async () => (await c.app.inject({ method: 'GET', url: '/v1/me', headers: c.owner })).json().counter;
-    assert.deepEqual(await counter(), { cashierDiscountLimit: null, loyalty: null, showUsd: false, serviceChargePercent: null, tips: false });
+    assert.deepEqual(await counter(), { cashierDiscountLimit: null, loyalty: null, showUsd: false, serviceChargePercent: null, tips: false, tables: [], stations: [] });
 
     const saved = await put(c.owner, { showUsd: true, serviceChargePercent: '10.00', tips: true });
     assert.equal(saved.statusCode, 200, saved.body);
-    assert.deepEqual(saved.json(), { cashierDiscountLimit: null, showUsd: true, serviceChargePercent: '10', tips: true });
+    assert.deepEqual(saved.json(), { cashierDiscountLimit: null, showUsd: true, serviceChargePercent: '10', tips: true, tables: [], stations: [] });
     // A page that only knows the discount limit (a till not updated yet) changes only that.
     assert.equal((await put(c.owner, { cashierDiscountLimit: '5' })).statusCode, 200);
-    assert.deepEqual(await counter(), { cashierDiscountLimit: '5', loyalty: null, showUsd: true, serviceChargePercent: '10', tips: true });
-    assert.deepEqual((await put(c.owner, { serviceChargePercent: null })).json(), { cashierDiscountLimit: '5', showUsd: true, serviceChargePercent: null, tips: true });
+    assert.deepEqual(await counter(), { cashierDiscountLimit: '5', loyalty: null, showUsd: true, serviceChargePercent: '10', tips: true, tables: [], stations: [] });
+    assert.deepEqual((await put(c.owner, { serviceChargePercent: null })).json(), { cashierDiscountLimit: '5', showUsd: true, serviceChargePercent: null, tips: true, tables: [], stations: [] });
 
     for (const bad of [{ serviceChargePercent: '45' }, { serviceChargePercent: '-1' }, { serviceChargePercent: 'ten' }, { showUsd: 'yes' }, {}, { other: true }]) {
       assert.equal((await put(c.owner, bad)).statusCode, 400, JSON.stringify(bad));
@@ -269,4 +269,22 @@ test('a service charge is part of the sale (on the receipt, with GST); a tip is 
     const invoice = await c.app.inject({ method: 'POST', url: '/v1/documents', headers: c.owner, payload: { type: '01', customer: { name: 'Island Logistics Ltd.', tin: '777888', address: { street: '4 Mile', city: 'Belize City', districtCode: '1' } }, lines: [line('10.00')], payment: { meansCode: '30', dueDate: '2026-12-31' }, tip: { amount: '2.00', meansCode: '48' } } });
     assert.equal(invoice.statusCode, 201, invoice.body);
     assert.equal((await c.f.db.query('select 1 from sale_tips')).rows.length, 2);
+  }));
+
+test('a bar or restaurant names its tables and says which categories print at the kitchen and the bar', () =>
+  withBusiness(async (c) => {
+    const put = (payload: Record<string, unknown>) => c.app.inject({ method: 'PUT', url: '/v1/counter-settings', headers: c.owner, payload });
+    const saved = await put({ tables: [' Table 1 ', 'Table 2', 'table 1', '', 'Bar', 'Patio   left'], stations: [{ name: 'Kitchen', categories: ['Food', 'food', ' Bakery '] }, { name: ' Bar ', categories: ['Drinks'] }, { name: '', categories: ['x'] }] });
+    assert.equal(saved.statusCode, 400, 'an empty name is refused outright');
+    const ok = await put({ tables: [' Table 1 ', 'Table 2', 'table 1', 'Bar', 'Patio   left'], stations: [{ name: 'Kitchen', categories: ['Food', 'food', ' Bakery '] }, { name: ' Bar ', categories: ['Drinks'] }] });
+    assert.equal(ok.statusCode, 200, ok.body);
+    // Kept tidy: trimmed, one of each whatever the letter case.
+    assert.deepEqual(ok.json().tables, ['Table 1', 'Table 2', 'Bar', 'Patio left']);
+    assert.deepEqual(ok.json().stations, [{ name: 'Kitchen', categories: ['Food', 'Bakery'] }, { name: 'Bar', categories: ['Drinks'] }]);
+    // Every till gets them, and the other settings are untouched.
+    const counter = (await c.app.inject({ method: 'GET', url: '/v1/me', headers: c.owner })).json().counter;
+    assert.deepEqual([counter.tables.length, counter.stations.length, counter.showUsd, counter.serviceChargePercent], [4, 2, false, null]);
+    assert.equal((await put({ tables: Array.from({ length: 81 }, (_, i) => `T${i}`) })).statusCode, 400);
+    assert.deepEqual((await put({ tables: [] })).json().tables, []);
+    assert.equal((await put({ stations: [] })).json().stations.length, 0);
   }));
