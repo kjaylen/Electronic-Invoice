@@ -84,6 +84,7 @@ test('gift cards at the counter: sold (not a BTS document) and emailed, taken as
     const listed = (await c.app.inject({ method: 'GET', url: `/v1/gift-cards?q=${card.last4}`, headers: c.owner })).json();
     assert.equal(listed.data[0].id, card.id);
     assert.equal(listed.summary.outstanding, '50.00');
+    assert.equal(listed.summary.active, 1);
     assert.equal((await c.app.inject({ method: 'POST', url: '/v1/gift-cards/check', headers: c.owner, payload: { code: code.toLowerCase() } })).json().card.balance, '50.00');
     assert.equal((await c.app.inject({ method: 'POST', url: '/v1/gift-cards/check', headers: c.owner, payload: { code: 'AAAA-BBBB-CCCC-DDDD' } })).statusCode, 404);
 
@@ -102,6 +103,9 @@ test('gift cards at the counter: sold (not a BTS document) and emailed, taken as
     assert.equal(part.statusCode, 201, part.body);
     const detail = (await c.app.inject({ method: 'GET', url: `/v1/gift-cards/${card.id}`, headers: c.owner })).json();
     assert.deepEqual([detail.card.balance, detail.card.status], ['0.00', 'used_up']);
+    // Used up: no longer counted as active, as it is no longer listed as active.
+    const after = (await c.app.inject({ method: 'GET', url: '/v1/gift-cards?status=active', headers: c.owner })).json();
+    assert.deepEqual([after.data.length, after.summary.active, after.summary.outstanding], [0, 0, '0.00']);
     assert.deepEqual(detail.activity.map((a: { kind: string; amount: string }) => [a.kind, a.amount]), [['issued', '50.00'], ['used', '-22.50'], ['used', '-27.50']]);
     assert.ok(detail.activity[1].document.id);
 

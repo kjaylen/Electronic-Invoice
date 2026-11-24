@@ -239,8 +239,9 @@ export async function listCards(db: Queryable, tenantId: string, filter: { q?: s
   if (filter.status === 'used_up') where += " and status = 'active' and balance_cents = 0";
   if (filter.status === 'disabled') where += " and status = 'disabled'";
   const rows = (await db.query<GiftCardRow>(`select ${COLUMNS} from gift_cards where ${where} order by created_at desc limit 500`, params)).rows;
+  // "Active" means the same in the count as in the list: turned on, with something left on it.
   const totals = (await db.query<{ n: number; outstanding: unknown }>(
-    `select count(*)::int as n, coalesce(sum(balance_cents), 0) as outstanding from gift_cards where tenant_id = $1 and status = 'active'`, [tenantId],
+    `select count(*) filter (where balance_cents > 0)::int as n, coalesce(sum(balance_cents), 0) as outstanding from gift_cards where tenant_id = $1 and status = 'active'`, [tenantId],
   )).rows[0]!;
   return { data: rows.map(cardJson), summary: { active: totals.n, outstanding: formatCents(toBigInt(totals.outstanding)) } };
 }
