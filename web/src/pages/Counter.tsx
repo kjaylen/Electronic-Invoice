@@ -71,6 +71,8 @@ interface Sale {
   tip?: string;
   /** Charged to the customer's account: days until it is due. */
   dueDays?: number;
+  /** On account as a layaway: the goods stay in the shop until paid. How long they are kept, and the deposit paid now. */
+  layaway?: { weeks: number; deposit: string; method: 'cash' | 'card' | 'bank_transfer' | 'online' };
   /** Loyalty points the customer uses on this sale. */
   redeemPoints?: number;
   /** A gift card paying what it can (checked when it was entered); cash, card or transfer pays the rest. */
@@ -400,11 +402,15 @@ export function CounterPanel(props: {
     const net = preview.lines[i]?.net;
     return base !== null && base > 0n && net !== undefined && Number(base - toCents(net)) * 100 > Number(limitText) * Number(base) + 50;
   });
+  // A layaway's deposit: nothing, or an amount up to the total.
+  const layaway = means === 'account' && sale.customer ? sale.layaway ?? null : null;
+  const depositCents = layaway && MONEY.test(layaway.deposit) ? toCents(layaway.deposit) : 0n;
+  const depositOk = !layaway || layaway.deposit === '' || (MONEY.test(layaway.deposit) && depositCents <= totalCents);
   // A tip rides with a card or wallet payment; cash tips go straight to the staff.
   const tipAllowed = Boolean(me?.counter?.tips) && (means === '48' || means === '68') && !gift;
   const tipOk = !tipAllowed || !sale.tip || MONEY.test(sale.tip);
   const tipCents = tipAllowed && sale.tip && MONEY.test(sale.tip) ? toCents(sale.tip) : 0n;
-  const canIssue = tipOk && valid.length > 0 && valid.length === sale.lines.length && Boolean(totals) && previewFresh && Boolean(me?.certificate) && (change === null || change >= 0n) && splitOk && !overLimit;
+  const canIssue = tipOk && depositOk && valid.length > 0 && valid.length === sale.lines.length && Boolean(totals) && previewFresh && Boolean(me?.certificate) && (change === null || change >= 0n) && splitOk && !overLimit;
 
   const issue = async (e?: FormEvent, overrideCreditLimit = false) => {
     e?.preventDefault();
@@ -421,7 +427,9 @@ export function CounterPanel(props: {
         ...(overrideCreditLimit && { overrideCreditLimit: true }),
         ...(redeem && { redeemPoints: redeem }),
         ...(tipCents > 0n && { tip: { amount: fromCents(tipCents), meansCode: means } }),
-        ...(onAccount
+        ...(onAccount && layaway
+          ? { layaway: { holdUntil: belizeDate(layaway.weeks * 7), ...(depositCents > 0n && { deposit: { amount: fromCents(depositCents), method: layaway.method } }) } }
+          : onAccount
           ? { payment: { meansCode: '30', dueDate: belizeDate(days), terms: `Payment due in ${days} days` } }
           : gift
             ? { giftCard: { code: gift.code, amount: fromCents(giftApplied) }, ...(rest > 0n && { tenders: [{ meansCode: '1', amount: fromCents(giftApplied) }, { meansCode: means, amount: fromCents(rest) }] }) }
@@ -759,8 +767,36 @@ export function CounterPanel(props: {
           )}
           {means === 'account' && sale.customer && (
             <div className="tender account">
-              <span>{t('Invoice {name}, due in', { name: sale.customer.name })}</span>
-              <Segmented label={t('Due in')} value={String(sale.dueDays ?? 30)} onChange={(v) => set({ dueDays: Number(v) })} options={[['7', t('{n} days', { n: 7 })], ['15', t('{n} days', { n: 15 })], ['30', t('{n} days', { n: 30 })]]} />
+              <Segmented
+                label={t('On account')}
+                value={sale.layaway ? 'layaway' : 'now'}
+                onChange={(v) => set({ layaway: v === 'layaway' ? sale.layaway ?? { weeks: 4, deposit: '', method: 'cash' } : undefined })}
+                options={[['now', t('Takes the goods now')], ['layaway', t('Layaway')]]}
+              />
+              {!sale.layaway ? (
+                <>
+                  <span>{t('Invoice {name}, due in', { name: sale.customer.name })}</span>
+                  <Segmented label={t('Due in')} value={String(sale.dueDays ?? 30)} onChange={(v) => set({ dueDays: Number(v) })} options={[['7', t('{n} days', { n: 7 })], ['15', t('{n} days', { n: 15 })], ['30', t('{n} days', { n: 30 })]]} />
+                </>
+              ) : (
+                <>
+                  <span>{t('The goods stay here until {name} has paid. Kept for', { name: sale.customer.name })}</span>
+                  <Segmented label={t('Kept for')} value={String(sale.layaway.weeks)} onChange={(v) => set({ layaway: { ...sale.layaway!, weeks: Number(v) } })} options={[['2', t('{n} weeks', { n: 2 })], ['4', t('{n} weeks', { n: 4 })], ['8', t('{n} weeks', { n: 8 })], ['12', t('{n} weeks', { n: 12 })]]} />
+                  <label className="layaway-deposit">
+                    <span>{t('Deposit now')}</span>
+                    <span className="row">
+                      <input inputMode="decimal" placeholder="0.00" aria-label={t('Deposit now')} value={sale.layaway.deposit} onChange={(e) => set({ layaway: { ...sale.layaway!, deposit: e.target.value } })} />
+                      <select aria-label={t('Deposit paid by')} value={sale.layaway.method} onChange={(e) => set({ layaway: { ...sale.layaway!, method: e.target.value as 'cash' | 'card' | 'bank_transfer' | 'online' } })}>
+                        <option value="cash">{t('Cash')}</option>
+                        <option value="card">{t('Card')}</option>
+                        <option value="bank_transfer">{t('Transfer')}</option>
+                        <option value="online">{t('Wallet')}</option>
+                      </select>
+                    </span>
+                  </label>
+                  <span className="small">{!depositOk ? t('A deposit up to the total, please') : t('Still to pay: {amount}', { amount: money(fromCents(totalCents - depositCents)) })}</span>
+                </>
+              )}
             </div>
           )}
           {overLimit && <p className="form-error" role="alert">{t('You can take up to {n}% off a line. Ask a manager to make this sale.', { n: limitText! })}</p>}
@@ -769,7 +805,7 @@ export function CounterPanel(props: {
             <button type="button" className="secondary" disabled={busy} onClick={() => void issue(undefined, true)}>{t('Allow it this time')}</button>
           )}
           <button type="submit" className="big lime" disabled={!canIssue || busy}>
-            {busy ? t('Signing and sending…') : means === 'account' ? t('Issue invoice') : t('Issue receipt')}<span className="chip" aria-hidden="true">F2</span>
+            {busy ? t('Signing and sending…') : layaway ? t('Start the layaway') : means === 'account' ? t('Issue invoice') : t('Issue receipt')}<span className="chip" aria-hidden="true">F2</span>
           </button>
           {sale.lines.length > 0 && <button type="button" className="link on-dark" onClick={() => { setSale(newSale()); setDiscountFor(null); focusSearch(); }}>{t('Clear sale')}</button>}
         </form>

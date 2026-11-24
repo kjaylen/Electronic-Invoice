@@ -43,7 +43,7 @@ constants in the code, because they change and because sources disagree.
 - [x] A4. **Tips.** When a customer adds a tip on a card or wallet payment,
   the till records it with the sale; it is not part of the receipt or the
   sales figures, and the shift report says how much is owed to staff.
-- [ ] A5. **Layaway.** Goods put aside for a customer who pays over time: a
+- [x] A5. **Layaway.** Goods put aside for a customer who pays over time: a
   deposit now, payments later, collected when paid in full; a list of
   layaways with what is still owed and when each runs out; cancelling gives
   back the goods and says what to refund.

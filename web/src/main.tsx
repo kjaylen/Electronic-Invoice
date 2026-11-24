@@ -66,6 +66,7 @@ const Expenses = page(() => import('./pages/Expenses'), 'Expenses');
 const Inventory = page(() => import('./pages/Inventory'), 'Inventory');
 const Shifts = page(() => import('./pages/Shifts'), 'Shifts');
 const GiftCards = page(() => import('./pages/GiftCards'), 'GiftCards');
+const Layaways = page(() => import('./pages/Layaways'), 'Layaways');
 const SiteEditor = page(() => import('./pages/SiteEditor'), 'SiteEditor');
 const ShiftDetail = page(() => import('./pages/Shifts'), 'ShiftDetail');
 const ReceiveStock = page(() => import('./pages/Inventory'), 'ReceiveStock');
@@ -172,6 +173,7 @@ function Layout() {
       { to: '/counter', label: t('Counter'), icon: Icons.counter, permission: 'documents.issue' },
       { to: '/shifts', label: t('Cash register'), icon: Icons.register, permission: 'documents.issue' },
       { to: '/gift-cards', label: t('Gift cards'), icon: Icons.giftCard, permission: 'documents.issue' },
+      ...(sells !== 'services' ? [{ to: '/layaways', label: t('Layaways'), icon: Icons.layaway, permission: 'documents.issue' as Permission }] : []),
       { to: '/documents/new?type=01', label: t('New invoice'), icon: Icons.invoice, permission: 'documents.issue' },
       { to: '/quotes', label: t('Quotes'), icon: Icons.quote, permission: 'documents.issue' },
       ...(sells !== 'products' ? [{ to: '/work', label: t('Time and jobs'), icon: Icons.clock, permission: 'documents.issue' as Permission }] : []),
@@ -416,6 +418,7 @@ function BusinessApp() {
         <Route path="/inventory" element={<Allowed permission="catalog.manage"><Inventory /></Allowed>} />
         <Route path="/shifts" element={<Allowed permission="documents.issue"><Shifts /></Allowed>} />
         <Route path="/gift-cards" element={<Allowed permission="documents.issue"><GiftCards /></Allowed>} />
+        <Route path="/layaways" element={<Allowed permission="documents.issue"><Layaways /></Allowed>} />
         <Route path="/site" element={<Allowed permission="business.manage"><SiteEditor /></Allowed>} />
         <Route path="/shifts/:id" element={<Allowed permission="documents.issue"><ShiftDetail /></Allowed>} />
         <Route path="/inventory/receive" element={<Allowed permission="catalog.manage"><ReceiveStock /></Allowed>} />

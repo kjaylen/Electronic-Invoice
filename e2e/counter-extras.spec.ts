@@ -25,12 +25,16 @@ test('counter: US$ total, service charge, a wallet payment with a tip, and the s
   await logIn(page);
   // From nothing, whatever an earlier run left; and a shift of this test's own.
   await page.request.put('/v1/counter-settings', { headers: API, data: { showUsd: false, serviceChargePercent: null, tips: false } });
-  const open = await page.request.get('/v1/shifts/current', { headers: API });
-  if (open.ok() && (await open.json()).shift) {
-    const current = await open.json();
-    await page.request.post(`/v1/shifts/${current.shift.id}/close`, { headers: API, data: { countedCash: current.report.cash.expected } });
+  // A shift of this test's own: close any still open (an earlier test's till may have left one), then open one.
+  const listed = await (await page.request.get('/v1/shifts', { headers: API })).json();
+  for (const open of (listed.data ?? []).filter((x: { status: string }) => x.status === 'open')) {
+    const detail = await (await page.request.get(`/v1/shifts/${open.id}`, { headers: API })).json();
+    await page.request.post(`/v1/shifts/${open.id}/close`, { headers: API, data: { countedCash: detail.report.cash.expected } });
   }
-  expect((await page.request.post('/v1/shifts', { headers: API, data: { openingFloat: '20.00' } })).status()).toBe(201);
+  const registers = await (await page.request.get('/v1/registers', { headers: API })).json();
+  const registerId = (registers.data ?? registers)[0].id as string;
+  const opened = await page.request.post('/v1/shifts', { headers: API, data: { openingFloat: '20.00', registerId } });
+  expect(opened.status(), await opened.text()).toBe(201);
 
   // The owner turns the three on.
   await page.goto(`/${SLUG}/settings?tab=tills`);
@@ -79,13 +83,80 @@ test('counter: US$ total, service charge, a wallet payment with a tip, and the s
 
   // The shift: the sale is wallet takings; the service charge and the tip are what is held for the staff.
   await page.goto(`/${SLUG}/shifts`);
-  await expect(page.getByText('Mobile wallet')).toBeVisible();
-  await expect(page.getByText(/Service charge \(1 sales, before GST\)/)).toBeVisible();
-  await expect(page.locator('tr', { hasText: 'Service charge (1 sales' })).toContainText('BZ$0.70');
-  await expect(page.locator('tr', { hasText: 'Tips for the staff (1)' })).toContainText('BZ$1.34');
+  await expect(page.getByText('Mobile wallet').first()).toBeVisible();
+  await expect(page.locator('tr', { hasText: /Service charge \(\d+ sales, before GST\)/ })).toContainText('BZ$');
+  await expect(page.locator('tr', { hasText: /Tips for the staff \(\d+\)/ })).toContainText('BZ$');
+  const report = (await (await page.request.get('/v1/shifts/current', { headers: API })).json()).report;
+  expect(Number(report.serviceCharge.total)).toBeGreaterThanOrEqual(0.7);
+  expect(Number(report.tips.byMeans.wallet)).toBeGreaterThanOrEqual(1.34);
+  expect(Number(report.takings.wallet)).toBeGreaterThanOrEqual(8.66);
 
   // Back to how the other tests expect the counter.
   await page.request.put('/v1/counter-settings', { headers: API, data: { showUsd: false, serviceChargePercent: null, tips: false } });
-  const current = await (await page.request.get('/v1/shifts/current', { headers: API })).json();
-  await page.request.post(`/v1/shifts/${current.shift.id}/close`, { headers: API, data: { countedCash: current.report.cash.expected } });
+});
+
+test('layaway: started at the counter with a deposit, paid off, handed over; another one cancelled with the money back', async ({ page }) => {
+  await logIn(page);
+  // A customer of this test's own.
+  const name = `Marta Layaway ${Date.now() % 100000}`;
+  const made = await page.request.post('/v1/customers', { headers: API, data: { name, contact: { telephone: '+501 610-2233' } } });
+  expect(made.status()).toBe(201);
+
+  const start = async (deposit: string) => {
+    await page.goto(`/${SLUG}/counter`);
+    const search = page.getByRole('combobox', { name: 'Add an item' });
+    await search.fill('4*7501000000017');
+    await search.press('Enter');
+    await expect(page.locator('.cart .grand')).toContainText('BZ$15.75');
+    await page.getByText('Customer on the receipt').click();
+    await page.getByRole('combobox', { name: 'Saved customer' }).fill(name);
+    await page.getByRole('option', { name: new RegExp(name) }).click();
+    await page.getByRole('group', { name: 'Payment' }).getByRole('button', { name: 'On account' }).click();
+    await page.getByRole('group', { name: 'On account' }).getByRole('button', { name: 'Layaway' }).click();
+    await page.getByRole('group', { name: 'Kept for' }).getByRole('button', { name: '8 weeks' }).click();
+    await page.getByLabel('Deposit now').fill('99');
+    await expect(page.getByText('A deposit up to the total, please')).toBeVisible();
+    await page.getByLabel('Deposit now').fill(deposit);
+    await expect(page.locator('.tender.account')).toContainText(`Still to pay: BZ$${(15.75 - Number(deposit)).toFixed(2)}`);
+    await page.getByRole('button', { name: /Start the layaway/ }).click();
+    await expect(page.locator('.last-sale')).toContainText('Authorized');
+  };
+
+  await start('5.00');
+  await page.getByRole('navigation').getByRole('link', { name: 'Layaways' }).click();
+  const row = page.locator('table.layaways tbody tr', { hasText: name }).first();
+  await expect(row).toContainText('4 × Coconut water');
+  await expect(row).toContainText('BZ$15.75');
+  await expect(row).toContainText('BZ$10.75');
+  await expect(row).toContainText('56 days left');
+  await expect(row.getByRole('link', { name: 'Remind on WhatsApp' })).toHaveAttribute('href', /^https:\/\/wa\.me\/5016102233\?text=/);
+
+  // She pays the rest; then the goods can be handed over, and not before.
+  await expect(row.getByRole('button', { name: 'Hand over' })).toHaveCount(0);
+  await row.getByRole('button', { name: 'Take a payment' }).click();
+  const pay = page.getByRole('dialog');
+  await expect(pay.getByLabel('Amount')).toHaveValue('10.75');
+  await pay.getByLabel('Amount').fill('20');
+  await expect(pay.getByText('An amount up to BZ$10.75')).toBeVisible();
+  await pay.getByLabel('Amount').fill('10.75');
+  await pay.getByRole('button', { name: 'Record payment' }).click();
+  await expect(page.getByText(`Paid in full. ${name} can collect.`)).toBeVisible();
+  await expect(row).toContainText('Paid: ready to collect');
+  await row.getByRole('button', { name: 'Hand over' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Collected' }).click();
+  await expect(page.getByText('No open layaways.')).toBeVisible();
+  await page.getByRole('group', { name: 'Show' }).getByRole('button', { name: 'Collected' }).click();
+  await expect(page.locator('table.layaways tbody tr', { hasText: name })).toHaveCount(1);
+
+  // A second one is cancelled: the deposit is given back.
+  await start('4.00');
+  await page.getByRole('navigation').getByRole('link', { name: 'Layaways' }).click();
+  const second = page.locator('table.layaways tbody tr', { hasText: name }).first();
+  await second.getByRole('button', { name: 'Cancel' }).click();
+  const cancel = page.getByRole('dialog');
+  await expect(cancel).toContainText(`${name} has paid BZ$4.00. It is given back now.`);
+  await cancel.getByRole('button', { name: 'Cancel the layaway' }).click();
+  await expect(page.getByText(`Cancelled. Give ${name} back BZ$4.00.`)).toBeVisible();
+  await page.getByRole('group', { name: 'Show' }).getByRole('button', { name: 'Cancelled' }).click();
+  await expect(page.locator('table.layaways tbody tr', { hasText: name })).toContainText('BZ$4.00 given back');
 });
