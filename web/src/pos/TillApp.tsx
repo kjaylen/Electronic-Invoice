@@ -762,9 +762,11 @@ function SignedInTill(props: {
           {!online && !props.offline && <div className="banner bad till-banner"><strong>{t('No connection.')}</strong> {t('Sales need the internet: every receipt is signed and sent to BTS.')}</div>}
           {me?.contingency.active && <div className="banner warn till-banner">{t('BTS cannot be reached right now. Receipts are issued and sent when it is back.')}</div>}
           <main className="till-main">
-            {tab === 'sell' && <Sell />}
-            {tab === 'sales' && <Sales />}
-            {tab === 'shift' && <ShiftPanel />}
+            {/* The counter and the shift wait for the business and the person (from the till's own copy: a moment). */}
+            {!me && tab !== 'devices' && tab !== 'sync' && <div className="till-loading" aria-busy="true">{t('Loading…')}</div>}
+            {me && tab === 'sell' && <Sell />}
+            {me && tab === 'sales' && <Sales />}
+            {me && tab === 'shift' && <ShiftPanel />}
             {tab === 'devices' && isManager && <HardwareSettings onError={(e) => toast(e instanceof Error ? e.message : String(e), 'bad')} />}
             {tab === 'sync' && isManager && props.offline && sync && <SyncScreen till={props.offline} state={sync} />}
           </main>

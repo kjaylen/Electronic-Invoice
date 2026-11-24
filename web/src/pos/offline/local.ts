@@ -90,6 +90,12 @@ interface SaleBody {
   note?: string;
 }
 
+/** The sale's contents, as a short hash: a retry sends the same, a new sale does not. */
+async function fingerprint(body: unknown): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(body)) as BufferSource);
+  return Array.from(new Uint8Array(digest).slice(0, 12), (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 /** An item's retail price at a quantity (its quantity prices). */
 function priceForQuantity(item: Item, quantity: string): string {
   let best = item.unitPrice;
@@ -368,12 +374,15 @@ export class LocalApi {
       return a + (full > l.netAmount ? full - l.netAmount : 0n);
     }, 0n);
     const shiftId = (await this.ctx.db.meta<string | null>('currentShift')) ?? null;
+    // The key and the contents together: the same sale sent again is found; a different sale under
+    // an old key (a cart restored from long ago) is a new sale, not the old one.
+    const idemKey = idem ? `${idem}:${await fingerprint(body)}` : null;
 
     return exclusive(async () => {
       const db = this.ctx.db;
       // Sent twice (a double tap, a retry after a lost answer): the first sale, once.
-      if (idem) {
-        const row = await db.saleByIdem(idem);
+      if (idemKey) {
+        const row = await db.saleByIdem(idemKey);
         if (row) return json(201, (await db.open<LocalSale>(row.payload)).doc);
       }
       const { series, receptionEnv, environment } = snap.offline;
@@ -415,7 +424,7 @@ export class LocalApi {
       // The sale, its event for the server and the next number: all on the disk, or none of it.
       await db.write({
         meta: { [serialKey]: serial + 1 },
-        sales: [{ id, createdAt: doc.createdAt, shiftId, idem, payload: salePayload }],
+        sales: [{ id, createdAt: doc.createdAt, shiftId, idem: idemKey, payload: salePayload }],
         outbox: [outboxRow(event, `Receipt ${doc.series}-${doc.number} · BZ$${doc.totals.payable}`, eventPayload)],
       });
       this.sales.set(id, { row: { createdAt: doc.createdAt, shiftId }, sale });

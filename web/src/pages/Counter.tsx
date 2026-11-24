@@ -174,11 +174,13 @@ export function CounterPanel(props: {
   const { me, session, can } = useSession();
   // On a till without the server: cash, card and transfer only (gift cards, points and accounts need it).
   const { serverFeatures } = useConnectivity();
-  const storageKey = `etd.counter.${session?.business.id}.${session?.user.id}`;
+  // The sale in progress is kept per business and person; never before both are known (a cart kept
+  // under no one would come back later with an old sale's idempotency key, and that sale would be lost).
+  const storageKey = session ? `etd.counter.${session.business.id}.${session.user.id}` : null;
   // Held sales are shared by every till of the business (they used to stay on the device: those are moved up once).
   const heldKey = `etd.counter.held.${session?.business.id}`;
   const [sale, setSale] = useState<Sale>(() => {
-    const saved = store.get<Sale>(storageKey);
+    const saved = storageKey ? store.get<Sale>(storageKey) : null;
     if (saved?.lines) key = Math.max(key, ...saved.lines.map((l) => l.key), 0);
     return saved?.lines ? saved : newSale();
   });
@@ -201,7 +203,7 @@ export function CounterPanel(props: {
   const search = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    store.set(storageKey, sale);
+    if (storageKey) store.set(storageKey, sale);
   }, [sale, storageKey]);
   useEffect(() => {
     void (async () => {
