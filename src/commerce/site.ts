@@ -27,6 +27,7 @@ const MAX_SECTIONS = 40;
 const MAX_PAGES = 40;
 const MAX_MENU = 12;
 const MAX_VERSIONS = 30;
+const MAX_SAVED = 20;
 
 export class SiteError extends Error {
   override name = 'SiteError';
@@ -51,6 +52,8 @@ export interface SiteDoc {
   home: { sections: Section[] };
   product: { sections: Section[]; showRelated: boolean; relatedTitle: string };
   pages: SitePage[];
+  /** Sections kept to reuse on any page (the editor's "Saved sections"); never sent to customers. */
+  saved: Array<{ id: string; name: string; section: Section }>;
 }
 
 // ---------- checking what is saved ----------
@@ -245,6 +248,10 @@ export function normalizeSite(input: unknown): SiteDoc {
     home: { sections: sections(home.sections, 'home', seen) },
     product: { sections: sections(product.sections, 'product', seen), showRelated: bool(product.showRelated, true), relatedTitle: line(product.relatedTitle, 80, 'You may also like') || 'You may also like' },
     pages,
+    saved: (Array.isArray(input.saved) ? input.saved : []).slice(0, MAX_SAVED).filter(isObj).flatMap((x) => {
+      const section = sections([x.section], 'page', seen)[0];
+      return section ? [{ id: pageId(x.id), name: line(x.name, 60) || 'Saved section', section: { ...section, hidden: false } }] : [];
+    }),
   };
 }
 
@@ -314,7 +321,9 @@ export async function loadSite(db: Queryable, tenantId: string) {
 /** What customers see: the published site, or the one made from the store's settings. */
 export async function publishedSite(db: Queryable, tenantId: string): Promise<SiteDoc> {
   const row = (await db.query<{ published: unknown }>('select published from store_sites where tenant_id = $1', [tenantId])).rows[0];
-  return row?.published ? normalizeSite(row.published) : defaultSite(await storeFacts(db, tenantId));
+  const site = row?.published ? normalizeSite(row.published) : defaultSite(await storeFacts(db, tenantId));
+  // The editor's saved sections are its own business.
+  return { ...site, saved: [] };
 }
 
 /**

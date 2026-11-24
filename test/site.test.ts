@@ -339,6 +339,24 @@ test('the editor is told when the store is closed', () =>
     assert.equal((await c.app.inject({ method: 'GET', url: '/v1/store-site', headers: c.owner })).json().store.open, false);
   }, { open: false }));
 
+test('saved sections are kept with the site, checked like any section, and never sent to customers', () =>
+  withStore(async (c) => {
+    const draft = (await c.app.inject({ method: 'GET', url: '/v1/store-site', headers: c.owner })).json().draft;
+    draft.saved = [
+      { name: 'Sale strip', section: { type: 'banner', hidden: true, settings: { text: 'Sale', background: 'neon', buttonLink: { type: 'url', value: 'javascript:alert(1)' } } } },
+      { name: '', section: { type: 'template_section' } },
+      { name: 'Nothing', section: { type: 'not_a_section' } },
+      ...Array.from({ length: 30 }, (_, i) => ({ name: `Text ${i}`, section: { type: 'rich_text', settings: {} } })),
+    ];
+    const saved = (await c.app.inject({ method: 'PUT', url: '/v1/store-site/draft', headers: c.owner, payload: { site: draft } })).json().draft.saved;
+    assert.equal(saved.length, 18, 'twenty at most, less the two that are not sections a page can hold');
+    assert.equal(saved[0].name, 'Sale strip');
+    assert.deepEqual([saved[0].section.hidden, saved[0].section.settings.background, saved[0].section.settings.buttonLink], [false, 'primary', { type: 'home' }]);
+    assert.ok(new Set([...saved.map((x: { id: string }) => x.id), ...saved.map((x: { section: { id: string } }) => x.section.id)]).size === 36, 'ids of their own');
+    await c.app.inject({ method: 'POST', url: '/v1/store-site/publish', headers: c.owner, payload: {} });
+    assert.deepEqual((await storeInfo(c)).json().site.saved, []);
+  }));
+
 test('normalizeSite keeps a site sound whatever it is given', () => {
   // Pages are kept whatever their address: made from the title, numbered when taken.
   const pages = normalizeSite({ pages: [{ slug: 'about', title: 'About' }, { slug: 'about', title: 'About (copy)' }, { slug: '', title: 'Envíos y Devoluciones' }, { title: '***' }, { slug: 'about-2', title: 'x' }] }).pages;

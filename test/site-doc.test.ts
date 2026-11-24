@@ -7,7 +7,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { defaultSite, newSection, normalizeSite } from '../src/commerce/site.ts';
-import { EMPTY_HISTORY, freeSlug, historyReducer, linksToPage, moved, removePage, setPageSlug, slugify, typingSlug } from '../web/src/site/doc.ts';
+import { copyOf, EMPTY_HISTORY, forgetSaved, freeSlug, historyReducer, insertAfter, linksToPage, MAX_SAVED, moved, removePage, saveSection, setPageSlug, setText, slugify, typingSlug } from '../web/src/site/doc.ts';
 import type { SiteDoc } from '../web/src/site/types.ts';
 
 function site(): SiteDoc {
@@ -105,4 +105,48 @@ test('undo and redo: one step per burst of typing; loading a site is not a chang
   assert.equal(h.doc, before);
   assert.deepEqual(moved(['a', 'b', 'c'], 0, 2), ['b', 'c', 'a']);
   assert.deepEqual(moved(['a', 'b'], 0, 5), ['a', 'b']);
+});
+
+test('typing in the preview, adding where you are, saved sections', () => {
+  const s = site();
+  const [hero, columns] = s.home.sections as [SiteDoc['home']['sections'][number], SiteDoc['home']['sections'][number]];
+  // A section's text, and a block's.
+  const typed = setText(s, hero.id, null, 'heading', 'Typed in place');
+  assert.equal(typed.home.sections[0]!.settings.heading, 'Typed in place');
+  assert.equal(typed.home.sections[1], s.home.sections[1], 'other sections are the same objects');
+  assert.equal(typed.pages, s.pages);
+  const block = columns.blocks[1]!;
+  const inBlock = setText(s, columns.id, block.id, 'heading', 'Second column');
+  assert.equal(inBlock.home.sections[1]!.blocks[1]!.settings.heading, 'Second column');
+  assert.equal(inBlock.home.sections[1]!.blocks[0], columns.blocks[0]);
+  // Nothing changes: the same site back (no step of undo, no save).
+  assert.equal(setText(s, hero.id, null, 'heading', hero.settings.heading as string), s);
+  assert.equal(setText(s, 'no-such-section', null, 'heading', 'x'), s);
+  assert.equal(setText(s, columns.id, 'no-such-block', 'heading', 'x'), s);
+
+  // A new section after a given one, or at the end.
+  const banner = newSection('banner');
+  assert.deepEqual(insertAfter(s.home.sections, banner, hero.id).map((x) => x.type), ['hero', 'banner', 'columns']);
+  assert.deepEqual(insertAfter(s.home.sections, banner, null).map((x) => x.type), ['hero', 'columns', 'banner']);
+  assert.deepEqual(insertAfter(s.home.sections, banner, 'gone').map((x) => x.type), ['hero', 'columns', 'banner']);
+
+  // A copy has ids of its own, and changing it leaves the original alone.
+  let n = 0;
+  const id = () => `copy${n++}`;
+  const copy = copyOf(columns, id);
+  assert.notEqual(copy.id, columns.id);
+  assert.ok(copy.blocks.every((b, i) => b.id !== columns.blocks[i]!.id));
+  copy.blocks[0]!.settings.heading = 'Changed';
+  assert.notEqual(columns.blocks[0]!.settings.heading, 'Changed');
+
+  // Saved for reuse: newest first, at most twenty, links in them follow a renamed page, and the server keeps them.
+  let saved = saveSection(s, columns, '  Three reasons  ', id);
+  assert.equal(saved.saved![0]!.name, 'Three reasons');
+  assert.notEqual(saved.saved![0]!.section.id, columns.id);
+  assert.deepEqual(setPageSlug(saved, saved.pages[0]!.id, 'story').saved![0]!.section.blocks[0]!.settings.link, { type: 'page', value: 'story' });
+  assert.deepEqual(normalizeSite(saved).saved, saved.saved);
+  for (let i = 0; i < 25; i++) saved = saveSection(saved, hero, `Banner ${i}`, id);
+  assert.equal(saved.saved!.length, MAX_SAVED);
+  assert.equal(saved.saved![0]!.name, 'Banner 24');
+  assert.equal(forgetSaved(saved, saved.saved![0]!.id).saved!.length, MAX_SAVED - 1);
 });

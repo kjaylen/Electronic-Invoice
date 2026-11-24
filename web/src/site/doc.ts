@@ -100,6 +100,54 @@ export function moved<T>(list: T[], from: number, to: number): T[] {
   return next;
 }
 
+/** Every section of the site, wherever it is, through `f` (the same object back means no change). */
+export function mapSections(doc: SiteDoc, f: (s: Section) => Section): SiteDoc {
+  const list = (sections: Section[]) => {
+    const next = sections.map(f);
+    return next.some((x, i) => x !== sections[i]) ? next : sections;
+  };
+  const home = list(doc.home.sections);
+  const product = list(doc.product.sections);
+  const pages = doc.pages.map((p) => {
+    const sections = list(p.sections);
+    return sections === p.sections ? p : { ...p, sections };
+  });
+  const samePages = pages.every((p, i) => p === doc.pages[i]);
+  if (home === doc.home.sections && product === doc.product.sections && samePages) return doc;
+  return { ...doc, home: home === doc.home.sections ? doc.home : { sections: home }, product: product === doc.product.sections ? doc.product : { ...doc.product, sections: product }, pages: samePages ? doc.pages : pages };
+}
+
+/** One text of a section (or of one of its blocks) set to `value`: what typing in the preview does. */
+export function setText(doc: SiteDoc, sectionId: string, blockId: string | null, key: string, value: string): SiteDoc {
+  return mapSections(doc, (s) => {
+    if (s.id !== sectionId) return s;
+    if (!blockId) return s.settings[key] === value ? s : { ...s, settings: { ...s.settings, [key]: value } };
+    if (!s.blocks.some((b) => b.id === blockId && b.settings[key] !== value)) return s;
+    return { ...s, blocks: s.blocks.map((b) => (b.id === blockId ? { ...b, settings: { ...b.settings, [key]: value } } : b)) };
+  });
+}
+
+/** `section` put after the section with id `after` (at the end when there is none). */
+export function insertAfter(sections: Section[], section: Section, after: string | null): Section[] {
+  const i = after ? sections.findIndex((s) => s.id === after) : -1;
+  return i < 0 ? [...sections, section] : [...sections.slice(0, i + 1), section, ...sections.slice(i + 1)];
+}
+
+/** A copy of a section with ids of its own (a duplicate, or a saved section put on a page). */
+export function copyOf(section: Section, newId: () => string): Section {
+  return { ...structuredClone(section), id: newId(), blocks: section.blocks.map((b) => ({ ...structuredClone(b), id: newId() })) };
+}
+
+export const MAX_SAVED = 20;
+
+/** Keep a section to reuse on any page, under a name (the newest first; the oldest go past twenty). */
+export function saveSection(doc: SiteDoc, section: Section, name: string, newId: () => string): SiteDoc {
+  const saved = { id: newId(), name: name.trim().slice(0, 60) || 'Saved section', section: { ...copyOf(section, newId), hidden: false } };
+  return { ...doc, saved: [saved, ...(doc.saved ?? [])].slice(0, MAX_SAVED) };
+}
+
+export const forgetSaved = (doc: SiteDoc, id: string): SiteDoc => ({ ...doc, saved: (doc.saved ?? []).filter((x) => x.id !== id) });
+
 // ---------- undo and redo ----------
 
 const MAX_STEPS = 80;

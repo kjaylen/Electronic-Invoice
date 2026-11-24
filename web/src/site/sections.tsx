@@ -5,7 +5,7 @@
  * collections it shows.
  */
 
-import { type FormEvent, type ReactNode, useEffect, useMemo, useState } from 'react';
+import { createContext, type FormEvent, type ReactNode, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { api } from '../api';
 import { useT } from '../i18n';
@@ -54,6 +54,47 @@ export function imageSrc(ref: unknown, slug: string): string | null {
   return null;
 }
 
+// ---------- text typed where it shows (the builder's preview) ----------
+
+/** The section being drawn, in the builder's preview only: its texts can be typed in place. */
+const EditScope = createContext<string | null>(null);
+
+/**
+ * A text from a section's settings. On the storefront it is just the text. In the builder's preview
+ * it can be clicked and typed into; each keystroke goes to the editor, which keeps the draft.
+ * The element's text is set by hand, never by React, so typing does not lose its place.
+ */
+function T({ k, v, block }: { k: string; v: string; block?: string }) {
+  const section = useContext(EditScope);
+  const ref = useRef<HTMLSpanElement>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (el && document.activeElement !== el && el.textContent !== v) el.textContent = v;
+  }, [v, section]);
+  if (!section) return <>{v}</>;
+  return (
+    <span
+      ref={ref}
+      className="site-editable"
+      contentEditable="plaintext-only"
+      suppressContentEditableWarning
+      spellCheck
+      data-field={k}
+      onInput={(e) => window.parent.postMessage({ type: 'site-edit', id: section, block: block ?? null, key: k, value: e.currentTarget.innerText.replace(/\s*\n\s*/g, ' ') }, window.location.origin)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === 'Escape') {
+          e.preventDefault();
+          e.currentTarget.blur();
+        }
+      }}
+      onBlur={(e) => {
+        // What the editor kept (cut to the field's length) is what shows.
+        if (e.currentTarget.textContent !== v) e.currentTarget.textContent = v;
+      }}
+    />
+  );
+}
+
 // ---------- links ----------
 
 function asLink(v: unknown): SiteLink | null {
@@ -96,7 +137,7 @@ function Buttons({ settings, suffixes = ['', '2'] }: { settings: Record<string, 
   if (!shown.length) return null;
   return (
     <div className="site-buttons">
-      {shown.map((x, i) => <SiteLinkEl key={x} link={asLink(settings[`button${x}Link`])} className={`button ${i > 0 ? 'secondary' : ''}`}>{s(settings[`button${x}Label`])}</SiteLinkEl>)}
+      {shown.map((x, i) => <SiteLinkEl key={x} link={asLink(settings[`button${x}Link`])} className={`button ${i > 0 ? 'secondary' : ''}`}><T k={`button${x}Label`} v={s(settings[`button${x}Label`])} /></SiteLinkEl>)}
     </div>
   );
 }
@@ -221,9 +262,9 @@ function SkeletonGrid({ columns }: { columns: number }) {
   return <div className="site-grid" style={gridStyle(columns)}>{Array.from({ length: Math.min(columns, 4) }, (_, i) => <div key={i} className="skeleton" style={{ aspectRatio: '3 / 4' }} />)}</div>;
 }
 
-function Heading({ text, first, className }: { text: string; first?: boolean; className?: string }) {
+function Heading({ text, first, className, k = 'heading' }: { text: string; first?: boolean; className?: string; k?: string }) {
   if (!text) return null;
-  return first ? <h1 className={className}>{text}</h1> : <h2 className={className}>{text}</h2>;
+  return first ? <h1 className={className}><T k={k} v={text} /></h1> : <h2 className={className}><T k={k} v={text} /></h2>;
 }
 
 /** Every product (or a collection's), with search and category buttons. */
@@ -247,7 +288,7 @@ export function ProductGrid({ settings, ctx, title, initial }: { settings: Recor
   const heading = title ?? s(settings.title);
   return (
     <div className="stack" id="products">
-      {heading && (title ? <h1>{heading}</h1> : <h2>{heading}</h2>)}
+      {heading && (title ? <h1>{heading}</h1> : <h2><T k="title" v={heading} /></h2>)}
       {settings.showSearch !== false && <input type="search" className="shop-search" placeholder={t('Search the store')} aria-label={t('Search the store')} value={q} onChange={(e) => setQ(e.target.value)} />}
       {settings.showCategories !== false && categories.length > 1 && (
         <div className="quick-tabs shop-categories" role="group" aria-label={t('Categories')}>
@@ -295,11 +336,11 @@ function FeaturedProducts({ settings, ctx, relatedTo }: { settings: Record<strin
     <div className="stack">
       {(s(settings.title) || (b(settings.showViewAll) && !relatedTo)) && (
         <div className="site-row-head">
-          {s(settings.title) && <h2>{s(settings.title)}</h2>}
+          {s(settings.title) && <h2>{relatedTo ? s(settings.title) : <T k="title" v={s(settings.title)} />}</h2>}
           {b(settings.showViewAll) && !relatedTo && source !== 'manual' && <SiteLinkEl link={viewAll} className="site-view-all">{t('View all')} →</SiteLinkEl>}
         </div>
       )}
-      {s(settings.text) && <p className="muted site-lead">{s(settings.text)}</p>}
+      {s(settings.text) && <p className="muted site-lead"><T k="text" v={s(settings.text)} /></p>}
       {products === null ? <SkeletonGrid columns={columns} /> : <div className="shop-grid site-grid" style={gridStyle(columns)}>{products.map((p) => <ProductCardView key={p.handle} p={p} slug={ctx.slug} />)}</div>}
     </div>
   );
@@ -341,7 +382,7 @@ function CollectionList({ settings, ctx }: { settings: Record<string, unknown>; 
   if (all && !shown.length) return ctx.preview ? <div className="site-placeholder">{t('Make a collection under Products → Collections to show it here.')}</div> : null;
   return (
     <div className="stack">
-      {s(settings.title) && <h2>{s(settings.title)}</h2>}
+      {s(settings.title) && <h2><T k="title" v={s(settings.title)} /></h2>}
       {all === null ? <SkeletonGrid columns={n(settings.columns, 3)} /> : <CollectionTiles collections={shown} ctx={ctx} columns={n(settings.columns, 3)} />}
     </div>
   );
@@ -358,7 +399,7 @@ function Hero({ settings, ctx, first }: { settings: Record<string, unknown>; ctx
     <div className={`site-hero ${src ? 'has-image' : 'shop-hero'} align-${s(settings.align) || 'left'} height-${s(settings.height) || 'medium'}`} style={style}>
       <div className="site-hero-inner">
         <Heading text={s(settings.heading)} first={first} />
-        {s(settings.text) && <p>{s(settings.text)}</p>}
+        {s(settings.text) && <p><T k="text" v={s(settings.text)} /></p>}
         {perks && (
           <div className="shop-perks small">
             {ctx.delivery.enabled && <span>{t('Delivery')}{ctx.delivery.zones.length > 0 && `: ${ctx.delivery.zones.map((z) => z.name).join(', ')}`}</span>}
@@ -384,15 +425,15 @@ function Countdown({ settings }: { settings: Record<string, unknown> }) {
   const parts: Array<[number, string]> = left === null ? [] : [[Math.floor(left / 86_400_000), t('days')], [Math.floor(left / 3_600_000) % 24, t('hours')], [Math.floor(left / 60_000) % 60, t('minutes')], [Math.floor(left / 1000) % 60, t('seconds')]];
   return (
     <div className={`site-countdown tone-${s(settings.background) || 'dark'}`}>
-      {left === 0 ? <h2>{s(settings.endedText)}</h2> : (
+      {left === 0 ? <h2><T k="endedText" v={s(settings.endedText)} /></h2> : (
         <>
-          {s(settings.heading) && <h2>{s(settings.heading)}</h2>}
+          {s(settings.heading) && <h2><T k="heading" v={s(settings.heading)} /></h2>}
           {left === null ? <p className="small">{t('Set when it ends in the editor.')}</p> : (
             <div className="site-countdown-figures" role="timer" aria-live="off">
               {parts.map(([v, label]) => <div key={label}><strong className="num">{String(v).padStart(2, '0')}</strong><span>{label}</span></div>)}
             </div>
           )}
-          {s(settings.text) && <p>{s(settings.text)}</p>}
+          {s(settings.text) && <p><T k="text" v={s(settings.text)} /></p>}
           <Buttons settings={settings} suffixes={['']} />
         </>
       )}
@@ -430,8 +471,8 @@ function ContactForm({ settings, ctx }: { settings: Record<string, unknown>; ctx
   };
   return (
     <div className="site-contact">
-      {s(settings.title) && <h2>{s(settings.title)}</h2>}
-      {s(settings.text) && <p className="muted">{s(settings.text)}</p>}
+      {s(settings.title) && <h2><T k="title" v={s(settings.title)} /></h2>}
+      {s(settings.text) && <p className="muted"><T k="text" v={s(settings.text)} /></p>}
       {sent ? <div className="banner ok" role="status"><div><strong>{t('Thank you. Your message was sent.')}</strong>{t('The store will reply by email.')}</div></div> : (
         <form className="stack" onSubmit={submit}>
           <div className="form-grid">
@@ -457,11 +498,11 @@ function VisitUs({ settings, blocks, ctx }: { settings: Record<string, unknown>;
   return (
     <div className={`site-visit ${src ? 'with-image' : ''}`}>
       <div className="stack">
-        {s(settings.title) && <h2>{s(settings.title)}</h2>}
+        {s(settings.title) && <h2><T k="title" v={s(settings.title)} /></h2>}
         {address && <p className="site-address"><SiteIcon name="map" /> <span style={{ whiteSpace: 'pre-line' }}>{address}</span></p>}
         {blocks.length > 0 && (
           <dl className="site-hours">
-            {blocks.map((blk) => <div key={blk.id}><dt>{s(blk.settings.days)}</dt><dd>{s(blk.settings.hours)}</dd></div>)}
+            {blocks.map((blk) => <div key={blk.id}><dt><T k="days" v={s(blk.settings.days)} block={blk.id} /></dt><dd><T k="hours" v={s(blk.settings.hours)} block={blk.id} /></dd></div>)}
           </dl>
         )}
         <div className="site-buttons">
@@ -478,8 +519,8 @@ function VisitUs({ settings, blocks, ctx }: { settings: Record<string, unknown>;
 function Faq({ settings, blocks }: { settings: Record<string, unknown>; blocks: Block[] }) {
   return (
     <div className="site-faq">
-      {s(settings.title) && <h2>{s(settings.title)}</h2>}
-      {s(settings.text) && <p className="muted">{s(settings.text)}</p>}
+      {s(settings.title) && <h2><T k="title" v={s(settings.title)} /></h2>}
+      {s(settings.text) && <p className="muted"><T k="text" v={s(settings.text)} /></p>}
       <div className="site-faq-list">
         {blocks.map((blk) => (
           <details key={blk.id}>
@@ -501,8 +542,8 @@ function SectionBody({ section, ctx, first }: { section: Section; ctx: SiteConte
     case 'banner':
       return (
         <div className={`site-banner tone-${s(st.background) || 'primary'}`}>
-          <span>{s(st.text)}</span>
-          {s(st.buttonLabel) && <SiteLinkEl link={asLink(st.buttonLink)} className="site-banner-link">{s(st.buttonLabel)} →</SiteLinkEl>}
+          <span><T k="text" v={s(st.text)} /></span>
+          {s(st.buttonLabel) && <SiteLinkEl link={asLink(st.buttonLink)} className="site-banner-link"><T k="buttonLabel" v={s(st.buttonLabel)} /> →</SiteLinkEl>}
         </div>
       );
     case 'product_grid': return <ProductGrid settings={st} ctx={ctx} />;
@@ -532,16 +573,16 @@ function SectionBody({ section, ctx, first }: { section: Section; ctx: SiteConte
     case 'columns':
       return (
         <div className="stack">
-          {s(st.title) && <h2>{s(st.title)}</h2>}
+          {s(st.title) && <h2><T k="title" v={s(st.title)} /></h2>}
           <div className="site-columns" style={gridStyle(Math.min(4, Math.max(1, section.blocks.length)))}>
             {section.blocks.map((blk) => {
               const src = imageSrc(blk.settings.image, ctx.slug);
               return (
                 <div key={blk.id} className="site-column">
                   {src && <img src={src} alt="" loading="lazy" />}
-                  {s(blk.settings.heading) && <h3>{s(blk.settings.heading)}</h3>}
+                  {s(blk.settings.heading) && <h3><T k="heading" v={s(blk.settings.heading)} block={blk.id} /></h3>}
                   <RichText text={s(blk.settings.text)} />
-                  {s(blk.settings.linkLabel) && <SiteLinkEl link={asLink(blk.settings.link)} className="site-view-all">{s(blk.settings.linkLabel)} →</SiteLinkEl>}
+                  {s(blk.settings.linkLabel) && <SiteLinkEl link={asLink(blk.settings.link)} className="site-view-all"><T k="linkLabel" v={s(blk.settings.linkLabel)} block={blk.id} /> →</SiteLinkEl>}
                 </div>
               );
             })}
@@ -551,13 +592,13 @@ function SectionBody({ section, ctx, first }: { section: Section; ctx: SiteConte
     case 'highlights':
       return (
         <div className="stack">
-          {s(st.title) && <h2>{s(st.title)}</h2>}
+          {s(st.title) && <h2><T k="title" v={s(st.title)} /></h2>}
           <div className="site-highlights" style={gridStyle(Math.min(4, Math.max(1, section.blocks.length)))}>
             {section.blocks.map((blk) => (
               <div key={blk.id} className="site-highlight">
                 <SiteIcon name={s(blk.settings.icon)} />
-                <strong>{s(blk.settings.title)}</strong>
-                {s(blk.settings.text) && <p className="small">{s(blk.settings.text)}</p>}
+                <strong><T k="title" v={s(blk.settings.title)} block={blk.id} /></strong>
+                {s(blk.settings.text) && <p className="small"><T k="text" v={s(blk.settings.text)} block={blk.id} /></p>}
               </div>
             ))}
           </div>
@@ -566,12 +607,12 @@ function SectionBody({ section, ctx, first }: { section: Section; ctx: SiteConte
     case 'testimonials':
       return (
         <div className="stack">
-          {s(st.title) && <h2>{s(st.title)}</h2>}
+          {s(st.title) && <h2><T k="title" v={s(st.title)} /></h2>}
           <div className="site-testimonials">
             {section.blocks.map((blk) => (
               <figure key={blk.id} className="site-testimonial">
-                <blockquote>“{s(blk.settings.quote)}”</blockquote>
-                <figcaption><strong>{s(blk.settings.author)}</strong>{s(blk.settings.detail) && <span className="muted"> · {s(blk.settings.detail)}</span>}</figcaption>
+                <blockquote>“<T k="quote" v={s(blk.settings.quote)} block={blk.id} />”</blockquote>
+                <figcaption><strong><T k="author" v={s(blk.settings.author)} block={blk.id} /></strong>{s(blk.settings.detail) && <span className="muted"> · <T k="detail" v={s(blk.settings.detail)} block={blk.id} /></span>}</figcaption>
               </figure>
             ))}
           </div>
@@ -583,7 +624,7 @@ function SectionBody({ section, ctx, first }: { section: Section; ctx: SiteConte
       if (!images.length) return ctx.preview ? <div className="site-placeholder">{t('Add pictures to the gallery in the editor.')}</div> : null;
       return (
         <div className="stack">
-          {s(st.title) && <h2>{s(st.title)}</h2>}
+          {s(st.title) && <h2><T k="title" v={s(st.title)} /></h2>}
           <div className={`site-gallery aspect-${s(st.aspect) || 'square'}`} style={gridStyle(n(st.columns, 3))}>{images.map((src) => <img key={src} src={src} alt="" loading="lazy" />)}</div>
         </div>
       );
@@ -593,7 +634,7 @@ function SectionBody({ section, ctx, first }: { section: Section; ctx: SiteConte
       if (!images.length) return ctx.preview ? <div className="site-placeholder">{t('Add logos in the editor.')}</div> : null;
       return (
         <div className="stack site-logos-wrap">
-          {s(st.title) && <h2 className="site-logos-title">{s(st.title)}</h2>}
+          {s(st.title) && <h2 className="site-logos-title"><T k="title" v={s(st.title)} /></h2>}
           <div className="site-logos">{images.map((src) => <img key={src} src={src} alt="" loading="lazy" />)}</div>
         </div>
       );
@@ -603,9 +644,9 @@ function SectionBody({ section, ctx, first }: { section: Section; ctx: SiteConte
       if (!src) return ctx.preview ? <div className="site-placeholder">{t('Paste a YouTube or Vimeo link in the editor.')}</div> : null;
       return (
         <div className="stack">
-          {s(st.title) && <h2>{s(st.title)}</h2>}
+          {s(st.title) && <h2><T k="title" v={s(st.title)} /></h2>}
           <div className="site-video"><iframe src={src} title={s(st.title) || t('Video')} loading="lazy" allow="encrypted-media; picture-in-picture; fullscreen" allowFullScreen /></div>
-          {s(st.caption) && <p className="small muted">{s(st.caption)}</p>}
+          {s(st.caption) && <p className="small muted"><T k="caption" v={s(st.caption)} /></p>}
         </div>
       );
     }
@@ -624,14 +665,16 @@ function SectionBody({ section, ctx, first }: { section: Section; ctx: SiteConte
 
 const BACKGROUND_SECTIONS = new Set(['image_with_text', 'rich_text', 'columns', 'highlights', 'testimonials']);
 
-/** A page's sections, in order (hidden ones left out). In the builder's preview, a click selects a section. */
+/** A page's sections, in order (hidden ones left out). In the builder's preview, a click selects a section, its texts can be typed in place, and a section can be added after any other. */
 export function Sections({ sections, ctx, firstIsTitle }: { sections: Section[]; ctx: SiteContext; firstIsTitle?: boolean }) {
+  const t = useT();
   const visible = sections.filter((x) => !x.hidden);
+  const tell = (message: Record<string, unknown>) => window.parent.postMessage(message, window.location.origin);
   return (
     <>
       {visible.map((section, i) => {
         const bg = BACKGROUND_SECTIONS.has(section.type) ? s(section.settings.background) : '';
-        return (
+        const body = (
           <section
             key={section.id}
             className={`site-section site-${section.type.replace(/_/g, '-')} ${bg && bg !== 'none' ? `tone-${bg} toned` : ''}`}
@@ -639,12 +682,23 @@ export function Sections({ sections, ctx, firstIsTitle }: { sections: Section[];
             {...(ctx.preview && {
               onClickCapture: (e: React.MouseEvent) => {
                 if ((e.target as HTMLElement).closest('a, button, input, textarea, select, summary, label')) e.preventDefault();
-                window.parent.postMessage({ type: 'site-select', id: section.id }, window.location.origin);
+                tell({ type: 'site-select', id: section.id });
               },
             })}
           >
-            <SectionBody section={section} ctx={ctx} first={Boolean(firstIsTitle) && i === 0} />
+            <EditScope.Provider value={ctx.preview ? section.id : null}>
+              <SectionBody section={section} ctx={ctx} first={Boolean(firstIsTitle) && i === 0} />
+            </EditScope.Provider>
           </section>
+        );
+        if (!ctx.preview) return body;
+        // In the preview each section sits in a slot of its own, which holds the "add a section after this one" button
+        // (outside the section, so no section's own shape hides it).
+        return (
+          <div key={section.id} className="site-slot">
+            {body}
+            <button type="button" className="site-insert" tabIndex={-1} onClick={() => tell({ type: 'site-add', after: section.id })}>+ {t('Add section')}</button>
+          </div>
         );
       })}
     </>

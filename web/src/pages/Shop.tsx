@@ -223,7 +223,7 @@ function useSitePreview(): SiteDoc | null {
     if (!SITE_PREVIEW) return;
     const onMessage = (e: MessageEvent) => {
       if (e.origin !== window.location.origin || e.source !== window.parent) return;
-      const data = e.data as { type?: string; site?: SiteDoc; path?: string; id?: string };
+      const data = e.data as { type?: string; site?: SiteDoc; path?: string; id?: string; scroll?: boolean };
       if (data?.type === 'site-preview' && data.site) setSite(data.site);
       if (data?.type === 'site-navigate' && typeof data.path === 'string' && data.path.startsWith('/shop')) navigate(data.path);
       if (data?.type === 'site-highlight' && data.id) {
@@ -231,7 +231,8 @@ function useSitePreview(): SiteDoc | null {
         document.querySelectorAll('.site-section.selected').forEach((x) => x.classList.remove('selected'));
         if (el) {
           el.classList.add('selected');
-          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          // Chosen in the editor's list: brought into view. Clicked here: it is in view already.
+          if (data.scroll !== false) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
       }
     };

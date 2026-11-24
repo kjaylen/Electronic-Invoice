@@ -228,3 +228,68 @@ test('site builder: a photo straight from a phone is made smaller and uploads', 
   await page.getByRole('button', { name: 'Remove', exact: true }).first().click();
   await saved(page);
 });
+
+test('site builder: type in the preview, add a section where you are, reuse a saved section on another page', async ({ page }) => {
+  await logIn(page);
+  const preview = await openSite(page);
+  page.on('dialog', (d) => void d.accept());
+
+  // Click the headline in the page itself and type: the form and the draft follow.
+  const headline = preview.locator('section.site-hero h1 .site-editable');
+  await headline.click();
+  await page.keyboard.press('ControlOrMeta+a');
+  await page.keyboard.type('Typed right on the page');
+  await expect(page.getByLabel('Headline')).toHaveValue('Typed right on the page');
+  await page.keyboard.press('Enter');
+  await saved(page);
+  expect((await draftOf(page)).home.sections[0].settings.heading).toBe('Typed right on the page');
+  // And the other way: the form still drives the page.
+  await page.getByLabel('Headline').fill('Typed in the form');
+  await expect(headline).toHaveText('Typed in the form');
+
+  // "Add section" under the banner, from the page: the new one lands right after it.
+  await preview.locator('section.site-hero').hover();
+  await preview.locator('.site-slot:has(> section.site-hero) > .site-insert').click();
+  await page.getByRole('dialog').getByRole('button', { name: /^Promotion strip/ }).click();
+  await expect(page.getByLabel('Message')).toBeVisible();
+  const strip = `Reused strip ${Date.now()}`;
+  await page.getByLabel('Message').fill(strip);
+  await saved(page);
+  const home = (await draftOf(page)).home.sections as Array<{ type: string; settings: { text?: string } }>;
+  expect(home[1]!.type).toBe('banner');
+  expect(home[1]!.settings.text).toBe(strip);
+
+  // Keep it, then put a copy on the About page.
+  await page.getByRole('button', { name: 'Save for reuse' }).click();
+  await page.getByLabel('Name for the saved section').fill('My strip');
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(page.getByText('Saved. Find it under “Add section” on any page.')).toBeVisible();
+  await page.getByRole('button', { name: 'Remove section' }).click();
+  await page.getByRole('combobox', { name: 'Page' }).selectOption({ label: 'About us' });
+  await page.getByRole('button', { name: '+ Add section' }).click();
+  const kept = page.getByRole('dialog').locator('.se-list li', { hasText: 'My strip' }).first();
+  await kept.getByRole('button', { name: 'Add', exact: true }).click();
+  await expect(preview.getByText(strip)).toBeVisible();
+  await page.getByRole('button', { name: 'Remove section' }).click();
+  // Tidy up the saved section.
+  await page.getByRole('button', { name: '+ Add section' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Remove My strip' }).first().click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click();
+  await saved(page);
+});
+
+test('site builder: looking for a product to link to asks the server once per pause, not in a loop', async ({ page }) => {
+  await logIn(page);
+  await openSite(page);
+  await openBanner(page);
+  let asked = 0;
+  page.on('request', (r) => {
+    if (r.url().includes('/v1/products?status=active&q=')) asked++;
+  });
+  await page.getByLabel('Button link').first().selectOption({ label: 'A product' });
+  await page.getByLabel('Find a product').first().fill('reef');
+  await expect(page.locator('.se-search-results')).toContainText('Reef Hoodie');
+  await page.waitForTimeout(1500);
+  expect(asked).toBeLessThanOrEqual(2);
+  await page.getByRole('button', { name: 'Undo' }).click();
+});

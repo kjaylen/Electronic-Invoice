@@ -15,7 +15,7 @@ import { useT } from '../i18n';
 import { useToast } from '../toast';
 import { ErrorText, Field, Modal, usePageTitle } from '../ui';
 import { type EditorCtx, FieldInput, fieldShown, Group, ImageInput, LinkInput } from '../site/editor-fields';
-import { freeSlug, linksToPage, type PageKey, pageKind, removePage, sectionsOf, setPageSlug, typingSlug, withSections } from '../site/doc';
+import { copyOf, forgetSaved, freeSlug, insertAfter, linksToPage, MAX_SAVED, moved, type PageKey, pageKind, removePage, saveSection, sectionsOf, setPageSlug, setText, typingSlug, withSections } from '../site/doc';
 import { contrast, FONT_FAMILIES, loadFonts } from '../site/theme';
 import type { Builder, MenuItem, Section, SectionSchema, SiteDoc, SiteLink, Theme } from '../site/types';
 import { useSiteDraft } from '../site/use-draft';
@@ -24,7 +24,6 @@ type Tab = 'pages' | 'theme' | 'header' | 'footer' | 'seo';
 type Device = 'desktop' | 'tablet' | 'phone';
 
 const newId = () => Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 6);
-const clone = <T,>(x: T): T => structuredClone(x);
 
 /** What a section is about, for its row in the list. */
 function summary(s: Section, schema: SectionSchema | undefined): string {
@@ -44,7 +43,9 @@ export function SiteEditor() {
   const [page, setPage] = useState<PageKey>('home');
   const [selected, setSelected] = useState<string | null>(null);
   const [device, setDevice] = useState<Device>('desktop');
-  const [adding, setAdding] = useState(false);
+  // Where a new section goes: undefined (not adding), null (at the end), or after the section with this id.
+  const [addAfter, setAddAfter] = useState<string | null | undefined>(undefined);
+  const fromPreview = useRef(false);
   const [history, setHistory] = useState(false);
   const [starting, setStarting] = useState(false);
   const [publishing, setPublishing] = useState(false);
@@ -101,14 +102,28 @@ export function SiteEditor() {
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
       if (e.origin !== window.location.origin || e.source !== frame.current?.contentWindow) return;
-      const data = e.data as { type?: string; id?: string; path?: string };
+      const data = e.data as { type?: string; id?: string; path?: string; block?: string | null; key?: string; value?: string; after?: string };
       if (data.type === 'site-ready') {
         frameReady.current = true;
         if (previewDoc) post({ type: 'site-preview', site: previewDoc });
       }
       if (data.type === 'site-select' && data.id) {
+        fromPreview.current = true;
         setTab('pages');
         setSelected(data.id);
+      }
+      if (data.type === 'site-add' && data.after) {
+        setTab('pages');
+        setAddAfter(data.after);
+      }
+      // Typed in the preview: only a section's own short texts, cut to their length, as the form would.
+      if (data.type === 'site-edit' && data.id && typeof data.key === 'string' && typeof data.value === 'string' && doc && loaded) {
+        const section = [...doc.home.sections, ...doc.product.sections, ...doc.pages.flatMap((x) => x.sections)].find((x) => x.id === data.id);
+        const schema = section && loaded.builder.sections.find((x) => x.type === section.type);
+        const field = (data.block ? schema?.blocks?.fields : schema?.fields)?.find((f) => f.key === data.key);
+        if (!section || !field || (field.type !== 'text' && field.type !== 'textarea')) return;
+        const { id, key, value } = data as { id: string; key: string; value: string };
+        update((d) => setText(d, id, data.block ?? null, key, value.slice(0, field.maxLength ?? 200)), `${data.block ?? id}-${key}`);
       }
       if (data.type === 'site-location' && data.path && doc) {
         // The editor follows the preview to the page shown there.
@@ -123,7 +138,7 @@ export function SiteEditor() {
     };
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [previewDoc, post, doc]);
+  }, [previewDoc, post, doc, loaded, update]);
   const goTo = (p: PageKey) => {
     setPage(p);
     setSelected(null);
@@ -139,7 +154,9 @@ export function SiteEditor() {
     post({ type: 'site-navigate', path: '/shop' });
   }, [pageGone, post]);
   useEffect(() => {
-    if (selected) post({ type: 'site-highlight', id: selected });
+    // Chosen in the list: the preview brings it into view. Clicked in the preview: it stays where it is.
+    if (selected) post({ type: 'site-highlight', id: selected, scroll: !fromPreview.current });
+    fromPreview.current = false;
   }, [selected, post]);
 
   if (draft.loadError && !doc) return <div className="stack"><h1>{t('Site')}</h1><ErrorText error={draft.loadError} /><div><button type="button" onClick={() => window.location.reload()}>{t('Try again')}</button></div></div>;
@@ -247,10 +264,15 @@ export function SiteEditor() {
               onBack={() => setSelected(null)}
               onChange={(next, key) => setSection(current.id, next, key)}
               onDuplicate={() => {
-                const copy = { ...clone(current), id: newId(), blocks: current.blocks.map((b) => ({ ...clone(b), id: newId() })) };
-                const i = sections.findIndex((s) => s.id === current.id);
-                setSections([...sections.slice(0, i + 1), copy, ...sections.slice(i + 1)]);
+                const copy = copyOf(current, newId);
+                setSections(insertAfter(sections, copy, current.id));
                 setSelected(copy.id);
+              }}
+              onAddBelow={() => setAddAfter(current.id)}
+              canSave={(doc.saved?.length ?? 0) < MAX_SAVED}
+              onSave={(name) => {
+                update((d) => saveSection(d, current, name, newId));
+                toast(t('Saved. Find it under “Add section” on any page.'));
               }}
               onDelete={() => {
                 setSections(sections.filter((s) => s.id !== current.id));
@@ -306,7 +328,7 @@ export function SiteEditor() {
                 </Group>
               )}
               <SectionList sections={sections} schemas={schemas} onSelect={setSelected} onChange={setSections} />
-              <button type="button" onClick={() => setAdding(true)}>+ {t('Add section')}</button>
+              <button type="button" onClick={() => setAddAfter(null)}>+ {t('Add section')}</button>
               {page === 'home' && <div><button type="button" className="link small" onClick={() => setStarting(true)}>{t('Start again from a ready-made site')}</button></div>}
             </div>
           ))}
@@ -339,12 +361,14 @@ export function SiteEditor() {
         </div>
       </div>
 
-      {adding && <AddSection schemas={loaded.builder.sections} kind={pageKind(page)} onClose={() => setAdding(false)} onAdd={async (type) => {
-        const r = await api<{ section: Section }>('/v1/store-site/sections', { method: 'POST', body: { type } });
-        setSections([...sections, r.section]);
-        setAdding(false);
-        setSelected(r.section.id);
-      }} />}
+      {addAfter !== undefined && <AddSection schemas={loaded.builder.sections} saved={doc.saved ?? []} kind={pageKind(page)} onClose={() => setAddAfter(undefined)}
+        onForget={(id) => update((d) => forgetSaved(d, id))}
+        onAdd={async (type, saved) => {
+          const section = saved ? copyOf(saved, newId) : (await api<{ section: Section }>('/v1/store-site/sections', { method: 'POST', body: { type } })).section;
+          setSections(insertAfter(sections, section, addAfter));
+          setAddAfter(undefined);
+          setSelected(section.id);
+        }} />}
       {starting && <StarterDialog builder={loaded.builder} onClose={() => setStarting(false)} onPick={async (key) => {
         const r = await api<{ site: SiteDoc }>(`/v1/store-site/starters/${key}`, { method: 'POST', body: {} });
         update(r.site);
@@ -365,38 +389,50 @@ export function SiteEditor() {
 
 // ---------- the sections of a page ----------
 
-function SectionList({ sections, schemas, onSelect, onChange }: { sections: Section[]; schemas: Map<string, SectionSchema>; onSelect: (id: string) => void; onChange: (s: Section[]) => void }) {
-  const t = useT();
+/**
+ * Drag to reorder a list (with a mouse; the arrows beside each row do the same by keyboard and touch).
+ * `row(i)` gives a row its drag handlers and whether something is being dropped on it.
+ */
+function useDragOrder(onMove: (from: number, to: number) => void) {
   const [dragging, setDragging] = useState<number | null>(null);
   const [over, setOver] = useState<number | null>(null);
-  const move = (from: number, to: number) => {
-    if (to < 0 || to >= sections.length || from === to) return;
-    const next = [...sections];
-    const [x] = next.splice(from, 1);
-    next.splice(to, 0, x!);
-    onChange(next);
+  const end = () => {
+    setDragging(null);
+    setOver(null);
   };
+  return (i: number, enabled = true) => ({
+    draggable: enabled,
+    dropTarget: over === i && dragging !== null && dragging !== i,
+    handlers: {
+      onDragStart: (e: DragEvent) => { e.stopPropagation(); setDragging(i); e.dataTransfer.effectAllowed = 'move'; },
+      onDragOver: (e: DragEvent) => { if (dragging === null) return; e.preventDefault(); e.stopPropagation(); setOver(i); },
+      onDragEnd: (e: DragEvent) => { e.stopPropagation(); end(); },
+      onDrop: (e: DragEvent) => { if (dragging === null) return; e.preventDefault(); e.stopPropagation(); onMove(dragging, i); end(); },
+    },
+  });
+}
+
+function SectionList({ sections, schemas, onSelect, onChange }: { sections: Section[]; schemas: Map<string, SectionSchema>; onSelect: (id: string) => void; onChange: (s: Section[]) => void }) {
+  const t = useT();
+  const move = (from: number, to: number) => {
+    const next = moved(sections, from, to);
+    if (next !== sections) onChange(next);
+  };
+  const row = useDragOrder(move);
   if (!sections.length) return <div className="se-empty small muted">{t('No sections on this page yet. Add one below.')}</div>;
   return (
     <ol className="se-sections" aria-label={t('Sections, top to bottom')}>
       {sections.map((s, i) => {
         const schema = schemas.get(s.type);
+        const drag = row(i);
         return (
-          <li
-            key={s.id}
-            draggable
-            className={`${s.hidden ? 'hidden-section' : ''} ${over === i && dragging !== null && dragging !== i ? 'drop-target' : ''}`}
-            onDragStart={(e: DragEvent) => { setDragging(i); e.dataTransfer.effectAllowed = 'move'; }}
-            onDragOver={(e: DragEvent) => { e.preventDefault(); setOver(i); }}
-            onDragEnd={() => { setDragging(null); setOver(null); }}
-            onDrop={(e: DragEvent) => { e.preventDefault(); if (dragging !== null) move(dragging, i); setDragging(null); setOver(null); }}
-          >
+          <li key={s.id} draggable className={`${s.hidden ? 'hidden-section' : ''} ${drag.dropTarget ? 'drop-target' : ''}`} {...drag.handlers}>
             <span className="se-handle" aria-hidden="true">⋮⋮</span>
             <button type="button" className="se-section-main" onClick={() => onSelect(s.id)}>
               <strong>{schema ? t(schema.name) : s.type}</strong>
               <span className="small muted">{summary(s, schema)}</span>
             </button>
-            <button type="button" className="link small" onClick={() => onChange(sections.map((x) => (x.id === s.id ? { ...x, hidden: !x.hidden } : x)))} aria-label={s.hidden ? t('Show') : t('Hide')} title={s.hidden ? t('Show') : t('Hide')}>{s.hidden ? '◌' : '●'}</button>
+            <button type="button" className="link small se-eye" onClick={() => onChange(sections.map((x) => (x.id === s.id ? { ...x, hidden: !x.hidden } : x)))} aria-label={s.hidden ? t('Show') : t('Hide')} aria-pressed={!s.hidden} title={s.hidden ? t('Hidden from customers. Show it') : t('Customers see it. Hide it')}><EyeIcon off={s.hidden} /></button>
             <button type="button" className="link small" disabled={i === 0} onClick={() => move(i, i - 1)} aria-label={t('Move up')}>↑</button>
             <button type="button" className="link small" disabled={i === sections.length - 1} onClick={() => move(i, i + 1)} aria-label={t('Move down')}>↓</button>
           </li>
@@ -406,22 +442,31 @@ function SectionList({ sections, schemas, onSelect, onChange }: { sections: Sect
   );
 }
 
-function SectionEditor({ section, schema, ctx, onBack, onChange, onDuplicate, onDelete }: {
+/** An eye, or an eye struck through: shown to customers, or hidden. */
+function EyeIcon({ off }: { off: boolean }) {
+  return (
+    <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+      <path d="M1.8 10S4.8 4.5 10 4.5 18.2 10 18.2 10 15.2 15.5 10 15.5 1.8 10 1.8 10Z" />
+      <circle cx="10" cy="10" r="2.4" />
+      {off && <path d="M3.5 3.5 16.5 16.5" />}
+    </svg>
+  );
+}
+
+function SectionEditor({ section, schema, ctx, onBack, onChange, onDuplicate, onDelete, onAddBelow, onSave, canSave }: {
   section: Section; schema: SectionSchema | undefined; ctx: EditorCtx;
   onBack: () => void; onChange: (s: Section, key: string) => void; onDuplicate: () => void; onDelete: () => void;
+  onAddBelow: () => void; onSave: (name: string) => void; canSave: boolean;
 }) {
   const t = useT();
   const [openBlock, setOpenBlock] = useState<string | null>(null);
+  const [saving, setSaving] = useState<string | null>(null);
   if (!schema) return <div className="stack"><button type="button" className="link" onClick={onBack}>← {t('Sections')}</button><p className="muted">{t('This section type is no longer available.')}</p></div>;
   const set = (key: string, value: unknown) => onChange({ ...section, settings: { ...section.settings, [key]: value } }, `${section.id}-${key}`);
   const blocks = section.blocks;
   const setBlocks = (next: Section['blocks'], key = '') => onChange({ ...section, blocks: next }, key);
-  const moveBlock = (i: number, d: number) => {
-    const next = [...blocks];
-    const [x] = next.splice(i, 1);
-    next.splice(i + d, 0, x!);
-    setBlocks(next);
-  };
+  const moveBlock = (i: number, d: number) => setBlocks(moved(blocks, i, i + d));
+  const blockRow = useDragOrder((from, to) => setBlocks(moved(blocks, from, to)));
   return (
     <div className="stack se-section-editor">
       <div className="row">
@@ -439,9 +484,12 @@ function SectionEditor({ section, schema, ctx, onBack, onChange, onDuplicate, on
           <span className="field-label">{t(schema.blocks.label)} ({blocks.length}/{schema.blocks.max})</span>
           {blocks.map((b, i) => {
             const title = [b.settings.title, b.settings.heading, b.settings.question, b.settings.author, b.settings.days].find((v) => typeof v === 'string' && v) as string | undefined;
+            // Dragged by its row while closed (open, its text boxes need the mouse for selecting).
+            const drag = blockRow(i, openBlock !== b.id);
             return (
-              <div key={b.id} className={`se-block ${openBlock === b.id ? 'open' : ''}`}>
+              <div key={b.id} className={`se-block ${openBlock === b.id ? 'open' : ''} ${drag.dropTarget ? 'drop-target' : ''}`} draggable={drag.draggable} {...drag.handlers}>
                 <div className="row se-block-head">
+                  {drag.draggable && <span className="se-handle" aria-hidden="true">⋮⋮</span>}
                   <button type="button" className="link se-block-title" onClick={() => setOpenBlock((o) => (o === b.id ? null : b.id))}>{title || `${t(schema.blocks!.label)} ${i + 1}`}</button>
                   <span className="spacer" />
                   <button type="button" className="link small" disabled={i === 0} onClick={() => moveBlock(i, -1)} aria-label={t('Move up')}>↑</button>
@@ -465,8 +513,19 @@ function SectionEditor({ section, schema, ctx, onBack, onChange, onDuplicate, on
           )}
         </div>
       )}
+      {saving !== null && (
+        <form className="stack se-new-page" onSubmit={(e) => { e.preventDefault(); onSave(saving); setSaving(null); }}>
+          <Field label={t('Name for the saved section')} hint={t('Saved sections can be added to any page, as a copy to change freely.')}><input autoFocus maxLength={60} value={saving} onChange={(e) => setSaving(e.target.value)} /></Field>
+          <div className="row">
+            <button type="submit" disabled={!saving.trim()}>{t('Save')}</button>
+            <button type="button" className="link" onClick={() => setSaving(null)}>{t('Cancel')}</button>
+          </div>
+        </form>
+      )}
       <div className="row se-section-actions">
         <button type="button" className="secondary" onClick={onDuplicate}>{t('Duplicate')}</button>
+        <button type="button" className="secondary" onClick={onAddBelow}>{t('Add below')}</button>
+        {saving === null && <button type="button" className="secondary" disabled={!canSave} title={canSave ? undefined : t('Up to {n} saved sections. Remove one under “Add section” first.', { n: MAX_SAVED })} onClick={() => setSaving(String(section.settings.heading || section.settings.title || t(schema.name)).slice(0, 60))}>{t('Save for reuse')}</button>}
         <span className="spacer" />
         <button type="button" className="link danger-link" onClick={() => { if (window.confirm(t('Remove this section?'))) onDelete(); }}>{t('Remove section')}</button>
       </div>
@@ -474,21 +533,46 @@ function SectionEditor({ section, schema, ctx, onBack, onChange, onDuplicate, on
   );
 }
 
-function AddSection({ schemas, kind, onAdd, onClose }: { schemas: SectionSchema[]; kind: 'home' | 'page' | 'product'; onAdd: (type: string) => Promise<void>; onClose: () => void }) {
+function AddSection({ schemas, saved, kind, onAdd, onForget, onClose }: {
+  schemas: SectionSchema[]; saved: NonNullable<SiteDoc['saved']>; kind: 'home' | 'page' | 'product';
+  onAdd: (type: string, saved?: Section) => Promise<void>; onForget: (id: string) => void; onClose: () => void;
+}) {
   const t = useT();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [q, setQ] = useState('');
-  const shown = schemas.filter((s) => (!s.pages || s.pages.includes(kind)) && (!q.trim() || `${t(s.name)} ${t(s.description)}`.toLowerCase().includes(q.trim().toLowerCase())));
+  const matches = (text: string) => !q.trim() || text.toLowerCase().includes(q.trim().toLowerCase());
+  const shown = schemas.filter((s) => (!s.pages || s.pages.includes(kind)) && matches(`${t(s.name)} ${t(s.description)}`));
+  const name = (type: string) => t(schemas.find((x) => x.type === type)?.name ?? type);
+  const kept = saved.filter((x) => matches(`${x.name} ${name(x.section.type)}`));
+  const add = (key: string, type: string, section?: Section) => {
+    setBusy(key);
+    setError(null);
+    void onAdd(type, section).catch(setError).finally(() => setBusy(null));
+  };
   return (
     <Modal title={t('Add a section')} onClose={onClose} wide>
       <div className="stack">
         <input type="search" autoFocus placeholder={t('Search sections')} aria-label={t('Search sections')} value={q} onChange={(e) => setQ(e.target.value)} />
         <ErrorText error={error} />
-        {shown.length === 0 && <div className="empty">{t('No section matches “{q}”.', { q: q.trim() })}</div>}
+        {kept.length > 0 && (
+          <div className="stack" style={{ gap: '0.4rem' }}>
+            <span className="field-label">{t('Your saved sections')}</span>
+            <ul className="se-list">
+              {kept.map((x) => (
+                <li key={x.id}>
+                  <span className="grow"><strong>{x.name}</strong> <span className="small muted">{name(x.section.type)}</span></span>
+                  <button type="button" className="secondary" disabled={busy !== null} onClick={() => add(x.id, x.section.type, x.section)}>{t('Add')}</button>
+                  <button type="button" className="link small" onClick={() => { if (window.confirm(t('Remove “{name}” from your saved sections? Pages that use it keep their copy.', { name: x.name }))) onForget(x.id); }} aria-label={t('Remove {name}', { name: x.name })}>✕</button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {shown.length === 0 && kept.length === 0 && <div className="empty">{t('No section matches “{q}”.', { q: q.trim() })}</div>}
         <div className="se-gallery">
           {shown.map((s) => (
-            <button key={s.type} type="button" className="se-gallery-item" disabled={busy !== null} onClick={() => { setBusy(s.type); setError(null); void onAdd(s.type).catch(setError).finally(() => setBusy(null)); }}>
+            <button key={s.type} type="button" className="se-gallery-item" disabled={busy !== null} onClick={() => add(s.type, s.type)}>
               <span className={`se-gallery-art art-${s.type}`} aria-hidden="true" />
               <strong>{t(s.name)}</strong>
               <span className="small muted">{t(s.description)}</span>
@@ -683,17 +767,14 @@ function ThemePanel({ theme, builder, ctx, onChange }: { theme: Theme; builder: 
 function MenuEditor({ items, ctx, onChange, depth = 0, max = 12 }: { items: MenuItem[]; ctx: EditorCtx; onChange: (m: MenuItem[], key?: string) => void; depth?: number; max?: number }) {
   const t = useT();
   const [open, setOpen] = useState<string | null>(null);
-  const move = (i: number, d: number) => {
-    const next = [...items];
-    const [x] = next.splice(i, 1);
-    next.splice(i + d, 0, x!);
-    onChange(next);
-  };
+  const move = (i: number, d: number) => onChange(moved(items, i, i + d));
+  const row = useDragOrder((from, to) => onChange(moved(items, from, to)));
   return (
     <div className="stack se-menu">
       {items.map((m, i) => (
-        <div key={m.id} className={`se-block ${open === m.id ? 'open' : ''}`}>
+        <div key={m.id} className={`se-block ${open === m.id ? 'open' : ''} ${row(i).dropTarget ? 'drop-target' : ''}`} draggable={open !== m.id} {...row(i).handlers}>
           <div className="row se-block-head">
+            {open !== m.id && <span className="se-handle" aria-hidden="true">⋮⋮</span>}
             <button type="button" className="link se-block-title" onClick={() => setOpen((o) => (o === m.id ? null : m.id))}>{m.label || t('Link')}{m.children.length > 0 && <span className="muted small"> · {t('{n} below', { n: m.children.length })}</span>}</button>
             <span className="spacer" />
             <button type="button" className="link small" disabled={i === 0} onClick={() => move(i, -1)} aria-label={t('Move up')}>↑</button>
