@@ -18,6 +18,7 @@ import { BELIZE_DISTRICTS, type Customer, type DistrictCode } from '../engine/ub
 import { issueDocument, type IssueRequest, type IssueResult, type PipelineDeps } from '../pipeline/issue.ts';
 import { allocateDiscount, DiscountError, type DiscountKind, discountShare, findUsableDiscount } from './discounts.ts';
 import { openShiftSql } from '../db/shifts.ts';
+import { cannotPay, findCard, returnToCard, useGiftCard } from './giftcards.ts';
 
 export class StoreError extends Error {
   override name = 'StoreError';
@@ -130,7 +131,7 @@ export function paymentMethodsFor(settings: StoreSettings, fulfillment: 'deliver
   ];
 }
 
-export type PaymentMethod = 'bank_transfer' | 'cash_on_delivery' | 'pay_at_pickup' | 'online';
+export type PaymentMethod = 'bank_transfer' | 'cash_on_delivery' | 'pay_at_pickup' | 'online' | 'gift_card';
 
 // ---------- prices ----------
 
@@ -322,12 +323,14 @@ export interface OrderInput extends CheckoutChoice {
   checkoutId?: string;
   /** Signed in: keep the delivery address in the buyer's account. */
   saveAddress?: boolean;
+  /** A gift card's code: it pays what it can (paymentMethod 'gift_card' when that is all of it). */
+  giftCard?: string;
 }
 
 const tokenHash = (token: string) => createHash('sha256').update(token, 'utf8').digest('hex');
 
 export async function placeOrder(db: Database, deps: Pick<PipelineDeps, 'tax'>, store: StoreRef, input: OrderInput, options: { buyerId?: string } = {}): Promise<{ id: string; number: number; token: string; quote: Quote }> {
-  if (!paymentMethodsFor(store.settings, input.fulfillment).includes(input.paymentMethod)) {
+  if (input.paymentMethod === 'gift_card' ? !input.giftCard : !paymentMethodsFor(store.settings, input.fulfillment).includes(input.paymentMethod)) {
     throw new StoreError('invalid_order', 'This payment method is not available for this order');
   }
   if (input.fulfillment === 'delivery' && !input.address) throw new StoreError('invalid_order', 'Give the delivery address');
@@ -339,20 +342,36 @@ export async function placeOrder(db: Database, deps: Pick<PipelineDeps, 'tax'>, 
       const used = await tx.query("update discount_codes set uses = uses + 1 where id = $1 and active and (max_uses is null or uses < max_uses) returning id", [quote.discount.id]);
       if (!used.rows.length) throw new StoreError('invalid_order', 'This discount code has just been used up');
     }
+    // A gift card pays what it can; the rest is paid the way chosen.
+    let gift: { id: string; cents: bigint } | null = null;
+    if (input.giftCard) {
+      const card = await findCard(tx, store.tenantId, input.giftCard);
+      if (!card) throw new StoreError('invalid_order', 'There is no gift card with this code. Check it and try again.');
+      const problem = cannotPay(card);
+      if (problem) throw new StoreError('invalid_order', problem.message);
+      const balance = toBigInt(card.balance_cents);
+      const cents = balance < quote.cents.total ? balance : quote.cents.total;
+      if (input.paymentMethod === 'gift_card' && cents < quote.cents.total) throw new StoreError('invalid_order', `The gift card has BZ$${formatCents(balance)}; choose how to pay the rest`);
+      if (input.paymentMethod !== 'gift_card' && cents >= quote.cents.total) throw new StoreError('invalid_order', 'The gift card pays for all of it');
+      gift = { id: card.id, cents };
+    }
     const number = (await tx.query<{ n: number }>('update tenants set next_order_number = next_order_number + 1 where id = $1 returning next_order_number - 1 as n', [store.tenantId])).rows[0]!.n;
     const id = randomUUID();
     const token = randomBytes(24).toString('base64url');
     const a = input.address;
     await tx.query(
       `insert into orders (id, tenant_id, number, token_hash, payment_method, fulfillment, delivery_zone, delivery_fee, customer_name, customer_email, customer_phone,
-         street, city, district_code, buyer_tin, buyer_name, note, line_extension_cents, gst_cents, total_cents, discount_code_id, discount_code, discount_cents, buyer_id)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)`,
+         street, city, district_code, buyer_tin, buyer_name, note, line_extension_cents, gst_cents, total_cents, discount_code_id, discount_code, discount_cents, buyer_id,
+         gift_card_id, gift_card_cents)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)`,
       [id, store.tenantId, number, tokenHash(token), input.paymentMethod, input.fulfillment, quote.delivery?.zone ?? null, quote.delivery?.fee ?? '0',
         input.customer.name.trim(), input.customer.email?.trim().toLowerCase() || null, input.customer.phone.trim(),
         a?.street ?? null, a?.city ?? null, a?.districtCode ?? null, input.business?.tin ?? null, input.business?.name.trim() ?? null, input.note?.trim() || null,
         String(quote.cents.lineExtension), String(quote.cents.gst), String(quote.cents.total),
-        quote.discount?.id ?? null, quote.discount?.code ?? null, String(quote.discount?.net ?? 0n), options.buyerId ?? null],
+        quote.discount?.id ?? null, quote.discount?.code ?? null, String(quote.discount?.net ?? 0n), options.buyerId ?? null,
+        gift?.id ?? null, String(gift?.cents ?? 0n)],
     );
+    if (gift) await useGiftCard(tx, store.tenantId, gift.id, gift.cents, { orderId: id, note: `Online order #${number}` });
     let n = 0;
     for (const l of quote.lines) {
       await tx.query(
@@ -396,6 +415,8 @@ export interface OrderRow {
   gst_cents: unknown;
   total_cents: unknown;
   refunded_cents: unknown;
+  gift_card_id: string | null;
+  gift_card_cents: unknown;
   discount_code: string | null;
   discount_cents: unknown;
   document_id: string | null;
@@ -440,8 +461,19 @@ export async function loadOrder(db: Queryable, tenantId: string, where: { id: st
 
 // ---------- the e-invoice ----------
 
-const MEANS: Record<PaymentMethod, string> = { bank_transfer: '30', cash_on_delivery: '10', pay_at_pickup: '10', online: '68' };
-const MEANS_TEXT: Record<PaymentMethod, string> = { bank_transfer: 'bank transfer', cash_on_delivery: 'cash on delivery', pay_at_pickup: 'payment at pickup', online: 'online payment' };
+const MEANS: Record<PaymentMethod, string> = { bank_transfer: '30', cash_on_delivery: '10', pay_at_pickup: '10', online: '68', gift_card: '1' };
+const MEANS_TEXT: Record<PaymentMethod, string> = { bank_transfer: 'bank transfer', cash_on_delivery: 'cash on delivery', pay_at_pickup: 'payment at pickup', online: 'online payment', gift_card: 'gift card' };
+
+/** How an order was paid, for its document: the method, or a gift card and the method for the rest. */
+function orderPayment(order: OrderRow): { meansCode: string; terms: string } {
+  const gift = toBigInt(order.gift_card_cents ?? 0);
+  if (gift <= 0n || order.payment_method === 'gift_card') return { meansCode: MEANS[order.payment_method], terms: `Paid by ${MEANS_TEXT[order.payment_method]}, online order #${order.number}` };
+  const rest = toBigInt(order.total_cents) - gift;
+  return {
+    meansCode: gift >= rest ? MEANS.gift_card : MEANS[order.payment_method],
+    terms: `Paid BZ$${formatCents(gift)} by gift card and BZ$${formatCents(rest)} by ${MEANS_TEXT[order.payment_method]}, online order #${order.number}`,
+  };
+}
 
 /** A paid order as a BTS document: a tax invoice when the buyer gave a TIN, otherwise a tax receipt. */
 export function orderToIssueRequest(order: OrderRow, lines: OrderLineRow[]): IssueRequest {
@@ -465,7 +497,7 @@ export function orderToIssueRequest(order: OrderRow, lines: OrderLineRow[]): Iss
       })),
       delivery,
     ),
-    payment: { meansCode: MEANS[order.payment_method], terms: `Paid by ${MEANS_TEXT[order.payment_method]}, online order #${order.number}` },
+    payment: orderPayment(order),
     note: `Online order #${order.number}`,
   };
 }
@@ -512,11 +544,13 @@ export async function fulfillOrder(db: Queryable, tenantId: string, orderId: str
 /** Cancel an unpaid order and put its stock back. (A paid order is refunded instead: refundOrder.) */
 export async function cancelOrder(db: Database, tenantId: string, orderId: string, reason: string): Promise<void> {
   await db.transaction(async (tx) => {
-    const order = (await tx.query<{ status: string; payment_status: string }>('select status, payment_status from orders where id = $1 and tenant_id = $2 for update', [orderId, tenantId])).rows[0];
+    const order = (await tx.query<{ status: string; payment_status: string; number: number; gift_card_id: string | null; gift_card_cents: unknown }>('select status, payment_status, number, gift_card_id, gift_card_cents from orders where id = $1 and tenant_id = $2 for update', [orderId, tenantId])).rows[0];
     if (!order) throw new StoreError('not_found', 'Order not found');
     if (order.status === 'cancelled') throw new StoreError('conflict', 'This order is already cancelled');
     if (order.payment_status === 'paid') throw new StoreError('conflict', 'A paid order is refunded with a credit note, not cancelled');
     await tx.query(`update orders set status = 'cancelled', cancelled_at = now(), cancel_reason = $3 where id = $1 and tenant_id = $2`, [orderId, tenantId, reason]);
+    // What a gift card paid goes back on it.
+    if (order.gift_card_id) await returnToCard(tx, tenantId, order.gift_card_id, toBigInt(order.gift_card_cents), { orderId, note: `Online order #${order.number} cancelled` });
     const lines = (await tx.query<{ item_id: string; quantity: string }>('select item_id, quantity::text as quantity from order_lines where order_id = $1 and item_id is not null', [orderId])).rows;
     for (const l of lines) await moveStock(tx, { tenantId, itemId: l.item_id, quantity: l.quantity, reason: 'order_cancelled', orderId });
   });
@@ -574,7 +608,7 @@ export function refundable(order: OrderRow, lines: OrderLineRow[], refunds: Refu
 export async function refundOrder(
   deps: PipelineDeps, tenantId: string, orderId: string, input: RefundInput, userId: string | null,
   check?: (req: IssueRequest) => Promise<void>,
-): Promise<{ refundId: string; document: IssueResult; amount: string }> {
+): Promise<{ refundId: string; document: IssueResult; amount: string; toGiftCard: string | null }> {
   const loaded = await loadOrder(deps.db, tenantId, { id: orderId });
   if (!loaded) throw new StoreError('not_found', 'Order not found');
   const { order, lines } = loaded;
@@ -632,6 +666,7 @@ export async function refundOrder(
   if (userId) await deps.db.query('update documents set issued_by = $3 where tenant_id = $1 and (id = $2 or supersedes_document_id = $2)', [tenantId, document.documentId, userId]);
   const refundId = randomUUID();
   const restock = Boolean(input.restock) && chosen.length > 0;
+  let toGiftCard = 0n;
   await deps.db.transaction(async (tx) => {
     await tx.query(
       `insert into order_refunds (id, tenant_id, order_id, document_id, amount_cents, lines, delivery, reason, restocked, created_by)
@@ -640,11 +675,18 @@ export async function refundOrder(
         delivery, input.reason.trim(), restock, userId],
     );
     await tx.query('update orders set refunded_cents = refunded_cents + $3 where id = $1 and tenant_id = $2', [orderId, tenantId, String(amount)]);
+    // Paid partly with a gift card: refunds go back on the card first, up to what it paid.
+    if (order.gift_card_id) {
+      const back = toBigInt((await tx.query<{ n: unknown }>("select coalesce(sum(amount_cents), 0) as n from gift_card_activity where order_id = $1 and kind = 'returned'", [orderId])).rows[0]!.n);
+      const left = toBigInt(order.gift_card_cents) - back;
+      toGiftCard = left <= 0n ? 0n : left < amount ? left : amount;
+      if (toGiftCard > 0n) await returnToCard(tx, tenantId, order.gift_card_id, toGiftCard, { orderId, documentId: document.documentId, userId, note: `Refund for online order #${order.number}` });
+    }
     if (restock) {
       for (const c of chosen) {
         if (c.line.item_id) await moveStock(tx, { tenantId, itemId: c.line.item_id, quantity: String(c.quantity), reason: 'refund', orderId, userId });
       }
     }
   });
-  return { refundId, document, amount: formatCents(amount) };
+  return { refundId, document, amount: formatCents(amount), toGiftCard: toGiftCard > 0n ? formatCents(toGiftCard) : null };
 }

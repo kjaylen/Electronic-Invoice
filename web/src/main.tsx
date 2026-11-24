@@ -53,11 +53,13 @@ const ShopTestPayment = page(() => import('./pages/Shop'), 'ShopTestPayment');
 const ShopResume = page(() => import('./pages/Shop'), 'ShopResume');
 const ShopUnsubscribe = page(() => import('./pages/Shop'), 'ShopUnsubscribe');
 const ShopAccount = page(() => import('./pages/Shop'), 'ShopAccount');
+const ShopGiftCardBalance = page(() => import('./pages/Shop'), 'ShopGiftCardBalance');
 const Reports = page(() => import('./pages/Reports'), 'Reports');
 const Receivables = page(() => import('./pages/Receivables'), 'Receivables');
 const Expenses = page(() => import('./pages/Expenses'), 'Expenses');
 const Inventory = page(() => import('./pages/Inventory'), 'Inventory');
 const Shifts = page(() => import('./pages/Shifts'), 'Shifts');
+const GiftCards = page(() => import('./pages/GiftCards'), 'GiftCards');
 const ShiftDetail = page(() => import('./pages/Shifts'), 'ShiftDetail');
 const ReceiveStock = page(() => import('./pages/Inventory'), 'ReceiveStock');
 const CustomerAccount = page(() => import('./pages/Account'), 'CustomerAccount');
@@ -162,6 +164,7 @@ function Layout() {
       { to: '/', label: t('Overview'), icon: Icons.overview },
       { to: '/counter', label: t('Counter'), icon: Icons.counter, permission: 'documents.issue' },
       { to: '/shifts', label: t('Cash register'), icon: Icons.register, permission: 'documents.issue' },
+      { to: '/gift-cards', label: t('Gift cards'), icon: Icons.giftCard, permission: 'documents.issue' },
       { to: '/documents/new?type=01', label: t('New invoice'), icon: Icons.invoice, permission: 'documents.issue' },
       { to: '/quotes', label: t('Quotes'), icon: Icons.quote, permission: 'documents.issue' },
       ...(sells !== 'products' ? [{ to: '/work', label: t('Time and jobs'), icon: Icons.clock, permission: 'documents.issue' as Permission }] : []),
@@ -371,6 +374,7 @@ function BusinessApp() {
           <Route path="resume" element={<ShopResume />} />
           <Route path="unsubscribe" element={<ShopUnsubscribe />} />
           <Route path="account" element={<ShopAccount />} />
+          <Route path="gift-card" element={<ShopGiftCardBalance />} />
         </Route>
       </Route>
       <Route element={<RequireSession />}>
@@ -393,6 +397,7 @@ function BusinessApp() {
         <Route path="/expenses" element={<Allowed permission="expenses.manage"><Expenses /></Allowed>} />
         <Route path="/inventory" element={<Allowed permission="catalog.manage"><Inventory /></Allowed>} />
         <Route path="/shifts" element={<Allowed permission="documents.issue"><Shifts /></Allowed>} />
+        <Route path="/gift-cards" element={<Allowed permission="documents.issue"><GiftCards /></Allowed>} />
         <Route path="/shifts/:id" element={<Allowed permission="documents.issue"><ShiftDetail /></Allowed>} />
         <Route path="/inventory/receive" element={<Allowed permission="catalog.manage"><ReceiveStock /></Allowed>} />
         <Route path="/inventory/orders/new" element={<Allowed permission="catalog.manage"><PurchaseOrderEditor /></Allowed>} />
@@ -434,6 +439,7 @@ function StoreDomainApp() {
           <Route path="resume" element={<ShopResume />} />
           <Route path="unsubscribe" element={<ShopUnsubscribe />} />
           <Route path="account" element={<ShopAccount />} />
+          <Route path="gift-card" element={<ShopGiftCardBalance />} />
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/shop" replace />} />

@@ -37,6 +37,7 @@ export interface ShiftReport {
   refunds: Record<Means, string>;
   refundCount: number;
   takings: Record<Means, string>;
+  giftCards?: { sold: { count: number; total: string }; used: string };
   totalTakings: string;
   voided: { count: number; total: string };
   discounts?: { count: number; total: string };
@@ -275,6 +276,8 @@ export function ReportView({ report, shift }: { report: ShiftReport; shift: Shif
             <tr><td>GST</td><td className="right mono">{money(report.gst)}</td></tr>
             {report.voided.count > 0 && <tr><td className="muted">{t('Cancelled ({n})', { n: report.voided.count })}</td><td className="right mono muted">{money(report.voided.total)}</td></tr>}
             {report.discounts && report.discounts.count > 0 && <tr><td className="muted">{t('Discounts given ({n} sales, before GST)', { n: report.discounts.count })}</td><td className="right mono muted">−{money(report.discounts.total)}</td></tr>}
+            {report.giftCards && report.giftCards.sold.count > 0 && <tr><td>{t('Gift cards sold ({n}), in the takings', { n: report.giftCards.sold.count })}</td><td className="right mono">{money(report.giftCards.sold.total)}</td></tr>}
+            {report.giftCards && report.giftCards.used !== '0.00' && <tr><td className="muted">{t('Paid with gift cards (not in the takings)')}</td><td className="right mono muted">{money(report.giftCards.used)}</td></tr>}
           </tbody>
         </table>
       </section>

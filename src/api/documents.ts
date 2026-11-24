@@ -37,6 +37,7 @@ import { documentPdf as templateDocumentPdf } from '../templates/pdf.ts';
 import { logoForPdf, logoPath } from '../templates/assets.ts';
 import { documentTypeName, emailLanguage } from '../templates/lang.ts';
 import { applyReward, checkRedeem, loyaltyBalance, recordLoyalty, REWARD_REASON, reverseVoidedLoyalty, rewardCents } from './loyalty.ts';
+import { GIFT_CARD_MEANS, payingCard, returnToCard, reverseVoidedGiftCards, useGiftCard } from '../commerce/giftcards.ts';
 
 const PRINTABLE = ['authorized', 'authorized_with_alert', 'contingency_pending'];
 // Emails per business per hour (shared by every server process), so a compromised account cannot send spam at volume.
@@ -63,6 +64,8 @@ export interface IssueBody {
   payableRoundingAmount?: string;
   paid?: { method: PaymentMethod; reference?: string };
   tenders?: Array<{ meansCode: string; amount: string }>;
+  /** Paid (partly) with a gift card: its code and how much it pays; `tenders` then has a part with means code 1 for that amount (or the card pays it all). */
+  giftCard?: { code: string; amount: string };
   /** Issue an invoice on account even if it takes the customer over their credit limit (owners, admins, managers). */
   overrideCreditLimit?: boolean;
   /** Loyalty points the customer uses as a reward on this sale (with customerId). */
@@ -76,7 +79,7 @@ export const CONTRACT_TAX_PERCENT = 6;
 /** Half up, to the cent. */
 export const contractTaxOn = (baseCents: bigint) => (baseCents * BigInt(CONTRACT_TAX_PERCENT * 100) + 5000n) / 10000n;
 
-const MEANS_NAMES: Record<string, string> = { '10': 'cash', '20': 'cheque', '30': 'transfer', '31': 'transfer', '42': 'bank transfer', '48': 'card', '54': 'credit card', '55': 'debit card' };
+const MEANS_NAMES: Record<string, string> = { '1': 'gift card', '10': 'cash', '20': 'cheque', '30': 'transfer', '31': 'transfer', '42': 'bank transfer', '48': 'card', '54': 'credit card', '55': 'debit card' };
 
 /**
  * A receipt paid in parts: they must add up to its total. The document then names the largest
@@ -299,7 +302,17 @@ export async function issueFromBody(deps: PipelineDeps, tenantId: string, body: 
   let issueRequest = await toIssueRequest(deps, tenantId, body);
   if (options.limitDiscounts) await checkDiscountLimit(deps, tenantId, issueRequest);
   // Paid in parts: checked against the total before anything is signed.
-  const split = body.tenders ? splitPayment(issueRequest, body.tenders, deps.tax) : null;
+  // A gift card pays as one part (all of it when there are no other parts); only with its code.
+  const giftCents = body.giftCard ? parseDecimalCents(body.giftCard.amount) : 0n;
+  if (body.giftCard) {
+    if (issueRequest.etdType !== '02') throw new ApiError(422, 'invalid_tenders', 'Gift cards pay for tax receipts');
+    const parts = (body.tenders ?? []).filter((x) => x.meansCode === GIFT_CARD_MEANS);
+    if (body.tenders && (parts.length !== 1 || parseDecimalCents(parts[0]!.amount) !== giftCents)) throw new ApiError(422, 'invalid_tenders', 'The gift card part of the payment must be the amount taken from the card');
+  } else if (body.tenders?.some((x) => x.meansCode === GIFT_CARD_MEANS)) {
+    throw new ApiError(422, 'invalid_tenders', 'Give the gift card (giftCard) to pay with one');
+  }
+  const tenders = body.tenders ?? (body.giftCard ? [{ meansCode: GIFT_CARD_MEANS, amount: body.giftCard.amount }] : null);
+  const split = tenders ? splitPayment(issueRequest, tenders, deps.tax) : null;
   if (split) issueRequest = split.req;
   // Contract tax withheld by the customer: written on the invoice (what they withhold, what they pay).
   let withholding: { base: bigint; amount: bigint } | null = null;
@@ -319,7 +332,24 @@ export async function issueFromBody(deps: PipelineDeps, tenantId: string, body: 
   }
   // Bought on account (an invoice not paid on the spot): within the customer's credit limit.
   if ((options.accountLimit ?? 'check') === 'check' && !body.paid) await checkAccountLimit(deps, tenantId, issueRequest);
-  const result = await issueDocument(deps, tenantId, issueRequest);
+  // The gift card's part comes off the card first (all or nothing), and goes back if the sale does not stand.
+  let giftUse: { cardId: string; activityId: string } | null = null;
+  if (body.giftCard) {
+    const card = await payingCard(deps.db, tenantId, body.giftCard.code);
+    const used = await useGiftCard(deps.db, tenantId, card.id, giftCents, { userId, note: 'Paid at the counter' });
+    giftUse = { cardId: card.id, activityId: used.activityId };
+  }
+  let result: IssueResult;
+  try {
+    result = await issueDocument(deps, tenantId, issueRequest);
+  } catch (e) {
+    if (giftUse) await returnToCard(deps.db, tenantId, giftUse.cardId, giftCents, { userId, note: 'The sale did not go through', reversesId: giftUse.activityId });
+    throw e;
+  }
+  if (giftUse) {
+    await deps.db.query('update gift_card_activity set document_id = $2 where id = $1', [giftUse.activityId, result.documentId]);
+    if (!['authorized', 'authorized_with_alert', 'contingency_pending', 'pending'].includes(result.status)) await reverseVoidedGiftCards(deps.db, { documentId: result.documentId });
+  }
   // What the customer withholds counts towards the invoice's balance (and the business claims it against its business tax).
   if (withholding && ['authorized', 'authorized_with_alert', 'contingency_pending', 'pending'].includes(result.status)) {
     await deps.db.query(

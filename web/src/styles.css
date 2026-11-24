@@ -1872,6 +1872,24 @@ button.cat-tag:hover:not(:disabled) { background: var(--brand); border-color: va
 
 /* Loyalty points at the counter. */
 .tender.points { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; font-size: 0.9rem; }
+.tender.gift { align-items: center; flex-wrap: wrap; font-size: 0.9rem; }
+.tender.gift > span { padding-bottom: 0; font-size: 0.95rem; }
+.tender.gift > span .small { font-family: var(--sans); color: rgba(255, 255, 255, 0.7); }
+.tender.gift.stack { align-items: stretch; }
+.tender.gift input { flex: 1; min-width: 12rem; font-family: var(--figures); letter-spacing: 0.06em; }
+.tender.gift button.secondary { min-height: 0; padding: 0.45rem 0.85rem; font-size: 0.85rem; }
+.gift-link { align-self: flex-start; font-size: 0.88rem; }
+.quick-amounts { gap: 0.4rem; flex-wrap: wrap; }
+.quick-amounts button { min-height: 0; padding: 0.35rem 0.85rem; font-size: 0.88rem; }
+.quick-amounts button[aria-pressed="true"] { border-color: var(--ink); box-shadow: 0 0 0 1px var(--ink); }
+.gift-balance { font-family: var(--display); font-size: 1.95rem; font-weight: 650; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; line-height: 1.15; }
+.gift-card-face { display: grid; gap: 0.35rem; padding: 1.3rem 1.4rem; border-radius: 16px; color: #fff; background: linear-gradient(135deg, #5b2384, #2e0f45); box-shadow: 0 10px 30px rgba(46, 15, 69, 0.25); }
+.gift-card-face .small { opacity: 0.8; }
+.gift-card-amount { font-family: var(--display); font-size: 2.1rem; font-weight: 650; letter-spacing: -0.03em; }
+.gift-card-code { font-size: 1.25rem; letter-spacing: 0.12em; font-weight: 600; user-select: all; }
+.gift-summary { max-width: 44rem; }
+.summary .gift-line span:last-child { color: var(--lime); }
+.summary .due-line { font-size: 1.1rem !important; font-weight: 600; color: var(--sheet); }
 .tender.points button.secondary { min-height: 0; padding: 0.3rem 0.75rem; font-size: 0.85rem; }
 .waiting-note { display: block; color: var(--brand-ink); font-weight: 600; margin-top: 0.2rem; }
 .shop-categories { margin: 0.6rem 0 0.4rem; }

@@ -9,7 +9,7 @@ import { useToast } from '../toast';
 import { ErrorText, Field, fromCents, Modal, money, Segmented, StatusBadge, toCents, TYPE_NAMES, usePageTitle, whatsappNumber } from '../ui';
 import { usePollWhile } from './Dashboard';
 
-export const PAYMENT_LABEL = { bank_transfer: 'Bank transfer', cash_on_delivery: 'Cash on delivery', pay_at_pickup: 'Pay at pickup', online: 'Paid online' } as const;
+export const PAYMENT_LABEL = { bank_transfer: 'Bank transfer', cash_on_delivery: 'Cash on delivery', pay_at_pickup: 'Pay at pickup', online: 'Paid online', gift_card: 'Gift card' } as const;
 
 export function refundState(o: Pick<Order, 'totals'>): 'full' | 'partial' | null {
   const refunded = toCents(o.totals.refunded ?? '0');
@@ -324,6 +324,8 @@ export function OrderDetail() {
             <div><span>{t('Subtotal')}</span><span>{money(o.totals.lineExtension)}</span></div>
             <div><span>GST</span><span>{money(o.totals.gst)}</span></div>
             <div className="grand"><span>{t('Total')}</span><span>{money(o.totals.total)}</span></div>
+            {o.giftCard && <div><span>{t('Paid with a gift card')}</span><span>−{money(o.giftCard.amount)}</span></div>}
+            {o.giftCard && o.paymentMethod !== 'gift_card' && <div><span>{o.paymentStatus === 'paid' ? t('Paid the rest') : t('Still to collect')}</span><span>{money(o.amountDue ?? o.totals.total)}</span></div>}
             {toCents(o.totals.refunded ?? '0') > 0n && <div><span>{t('Refunded')}</span><span>−{money(o.totals.refunded)}</span></div>}
           </div>
         </section>
@@ -333,7 +335,7 @@ export function OrderDetail() {
             <dt>{t('Name')}</dt><dd>{o.customer.name}</dd>
             <dt>{t('Telephone')}</dt><dd><a href={`tel:${o.customer.phone}`}>{o.customer.phone}</a></dd>
             {o.customer.email && <><dt>{t('Email')}</dt><dd>{o.customer.email}</dd></>}
-            <dt>{t('Payment')}</dt><dd>{t(PAYMENT_LABEL[o.paymentMethod])}</dd>
+            <dt>{t('Payment')}</dt><dd>{o.giftCard && o.paymentMethod !== 'gift_card' ? `${t('Gift card')} + ${t(PAYMENT_LABEL[o.paymentMethod])}` : t(PAYMENT_LABEL[o.paymentMethod])}</dd>
             <dt>{o.fulfillment === 'pickup' ? t('Pickup') : t('Delivery')}</dt>
             <dd>{o.fulfillment === 'pickup' ? t('At your shop') : <>{o.deliveryZone}{o.address && <div className="small">{o.address.street}, {o.address.city}{o.address.districtName && `, ${o.address.districtName}`}</div>}</>}</dd>
             {o.business && <><dt>{t('Tax invoice for')}</dt><dd>{o.business.name} · TIN {o.business.tin}</dd></>}
@@ -370,7 +372,10 @@ export function OrderDetail() {
           onDone={(r) => {
             setRefunding(false);
             setOrder(r);
-            toast(r.emailed ? t('Refunded {amount}. The credit note was issued and emailed to {email}.', { amount: money(r.refund.amount), email: r.customer.email ?? '' }) : t('Refunded {amount}. The credit note was issued.', { amount: money(r.refund.amount) }));
+            toast([
+              r.emailed ? t('Refunded {amount}. The credit note was issued and emailed to {email}.', { amount: money(r.refund.amount), email: r.customer.email ?? '' }) : t('Refunded {amount}. The credit note was issued.', { amount: money(r.refund.amount) }),
+              r.refund.toGiftCard ? t('{amount} went back on the gift card.', { amount: money(r.refund.toGiftCard) }) : '',
+            ].filter(Boolean).join(' '));
           }}
         />
       )}
@@ -388,7 +393,7 @@ export function OrderDetail() {
   );
 }
 
-type RefundResult = Order & { refund: { id: string; amount: string; documentId: string; status: string }; emailed: boolean };
+type RefundResult = Order & { refund: { id: string; amount: string; toGiftCard?: string | null; documentId: string; status: string }; emailed: boolean };
 
 /** Choose what to refund: quantities per line, the delivery fee, whether it goes back into stock. */
 function RefundDialog({ order: o, onClose, onDone }: { order: Order; onClose: () => void; onDone: (r: RefundResult) => void }) {

@@ -22,6 +22,7 @@ import { reverseVoidedLoyalty } from './loyalty.ts';
 import { runStockAlerts } from '../commerce/stock-alerts.ts';
 import { runCheckoutReminders } from '../commerce/checkouts.ts';
 import { sweepBuyerSignIns } from '../commerce/buyers.ts';
+import { reverseVoidedGiftCards } from '../commerce/giftcards.ts';
 
 export interface HousekeepingOptions {
   mailer?: Mailer;
@@ -66,6 +67,7 @@ export async function runHousekeepingOnce(db: Queryable, options: HousekeepingOp
   // Stock sold on documents that were rejected or cancelled since goes back on the shelf.
   await step('stock', () => reverseVoidedSales(db));
   await step('loyalty', () => reverseVoidedLoyalty(db));
+  await step('gift cards', () => reverseVoidedGiftCards(db));
   // Due dates for invoices issued before they were kept (read from the signed XML).
   await step('due dates', () => backfillDueDates(db));
   await step('repeating expenses', () => runRecurringExpenses(db));

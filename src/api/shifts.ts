@@ -12,8 +12,8 @@
  *   GET            /v1/shifts/:id/report.pdf  the end-of-day (Z) report, ?format=receipt for the receipt printer
  *
  * What a shift holds: the documents issued and the invoice payments recorded
- * by the person who opened it while it was open (attached when made), and
- * its cash movements. On a till, the shift is the till's drawer: everyone
+ * by the person who opened it while it was open (attached when made), gift
+ * cards sold, and its cash movements. On a till, the shift is the till's drawer: everyone
  * signed in on that till sells into it, records cash in and out, and may
  * close it. Money in: receipts by their payment means, and invoice
  * payments by method. Money out: credit notes against receipts (refunds)
@@ -80,11 +80,19 @@ export async function shiftReport(db: Queryable, tenantId: string, s: ShiftRow) 
     [tenantId, s.id],
   )).rows;
   // A receipt paid in parts counts each part under its own means.
-  const receipts = (await db.query<{ payment_means: string | null; total: unknown }>(
+  const receiptsAll = (await db.query<{ payment_means: string | null; total: unknown }>(
     `select coalesce(t.part ->> 'means', d.payment_means) as payment_means, coalesce(sum(coalesce((t.part ->> 'cents')::bigint, d.payable_cents)), 0) as total
      from documents d left join lateral jsonb_array_elements(coalesce(d.tenders, '[]'::jsonb)) as t(part) on true
      where d.tenant_id = $1 and d.shift_id = $2 and d.etd_type = '02' and d.status in ${COUNTED}
      group by 1`,
+    [tenantId, s.id],
+  )).rows;
+  // Paid with gift cards: money taken when the cards were sold, so not takings now.
+  const receipts = receiptsAll.filter((r) => r.payment_means !== '1');
+  const giftUsed = receiptsAll.filter((r) => r.payment_means === '1').reduce((a, r) => a + toBigInt(r.total), 0n);
+  // Gift cards sold on the shift: money in, by how they were paid.
+  const giftSold = (await db.query<{ paid_by: string; total: unknown; n: number }>(
+    "select paid_by, coalesce(sum(initial_cents), 0) as total, count(*)::int as n from gift_cards where tenant_id = $1 and shift_id = $2 and source = 'sold' group by paid_by",
     [tenantId, s.id],
   )).rows;
   const refunds = (await db.query<{ payment_means: string | null; total: unknown; n: number }>(
@@ -123,8 +131,10 @@ export async function shiftReport(db: Queryable, tenantId: string, s: ShiftRow) 
   const payIn = moves.filter((m) => m.kind === 'pay_in').reduce((a, m) => a + toBigInt(m.amount_cents), 0n);
   const payOut = moves.filter((m) => m.kind === 'pay_out').reduce((a, m) => a + toBigInt(m.amount_cents), 0n);
   const float = toBigInt(s.opening_float_cents);
+  const giftCardsSold = zero();
+  for (const g of giftSold) giftCardsSold[fromMethod(g.paid_by)] += toBigInt(g.total);
   const takings = zero();
-  for (const m of MEANS) takings[m] = sales[m] + invoicePayments[m] - refunded[m];
+  for (const m of MEANS) takings[m] = sales[m] + invoicePayments[m] + giftCardsSold[m] - refunded[m];
   const expectedCash = float + takings.cash + payIn - payOut;
   const counted = s.counted_cash_cents === null ? null : toBigInt(s.counted_cash_cents);
   const typeName: Record<string, string> = { '01': 'Tax invoices', '02': 'Tax receipts', '03': 'Debit notes', '04': 'Credit notes' };
@@ -138,6 +148,10 @@ export async function shiftReport(db: Queryable, tenantId: string, s: ShiftRow) 
     takings: asMoney(takings),
     totalTakings: formatCents(MEANS.reduce((a, m) => a + takings[m], 0n)),
     voided: { count: voided.n, total: c(voided.total) },
+    giftCards: {
+      sold: { count: giftSold.reduce((a, g) => a + g.n, 0), total: formatCents(giftSold.reduce((a, g) => a + toBigInt(g.total), 0n)) },
+      used: formatCents(giftUsed),
+    },
     discounts: { count: discounts.n, total: c(discounts.total) },
     cash: {
       float: formatCents(float),

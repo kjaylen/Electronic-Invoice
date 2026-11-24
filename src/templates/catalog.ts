@@ -137,6 +137,17 @@ export const TEMPLATES: TemplateDef[] = [
       { name: 'url', description: 'The link that puts the cart back and opens the checkout' }, { name: 'unsubscribe_url', description: 'The link to stop these emails (keep it in the email)' }, { name: 'reminder.number', description: '1 or 2' }, { name: 'reminder.last', description: 'Whether no other reminder follows' }],
   },
   {
+    key: 'email.gift-card', group: 'emails', name: 'Gift card', preview: 'email', language: 'html', file: 'email-gift-card.liquid',
+    description: 'Sent to whoever a gift card is for, when it is sold or given (and again on request): the amount and the code they pay with.',
+    subject: "{% if recipient.name != blank %}{{ recipient.name }}, a{% else %}A{% endif %} {{ card.amount | money }} gift card from {{ store.name }}",
+    subjectEs: "{% if recipient.name != blank %}{{ recipient.name }}, una{% else %}Una{% endif %} tarjeta de regalo de {{ card.amount | money }} de {{ store.name }}",
+    variables: [{ name: 'store.name', description: 'Your business name' }, { name: 'store.logo', description: "Your logo's address (empty when you have none)" }, IMAGES, { name: 'store.city', description: 'Where you are' }, { name: 'store.telephone', description: 'Your phone' },
+      { name: 'store.online', description: 'Whether your online store is open' }, { name: 'store.url', description: 'Your online store' },
+      { name: 'recipient.name', description: 'Who the card is for (may be empty)' }, { name: 'message', description: 'The message written with the card (may be empty)' },
+      { name: 'card.amount', description: 'What the card was for' }, { name: 'card.balance', description: 'What is left on it' }, { name: 'card.code', description: 'The code (keep it in the email)' },
+      { name: 'card.expires_on', description: 'The last day it can be used (empty when it does not expire)' }, { name: 'balance_url', description: 'The page where its balance can be checked' }],
+  },
+  {
     key: 'email.sign-in-code', group: 'emails', name: 'Sign-in code', preview: 'email', language: 'html', file: 'email-sign-in-code.liquid',
     description: 'Sent to a buyer signing in to their account at your online store: the six-digit code they type.',
     subject: "{{ code }} is your sign-in code for {{ store.name }}",

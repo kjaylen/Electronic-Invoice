@@ -1,0 +1,50 @@
+{%- comment -%}
+  A gift card, emailed to whoever it is for. Keep the code in the email: it is what they pay with.
+{% endcomment -%}
+<!doctype html>
+<html lang="en">
+<body style="margin:0;padding:0;background:#f4f5f7;font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;color:#0f1117">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f5f7;padding:32px 12px">
+    <tr><td align="center">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border:1px solid #e6e8ec;border-radius:14px">
+        <tr><td style="padding:28px 32px 6px">
+          {%- if store.logo %}
+          <img src="{{ store.logo }}" alt="{{ store.name }}" height="40" style="display:block;height:40px;width:auto;max-width:220px;border:0;margin:0 0 14px">
+          {%- else %}
+          <div style="font-size:13px;color:#646b7b">{{ store.name }}</div>
+          {%- endif %}
+          <h1 style="margin:6px 0 0;font-size:22px;line-height:1.25;letter-spacing:-0.02em">{% if recipient.name != blank %}{{ recipient.name }}, here is a gift card{% else %}A gift card for you{% endif %}</h1>
+        </td></tr>
+        {%- if message != blank %}
+        <tr><td style="padding:14px 32px 0">
+          <div style="border-left:3px solid #d8c3ea;padding:4px 0 4px 14px;font-size:15px;line-height:1.6;color:#3d4250;white-space:pre-line">{{ message }}</div>
+        </td></tr>
+        {%- endif %}
+        <tr><td style="padding:18px 32px 4px">
+          <div style="background:linear-gradient(135deg,#5b2384,#2e0f45);background-color:#45196a;border-radius:14px;padding:22px 24px;color:#ffffff">
+            <div style="font-size:13px;opacity:0.8">{{ store.name }}</div>
+            <div style="font-size:34px;font-weight:700;letter-spacing:-0.02em;margin:6px 0 16px">{{ card.amount | money }}</div>
+            <div style="font-size:12px;opacity:0.8;text-transform:uppercase;letter-spacing:0.08em">Gift card code</div>
+            <div style="font-size:20px;font-weight:700;letter-spacing:0.12em;font-family:'SFMono-Regular',Consolas,'Courier New',monospace;margin-top:4px">{{ card.code }}</div>
+          </div>
+        </td></tr>
+        <tr><td style="padding:16px 32px 4px;font-size:15px;line-height:1.6">
+          <p style="margin:0 0 12px">{% if store.online %}Use it in our online store (type the code under Gift card when you check out), or show this email when you pay in person.{% else %}Show this email when you pay at {{ store.name }}.{% endif %}{% if card.balance != card.amount %} It has {{ card.balance | money }} left.{% endif %} You can use it over several purchases.</p>
+          {%- if card.expires_on %}
+          <p style="margin:0 0 12px">It can be used until {{ card.expires_on }}.</p>
+          {%- endif %}
+        </td></tr>
+        {%- if store.online %}
+        <tr><td style="padding:8px 32px 4px">
+          <a href="{{ store.url }}" style="display:inline-block;background:#6d2d93;color:#ffffff;padding:12px 22px;border-radius:9px;text-decoration:none;font-weight:600;font-size:15px">Shop now</a>
+          <a href="{{ balance_url }}" style="display:inline-block;margin-left:14px;color:#6d2d93;font-size:14px">Check the balance</a>
+        </td></tr>
+        {%- endif %}
+        <tr><td style="padding:22px 32px 28px;font-size:12px;line-height:1.6;color:#646b7b">
+          Keep this email: the code is what you pay with, and anyone who has it can use it. {{ store.name }}{% if store.city %} · {{ store.city }}{% endif %}{% if store.telephone %} · {{ store.telephone }}{% endif %}
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>

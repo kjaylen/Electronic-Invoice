@@ -65,6 +65,8 @@ interface Sale {
   dueDays?: number;
   /** Loyalty points the customer uses on this sale. */
   redeemPoints?: number;
+  /** A gift card paying what it can (checked when it was entered); cash, card or transfer pays the rest. */
+  giftCard?: { code: string; last4: string; balance: string };
 }
 
 interface HeldSale { id: string; at: string; label: string; total: string; count: number; sale: Sale; heldBy?: string | null }
@@ -359,11 +361,15 @@ export function CounterPanel(props: {
   const fullPrice = valid.reduce((a, l) => a + (lineBase(l) ?? 0n), 0n);
   const discounted = totals ? fullPrice - toCents(totals.lineExtension) : 0n;
 
+  // A gift card pays what it can; the rest is paid by cash, card or transfer (not split, not on account).
+  const gift = sale.giftCard ?? null;
+  const giftApplied = gift && totals ? (toCents(gift.balance) < totalCents ? toCents(gift.balance) : totalCents) : 0n;
+  const rest = totalCents - giftApplied;
   // Payment: cash (with change), card, transfer, split (card or transfer plus cash), or the customer's account.
-  const means: Means = sale.meansCode === 'account' && !sale.customer ? '10' : sale.meansCode;
+  const means: Means = (sale.meansCode === 'account' && !sale.customer) || (gift && (sale.meansCode === 'split' || sale.meansCode === 'account')) ? '10' : sale.meansCode;
   const splitOther = means === 'split' && sale.split && MONEY.test(sale.split.amount) ? toCents(sale.split.amount) : null;
   const splitOk = means !== 'split' || (splitOther !== null && splitOther > 0n && splitOther < totalCents);
-  const cashDue = means === '10' ? totalCents : means === 'split' && splitOther !== null ? totalCents - splitOther : null;
+  const cashDue = gift && rest === 0n ? null : means === '10' ? rest : means === 'split' && splitOther !== null ? totalCents - splitOther : null;
   // Cash received, in BZ$ (US dollars count double).
   const tenderedBz = DECIMAL.test(sale.tendered) ? toCents(sale.tendered) * (sale.usd ? USD_RATE : 1n) : null;
   const change = cashDue !== null && tenderedBz !== null && totals ? tenderedBz - cashDue : null;
@@ -392,6 +398,8 @@ export function CounterPanel(props: {
         ...(redeem && { redeemPoints: redeem }),
         ...(onAccount
           ? { payment: { meansCode: '30', dueDate: belizeDate(days), terms: `Payment due in ${days} days` } }
+          : gift
+            ? { giftCard: { code: gift.code, amount: fromCents(giftApplied) }, ...(rest > 0n && { tenders: [{ meansCode: '1', amount: fromCents(giftApplied) }, { meansCode: means, amount: fromCents(rest) }] }) }
           : means === 'split'
             ? { tenders: [{ meansCode: sale.split!.means, amount: sale.split!.amount }, { meansCode: '10', amount: fromCents(cashDue!) }] }
             : { payment: { meansCode: means, terms: means === '10' && sale.usd && tenderedBz !== null ? `Paid by cash (US$${fromCents(toCents(sale.tendered))} received)` : `Paid by ${means === '10' ? 'cash' : means === '48' ? 'card' : 'bank transfer'}` } }),
@@ -402,7 +410,7 @@ export function CounterPanel(props: {
       setSale(newSale());
       setDiscountFor(null);
       if (doc.status === 'rejected') toast(t('Rejected by BTS'), 'bad');
-      props.onIssued?.(doc, { meansCode: means === 'split' ? '10' : means === 'account' ? '30' : means, change: changeText });
+      props.onIssued?.(doc, { meansCode: gift && rest === 0n ? '1' : means === 'split' ? '10' : means === 'account' ? '30' : means, change: changeText });
       focusSearch();
     } catch (err) {
       setError(err);
@@ -417,7 +425,7 @@ export function CounterPanel(props: {
   const holdCurrent = async (label: string) => {
     if (!sale.lines.length) return;
     try {
-      await putOnHold(label, sale);
+      await putOnHold(label, { ...sale, giftCard: undefined });
     } catch (e) {
       setError(e);
       return;
@@ -433,7 +441,7 @@ export function CounterPanel(props: {
     let got: HeldSale;
     try {
       // A sale in progress is held in its place, not lost.
-      if (sale.lines.length) await putOnHold('', sale);
+      if (sale.lines.length) await putOnHold('', { ...sale, giftCard: undefined });
       got = await api<HeldSale>(`/v1/held-sales/${h.id}/recall`, { method: 'POST' });
     } catch (e) {
       setError(e);
@@ -498,7 +506,7 @@ export function CounterPanel(props: {
     }
   };
 
-  const meansOptions: Array<[Means, string]> = [['10', t('Cash')], ['48', t('Card')], ['30', t('Transfer')], ['split', t('Split')], ...(sale.customer ? [['account', t('On account')] as [Means, string]] : [])];
+  const meansOptions: Array<[Means, string]> = [['10', t('Cash')], ['48', t('Card')], ['30', t('Transfer')], ...(sale.giftCard ? [] : [['split', t('Split')] as [Means, string], ...(sale.customer ? [['account', t('On account')] as [Means, string]] : [])])];
   const lineNet = (l: CartLine) => {
     const i = valid.indexOf(l);
     if (previewFresh && preview && i >= 0 && preview.lines[i]) return preview.lines[i]!.net;
@@ -654,7 +662,8 @@ export function CounterPanel(props: {
             );
           })()}
 
-          <Segmented label={t('Payment')} value={means} onChange={(v) => set({ meansCode: v })} options={meansOptions} />
+          <GiftCardTender gift={gift} applied={giftApplied} rest={rest} disabled={!sale.lines.length} onUse={(g) => set({ giftCard: g })} onRemove={() => set({ giftCard: undefined })} />
+          {!(gift && rest === 0n) && <Segmented label={gift ? t('The rest') : t('Payment')} value={means} onChange={(v) => set({ meansCode: v })} options={meansOptions} />}
           {means === 'split' && (
             <div className="tender split">
               <label>
@@ -667,7 +676,7 @@ export function CounterPanel(props: {
               <span>{cashDue !== null && splitOk ? t('Cash: {amount}', { amount: money(fromCents(cashDue)) }) : sale.split?.amount ? t('Less than the total, please') : ''}</span>
             </div>
           )}
-          {(means === '10' || (means === 'split' && splitOk && cashDue !== null)) && (
+          {((means === '10' && cashDue !== null) || (means === 'split' && splitOk && cashDue !== null)) && (
             <div className="tender-block">
               <div className="tender">
                 <div className="tender-field">
@@ -726,6 +735,52 @@ export function CounterPanel(props: {
           onClose={() => setDialog(null)}
         />
       )}
+    </div>
+  );
+}
+
+/** Paying with a gift card: its code, checked; then what it pays and what is left. */
+function GiftCardTender({ gift, applied, rest, disabled, onUse, onRemove }: {
+  gift: Sale['giftCard'] | null; applied: bigint; rest: bigint; disabled: boolean;
+  onUse: (g: NonNullable<Sale['giftCard']>) => void; onRemove: () => void;
+}) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const [code, setCode] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  if (gift) {
+    return (
+      <div className="tender gift">
+        <span>{t('Gift card ••••{last4} pays {amount}', { last4: gift.last4, amount: money(fromCents(applied)) })}<span className="small"> · {rest === 0n ? t('{amount} left on the card', { amount: money(fromCents(toCents(gift.balance) - applied)) }) : t('the card is used up')}</span></span>
+        <button type="button" className="link on-dark" onClick={onRemove}>{t('Remove')}</button>
+      </div>
+    );
+  }
+  if (!open) return <button type="button" className="link on-dark gift-link" disabled={disabled} onClick={() => setOpen(true)}>{t('Pay with a gift card')}</button>;
+  const check = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await api<{ card: { last4: string; balance: string } }>('/v1/gift-cards/check', { method: 'POST', body: { code: code.trim() } });
+      onUse({ code: code.trim(), last4: r.card.last4, balance: r.card.balance });
+      setOpen(false);
+      setCode('');
+    } catch (e) {
+      setError(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="tender gift stack">
+      <div className="row">
+        <input aria-label={t('Gift card code')} placeholder="XXXX-XXXX-XXXX-XXXX" autoComplete="off" autoFocus value={code} onChange={(e) => setCode(e.target.value.toUpperCase())}
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); if (code.trim()) void check(); } if (e.key === 'Escape') setOpen(false); }} />
+        <button type="button" className="secondary" disabled={busy || !code.trim()} onClick={() => void check()}>{busy ? t('Checking…') : t('Use card')}</button>
+        <button type="button" className="link on-dark" onClick={() => { setOpen(false); setError(null); }}>{t('Cancel')}</button>
+      </div>
+      <ErrorText error={error} />
     </div>
   );
 }

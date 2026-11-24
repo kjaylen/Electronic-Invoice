@@ -41,6 +41,7 @@ interface Phrases {
   payCashOnDelivery: (total: string) => string;
   paidOnline: (total: string) => string;
   payAtPickup: (total: string) => string;
+  paidByGiftCard: (amount: string) => string;
 }
 
 export const PHRASES: Record<Lang, Phrases> = {
@@ -56,6 +57,7 @@ export const PHRASES: Record<Lang, Phrases> = {
     payCashOnDelivery: (total) => `Pay ${total} in cash when your order is delivered.`,
     paidOnline: (total) => `Total ${total}, paid online. Your receipt is emailed as soon as the payment is confirmed.`,
     payAtPickup: (total) => `Pay ${total} when you pick up your order.`,
+    paidByGiftCard: (amount) => `${amount} paid with a gift card.`,
   },
   es: {
     receivable: (type) => (type === '03' ? 'Nota de débito' : 'Factura'),
@@ -69,5 +71,6 @@ export const PHRASES: Record<Lang, Phrases> = {
     payCashOnDelivery: (total) => `Pague ${total} en efectivo cuando reciba su pedido.`,
     paidOnline: (total) => `Total ${total}, pagado en línea. Su recibo se envía por correo en cuanto se confirme el pago.`,
     payAtPickup: (total) => `Pague ${total} cuando retire su pedido.`,
+    paidByGiftCard: (amount) => `${amount} pagado con tarjeta de regalo.`,
   },
 };

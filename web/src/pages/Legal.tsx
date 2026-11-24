@@ -165,6 +165,7 @@ export function Privacy() {
           <li><strong>Accounts:</strong> names, email or username, role, password (stored as a one-way hash), two-step sign-in secret (encrypted), sign-in times and IP addresses.</li>
           <li><strong>Documents:</strong> what a business puts on its invoices and receipts, including its customers' names, TINs and addresses.</li>
           <li><strong>Online store buyers:</strong> name, phone, email and address given at checkout, and what was ordered. If a buyer gives their email and leaves without ordering, the cart is kept for up to 30 days so the store can send a reminder (if it uses them); every reminder has a link to stop them. A buyer who makes an account at a store (signing in with a code sent to their email) also keeps their addresses and, if they choose, their business's name and TIN there; they can change these or close the account at any time.</li>
+          <li><strong>Gift cards:</strong> the amount and balance, what each card paid for, and, if the business adds them, the name and email of who it is for and a message. The card's code is stored encrypted.</li>
           <li><strong>Security logs:</strong> an activity log of sign-ins and changes, kept so businesses can see who did what.</li>
         </ul>
         <h2>Why</h2>

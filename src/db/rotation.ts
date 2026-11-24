@@ -54,6 +54,8 @@ export async function rotateSecrets(db: Queryable, keys: Keyring, options: { dry
   const keyed = [
     ...(await db.query<{ id: string; blob: string; context: string }>("select id::text, secret_encrypted as blob, 'connector:' || tenant_id || ':' || id as context from connector_links where secret_encrypted is not null")).rows.map((r) => ({ ...r, table: 'connector_links', column: 'secret_encrypted', key: 'id' })),
     ...(await db.query<{ id: string; blob: string; context: string }>("select tenant_id::text || '/' || provider as id, tokens_encrypted as blob, 'integration:' || tenant_id || ':' || provider as context from integration_connections where tokens_encrypted is not null")).rows.map((r) => ({ ...r, table: 'integration_connections', column: 'tokens_encrypted', key: "tenant_id::text || '/' || provider" })),
+    // Gift card codes (kept to email a card again).
+    ...(await db.query<{ id: string; blob: string; context: string }>("select id::text, code_encrypted as blob, 'gift-card:' || tenant_id || ':' || id as context from gift_cards")).rows.map((r) => ({ ...r, table: 'gift_cards', column: 'code_encrypted', key: 'id' })),
   ];
   for (const k of keyed) {
     if (keys.isCurrent(k.blob)) {

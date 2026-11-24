@@ -10,7 +10,8 @@
  *   POST /v1/store/:slug/orders/:n/payments/:id/confirm?t=   back from the provider: was it paid?
  *   GET|POST /v1/store/:slug/test-payments/:id   the pretend card page of the test gateway
  *   POST /v1/store/:slug/products/:handle/notify { variantId, email }: email me when this sold-out variant is back
- *   POST /v1/store/:slug/quote                   price a cart, with delivery
+ *   POST /v1/store/:slug/quote                   price a cart, with delivery (and what a gift card would pay)
+ *   POST /v1/store/:slug/gift-cards/balance      a gift card's balance { code }
  *   POST /v1/store/:slug/orders                  place an order
  *   GET  /v1/store/:slug/orders/:number?t=       the buyer's order page (the token from the order link,
  *                                                or none for a buyer signed in to their account)
@@ -27,7 +28,7 @@ import { rememberFromOrder } from '../commerce/buyers.ts';
 import { accountsOffered, buyerFromRequest, registerStoreAccountRoutes } from './store-accounts.ts';
 import { requireCsrfHeader } from './auth.ts';
 import { type CheckoutInput, markOrdered, restoreCheckout, saveCheckout, unsubscribe } from '../commerce/checkouts.ts';
-import { loadOrder, loadStore, type OrderInput, paymentMethodsFor, placeOrder, priceWithGst, quoteCart, StoreError, type StoreRef, variantTitle } from '../commerce/store.ts';
+import { loadOrder, loadStore, markOrderPaid, type OrderInput, paymentMethodsFor, placeOrder, priceWithGst, quoteCart, StoreError, type StoreRef, variantTitle } from '../commerce/store.ts';
 import { simpleHtml } from '../mail/mailer.ts';
 import { renderEmail, renderStoreTheme, storeContext } from '../templates/render.ts';
 import type { PipelineDeps } from '../pipeline/issue.ts';
@@ -46,6 +47,8 @@ import { toBigInt } from '../db/database.ts';
 import { formatCents } from '../engine/decimal.ts';
 import { emailLanguage, PHRASES } from '../templates/lang.ts';
 import { addStockAlert, StockAlertError } from '../commerce/stock-alerts.ts';
+import { cardJson, findCard, payingCard } from '../commerce/giftcards.ts';
+import { sendDocumentEmail } from './documents.ts';
 
 
 // Limits on placing orders (shared by every server process), so a script cannot flood a store.
@@ -59,7 +62,7 @@ const cartSchema = {
   items: { type: 'object', required: ['variantId', 'quantity'], additionalProperties: false, properties: { variantId: uuid, quantity: { type: 'integer', minimum: 1, maximum: 9999 } } },
 } as const;
 
-const PAYMENT_TEXT = { bank_transfer: 'Bank transfer', cash_on_delivery: 'Cash on delivery', pay_at_pickup: 'Pay at pickup', online: 'Paid online' } as const;
+const PAYMENT_TEXT = { bank_transfer: 'Bank transfer', cash_on_delivery: 'Cash on delivery', pay_at_pickup: 'Pay at pickup', online: 'Paid online', gift_card: 'Paid with a gift card' } as const;
 
 export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDeps, ctx: ServerContext, payments: GatewayExtras = {}) {
   const { db } = deps;
@@ -196,19 +199,46 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
     discountCode: { type: 'string', maxLength: 40 },
   } as const;
 
-  app.post<{ Params: { slug: string }; Body: { lines: OrderInput['lines']; fulfillment: 'delivery' | 'pickup'; zone?: string; discountCode?: string } }>(
+  app.post<{ Params: { slug: string }; Body: { lines: OrderInput['lines']; fulfillment: 'delivery' | 'pickup'; zone?: string; discountCode?: string; giftCard?: string } }>(
     '/:slug/quote',
-    { schema: { params: { type: 'object', required: ['slug'], properties: slugParams }, body: { type: 'object', required: ['lines', 'fulfillment'], additionalProperties: false, properties: { lines: cartSchema, ...choiceProps } } } },
+    { schema: { params: { type: 'object', required: ['slug'], properties: slugParams }, body: { type: 'object', required: ['lines', 'fulfillment'], additionalProperties: false, properties: { lines: cartSchema, ...choiceProps, giftCard: { type: 'string', maxLength: 40 } } } } },
     async (request) => {
       const s = await store(request);
       const q = await quoteCart(db, deps, s, request.body.lines, request.body);
+      // A gift card pays what it can; when that is everything, it is the only way to pay.
+      let giftCard: { last4: string; balance: string; applied: string } | null = null;
+      let due = q.cents.total;
+      if (request.body.giftCard) {
+        if (await overLimit(db, `gift-card|${request.ip}`, 60, HOUR_MS)) throw new ApiError(429, 'too_many_requests', 'Too many tries from here; try again later');
+        const card = await payingCard(db, s.tenantId, request.body.giftCard);
+        const balance = toBigInt(card.balance_cents);
+        const applied = balance < q.cents.total ? balance : q.cents.total;
+        due = q.cents.total - applied;
+        giftCard = { last4: card.last4, balance: formatCents(balance), applied: formatCents(applied) };
+      }
       return {
         lines: q.lines.map((l) => ({ variantId: l.variantId, productTitle: l.productTitle, variantTitle: l.variantTitle, quantity: l.quantity, total: l.total, listTotal: l.listTotal })),
         delivery: q.delivery && { zone: q.delivery.zone, total: q.delivery.total },
         discount: q.discount && { code: q.discount.code, kind: q.discount.kind, saved: q.discount.saved },
         totals: q.totals,
-        paymentMethods: paymentMethodsFor(s.settings, request.body.fulfillment),
+        giftCard,
+        due: formatCents(due),
+        paymentMethods: giftCard && due === 0n ? ['gift_card'] : paymentMethodsFor(s.settings, request.body.fulfillment),
       };
+    },
+  );
+
+  // A gift card's balance (the link in its email).
+  app.post<{ Params: { slug: string }; Body: { code: string } }>(
+    '/:slug/gift-cards/balance',
+    { schema: { params: { type: 'object', required: ['slug'], properties: slugParams }, body: { type: 'object', required: ['code'], additionalProperties: false, properties: { code: { type: 'string', minLength: 1, maxLength: 40 } } } } },
+    async (request) => {
+      const s = await store(request);
+      if (await overLimit(db, `gift-card|${request.ip}`, 60, HOUR_MS)) throw new ApiError(429, 'too_many_requests', 'Too many tries from here; try again later');
+      const card = await findCard(db, s.tenantId, request.body.code);
+      if (!card) throw new ApiError(404, 'gift_card_not_found', 'There is no gift card with this code. Check it and try again.');
+      const j = cardJson(card);
+      return { last4: j.last4, balance: j.balance, status: j.status, expiresOn: j.expiresOn };
     },
   );
 
@@ -224,7 +254,8 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
           properties: {
             lines: cartSchema,
             ...choiceProps,
-            paymentMethod: { type: 'string', enum: ['bank_transfer', 'cash_on_delivery', 'pay_at_pickup', 'online'] },
+            paymentMethod: { type: 'string', enum: ['bank_transfer', 'cash_on_delivery', 'pay_at_pickup', 'online', 'gift_card'] },
+            giftCard: { type: 'string', maxLength: 40 },
             customer: {
               type: 'object',
               required: ['name', 'phone'],
@@ -264,6 +295,19 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
       await markOrdered(db, s.tenantId, placed.id, request.body.checkoutId, request.body.customer.email).catch((e) => request.log.error({ err: e }, 'checkout not closed'));
       const path = `/${s.slug}/shop/orders/${placed.number}?t=${placed.token}`;
       await audit(db, { tenantId: s.tenantId, action: 'order.placed', target: `#${placed.number}`, details: { total: placed.quote.totals.total }, ip: request.ip });
+      // Paid in full with a gift card: paid now, and the receipt issued and emailed.
+      if (request.body.paymentMethod === 'gift_card') {
+        try {
+          const { order, document } = await markOrderPaid(deps, s.tenantId, placed.id, null);
+          await audit(db, { tenantId: s.tenantId, action: 'order.paid', target: `#${order.number}`, details: { giftCard: true } });
+          if (document && order.customer_email && ctx.mailConfigured && ['authorized', 'authorized_with_alert', 'contingency_pending'].includes(document.status)) {
+            void sendDocumentEmail(deps, ctx, s.tenantId, document.documentId, { to: order.customer_email, message: PHRASES[await emailLanguage(db, s.tenantId)].orderPaid(order.number) }).catch((e) => request.log.error({ err: e }, 'receipt email failed'));
+          }
+        } catch (e) {
+          // The card was charged and the order stands: staff can issue the receipt from it.
+          request.log.error({ err: e }, 'gift card order not marked paid');
+        }
+      }
       void notify(request, s, placed, path).catch((e) => request.log.error({ err: e }, 'order notification failed'));
       // Paying online: straight to the provider's page. If that fails, the order stands and the buyer can retry from its page.
       let payment: { redirectUrl: string } | { error: string } | undefined;
@@ -326,7 +370,8 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
     const gateway = await gatewayFor(db, s.tenantId, s.settings.payments.online.provider, await gatewaySettings(s.tenantId));
     const base = ctx.publicUrl?.replace(/\/$/, '') ?? '';
     if (gateway.provider !== 'test' && !base) throw new PaymentError('PUBLIC_URL is not set on this server, so the payment provider cannot send buyers back');
-    const order = (await db.query<{ total_cents: unknown }>('select total_cents from orders where id = $1', [orderId])).rows[0]!;
+    // What is left after a gift card.
+    const order = (await db.query<{ total_cents: unknown }>('select total_cents - gift_card_cents as total_cents from orders where id = $1', [orderId])).rows[0]!;
     const orderPage = `${base}/${s.slug}/shop/orders/${number}${token ? `?t=${token}` : ''}`;
     const and = token ? '&' : '?';
     const started = await startPayment(db, gateway, {
@@ -345,10 +390,16 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
     if (o.customer_email) {
       const lang = await emailLanguage(db, s.tenantId);
       const say = PHRASES[lang];
-      const how = o.payment_method === 'bank_transfer'
-        ? [say.payByTransfer(total), s.settings.payments.bankTransfer.instructions || say.bankDetailsLater, say.orderReference(o.number)]
-        : o.payment_method === 'cash_on_delivery' ? [say.payCashOnDelivery(total)]
-          : o.payment_method === 'online' ? [say.paidOnline(total)] : [say.payAtPickup(total)];
+      // What a gift card paid, and what is left to pay the way chosen.
+      const gift = toBigInt(o.gift_card_cents ?? 0);
+      const due = `BZ$${formatCents(toBigInt(o.total_cents) - gift)}`;
+      const how = [
+        ...(gift > 0n ? [say.paidByGiftCard(`BZ$${formatCents(gift)}`)] : []),
+        ...(o.payment_method === 'gift_card' ? []
+          : o.payment_method === 'bank_transfer' ? [say.payByTransfer(due), s.settings.payments.bankTransfer.instructions || say.bankDetailsLater, say.orderReference(o.number)]
+            : o.payment_method === 'cash_on_delivery' ? [say.payCashOnDelivery(due)]
+              : o.payment_method === 'online' ? [say.paidOnline(due)] : [say.payAtPickup(due)]),
+      ];
       const link = publicLink(ctx, path);
       const mail = await renderEmail(db, s.tenantId, 'email.order', {
         store: { name: s.name, city: s.city, telephone: s.telephone, email: s.email },
@@ -434,6 +485,8 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
         address: j.address,
         lines: j.lines,
         totals: j.totals,
+        giftCard: j.giftCard,
+        amountDue: j.amountDue,
         createdAt: j.createdAt,
         readyAt: j.readyAt,
         cancelReason: j.cancelReason,

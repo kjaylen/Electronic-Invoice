@@ -27,6 +27,7 @@ export interface ZReportInput {
     refundCount: number;
     voided: { count: number; total: string };
     discounts?: { count: number; total: string };
+    giftCards?: { sold: { count: number; total: string }; used: string };
     cash: { float: string; in: string; payIn: string; payOut: string; expected: string; counted: string | null; difference: string | null };
     movements: Array<{ kind: 'pay_in' | 'pay_out'; amount: string; reason: string; at: string; by: string | null }>;
   };
@@ -76,6 +77,11 @@ export function renderZReport(z: ZReportInput): Promise<Buffer> {
     for (const m of means) if (r.refunds[m] !== '0.00') line(`  ${MEANS_NAME[m]}`, `-${formatAmount(r.refunds[m])}`);
   }
   rule();
+  if (r.giftCards && (r.giftCards.sold.count > 0 || r.giftCards.used !== '0.00')) {
+    if (r.giftCards.sold.count > 0) line(`Gift cards sold (${r.giftCards.sold.count})`, formatAmount(r.giftCards.sold.total));
+    if (r.giftCards.used !== '0.00') line('Paid with gift cards', formatAmount(r.giftCards.used));
+    rule();
+  }
   title('Cash drawer');
   line('Opening float', formatAmount(r.cash.float));
   line('Cash takings', formatAmount(r.cash.in));

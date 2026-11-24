@@ -62,7 +62,7 @@ interface ProductPage {
 const slug = BUSINESS ?? '';
 const shopApi = (path: string) => `/v1/store/${slug}${path}`;
 export const imageUrl = (id: string) => `/v1/store/${slug}/images/${id}`;
-const PAYMENT_LABEL: Record<PaymentMethod, string> = { bank_transfer: 'Bank transfer', cash_on_delivery: 'Cash on delivery', pay_at_pickup: 'Pay at pickup', online: 'Pay online now' };
+const PAYMENT_LABEL: Record<PaymentMethod, string> = { bank_transfer: 'Bank transfer', cash_on_delivery: 'Cash on delivery', pay_at_pickup: 'Pay at pickup', online: 'Pay online now', gift_card: 'Gift card' };
 
 // ---------- the cart, on this device ----------
 
@@ -442,6 +442,9 @@ interface QuoteResult {
   delivery: { zone: string; total: string } | null;
   discount: { code: string; kind: string; saved: string } | null;
   totals: { lineExtension: string; gst: string; total: string };
+  /** What a gift card pays, and what is left to pay. */
+  giftCard?: { last4: string; balance: string; applied: string } | null;
+  due?: string;
   paymentMethods: PaymentMethod[];
 }
 
@@ -484,6 +487,11 @@ export function ShopCheckout() {
   const [codeInput, setCodeInput] = useState(prefill?.discountCode ?? '');
   const [code, setCode] = useState(prefill?.discountCode ?? '');
   const [codeError, setCodeError] = useState<unknown>(null);
+  // A gift card: typed, then applied (the quote says what it pays).
+  const [giftInput, setGiftInput] = useState('');
+  const [gift, setGift] = useState('');
+  const [giftError, setGiftError] = useState<unknown>(null);
+  const [giftOpen, setGiftOpen] = useState(false);
   const [quote, setQuote] = useState<QuoteResult | null>(null);
   const [quoteError, setQuoteError] = useState<unknown>(null);
   const [error, setError] = useState<unknown>(null);
@@ -493,14 +501,21 @@ export function ShopCheckout() {
 
   const refresh = useCallback(() => {
     if (!linesBody.length) return;
-    void api<QuoteResult>(shopApi('/quote'), { method: 'POST', body: { lines: linesBody, fulfillment, ...(fulfillment === 'delivery' && { zone }), ...(code && { discountCode: code }) } })
+    void api<QuoteResult>(shopApi('/quote'), { method: 'POST', body: { lines: linesBody, fulfillment, ...(fulfillment === 'delivery' && { zone }), ...(code && { discountCode: code }), ...(gift && { giftCard: gift }) } })
       .then((q) => {
         setQuote(q);
         setQuoteError(null);
         setCodeError(null);
+        setGiftError(null);
         setPayment((p) => (p && q.paymentMethods.includes(p) ? p : q.paymentMethods[0] ?? ''));
       })
       .catch((e) => {
+        // A gift card that does not work is said next to it, and the order is quoted without it.
+        if (gift && e instanceof ApiError && e.code.startsWith('gift_card')) {
+          setGiftError(e);
+          setGift('');
+          return;
+        }
         // A code that does not work is said next to it, and the order is quoted without it.
         if (code) {
           setCodeError(e);
@@ -510,7 +525,7 @@ export function ShopCheckout() {
         setQuote(null);
         setQuoteError(e);
       });
-  }, [linesBody, fulfillment, zone, code]);
+  }, [linesBody, fulfillment, zone, code, gift]);
   useEffect(refresh, [refresh]);
 
   // Once there is an email, the store keeps this checkout, to send a reminder if the buyer leaves.
@@ -566,6 +581,7 @@ export function ShopCheckout() {
           ...(wantsInvoice && { business }),
           ...(note.trim() && { note: note.trim() }),
           ...(code && { discountCode: code }),
+          ...(gift && quote?.giftCard && { giftCard: gift }),
           ...(info.reminders && store.get<string>(CHECKOUT_KEY) && { checkoutId: store.get<string>(CHECKOUT_KEY) }),
           ...(account && needsAddress && addressChoice === 'new' && saveAddress && { saveAddress: true }),
         },
@@ -655,7 +671,7 @@ export function ShopCheckout() {
             {(quote?.paymentMethods ?? []).map((m) => (
               <Radio key={m} name="payment" value={m} checked={payment === m} onChange={(v) => setPayment(v as PaymentMethod)}>
                 <strong>{t(PAYMENT_LABEL[m])}</strong>
-                <span className="small muted">{m === 'bank_transfer' ? t('The bank details appear after you order.') : m === 'cash_on_delivery' ? t('Pay the driver in cash.') : m === 'online' ? t(PROVIDER_NOTE[info.payments.online ?? 'test'] ?? PROVIDER_NOTE.test!) : t('Pay when you collect.')}</span>
+                <span className="small muted">{m === 'gift_card' ? t('Your gift card pays for all of it.') : m === 'bank_transfer' ? t('The bank details appear after you order.') : m === 'cash_on_delivery' ? t('Pay the driver in cash.') : m === 'online' ? t(PROVIDER_NOTE[info.payments.online ?? 'test'] ?? PROVIDER_NOTE.test!) : t('Pay when you collect.')}</span>
               </Radio>
             ))}
           </div>
@@ -681,6 +697,12 @@ export function ShopCheckout() {
             </ul>
             <div><span>{t('GST included')}</span><span>{money(quote.totals.gst)}</span></div>
             <div className="grand"><span>{t('Total')}</span><span>{money(quote.totals.total)}</span></div>
+            {quote.giftCard && (
+              <>
+                <div className="gift-line"><span>{t('Gift card ••••{last4}', { last4: quote.giftCard.last4 })}</span><span>−{money(quote.giftCard.applied)}</span></div>
+                <div className="due-line"><span>{t('To pay')}</span><span>{money(quote.due ?? quote.totals.total)}</span></div>
+              </>
+            )}
           </>
         ) : quoteError ? <ErrorText error={quoteError} /> : <div className="skeleton" />}
         <div className="discount-entry">
@@ -694,8 +716,21 @@ export function ShopCheckout() {
           )}
           <ErrorText error={codeError} />
         </div>
+        <div className="discount-entry">
+          {gift && quote?.giftCard ? (
+            <div className="row small"><span>{t('Gift card ••••{last4}: {balance} on it', { last4: quote.giftCard.last4, balance: money(quote.giftCard.balance) })}</span><span className="spacer" /><button type="button" className="link" onClick={() => { setGift(''); setGiftInput(''); }}>{t('Remove')}</button></div>
+          ) : giftOpen ? (
+            <div className="row">
+              <input aria-label={t('Gift card code')} placeholder="XXXX-XXXX-XXXX-XXXX" autoComplete="off" value={giftInput} onChange={(e) => setGiftInput(e.target.value.toUpperCase())} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); setGift(giftInput.trim()); } }} />
+              <button type="button" className="secondary" disabled={!giftInput.trim()} onClick={() => setGift(giftInput.trim())}>{t('Apply')}</button>
+            </div>
+          ) : (
+            <button type="button" className="link small" onClick={() => setGiftOpen(true)}>{t('Have a gift card?')}</button>
+          )}
+          <ErrorText error={giftError} />
+        </div>
         <ErrorText error={error} />
-        <button type="submit" className="big lime" disabled={busy || !quote || !payment}>{busy ? t('Placing your order…') : payment === 'online' ? t('Pay {amount}', { amount: money(quote?.totals.total ?? '0') }) : t('Place order')}<span className="chip" aria-hidden="true">→</span></button>
+        <button type="submit" className="big lime" disabled={busy || !quote || !payment}>{busy ? t('Placing your order…') : payment === 'online' ? t('Pay {amount}', { amount: money(quote?.due ?? quote?.totals.total ?? '0') }) : t('Place order')}<span className="chip" aria-hidden="true">→</span></button>
         <p className="small muted">{t('You get a receipt authorized by the Belize Tax Service once your payment is confirmed.')}</p>
       </aside>
     </form>
@@ -724,6 +759,8 @@ interface BuyerOrder {
   document: { type: string; series: string; number: string } | null;
   discount: { code: string } | null;
   online: { canPay: boolean; lastStatus: string | null; lastProblem: string | null; provider: string | null } | null;
+  giftCard?: { amount: string } | null;
+  amountDue?: string;
 }
 
 export function ShopOrder() {
@@ -831,7 +868,7 @@ export function ShopOrder() {
       )}
       {o.instructions !== null && o.paymentStatus === 'unpaid' && o.status === 'open' && (
         <section className="card stack pay-box">
-          <h2>{t('Pay {amount} by bank transfer', { amount: money(o.totals.total) })}</h2>
+          <h2>{t('Pay {amount} by bank transfer', { amount: money(o.amountDue ?? o.totals.total) })}</h2>
           <pre className="instructions">{o.instructions || t('The store will send you its bank details.')}</pre>
           <p className="small">{t('Use order #{n} as the reference. The store confirms your payment and your receipt appears here.', { n: o.number })}</p>
         </section>
@@ -839,7 +876,7 @@ export function ShopOrder() {
       {wallet && o.paymentStatus === 'unpaid' && o.status === 'open' && <WalletPay wallet={wallet} amount={o.totals.total} />}
       {o.online && o.paymentStatus === 'unpaid' && o.status === 'open' && !wallet && (
         <section className="card stack pay-box">
-          <h2>{t('Pay {amount} online', { amount: money(o.totals.total) })}</h2>
+          <h2>{t('Pay {amount} online', { amount: money(o.amountDue ?? o.totals.total) })}</h2>
           {o.online.lastStatus === 'failed' && <div className="banner bad"><div><strong>{t('The payment did not go through')}</strong>{o.online.lastProblem ?? t('Nothing was charged. You can try again.')}</div></div>}
           {o.online.lastStatus === 'pending' && <p className="small muted">{t('If you already paid, it can take a minute to show here.')}</p>}
           {o.online.canPay ? <button className="big lime" disabled={paying} onClick={() => void payNow()}>{paying ? t('Opening the payment page…') : t('Pay now')}<span className="chip" aria-hidden="true">→</span></button>
@@ -848,7 +885,7 @@ export function ShopOrder() {
         </section>
       )}
       {o.paymentStatus === 'unpaid' && o.status === 'open' && o.paymentMethod !== 'bank_transfer' && o.paymentMethod !== 'online' && (
-        <div className="banner info"><div>{o.paymentMethod === 'cash_on_delivery' ? t('Pay {amount} in cash when your order arrives.', { amount: money(o.totals.total) }) : t('Pay {amount} when you pick up your order.', { amount: money(o.totals.total) })}</div></div>
+        <div className="banner info"><div>{o.paymentMethod === 'cash_on_delivery' ? t('Pay {amount} in cash when your order arrives.', { amount: money(o.amountDue ?? o.totals.total) }) : t('Pay {amount} when you pick up your order.', { amount: money(o.amountDue ?? o.totals.total) })}</div></div>
       )}
       {o.document && (
         <section className="card receipt-box row">
@@ -870,6 +907,8 @@ export function ShopOrder() {
           {o.discount && <div><span>{t('Discount code')}</span><span>{o.discount.code}</span></div>}
           <div><span>{t('GST included')}</span><span>{money(o.totals.gst)}</span></div>
           <div className="grand"><span>{t('Total')}</span><span>{money(o.totals.total)}</span></div>
+          {o.giftCard && <div><span>{t('Paid with a gift card')}</span><span>−{money(o.giftCard.amount)}</span></div>}
+          {o.giftCard && o.paymentMethod !== 'gift_card' && <div><span>{o.paymentStatus === 'paid' ? t('Paid the rest') : t('To pay')}</span><span>{money(o.amountDue ?? o.totals.total)}</span></div>}
         </div>
       </section>
       <p className="small muted">
@@ -1329,5 +1368,55 @@ function AccountDetails({ account }: { account: BuyerAccount }) {
         {saved && <span className="small muted" role="status">{t('Saved')}</span>}
       </div>
     </form>
+  );
+}
+
+// ---------- a gift card's balance ----------
+
+/** /shop/gift-card: the balance of a card, from its code (the link in its email). */
+export function ShopGiftCardBalance() {
+  const t = useT();
+  const info = useStoreInfo();
+  usePageTitle(t('Gift card balance'), info.name);
+  const [code, setCode] = useState('');
+  const [result, setResult] = useState<{ last4: string; balance: string; status: 'active' | 'used_up' | 'expired' | 'disabled'; expiresOn: string | null } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const check = async (e: FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    setResult(null);
+    try {
+      setResult(await api<NonNullable<typeof result>>(shopApi('/gift-cards/balance'), { method: 'POST', body: { code: code.trim() } }));
+    } catch (err) {
+      setError(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="shop-narrow account-sign-in">
+      <form className="card stack" onSubmit={check}>
+        <div>
+          <span className="kicker">{info.name}</span>
+          <h1>{t('Gift card balance')}</h1>
+        </div>
+        <Field label={t('Gift card code')}><input required autoComplete="off" placeholder="XXXX-XXXX-XXXX-XXXX" value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} /></Field>
+        <ErrorText error={error} />
+        <button type="submit" className="big" disabled={busy || !code.trim()}>{busy ? t('Checking…') : t('Check the balance')}</button>
+        {result && (
+          <div className="gift-card-face" role="status">
+            <span className="small">{t('Gift card ••••{last4}', { last4: result.last4 })}</span>
+            <strong className="gift-card-amount">{money(result.balance)}</strong>
+            <span className="small">
+              {result.status === 'active' ? (result.expiresOn ? t('Use it by {date}, here or in the store.', { date: result.expiresOn }) : t('Use it here at checkout, or in the store.'))
+                : result.status === 'used_up' ? t('This card has been used up.') : result.status === 'expired' ? t('This card has expired.') : t('This card is turned off. Contact the store.')}
+            </span>
+          </div>
+        )}
+      </form>
+      <Link className="small" to="/shop" viewTransition>← {t('Back to the store')}</Link>
+    </div>
   );
 }

@@ -350,6 +350,10 @@ export async function sampleContext(def: TemplateDef, biz: BusinessContext, lang
         total: '77.50', url: 'https://example.bz/shop/resume?t=example', unsubscribe_url: 'https://example.bz/shop/unsubscribe?t=example', reminder: { number: 1, last: false },
       },
     };
+    case 'email.gift-card': return { context: {
+      store: { ...store, online: true, url: 'https://example.bz/shop' }, recipient: { name: 'Maria' }, message: es ? '¡Feliz cumpleaños! De parte de todos en la oficina.' : 'Happy birthday! From all of us at the office.',
+      card: { amount: '50.00', balance: '50.00', code: 'K7QM-3XRP-9DWT-HB4N', expires_on: null }, balance_url: 'https://example.bz/shop/gift-card',
+    } };
     case 'email.sign-in-code': return { context: { store: { ...store, url: 'https://example.bz/shop' }, code: '482913', minutes: 10 } };
     case 'email.order-ready': return { context: { store, order: {
       number: 1042, customer_name: 'Maria Chan', delivery: false, address: null, pickup_address: '12 Burns Avenue, San Ignacio', pickup_instructions: es ? 'Toque el timbre en la puerta lateral.' : 'Ring the bell at the side door.',

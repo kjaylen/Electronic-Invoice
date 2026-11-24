@@ -430,7 +430,7 @@ export interface StoreBuyer {
 }
 export interface CheckoutSummary { left: number; reminded: number; recovered: number; recoveredTotal: string }
 
-export type PaymentMethod = 'bank_transfer' | 'cash_on_delivery' | 'pay_at_pickup' | 'online';
+export type PaymentMethod = 'bank_transfer' | 'cash_on_delivery' | 'pay_at_pickup' | 'online' | 'gift_card';
 
 export interface Order {
   id: string;
@@ -447,6 +447,9 @@ export interface Order {
   business: { tin: string; name: string } | null;
   note: string | null;
   totals: { lineExtension: string; gst: string; total: string; refunded: string };
+  /** Paid partly or fully with a gift card; amountDue is the rest. */
+  giftCard?: { amount: string } | null;
+  amountDue?: string;
   documentId: string | null;
   document?: { id: string; status: DocStatus; type: string; series: string; number: string } | null;
   refunds?: Array<{

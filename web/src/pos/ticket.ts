@@ -141,6 +141,7 @@ export interface ZReportData {
     documents: Array<{ name: string; count: number; total: string }>;
     gst: string;
     takings: Record<Means, string>;
+    giftCards?: { sold: { count: number; total: string }; used: string };
     totalTakings: string;
     invoicePayments: Record<Means, string>;
     refunds: Record<Means, string>;
@@ -192,6 +193,8 @@ export function zReportTicket(z: ZReportData, now = new Date()): Ticket {
   rule();
   text('CASH DRAWER', { bold: true });
   pair('Opening float', formatAmount(r.cash.float));
+  if (r.giftCards && r.giftCards.sold.count > 0) pair(`Gift cards sold (${r.giftCards.sold.count})`, formatAmount(r.giftCards.sold.total));
+  if (r.giftCards && r.giftCards.used !== '0.00') pair('Paid with gift cards', formatAmount(r.giftCards.used));
   pair('Cash takings', formatAmount(r.cash.in));
   if (r.cash.payIn !== '0.00') pair('Paid in', formatAmount(r.cash.payIn));
   if (r.cash.payOut !== '0.00') pair('Paid out', `-${formatAmount(r.cash.payOut)}`);

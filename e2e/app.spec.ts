@@ -577,6 +577,64 @@ test('online store: a product with sizes and a photo, open the store, a buyer or
   await expect(row).toContainText('BZ$67.50');
 });
 
+test('gift cards: sell one and email it, pay for a sale at the counter with it, the rest of it in the online store', async ({ page, browser }) => {
+  await logIn(page);
+  await page.getByRole('navigation').getByRole('link', { name: 'Gift cards' }).click();
+  await page.getByRole('button', { name: 'Sell a gift card' }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByRole('button', { name: 'BZ$50' }).click();
+  await dialog.getByLabel('For (name)').fill('Gil Gift');
+  await dialog.getByLabel(/^Their email/).fill('gil@gift.test');
+  const sent = Date.now();
+  await dialog.getByRole('button', { name: 'Sell BZ$50.00 card' }).click();
+  const code = (await page.locator('.gift-card-code').textContent())!.trim();
+  expect(code).toMatch(/^[A-Z2-9]{4}(-[A-Z2-9]{4}){3}$/);
+  await expect(page.getByText('Emailed to gil@gift.test.')).toBeVisible();
+  expect(await emailTo('gil@gift.test', sent)).toContain(code);
+  await page.getByRole('button', { name: 'Done' }).click();
+  await expect(page.getByRole('row', { name: /Gil Gift/ })).toContainText('BZ$50.00');
+
+  // At the counter: a coconut water, paid with the card (no other payment needed).
+  await page.goto(p('/counter'));
+  await page.getByRole('group', { name: 'Quick buttons' }).getByRole('button', { name: /Coconut water/ }).click();
+  await expect(page.locator('.cart .grand')).toContainText('BZ$3.94');
+  await page.getByRole('button', { name: 'Pay with a gift card' }).click();
+  await page.getByLabel('Gift card code').fill(code.toLowerCase());
+  await page.getByRole('button', { name: 'Use card' }).click();
+  await expect(page.locator('.tender.gift')).toContainText('pays BZ$3.94');
+  await expect(page.getByLabel('Cash received')).toHaveCount(0);
+  await page.keyboard.press('F2');
+  await expect(page.locator('.last-sale')).toContainText('Authorized');
+
+  // In the store: the rest of the card pays most of a hoodie; the rest is paid at pickup.
+  const buyer = await (await browser.newContext()).newPage();
+  await buyer.goto(p('/shop'));
+  await buyer.getByRole('link', { name: /Reef Hoodie/ }).click();
+  await buyer.getByRole('button', { name: 'M', exact: true }).click();
+  await buyer.getByRole('button', { name: /Add to cart/ }).click();
+  await buyer.getByRole('button', { name: 'View cart' }).click();
+  await buyer.getByRole('button', { name: /Check out/ }).click();
+  await buyer.getByLabel('Name', { exact: true }).fill('Gil Gift');
+  await buyer.getByLabel(/^Phone/).fill('+501 600 7777');
+  await buyer.getByRole('radio', { name: /Pickup/ }).check();
+  await buyer.getByRole('button', { name: 'Have a gift card?' }).click();
+  await buyer.getByLabel('Gift card code').fill(code);
+  await buyer.getByLabel('Gift card code').press('Enter');
+  await expect(buyer.locator('.summary .gift-line')).toContainText('BZ$46.06');
+  await expect(buyer.locator('.summary .due-line')).toContainText('BZ$21.44');
+  await buyer.getByRole('radio', { name: /Pay at pickup/ }).check();
+  await buyer.getByRole('button', { name: /Place order/ }).click();
+  await expect(buyer.getByRole('heading', { name: 'Thank you, Gil' })).toBeVisible();
+  await expect(buyer.getByText('Pay BZ$21.44 when you pick up your order.')).toBeVisible();
+
+  // The card is used up; what it paid for is on it.
+  await page.goto(p('/gift-cards'));
+  await page.getByRole('group', { name: 'Show' }).getByRole('button', { name: 'Used up' }).click();
+  await page.getByRole('row', { name: /Gil Gift/ }).click();
+  await expect(page.getByRole('dialog')).toContainText('Paid for a sale');
+  await expect(page.getByRole('dialog').locator('.gift-balance')).toHaveText('BZ$0.00');
+});
+
 test('till: set a PIN, add a till and pair it from the link, sign in, open a shift, scan and sell, lock', async ({ page, browser }) => {
   await logIn(page);
   await page.goto(p('/settings?tab=account'));

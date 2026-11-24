@@ -14,7 +14,9 @@
 
 import type { FastifyInstance } from 'fastify';
 import { audit } from '../db/audit.ts';
+import { toBigInt } from '../db/database.ts';
 import { BELIZE_DISTRICTS } from '../engine/ubl.ts';
+import { formatCents } from '../engine/decimal.ts';
 import { cancelOrder, centsString, fulfillOrder, loadOrder, loadRefunds, markOrderPaid, type OrderLineRow, type OrderRow, refundable, refundOrder, type RefundRow, trimDecimal } from '../commerce/store.ts';
 import { checkoutSummary, listCheckouts } from '../commerce/checkouts.ts';
 import { listBuyers } from '../commerce/buyers.ts';
@@ -47,6 +49,9 @@ export function orderJson(o: OrderRow, lines?: OrderLineRow[], document?: { id: 
     note: o.note,
     discount: o.discount_code ? { code: o.discount_code, net: centsString(o.discount_cents ?? 0) } : null,
     totals: { lineExtension: centsString(o.line_extension_cents), gst: centsString(o.gst_cents), total: centsString(o.total_cents), refunded: centsString(o.refunded_cents ?? 0) },
+    // Paid partly (or fully) with a gift card; the rest is what is collected the way chosen.
+    giftCard: toBigInt(o.gift_card_cents ?? 0) > 0n ? { amount: centsString(o.gift_card_cents) } : null,
+    amountDue: formatCents(toBigInt(o.total_cents) - toBigInt(o.gift_card_cents ?? 0)),
     documentId: o.document_id,
     ...(document !== undefined && { document }),
     ...(lines && {
@@ -264,7 +269,7 @@ export function registerOrderRoutes(app: FastifyInstance, deps: PipelineDeps, ct
     },
     async (request) => {
       requirePermission(request, 'documents.adjust');
-      const { refundId, document, amount } = await refundOrder(deps, request.tenantId, request.params.id, request.body, request.userId || null,
+      const { refundId, document, amount, toGiftCard } = await refundOrder(deps, request.tenantId, request.params.id, request.body, request.userId || null,
         (req) => checkCreditLimit(deps, request.tenantId, req));
       const full = await fullOrder(deps, request.tenantId, request.params.id);
       await audit(db, { tenantId: request.tenantId, userId: request.userId || null, action: 'order.refunded', target: `#${full.number}`, details: { amount, reason: request.body.reason, refundId }, ip: request.ip });
@@ -278,7 +283,7 @@ export function registerOrderRoutes(app: FastifyInstance, deps: PipelineDeps, ct
           request.log.error({ err: e }, 'refund email failed');
         }
       }
-      return { ...full, refund: { id: refundId, amount, documentId: document.documentId, status: document.status }, emailed };
+      return { ...full, refund: { id: refundId, amount, toGiftCard, documentId: document.documentId, status: document.status }, emailed };
     },
   );
 }

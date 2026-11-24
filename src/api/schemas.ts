@@ -162,6 +162,10 @@ export const issueSchema = {
     // Tax receipts paid partly one way and partly another (cash and card): the parts, adding up to the total.
     overrideCreditLimit: { type: 'boolean' },
     redeemPoints: { type: 'integer', minimum: 1, maximum: 10_000_000 },
+    giftCard: {
+      type: 'object', required: ['code', 'amount'], additionalProperties: false,
+      properties: { code: { type: 'string', minLength: 16, maxLength: 40 }, amount: money },
+    },
     tenders: {
       type: 'array',
       minItems: 2,
