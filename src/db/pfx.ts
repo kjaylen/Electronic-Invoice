@@ -19,9 +19,23 @@ export class PfxError extends Error {
   override name = 'PfxError';
 }
 
-export function pfxToPem(pfx: Buffer, password: string): { certificatePem: string; privateKeyPem: string } {
+/**
+ * The file's bytes as PKCS#12 itself. Some portals (the BTS portal among them) hand the file out
+ * written as base64 text, sometimes between PEM "-----BEGIN ...-----" lines, under a .pfx name:
+ * that is decoded here. A real PKCS#12 file starts with the byte 0x30 and is returned as it is.
+ */
+export function pfxBytes(file: Buffer): Buffer {
+  if (file[0] === 0x30) return file;
+  const text = file.toString('latin1').replace(/^﻿|^ï»¿/, '').replace(/-----(BEGIN|END)[^-]*-----/g, '').replace(/\s+/g, '');
+  if (text.length < 16 || !/^[A-Za-z0-9+/]+={0,2}$/.test(text)) return file;
+  const decoded = Buffer.from(text, 'base64');
+  return decoded[0] === 0x30 ? decoded : file;
+}
+
+export function pfxToPem(file: Buffer, password: string): { certificatePem: string; privateKeyPem: string } {
   let p12: forge.pkcs12.Pkcs12Pfx;
   try {
+    const pfx = pfxBytes(file);
     const asn1 = forge.asn1.fromDer(forge.util.createBuffer(pfx.toString('binary')));
     p12 = forge.pkcs12.pkcs12FromAsn1(asn1, false, password);
   } catch {
