@@ -27,6 +27,7 @@ import { ApiError, notFound } from './errors.ts';
 import { renderEmail } from '../templates/render.ts';
 import { requirePermission } from './permissions.ts';
 import { uuid } from './schemas.ts';
+import { nextCursor, parsePage } from './catalog.ts';
 import { assertCanIssue } from '../billing/billing.ts';
 import { emailLanguage, PHRASES } from '../templates/lang.ts';
 
@@ -122,9 +123,9 @@ export function registerOrderRoutes(app: FastifyInstance, deps: PipelineDeps, ct
   const { db } = deps;
   const idParams = { type: 'object', required: ['id'], properties: { id: uuid } } as const;
 
-  app.get<{ Querystring: { view?: string; q?: string } }>(
+  app.get<{ Querystring: { view?: string; q?: string; limit?: string; cursor?: string } }>(
     '/orders',
-    { schema: { querystring: { type: 'object', additionalProperties: false, properties: { view: { type: 'string', enum: Object.keys(VIEWS) }, q: { type: 'string', maxLength: 100 } } } } },
+    { schema: { querystring: { type: 'object', additionalProperties: false, properties: { view: { type: 'string', enum: Object.keys(VIEWS) }, q: { type: 'string', maxLength: 100 }, limit: { type: 'string', pattern: '^\\d{1,3}$' }, cursor: { type: 'string', maxLength: 200 } } } } },
     async (request) => {
       const params: unknown[] = [request.tenantId];
       let where = `tenant_id = $1 and ${VIEWS[request.query.view ?? 'to_do']}`;
@@ -138,12 +139,21 @@ export function registerOrderRoutes(app: FastifyInstance, deps: PipelineDeps, ct
           where += ` and (customer_name ilike $${params.length} or customer_phone like $${params.length} or customer_email ilike $${params.length})`;
         }
       }
-      const rows = (await db.query<OrderRow>(`select * from orders where ${where} order by created_at desc limit 300`, params)).rows;
+      // Pages like documents and customers: limit and cursor in, nextCursor out. Without a limit, the newest 300 as before.
+      const page = parsePage(request.query);
+      const limit = request.query.limit ? page.limit : 300;
+      if (page.after) {
+        params.push(page.after.createdAt, page.after.id);
+        where += ` and (created_at, id) < ($${params.length - 1}::timestamptz, $${params.length}::uuid)`;
+      }
+      params.push(limit + 1);
+      const found = (await db.query<OrderRow>(`select * from orders where ${where} order by created_at desc, id desc limit $${params.length}`, params)).rows;
+      const { items: rows, nextCursor: next } = nextCursor(found, limit);
       const counts = (await db.query<{ unpaid: number; unfulfilled: number }>(
         `select count(*) filter (where ${VIEWS.unpaid})::int as unpaid, count(*) filter (where ${VIEWS.unfulfilled})::int as unfulfilled from orders where tenant_id = $1`,
         [request.tenantId],
       )).rows[0]!;
-      return { data: rows.map((o) => orderJson(o)), counts };
+      return { data: rows.map((o) => orderJson(o)), counts, nextCursor: next };
     },
   );
 
