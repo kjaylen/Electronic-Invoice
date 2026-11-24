@@ -26,7 +26,7 @@ export interface NetSuiteAddonsProps {
 
 const DEFAULT_QR_FIELD = 'custbody_bts_qr';
 
-function saveFile(filename: string, text: string, type: string) {
+export function saveFile(filename: string, text: string, type: string) {
   const url = URL.createObjectURL(new Blob([text], { type }));
   const a = document.createElement('a');
   a.href = url;
@@ -61,7 +61,7 @@ export function qrTemplateBlock(numberField: string, qrField: string): string {
   ].join('\n');
 }
 
-function CopyButton({ text, label }: { text: string; label: string }) {
+export function CopyButton({ text, label }: { text: string; label: string }) {
   const t = useT();
   const [copied, setCopied] = useState(false);
   return (
@@ -79,7 +79,7 @@ function CopyButton({ text, label }: { text: string; label: string }) {
 }
 
 /** A numbered step of a guide: what to do, and whether it is done. */
-function Step({ n, title, done, children }: { n: number; title: string; done?: boolean; children: ReactNode }) {
+export function Step({ n, title, done, children }: { n: number; title: string; done?: boolean; children: ReactNode }) {
   const t = useT();
   return (
     <li className={`guide-step ${done ? 'done' : ''}`}>
@@ -93,7 +93,7 @@ function Step({ n, title, done, children }: { n: number; title: string; done?: b
 }
 
 /** What to type into a NetSuite form, field by field. */
-function Spec({ rows }: { rows: Array<[string, string]> }) {
+export function Spec({ rows }: { rows: Array<[string, string]> }) {
   return (
     <dl className="guide-spec">
       {rows.map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}

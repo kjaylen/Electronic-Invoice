@@ -2553,3 +2553,27 @@ main:has(.site-editor) { max-width: none; padding: 0.75rem 1rem 0.75rem; }
 .guide-code { margin: 0; padding: 0.7rem 0.85rem; max-height: 13rem; overflow: auto; background: var(--sheet-2); border: 1px solid var(--hairline); border-radius: var(--radius); font-family: var(--figures); font-size: 0.76rem; line-height: 1.5; white-space: pre; }
 .guide-row { gap: 0.5rem; flex-wrap: wrap; align-items: center; }
 .guide-row input { flex: 1; min-width: 12rem; max-width: 20rem; }
+
+/* Settings → Developers (web/src/pages/Developers.tsx): the connect guide, keys, and the logs. */
+.dev-head { flex-wrap: wrap; gap: 0.75rem; }
+.dev-title { display: grid; gap: 0.25rem; }
+.dev-title .row { gap: 0.6rem; }
+.dev-title h2, .dev-title p { margin: 0; }
+.dev-title p { max-width: 62rem; }
+.dev-key { padding: 0.35rem 0.6rem; background: var(--sheet-2); border: 1px solid var(--hairline); border-radius: var(--radius); font-size: 0.85rem; overflow-wrap: anywhere; }
+.dev-actions { justify-content: flex-end; gap: 0.75rem; flex-wrap: wrap; }
+.dev-sites { gap: 0.5rem; justify-self: stretch; }
+.dev-site-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--hairline); border-radius: var(--radius); background: var(--sheet); }
+.dev-site-list > li { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.4rem 0.7rem; font-size: 0.9rem; overflow-wrap: anywhere; }
+.dev-site-list > li + li { border-top: 1px solid var(--hairline); }
+.dev-totals { gap: 2.5rem; flex-wrap: wrap; }
+.dev-totals > div { display: grid; gap: 0.1rem; }
+.dev-totals strong { font-family: var(--display); font-size: 1.6rem; font-variant-numeric: tabular-nums; }
+/* Requests by day: one bar a day, the refused share marked at its foot. */
+.dev-days { list-style: none; margin: 0; padding: 0; height: 7rem; display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 4px; align-items: end; border-bottom: 1px solid var(--hairline-strong); }
+.dev-days > li { height: 100%; display: flex; align-items: flex-end; }
+.dev-bar { position: relative; width: 100%; min-height: 2px; background: var(--brand-line); border-radius: 3px 3px 0 0; overflow: hidden; display: flex; align-items: flex-end; }
+.dev-bar-bad { width: 100%; background: var(--coral); opacity: 0.75; }
+.dev-axis { margin-top: -0.5rem; }
+.dev-requests td { vertical-align: top; }
+.dev-requests .mono { overflow-wrap: anywhere; }

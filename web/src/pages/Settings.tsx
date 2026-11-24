@@ -14,7 +14,7 @@ import { CodeForm, RecoveryCodes, SetupSteps, type TwoFactorSetupInfo } from '..
 import { DISTRICTS, ErrorText, Field, Modal, money, Pager, Segmented, Select, usePageTitle, usePages } from '../ui';
 import { PlanTab, UpgradeNotice } from './Billing';
 import { DeleteBusinessCard } from './Closed';
-import { WebhooksPanel } from './Webhooks';
+import { DevelopersTab } from './Developers';
 import { IntegrationsTab } from './Integrations';
 import { StoreSettingsTab } from './StoreSettings';
 import { PinCard, TillsTab, UserPinDialog } from './Tills';
@@ -945,81 +945,6 @@ function ActivityTab() {
   );
 }
 
-// ---------- API keys ----------
-
-interface ApiKeyRow {
-  id: string;
-  name: string;
-  prefix: string;
-  createdAt: string;
-  lastUsedAt: string | null;
-  revokedAt: string | null;
-}
-
-function ApiKeysTab() {
-  const t = useT();
-  const [keys, setKeys] = useState<ApiKeyRow[]>([]);
-  const [name, setName] = useState('');
-  const [revealed, setRevealed] = useState<string | null>(null);
-  const [error, setError] = useState<unknown>(null);
-  const load = () => api<{ data: ApiKeyRow[] }>('/v1/api-keys').then((r) => setKeys(r.data)).catch(setError);
-  useEffect(() => {
-    void load();
-  }, []);
-  const create = async (e: FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    try {
-      const k = await api<{ key: string }>('/v1/api-keys', { method: 'POST', body: { name } });
-      setRevealed(k.key);
-      setName('');
-      await load();
-    } catch (err) {
-      setError(err);
-    }
-  };
-  return (
-    <section className="card stack">
-      <h2>{t('API keys')}</h2>
-      <p className="muted small">{t('For your own software: a POS, or a connection to your accounting system. Each key acts as this business.')}</p>
-      {revealed && (
-        <div className="banner warn">
-          <div style={{ width: '100%' }}>
-            <strong>{t('Copy this key now. It will not be shown again.')}</strong>
-            <div className="key-reveal mono">{revealed}</div>
-            <div className="row" style={{ marginTop: '0.5rem' }}>
-              <button className="secondary" onClick={() => void navigator.clipboard.writeText(revealed)}>{t('Copy')}</button>
-              <button className="link" onClick={() => setRevealed(null)}>{t("I've saved it")}</button>
-            </div>
-          </div>
-        </div>
-      )}
-      <form className="row" onSubmit={create}>
-        <input placeholder={t('Name, e.g. Front counter POS')} aria-label={t('Key name')} required value={name} onChange={(e) => setName(e.target.value)} style={{ maxWidth: 320 }} />
-        <button type="submit">{t('Create key')}</button>
-      </form>
-      <ErrorText error={error} />
-      {keys.length > 0 && (
-        <div className="table-wrap">
-          <table className="responsive">
-            <thead><tr><th scope="col">{t('Name')}</th><th scope="col">{t('Key')}</th><th scope="col">{t('Last used')}</th><th scope="col"><span className="sr-only">{t('Actions')}</span></th></tr></thead>
-            <tbody>
-              {keys.map((k) => (
-                <tr key={k.id}>
-                  <td data-label={t('Name')}>{k.name}</td>
-                  <td data-label={t('Key')} className="mono">etd_{k.prefix}_…</td>
-                  <td data-label={t('Last used')}>{k.revokedAt ? t('Revoked') : k.lastUsedAt ? k.lastUsedAt.slice(0, 16).replace('T', ' ') : t('Never')}</td>
-                  <td className="right">{!k.revokedAt && <button className="link" onClick={() => void api(`/v1/api-keys/${k.id}`, { method: 'DELETE' }).then(load).catch(setError)}>{t('Revoke')}</button>}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </section>
-  );
-}
-
 // ---------- the page ----------
 
 type Tab = 'account' | 'business' | 'plan' | 'store' | 'tills' | 'users' | 'activity' | 'keys' | 'integrations';
@@ -1059,13 +984,7 @@ export function Settings() {
       {tab === 'tills' && <TillsTab />}
       {tab === 'users' && <UsersTab />}
       {tab === 'activity' && <ActivityTab />}
-      {tab === 'keys' && (me?.billing && !me.billing.features.includes('api') ? <UpgradeNotice feature="api" /> : (
-        <div className="stack">
-          <div className="banner info"><div><strong>{t('Build on Floreo')}</strong>{t('Issue documents from your own POS or accounting system with the API.')} <a href="/docs" target="_blank" rel="noreferrer">{t('Read the API reference')} ↗</a></div></div>
-          <ApiKeysTab />
-          {me?.billing && !me.billing.features.includes('webhooks') ? <UpgradeNotice feature="webhooks" /> : <WebhooksPanel />}
-        </div>
-      ))}
+      {tab === 'keys' && (me?.billing && !me.billing.features.includes('api') ? <UpgradeNotice feature="api" /> : <DevelopersTab />)}
       </div>
     </div>
   );

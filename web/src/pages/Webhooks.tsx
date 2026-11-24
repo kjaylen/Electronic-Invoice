@@ -1,4 +1,4 @@
-/** Settings → Developers → Webhooks: endpoints, their deliveries, test, rotate, switch on or off. */
+/** Settings → Developers → Webhooks: endpoints, their deliveries (each one in full), tests of any event, rotate, switch on or off. */
 
 import { type FormEvent, useCallback, useEffect, useState } from 'react';
 import { api } from '../api';
@@ -30,7 +30,96 @@ interface Delivery {
   nextAttemptAt: string | null;
 }
 
+interface DeliveryDetail extends Delivery {
+  responseBody: string | null;
+  body: unknown;
+}
+
+interface EventSample {
+  type: string;
+  sample: unknown;
+}
+
 const when = (iso: string) => new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+
+/** One delivery in full: what was sent, and what the endpoint answered. */
+function DeliveryView({ id, onClose }: { id: string; onClose: () => void }) {
+  const t = useT();
+  const [d, setD] = useState<DeliveryDetail | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  useEffect(() => {
+    void api<DeliveryDetail>(`/v1/webhooks/deliveries/${id}`).then(setD).catch(setError);
+  }, [id]);
+  return (
+    <Modal title={d ? d.type : t('Delivery')} onClose={onClose} wide>
+      <ErrorText error={error} />
+      {!d ? !error && <div className="skeleton" style={{ height: '12rem' }} /> : (
+        <div className="stack">
+          <dl className="guide-spec">
+            <div><dt>{t('Result')}</dt><dd>{d.status === 'delivered' ? t('Delivered') : d.status === 'failed' ? t('Failed') : t('Retrying')}{d.responseStatus !== null && ` · ${d.responseStatus}`}{d.error && d.status !== 'delivered' && ` · ${d.error}`}</dd></div>
+            <div><dt>{t('Attempts')}</dt><dd>{d.attempts}</dd></div>
+            <div><dt>{t('Made')}</dt><dd>{when(d.createdAt)}</dd></div>
+            {d.deliveredAt && <div><dt>{t('Delivered')}</dt><dd>{when(d.deliveredAt)}</dd></div>}
+            {d.nextAttemptAt && <div><dt>{t('Next try')}</dt><dd>{when(d.nextAttemptAt)}</dd></div>}
+          </dl>
+          <div className="stack" style={{ gap: '0.35rem' }}>
+            <strong className="small">{t('What was sent')}</strong>
+            <pre className="guide-code" tabIndex={0}>{JSON.stringify(d.body, null, 2)}</pre>
+          </div>
+          <div className="stack" style={{ gap: '0.35rem' }}>
+            <strong className="small">{t('What your endpoint answered')}</strong>
+            <pre className="guide-code" tabIndex={0}>{d.responseBody || (d.responseStatus === null ? t('No answer.') : t('An empty answer.'))}</pre>
+          </div>
+          <div className="row"><span className="spacer" /><button type="button" className="secondary" onClick={onClose}>{t('Done')}</button></div>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+/** Send a test: a ping, or the sample of any event, shown before it is sent. */
+function TestDialog({ endpoint, onClose, onSent }: { endpoint: Endpoint; onClose: () => void; onSent: () => void }) {
+  const t = useT();
+  const [events, setEvents] = useState<EventSample[]>([]);
+  const [event, setEvent] = useState('ping');
+  const [result, setResult] = useState<{ ok: boolean; status: number | null; error: string | null } | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    void api<{ data: EventSample[] }>('/v1/webhooks/events').then((r) => setEvents(r.data)).catch(setError);
+  }, []);
+  const sample = events.find((e) => e.type === event)?.sample;
+  const send = async () => {
+    setBusy(true);
+    setError(null);
+    setResult(null);
+    try {
+      setResult(await api(`/v1/webhooks/${endpoint.id}/test`, { method: 'POST', body: event === 'ping' ? {} : { event } }));
+      onSent();
+    } catch (e) {
+      setError(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal title={t('Send a test')} onClose={onClose} wide>
+      <div className="stack">
+        <p className="small muted" style={{ margin: 0 }}>{t('Sent now to {url}, signed like a real delivery. A test of an event carries its sample and "test": true, so your code can tell it from the real thing.', { url: endpoint.url })}</p>
+        <Field label={t('What to send')}>
+          <select value={event} onChange={(e) => { setEvent(e.target.value); setResult(null); }}>
+            <option value="ping">ping</option>
+            {events.map((e) => <option key={e.type} value={e.type}>{e.type}</option>)}
+          </select>
+        </Field>
+        {sample !== undefined && <pre className="guide-code" tabIndex={0}>{JSON.stringify({ ...(sample as object), test: true }, null, 2)}</pre>}
+        <ErrorText error={error} />
+        {result && <div className={`banner ${result.ok ? 'info' : 'warn'}`} role="status"><div><strong>{result.ok ? t('Your endpoint answered {status}', { status: result.status ?? 'OK' }) : t('It did not work: {error}', { error: result.error ?? String(result.status) })}</strong></div></div>}
+        <div className="row"><span className="spacer" /><button type="button" className="secondary" onClick={onClose}>{t('Done')}</button><button type="button" disabled={busy} onClick={() => void send()}>{busy ? t('Sending…') : t('Send')}</button></div>
+      </div>
+    </Modal>
+  );
+}
 
 function SecretReveal({ secret, onDone }: { secret: string; onDone: () => void }) {
   const t = useT();
@@ -55,6 +144,7 @@ function Deliveries({ endpoint }: { endpoint: Endpoint }) {
   const toast = useToast();
   const [rows, setRows] = useState<Delivery[] | null>(null);
   const [error, setError] = useState<unknown>(null);
+  const [viewing, setViewing] = useState<string | null>(null);
   const load = useCallback(() => api<{ data: Delivery[] }>(`/v1/webhooks/${endpoint.id}/deliveries`).then((r) => setRows(r.data)).catch(setError), [endpoint.id]);
   useEffect(() => {
     void load();
@@ -77,12 +167,18 @@ function Deliveries({ endpoint }: { endpoint: Endpoint }) {
                 {d.error && d.status !== 'delivered' && <div className="muted">{d.error}{d.nextAttemptAt && ` · ${t('next try {when}', { when: when(d.nextAttemptAt) })}`}</div>}
                 {d.attempts > 1 && <div className="muted">{t('{n} attempts', { n: d.attempts })}</div>}
               </td>
-              <td className="right">{d.status === 'failed' && d.type !== 'ping' && <button className="link" onClick={() => void api(`/v1/webhooks/deliveries/${d.id}/retry`, { method: 'POST' }).then(() => { toast(t('Sending again shortly')); void load(); }).catch(setError)}>{t('Send again')}</button>}</td>
+              <td className="right">
+                <span className="row small dev-actions">
+                  <button className="link" onClick={() => setViewing(d.id)}>{t('View')}</button>
+                  {d.status === 'failed' && d.type !== 'ping' && <button className="link" onClick={() => void api(`/v1/webhooks/deliveries/${d.id}/retry`, { method: 'POST' }).then(() => { toast(t('Sending again shortly')); void load(); }).catch(setError)}>{t('Send again')}</button>}
+                </span>
+              </td>
             </tr>
           ))}
         </tbody>
       </table>
       <ErrorText error={error} />
+      {viewing && <DeliveryView id={viewing} onClose={() => setViewing(null)} />}
     </div>
   );
 }
@@ -95,6 +191,7 @@ export function WebhooksPanel() {
   const [adding, setAdding] = useState(false);
   const [secret, setSecret] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
+  const [testing, setTesting] = useState<Endpoint | null>(null);
   const [form, setForm] = useState<{ url: string; description: string; all: boolean; events: string[] }>({ url: '', description: '', all: true, events: [] });
   const load = useCallback(() => api<{ data: Endpoint[]; events: string[] }>('/v1/webhooks').then(setData).catch(setError), []);
   useEffect(() => {
@@ -119,17 +216,13 @@ export function WebhooksPanel() {
       setForm({ url: '', description: '', all: true, events: [] });
     });
   };
-  const test = (ep: Endpoint) => act(async () => {
-    const r = await api<{ ok: boolean; status: number | null; error: string | null }>(`/v1/webhooks/${ep.id}/test`, { method: 'POST' });
-    toast(r.ok ? t('Your endpoint answered {status}', { status: r.status ?? 'OK' }) : t('It did not work: {error}', { error: r.error ?? String(r.status) }), r.ok ? 'ok' : 'info');
-  });
   if (!data) return error ? <ErrorText error={error} /> : <div className="skeleton" style={{ height: '8rem' }} />;
   return (
     <section className="card stack">
       <div className="row">
         <div>
           <h2>{t('Webhooks')}</h2>
-          <p className="muted small">{t('Your systems are told as soon as a document is authorized or rejected, or an online order changes, with a signed HTTPS request.')}</p>
+          <p className="muted small">{t('Your systems are told as soon as something happens (an order placed or paid, a payment that failed, a product or its stock changing, a document authorized), with a signed HTTPS request. An endpoint must be on the internet over https: while you build, point it at a tunnel to your computer.')}</p>
         </div>
         <span className="spacer" />
         <button onClick={() => setAdding(true)}>{t('Add endpoint')}</button>
@@ -156,7 +249,7 @@ export function WebhooksPanel() {
               </div>
               <div className="row small endpoint-actions">
                 <button className="link" onClick={() => setOpen(open === ep.id ? null : ep.id)}>{open === ep.id ? t('Hide deliveries') : t('Deliveries')}</button>
-                {ep.enabled && <button className="link" onClick={() => void test(ep)}>{t('Send a test')}</button>}
+                {ep.enabled && <button className="link" onClick={() => setTesting(ep)}>{t('Send a test')}</button>}
                 <button className="link" onClick={() => void act(() => api(`/v1/webhooks/${ep.id}`, { method: 'PATCH', body: { enabled: !ep.enabled } }), ep.enabled ? t('Endpoint switched off') : t('Endpoint switched on'))}>{ep.enabled ? t('Switch off') : t('Switch on')}</button>
                 <button className="link" onClick={() => void act(async () => setSecret((await api<{ secret: string }>(`/v1/webhooks/${ep.id}/rotate-secret`, { method: 'POST' })).secret))}>{t('New secret')}</button>
                 <button className="link danger-link" onClick={() => void act(() => api(`/v1/webhooks/${ep.id}`, { method: 'DELETE' }), t('Endpoint removed'))}>{t('Remove')}</button>
@@ -167,6 +260,7 @@ export function WebhooksPanel() {
         </ul>
       )}
       <p className="small muted"><a href="/docs#webhooks" target="_blank" rel="noreferrer">{t('How to check signatures and handle retries')} ↗</a></p>
+      {testing && <TestDialog endpoint={testing} onClose={() => setTesting(null)} onSent={() => void load()} />}
 
       {adding && (
         <Modal title={t('Add a webhook endpoint')} onClose={() => setAdding(false)}>
