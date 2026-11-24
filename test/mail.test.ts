@@ -701,7 +701,7 @@ test('emails that are not transactional carry a way to stop them, by link and by
   await withMail(async ({ f, service, memory }) => {
     const mail = await service();
     const optional = Object.entries(MAIL_TYPES).filter(([, d]) => d.category === 'optional').map(([k]) => k);
-    assert.deepEqual(optional.sort(), ['checkout-reminder', 'daily-summary']);
+    assert.deepEqual(optional.sort(), ['checkout-reminder', 'daily-summary', 'filing-reminder']);
 
     const summary = () => mail.send({ type: 'daily-summary', tenantId: f.tenantA, to: 'owner@corner.example', subject: 'Yesterday', text: 'BZ$120 in sales', html: '<html><body><p>BZ$120 in sales</p></body></html>' });
     assert.equal((await summary()).status, 'sent');

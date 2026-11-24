@@ -91,6 +91,7 @@ import { type HtmlPdfRenderer, setPdfRenderer } from '../render/browser-pdf.ts';
 import { namesOneThing, storePageMeta, storeRobots, storeSitemap, withMeta, withoutMeta } from '../commerce/seo.ts';
 import { registerLayawayRoutes } from './layaways.ts';
 import { registerLocationRoutes } from './locations.ts';
+import { registerBusinessTaxRoutes } from './business-tax.ts';
 
 export type Principal = 'api' | Role;
 
@@ -432,6 +433,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     registerGiftCardRoutes(tenant, deps, ctx);
     registerLayawayRoutes(tenant, deps);
     registerLocationRoutes(tenant, deps);
+    registerBusinessTaxRoutes(tenant, deps);
     registerSiteRoutes(tenant, deps);
     registerConnectRoutes(tenant, deps, ctx);
     registerDeveloperRoutes(tenant, deps, devlog);

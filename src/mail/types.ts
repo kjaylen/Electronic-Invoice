@@ -52,6 +52,7 @@ export const MAIL_TYPES = {
   'quote-answer': { label: 'Quote accepted or declined', sender: 'platform', category: 'transactional' },
   'notice': { label: 'Notice', sender: 'platform', category: 'transactional' },
   'daily-summary': { label: 'Daily summary', sender: 'platform', category: 'optional' },
+  'filing-reminder': { label: 'What is due this month', sender: 'platform', category: 'optional' },
   'test': { label: 'Test email', sender: 'business', category: 'transactional' },
 } as const satisfies Record<string, MailTypeDef>;
 
