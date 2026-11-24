@@ -1,178 +1,149 @@
-# Plan: connect your own site to Floreo
+# Plan: email (SMTP settings, one mail service, a queue, a log)
 
-Who this is for: small businesses in Belize, and the developers and agencies
-who build sites for them. They make a site with whatever tools they like
-(plain HTML and JavaScript first, React second) and connect it to Floreo for
-the catalogue, cart, checkout, payments, orders, stock and the BTS tax receipt
-every paid order gets. The target: from sign-up to a working product page and a
-test checkout in under 30 minutes.
+Who this is for: small businesses in Belize and the people who buy from them.
+A business's customers get its invoices, receipts, order confirmations and
+reminders by email, so these must look like they come from the business and
+must arrive. The platform's own staff set up the server everything goes
+through; a business can add its own.
 
 Status marks: `[ ]` to do, `[x]` done, `[-]` skipped (the reason is in DECISIONS.md).
 
-The plan before this one (the site builder and the polish pass) is finished and
-kept in `docs/plans/2026-11-site-builder.md`.
+The plan before this one (connecting a site built elsewhere) is finished and
+kept in `docs/plans/2026-11-connect-your-site.md`.
 
 ## What exists (read end to end, 24 Nov 2026)
 
-- **A public store API** (`src/api/storefront.ts`, `/v1/store/:slug/...`): store
-  details, products, collections, a product, photos, pricing a cart, placing an
-  order, the buyer's order page and receipt, starting and confirming an online
-  payment, gift cards, checkout reminders, buyer accounts (cookie). No sign-in;
-  rate limits per IP on the routes that write.
-- **Secret API keys** (`src/db/apikeys.ts`, `etd_<prefix>_<secret>`): one kind,
-  made by owners in Settings → Developers, 600 requests a minute, act as the
-  whole business. Needs the Business plan (a new business's trial has it).
-- **Webhooks** (`src/webhooks/webhooks.ts`, Pro plan): fourteen events from
-  database triggers, signed, retried six times over about a day, the last 50
-  deliveries per endpoint listed, a test ping, secret rotation.
-- **Reference** (`/docs`, from `/v1/openapi.json`): the key-authenticated API
-  only. The store API is described nowhere but the README.
-- **Test and live**: a business is in the BTS test environment or in
-  production, as a whole. Test documents have no fiscal value and there is a
-  pretend card page for payments.
+- **One small module** (`src/mail/mailer.ts`): `smtpMailer(SMTP_URL, MAIL_FROM)`
+  with nodemailer, an outbox of `.eml` files for development, and a memory
+  mailer for tests. Everything goes from one address set in the environment;
+  the business's address is only the reply-to.
+- **No queue.** Every email is sent inside the request that causes it (or the
+  housekeeping run). A slow mail server holds up checkout; a dead one loses
+  the order confirmation, or fails the request.
+- **No settings screens, no log, no test button.** A failure is a line in the
+  server log, or a row in `document_messages` for emailed documents.
+- **Templates** (`src/templates/`, Liquid): eleven customer-facing emails a
+  business can edit, with a live preview, versions and a Spanish default. The
+  other emails are built in code with `simpleHtml`, which looks different.
+- **Opt-outs** only for checkout reminders (`store_email_optouts`).
+- **No sign-up verification email.** A new business's owner signs in at once.
 
-## What an outside site hits today
+## Every email the platform sends (27, from 25 places in the code)
 
-Found by acting as a customer: a business signed up on a private server, three
-products, the store opened, an API key made, and a static site on another
-origin (`http://localhost:3140`) calling the API with what the README says.
+From a business, to its customers and suppliers (its own server when it has one):
 
-1. **Nothing works from a browser.** The store API sends no CORS headers, so
-   `fetch` from any other site fails ("blocked by CORS policy") on the first
-   call, and every POST fails its preflight with 404. The only way in today is
-   a proxy on the customer's own server, which a non-developer cannot build.
-2. **Nothing says how to start.** Settings → Developers talks about issuing
-   documents from a POS. `/docs` has no store endpoints. There is no quick
-   start, no snippet, nothing to copy.
-3. **The only key is a secret one** that acts as the whole business. It must
-   not go into a page, and there is nothing that may.
-4. **Answers point inside Floreo.** A product has `imageId`, not an address;
-   an order answers with a `path` and a `redirectUrl` relative to Floreo; I
-   had to guess the photo address from the README.
-5. **Paying online never comes back.** The provider returns the buyer to
-   Floreo's own order page. The pretend card page finds its way back from the
-   browser's storage on Floreo's origin, so an order placed from another site
-   ends on the store's home page with nothing said.
-6. **No drop-in pieces.** No script, no buy button, no cart; everything is
-   to be built by hand against the API.
-7. **Errors are the validator's own words**: `querystring/limit must match
-   pattern "^\d{1,3}$"`, `body must have required property 'fulfillment'`.
-   Correct, but not what to do about it.
-8. **Lists differ.** Documents and customers page with `limit` and `cursor`;
-   store products take `limit` only and say nothing about more; orders stop at
-   300.
-9. **`Idempotency-Key` on store orders is ignored** (the hosted checkout sends
-   one): a retry after a dropped connection places a second order.
-10. **Test and live look the same** from outside: one boolean in the store's
-    details; keys carry no mark.
-11. **Webhooks**: nothing about a product or its stock changing, or a payment
-    failing; the delivery log shows no payload and no answer body; endpoints
-    must be public https, so nothing can be tried on a laptop without a tunnel
-    (and the docs do not say so).
-12. **Nothing to debug with.** No request log, no error log, no usage; a key
-    shows only when it was last used.
-13. **Buyer accounts and the store's own design** (`site`, `theme` in the
-    store's details) are tied to Floreo's own pages; an outside site gets a
-    large answer it has no use for.
+| Type | Where | Template |
+|---|---|---|
+| `document` | `sendDocumentEmail` in `src/api/documents.ts`: invoices, receipts, credit notes, with PDF and XML | `email.document` |
+| `reminder` | the same function, for invoices coming due and overdue | `email.reminder` |
+| `statement` | `src/api/receivables.ts` | `email.statement` |
+| `quote` | `src/api/quotes.ts` | `email.quote` |
+| `purchase-order` | `src/api/purchasing.ts` | `email.purchase-order` |
+| `order` | `src/api/storefront.ts` (order confirmation) | `email.order` |
+| `order-ready` | `src/api/orders.ts` | `email.order-ready` |
+| `back-in-stock` | `src/commerce/stock-alerts.ts` | `email.back-in-stock` |
+| `checkout-reminder` | `src/commerce/checkouts.ts` (not transactional: unsubscribe link) | `email.checkout-reminder` |
+| `gift-card` | `src/api/giftcards.ts` | `email.gift-card` |
+| `sign-in-code` | `src/api/store-accounts.ts` | `email.sign-in-code` |
+| `account-link` | `src/api/accounts.ts` (built in code today) | new: `email.account-link` |
 
-## The plan, most helpful to a customer first
+From the platform, to a business and its people:
 
-### A. A first integration that works
+| Type | Where |
+|---|---|
+| `password-reset` | `src/api/auth.ts` |
+| `staff-invitation`, `staff-password` | `src/api/users.ts` |
+| `support-password-reset`, `two-factor-off`, `support-notice`, `business-live` | `src/api/platform.ts` |
+| `business-closed` | `src/api/business.ts` |
+| `service-invoice` | `src/api/billing.ts` (when there is no e-invoice to send) |
+| `store-message` | `src/api/storefront.ts` (the store's contact form, to the business) |
+| `new-order` | `src/api/storefront.ts` (to the business) |
+| `quote-answer` | `src/api/quotes.ts` (accepted or declined, to the business) |
+| `notice` | `src/notify/notifications.ts` (rejections, outages, certificates, plan, low stock) |
+| `daily-summary` | `src/notify/daily.ts` (not transactional: unsubscribe link) |
+| `test` | new: the "Send test email" button |
 
-- [x] 1. **Publishable keys.** `pk_test_…` / `pk_live_…`, safe in a page: they
-  open only the public store API, only for the sites on their list (any
-  `localhost` for a test key). Made, listed, changed and revoked by owners
-  (`/v1/publishable-keys`); kept in the store's settings, no schema change.
-- [x] 2. **The store API answers other sites.** CORS for requests that carry a
-  publishable key from an allowed site, never with cookies; a refusal says
-  what is wrong and where to fix it, and is readable from the page. Requests
-  with no `Origin` (servers, the hosted store) work as before.
-- [x] 3. **Answers an outside site can use.** Full addresses beside the old
-  fields (`imageUrl`, `url`, `orderUrl`, `payment.url`), `GET
-  /v1/store/:slug/info` (the store without its hosted design), `returnUrl` on
-  orders and payments so the buyer comes back to the site they bought on, and
-  the pretend card page returning there too.
-- [x] 4. **The embed script.** One tag (`/embed.js`): `<floreo-products>`,
-  `<floreo-product>`, `<floreo-buy-button>`, `<floreo-cart>`,
-  `<floreo-checkout>`, styled with CSS variables and `::part`, English and
-  Spanish, a test-mode mark, and `window.Floreo` for developers. Served from a
-  fixed address with a short cache.
-- [x] 5. **"Connect your site" in Settings → Developers.** Numbered steps, the
-  key made in place, the snippet to copy with the store and key filled in, and
-  a check that the site has called.
-- [x] 6. **Docs that match.** The store API in the OpenAPI description and on
-  `/docs`; a quick start; the components' reference; worked examples for plain
-  HTML/JS and React, each one run.
+## A. Foundations
 
-### B. A predictable API
+- [ ] A1. Migration `057_mail.sql`: `mail_settings` (the platform's row and one
+  per business), `mail_messages` (the queue and the log in one table),
+  `mail_suppressions`. New tables only. (054 to 056 are taken by branches not
+  merged yet.)
+- [ ] A2. `src/mail/types.ts`: the catalogue of every email type above: who
+  sends it, who gets it, transactional or not, whether its text holds a secret.
+- [ ] A3. `src/mail/address.ts`: one check for recipient addresses; subjects,
+  names and headers that cannot carry a line break (header injection).
+- [ ] A4. `src/mail/settings.ts`: the settings themselves: validation in plain
+  words, presets, the password encrypted with the server's key and bound to
+  its row, never returned.
+- [ ] A5. `src/mail/smtp.ts`: the only file that talks SMTP (nodemailer): the
+  three encryption modes, time limits, what a server's refusal means (retry,
+  give up, the address is dead, the settings are wrong) and a hint for a person.
+- [ ] A6. `src/mail/service.ts`: the one mail service. `send()` checks, writes
+  the message to the queue and returns; delivery happens in the background.
 
-- [x] 7. **Errors that say what to do.** Validation errors in plain words with
-  the field named; one list of codes in the docs; unknown routes point at the
-  reference. The `{ error: { code, message, details } }` shape stays.
-- [x] 8. **One way to page.** `limit` + `cursor` → `nextCursor` on store
-  products and on `/v1/orders`, as documents and customers already do.
-- [x] 9. **`Idempotency-Key` on store orders.** A retry returns the first
-  answer and never orders twice.
+## B. The queue
 
-### C. Events
+- [ ] B1. Background delivery: claimed rows (safe with several servers), a
+  time limit per attempt, a message left "sending" by a crash goes back.
+- [ ] B2. Retry with backoff on temporary failures (1 min, 5 min, 30 min,
+  2 h), failed after 5 attempts (`MAIL_MAX_ATTEMPTS`); permanent refusals fail at once.
+- [ ] B3. A business's own server first; if it has none, or its server fails
+  for a reason that is the server's, the platform's sender with the business's
+  name as the from name, and the business told on its settings page.
+- [ ] B4. Messages that hold a secret (reset links, codes) are scrubbed once
+  delivered, are never resent, and are not sent after they stop working.
+- [ ] B5. Rate limit per business (per hour and per day); mail over the limit waits, it is not lost.
+- [ ] B6. Housekeeping: the log is kept 90 days (`MAIL_LOG_DAYS`), message
+  bodies and attachments 30 (`MAIL_CONTENT_DAYS`).
 
-- [x] 10. **More events.** `product.created`, `product.updated`,
-  `product.deleted`, `stock.changed`, `order.payment_failed`, written by the
-  code that makes the change (no new triggers).
-- [x] 11. **A delivery log that explains.** One delivery with its payload and
-  the endpoint's answer; a test delivery of any event type with a sample
-  payload. The answer shown is the last attempt's: a history of every attempt
-  needs a table (DECISIONS.md).
+## C. Every email moved onto the service, one at a time
 
-### D. A safe sandbox
+- [ ] C1. `document`, `reminder`, `statement`
+- [ ] C2. `quote`, `quote-answer`, `purchase-order`
+- [ ] C3. `order`, `new-order`, `order-ready`, `store-message`
+- [ ] C4. `back-in-stock`, `checkout-reminder`, `gift-card`, `sign-in-code`
+- [ ] C5. `account-link` (now a template a business can edit)
+- [ ] C6. `password-reset`, `staff-invitation`, `staff-password`
+- [ ] C7. `support-password-reset`, `two-factor-off`, `support-notice`, `business-live`, `business-closed`, `service-invoice`
+- [ ] C8. `notice`, `daily-summary`
+- [ ] C9. Nothing but `src/mail/smtp.ts` imports nodemailer; a test keeps it so.
 
-- [x] 12. **Test and live kept apart.** Keys named for the environment they
-  work in, a test key refused on a live store (and the reverse) with the
-  reason, `test: true` on what a test store answers, test cards that come back
-  to the site. Documented as it is: a business is in test or live as a whole.
+## D. Settings
 
-### E. Security
+- [ ] D1. Platform console → Email: host, port, encryption, username,
+  password, from name, from address, reply-to; presets; the password shown as
+  set with "Replace".
+- [ ] D2. Settings → Email for a business (optional), the same fields.
+- [ ] D3. "Send test email" on both: a real message, the server's own answer,
+  and the likely cause in plain words.
+- [ ] D4. Presets: Gmail / Google Workspace, Outlook / Microsoft 365, Zoho,
+  Amazon SES, with the note where an app password is needed.
+- [ ] D5. A business's server may not be an address inside the platform's own network.
 
-- [x] 13. **Limits and rules.** Requests per minute per publishable key and
-  visitor; exact-match origins, `Vary: Origin`, no credentials; a secret key
-  sent from a web page to the store API is refused and says why (to the rest
-  of the API a browser on another site never gets as far as sending one);
-  replacing a key without downtime in the dashboard.
+## E. Templates
 
-### F. A dashboard to debug with
+- [ ] E1. One layout (`src/mail/layout.ts`) for every email built in code:
+  the business's logo or name, a heading, text, a button, a footer; phone-friendly; HTML and plain text.
+- [ ] E2. The eleven Liquid templates keep working as they are; `account-link` joins them.
+- [ ] E3. Everything put into an email is escaped; tests with hostile values.
 
-- [x] 14. **Usage and errors per key.** Requests and failures by day, by
-  endpoint and error code (counters in the existing rate-limit table), and
-  the most recent requests with their answers (`/v1/developer/...`). The list
-  of recent requests is kept in the server's memory; the table that would
-  make it durable is written up in DECISIONS.md.
-- [x] 15. **Settings → Developers as a dashboard.** Connect your site, keys
-  (publishable and secret), webhooks, logs and usage, in tabs.
+## F. Log, safeguards, deliverability
 
-### G. Proof
+- [ ] F1. The email log: recipient, subject, type, status, error, times. Staff
+  see all; a business sees its own. Resend.
+- [ ] F2. Suppression list: an address a server says does not exist, and
+  people who opt out. Shown and removable on the settings page.
+- [ ] F3. An unsubscribe link (and one-click header) on every email that is not transactional.
+- [ ] F4. Deliverability guide: SPF, DKIM, DMARC in plain language, and a
+  check of the sending domain's DNS.
 
-- [x] 16. **The test site again, from the docs alone.** A fresh business, a
-  fresh folder, only what `/docs` and the dashboard say; browse to checkout to
-  a paid test order with its receipt.
-- [x] 17. **README, DECISIONS, the full check and the browser tests.**
+## G. Proof
 
-## How it ended
-
-Every item is done; none was skipped. Three stop short of what was first
-written, each for the same reason (no schema changes), and say so above:
-item 11 (the last attempt's answer, not every attempt's), item 13 (where a
-secret key from a page is refused) and item 14 (the latest requests are kept
-in memory). What was deliberately left for later, and what was found and not
-fixed, is in DECISIONS.md under "Connect your own site".
-
-The proof (item 16) was run on a fresh database: a new business, a key made
-in Settings → Developers → Connect your site, the lines it gives pasted into
-a new page on another origin, then products → a product → the cart → the
-checkout → the test card → back on the site, paid, with its receipt PDF; the
-guide's check and the Logs page showed the ten requests it took.
-
-Checks at the end (item 17), run here rather than by GitHub Actions:
-`npm run check` (types, and 374 of 375 unit tests passing with one skipped as
-before) and the whole browser suite, 49 of 49, the older specs included
-(run on a web build in a scratch folder with `WEB_ROOT`, so the demo's
-`web/dist` was left alone).
+- [ ] G1. Tests: valid and invalid settings, each encryption mode, wrong
+  password, server unreachable, retry then success, retry then failure,
+  fallback to the platform, templates with missing and hostile values.
+- [ ] G2. A local mail catcher (`npm run mail:catch`); the demo and the
+  browser tests send through it by SMTP.
+- [ ] G3. Every type triggered end to end and looked at in the catcher.
+- [ ] G4. README, `deploy/env.example`, DECISIONS.md, and the steps to go live.
