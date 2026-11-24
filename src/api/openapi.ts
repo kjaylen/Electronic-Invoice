@@ -2,10 +2,17 @@
  * The public API's OpenAPI 3.1 description, built from the routes' own
  * validation schemas (so it can never drift from what the server accepts),
  * served at GET /v1/openapi.json. The web app renders it at /docs.
+ *
+ * Two parts: the store API (/v1/store/:slug/..., public, for sites built
+ * elsewhere, with example answers from store-reference.ts) and the API for a
+ * business's own systems (a secret key). Webhook events are listed with a
+ * sample of what each carries.
  */
 
 import type { RouteOptions } from 'fastify';
 import { WEBHOOK_EVENTS } from '../webhooks/webhooks.ts';
+import { SAMPLE_EVENT_DATA } from '../webhooks/samples.ts';
+import { hostedOnly, STORE_ERRORS, STORE_EXAMPLES, STORE_REQUESTS, STORE_SUMMARIES } from './store-reference.ts';
 
 interface CollectedRoute {
   method: string;
@@ -13,6 +20,9 @@ interface CollectedRoute {
   schema: { params?: Schema; querystring?: Schema; body?: Schema } | undefined;
 }
 type Schema = { type?: string | string[]; properties?: Record<string, Schema>; required?: readonly string[]; [k: string]: unknown };
+
+const STOREFRONT = { name: 'Storefront', description: 'A store for buyers: products, pricing a cart, orders, paying, receipts. Public; a page on another site sends the store\'s publishable key. Prices include GST.' };
+const HOSTED = { name: 'Storefront: hosted pages', description: 'What only the store\'s own hosted pages use: its design, buyer accounts (a cookie), the pretend card page, reminder links. Listed so nothing is hidden; a site built elsewhere does not need them.' };
 
 /** Areas of the API usable with an API key, in the order the reference shows them. */
 const TAGS: Array<{ prefix: string; name: string; description: string }> = [
@@ -204,30 +214,43 @@ const SUMMARIES: Record<string, string> = {
   'POST /v1/webhooks/deliveries/{id}/retry': 'Send a failed delivery again',
 };
 
-const DESCRIPTION = `Issue Belize electronic tax documents (BTS e-invoicing) from your own systems.
+const DESCRIPTION = `Sell from your own site with a Floreo store, and issue Belize electronic tax documents (BTS e-invoicing) from your own systems.
 
 ## Authentication
-Create an API key in the web app (Settings → API keys) and send it as \`Authorization: Bearer etd_…\`.
-The key belongs to one business; every request acts for that business.
+There are two kinds of keys, both made in Settings → Developers and both sent as \`Authorization: Bearer …\`.
+
+A publishable key (\`pk_test_…\` or \`pk_live_…\`) is for web pages. It opens only the store API (\`/v1/store/{store}/…\`), which is what buyers see anyway, and only from the sites on the key's list; a test key also works from any page on your own computer. It is safe to show. On a GET it may go in the address instead (\`?key=pk_…\`), which spares the browser a second request.
+
+A secret key (\`etd_…\`) is for servers and your own software. It acts as the whole business (orders, products, documents, reports), so it must never be put in a page or in code others can read; a secret key sent from a page is refused. Every request with a key acts for the business the key belongs to.
+
+Calls to the store API from a server (no \`Origin\` header) need no key.
 
 ## Money and quantities
 Decimal strings, never numbers: \`"24.99"\`, \`"2"\`. Totals come from the same calculation BTS checks, to the cent.
 
+## Test and live
+A business is in test mode or live, as a whole. A new business starts in test mode: documents go to the BTS test environment and have no fiscal value, and the store can take test payments (a pretend card page, no money moves). Keys say which they are for: \`pk_test_…\` works only while the store is in test mode, \`pk_live_…\` only once it is live, and each is refused on the other with the reason. Store answers carry \`"test": true\` in test mode. To keep trying things after going live, use a second business that stays in test mode.
+
 ## Errors
-Always \`{ "error": { "code", "message", "details"? } }\`. 400 malformed request, 401 bad key, 402 your plan's limit,
-403 not allowed, 404 not found, 409 wrong state, 422 a document BTS would refuse (the message names the rule), 429 too many requests.
+Always \`{ "error": { "code", "message", "details"? } }\`. The message says what is wrong and what to do; show it to the person building the site, and to buyers when the status is 409 or 422 (sold out, a code that does not apply). 400 the request does not fit (the message names the field), 401 no key or a wrong one, 402 your plan's limit,
+403 not allowed, 404 not found, 409 wrong state, 422 it cannot be done as asked (an order, or a document BTS would refuse; the message names the rule), 429 too many requests.
+
+## Pagination
+Lists answer \`{ "data": [...], "nextCursor": "…" | null }\`. Send \`limit\`, and to get the next page send the \`nextCursor\` you were given as \`cursor\`, unchanged. \`null\` means there is no more.
 
 ## Idempotency
-Send \`Idempotency-Key: <unique per sale>\` when issuing. A retry returns the original answer (\`Idempotent-Replayed: true\`) and never issues twice.
+Send \`Idempotency-Key: <unique per sale>\` when issuing a document or placing a store order. A retry with the same key and body returns the original answer (\`Idempotent-Replayed: true\`) and never issues or orders twice.
 
 ## Rate limits
-600 requests a minute per key by default. Every answer carries \`X-RateLimit-Limit\` and \`X-RateLimit-Remaining\`; over the limit you get 429 with \`Retry-After\`.
+A secret key: 600 requests a minute by default. A publishable key: 300 a minute from each visitor. Every answer carries \`X-RateLimit-Limit\` and \`X-RateLimit-Remaining\`; over the limit you get 429 with \`Retry-After\`. Placing orders, gift card codes and messages have their own limits per visitor.
 
 ## Webhooks
 Events: ${WEBHOOK_EVENTS.map((e) => `\`${e}\``).join(', ')}.
 Each delivery is a JSON POST \`{ id, type, createdAt, data }\` signed with your endpoint's secret:
 \`X-Floreo-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<raw body>">\`.
-Check the signature and that \`t\` is recent, answer 2xx within 10 seconds, and handle the same \`id\` twice gracefully. Failed deliveries are retried for about a day.
+Check the signature and that \`t\` is recent, answer 2xx within 10 seconds, and handle the same \`id\` twice gracefully. Failed deliveries are retried after 1 minute, 5 minutes, 30 minutes, 2, 6 and 12 hours; an endpoint that fails 20 in a row is switched off. Each delivery, with what was sent and what your endpoint answered, is in Settings → Developers → Webhooks. A test delivery carries \`"test": true\`.
+
+An endpoint must be on the internet over https. While you build, point it at a tunnel to your own computer.
 `;
 
 export function routeCollector() {
@@ -244,6 +267,7 @@ export function routeCollector() {
 }
 
 const toOpenApiPath = (url: string) => url.replace(/:([A-Za-z_]+)/g, '{$1}');
+const tagOf = (path: string) => (path.startsWith('/v1/store/') ? (hostedOnly(path) ? HOSTED : STOREFRONT) : TAGS.find((t) => path === t.prefix || path.startsWith(`${t.prefix}/`)));
 
 function parameters(schema: Schema | undefined, where: 'path' | 'query') {
   if (!schema?.properties) return [];
@@ -255,40 +279,59 @@ function parameters(schema: Schema | undefined, where: 'path' | 'query') {
 export function buildOpenApi(routes: CollectedRoute[], options: { serverUrl?: string } = {}) {
   const paths: Record<string, Record<string, unknown>> = {};
   for (const r of routes) {
-    const tag = TAGS.find((t) => r.url === t.prefix || r.url.startsWith(`${t.prefix}/`));
-    if (!tag) continue;
     const path = toOpenApiPath(r.url);
+    const tag = tagOf(path);
+    if (!tag) continue;
     const key = `${r.method} ${path}`;
+    const store = path.startsWith('/v1/store/');
+    const example = STORE_EXAMPLES[key];
+    const created = r.method === 'POST' && (path === '/v1/documents' || path === '/v1/customers' || path === '/v1/items' || path === '/v1/webhooks' || path === '/v1/store/{slug}/orders');
     const op: Record<string, unknown> = {
       tags: [tag.name],
-      summary: SUMMARIES[key] ?? `${r.method} ${path}`,
+      summary: SUMMARIES[key] ?? STORE_SUMMARIES[key] ?? `${r.method} ${path}`,
       operationId: key.replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, ''),
       parameters: [...parameters(r.schema?.params, 'path'), ...parameters(r.schema?.querystring, 'query')],
       responses: {
-        [r.method === 'POST' && (path === '/v1/documents' || path === '/v1/customers' || path === '/v1/items' || path === '/v1/webhooks') ? '201' : '200']: { description: 'Success' },
+        [created ? '201' : '200']: { description: 'Success', ...(example !== undefined && { content: { 'application/json': { example } } }) },
         default: { description: 'An error', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
       },
     };
-    if (r.schema?.body) op.requestBody = { required: true, content: { 'application/json': { schema: r.schema.body } } };
-    if (key === 'POST /v1/documents') {
+    // The store API is public: no key from a server, the store's publishable key from a page on another site.
+    if (store) op.security = [{}, { publishableKey: [] }];
+    if (r.schema?.body) op.requestBody = { required: true, content: { 'application/json': { schema: r.schema.body, ...(STORE_REQUESTS[key] !== undefined && { example: STORE_REQUESTS[key] }) } } };
+    if (key === 'POST /v1/documents' || key === 'POST /v1/store/{slug}/orders') {
       (op.parameters as unknown[]).push({ name: 'Idempotency-Key', in: 'header', required: false, schema: { type: 'string', maxLength: 200 }, description: 'Unique per sale; a retry returns the original answer.' });
     }
     (paths[path] ??= {})[r.method.toLowerCase()] = op;
   }
-  const tags = [...new Map(TAGS.filter((t) => t.description).map((t) => [t.name, { name: t.name, description: t.description }])).values()];
+  const tags = [STOREFRONT, ...new Map(TAGS.filter((t) => t.description).map((t) => [t.name, { name: t.name, description: t.description }])).values(), HOSTED];
+  // The store API first, in the order a storefront uses it (as store-reference.ts lists it); the hosted pages' own endpoints last.
+  const storeOrder = [...new Set(Object.keys(STORE_SUMMARIES).map((k) => k.split(' ')[1]!))];
+  const order = (path: string) => (path.startsWith('/v1/store/')
+    ? (hostedOnly(path) ? 1000 : -1000) + storeOrder.indexOf(path)
+    : TAGS.findIndex((t) => path === t.prefix || path.startsWith(`${t.prefix}/`)));
   return {
     openapi: '3.1.0',
     info: { title: 'Floreo API', version: '1.0', description: DESCRIPTION },
     servers: [{ url: options.serverUrl ?? '/' }],
     security: [{ apiKey: [] }],
     tags,
-    paths: Object.fromEntries(Object.entries(paths).sort(([a], [b]) => {
-      const ta = TAGS.findIndex((t) => a.startsWith(t.prefix));
-      const tb = TAGS.findIndex((t) => b.startsWith(t.prefix));
-      return ta - tb || a.localeCompare(b);
-    })),
+    paths: Object.fromEntries(Object.entries(paths).sort(([a], [b]) => order(a) - order(b) || a.localeCompare(b))),
+    // What each webhook event carries (OpenAPI 3.1's own place for it).
+    webhooks: Object.fromEntries(WEBHOOK_EVENTS.map((type) => [type, {
+      post: {
+        summary: type,
+        requestBody: { content: { 'application/json': { example: { id: '3f6c1d1e-7a2b-4c5d-8e9f-0a1b2c3d4e5f', type, createdAt: '2026-11-24T16:07:02.511Z', data: SAMPLE_EVENT_DATA[type] } } } },
+        responses: { '200': { description: 'Any 2xx within 10 seconds means delivered' } },
+      },
+    }])),
+    // Every error code of the store API: its status and what to do about it.
+    'x-store-errors': STORE_ERRORS,
     components: {
-      securitySchemes: { apiKey: { type: 'http', scheme: 'bearer', description: 'An API key from Settings → API keys: etd_<prefix>_<secret>' } },
+      securitySchemes: {
+        apiKey: { type: 'http', scheme: 'bearer', description: 'A secret key from Settings → Developers: etd_<prefix>_<secret>. For servers; never in a page.' },
+        publishableKey: { type: 'http', scheme: 'bearer', description: 'A publishable key from Settings → Developers: pk_test_… or pk_live_…. For pages on the sites listed on the key; on a GET it may be sent as ?key= instead.' },
+      },
       schemas: {
         Error: {
           type: 'object',

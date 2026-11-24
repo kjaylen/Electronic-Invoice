@@ -455,9 +455,11 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   await app.register(async (cb) => registerPaymentCallbacks(cb, deps, ctx, gatewayOptions(deps, slugOfTenant, paymentExtras)), { prefix: '/v1/payment-callbacks' });
 
   // The public storefront: no sign-in, scoped by the business's address.
-  await app.register(async (store) => registerStorefrontRoutes(store, deps, ctx, paymentExtras, {
-    ownOrigins: tillOrigins, ...(options.storeRateLimitPerMinute && { ratePerMinute: options.storeRateLimitPerMinute }),
-  }), { prefix: '/v1/store' });
+  await app.register(async (store) => {
+    // In the reference too (openapi.ts), from the routes' own schemas.
+    store.addHook('onRoute', collected.onRoute);
+    registerStorefrontRoutes(store, deps, ctx, paymentExtras, { ownOrigins: tillOrigins, ...(options.storeRateLimitPerMinute && { ratePerMinute: options.storeRateLimitPerMinute }) });
+  }, { prefix: '/v1/store' });
 
   // The web app: static files, and index.html for any other GET so client-side routes work.
   const webRoot = options.webRoot;
