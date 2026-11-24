@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>My store</title>
+  <style>
+    body { font: 16px/1.5 system-ui, sans-serif; color: #1c2b33; max-width: 960px; margin: 0 auto; padding: 1.5rem; }
+    header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 2rem; }
+    h1 { margin: 0; }
+    /* The store takes your colours and corners. Its text uses your page's font. */
+    :root { --floreo-accent: #0b6e69; --floreo-radius: 6px; }
+    /* ::part reaches a piece inside a component. */
+    floreo-products::part(title) { text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.85rem; }
+    #thanks { padding: 0.75rem 1rem; background: #ecf8f0; border-radius: 6px; }
+  </style>
+
+  <!-- 1. Your store's script, once. Change the address, the store and the key to yours. -->
+  <script src="https://YOUR-FLOREO/embed.js" data-store="your-store" data-key="pk_test_YOUR_KEY" async></script>
+</head>
+<body>
+  <header>
+    <h1>My store</h1>
+    <!-- 2. The cart button. -->
+    <floreo-cart></floreo-cart>
+  </header>
+
+  <p id="thanks" hidden></p>
+
+  <!-- 3. Your products: eight to a page, cheapest first. A product opens over the page. -->
+  <floreo-products limit="8" sort="price_asc"></floreo-products>
+
+  <script>
+    // Optional: your own code can listen to what happens, and use the cart and the store's API.
+    function withFloreo(run) {
+      if (window.Floreo) run(window.Floreo);
+      else window.addEventListener('floreo:ready', function () { run(window.Floreo); }, { once: true });
+    }
+    withFloreo(function (Floreo) {
+      // An order was placed on this page.
+      Floreo.on('order', function (order) {
+        var thanks = document.getElementById('thanks');
+        thanks.textContent = 'Order #' + order.number + ' placed, BZ$' + order.totals.total + '.';
+        thanks.hidden = false;
+      });
+      // The cart changed: { lines, count, subtotal }.
+      Floreo.on('cart', function (cart) {
+        document.title = cart.count ? '(' + cart.count + ') My store' : 'My store';
+      });
+    });
+  </script>
+</body>
+</html>

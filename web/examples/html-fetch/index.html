@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>My store</title>
+  <style>
+    body { font: 16px/1.5 system-ui, sans-serif; max-width: 960px; margin: 0 auto; padding: 1.5rem; }
+    #products { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 1rem; }
+    .product { border: 1px solid #ddd; border-radius: 8px; padding: 1rem; display: grid; gap: 0.5rem; }
+    .product img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 6px; }
+    form { display: grid; gap: 0.75rem; max-width: 26rem; }
+    label { display: grid; gap: 0.25rem; }
+    #message { padding: 0.75rem 1rem; background: #f3f4f6; border-radius: 6px; }
+    #message.bad { background: #fdf3f3; color: #8a1f1f; }
+  </style>
+</head>
+<body>
+  <h1>My store</h1>
+  <p id="message" hidden></p>
+
+  <h2>Products</h2>
+  <div id="products"></div>
+
+  <h2>Cart</h2>
+  <ul id="cart"></ul>
+
+  <form id="checkout" hidden>
+    <label>Full name <input name="name" required></label>
+    <label>Phone <input name="phone" required minlength="7"></label>
+    <label>Email (for the receipt) <input name="email" type="email"></label>
+    <label>How to pay <select name="paymentMethod"></select></label>
+    <p id="total"></p>
+    <button>Place order</button>
+  </form>
+
+  <script>
+    // Your Floreo address, your store's name, and a publishable key (Settings → Developers).
+    const FLOREO = 'https://YOUR-FLOREO';
+    const STORE = 'your-store';
+    const KEY = 'pk_test_YOUR_KEY';
+
+    const PAYMENT_NAMES = { bank_transfer: 'Bank transfer', pay_at_pickup: 'Pay at pickup', cash_on_delivery: 'Cash on delivery', online: 'Pay online now' };
+    const $ = (id) => document.getElementById(id);
+    let cart = []; // [{ variantId, quantity, title, price }]
+
+    // One helper for every call: the key in the Authorization header, JSON in and out, errors as exceptions.
+    async function floreo(path, { method = 'GET', body, idempotencyKey } = {}) {
+      const res = await fetch(`${FLOREO}/v1/store/${STORE}${path}`, {
+        method,
+        headers: {
+          Authorization: `Bearer ${KEY}`,
+          ...(body && { 'Content-Type': 'application/json' }),
+          ...(idempotencyKey && { 'Idempotency-Key': idempotencyKey }),
+        },
+        body: body && JSON.stringify(body),
+      });
+      const json = await res.json();
+      // Every error has the same shape: { error: { code, message } }. The message says what to do.
+      if (!res.ok) throw Object.assign(new Error(json.error.message), { code: json.error.code, status: res.status });
+      return json;
+    }
+
+    function say(text, bad = false) {
+      $('message').textContent = text;
+      $('message').className = bad ? 'bad' : '';
+      $('message').hidden = false;
+    }
+
+    // 1. The products. Prices include GST; money is always text ("45.00"), never a number.
+    async function showProducts() {
+      const { data } = await floreo('/products?limit=12&sort=title');
+      $('products').replaceChildren(...data.map((p) => {
+        const card = document.createElement('div');
+        card.className = 'product';
+        if (p.imageUrl) card.append(Object.assign(document.createElement('img'), { src: p.imageUrl, alt: '' }));
+        card.append(Object.assign(document.createElement('strong'), { textContent: p.title }));
+        card.append(`${p.priceVaries ? 'From ' : ''}BZ$${p.price}`);
+        const button = Object.assign(document.createElement('button'), { textContent: p.soldOut ? 'Sold out' : 'Add to cart', disabled: p.soldOut });
+        button.onclick = () => addToCart(p.handle);
+        card.append(button);
+        return card;
+      }));
+    }
+
+    // 2. What is ordered is a variant (a size, a colour); a product without options has one.
+    async function addToCart(handle) {
+      const product = await floreo(`/products/${handle}`);
+      const variant = product.variants.find((v) => v.available);
+      const line = cart.find((l) => l.variantId === variant.id);
+      if (line) line.quantity += 1;
+      else cart.push({ variantId: variant.id, quantity: 1, title: [product.title, variant.title].filter(Boolean).join(' – '), price: variant.price });
+      await showCart();
+    }
+
+    // 3. The store prices the cart: the total, and the ways to pay for this kind of order.
+    async function showCart() {
+      $('cart').replaceChildren(...cart.map((l) => Object.assign(document.createElement('li'), { textContent: `${l.quantity} × ${l.title}, BZ$${l.price} each` })));
+      $('checkout').hidden = cart.length === 0;
+      if (!cart.length) return;
+      const quote = await floreo('/quote', { method: 'POST', body: { lines: cart.map(({ variantId, quantity }) => ({ variantId, quantity })), fulfillment: 'pickup' } });
+      $('total').textContent = `Total BZ$${quote.totals.total} (GST included: BZ$${quote.totals.gst})`;
+      $('checkout').elements.paymentMethod.replaceChildren(...quote.paymentMethods.map((m) => new Option(PAYMENT_NAMES[m] ?? m, m)));
+    }
+
+    // 4. Place the order. The Idempotency-Key makes a retry safe: the same key never orders twice.
+    const orderKey = crypto.randomUUID();
+    $('checkout').onsubmit = async (event) => {
+      event.preventDefault();
+      const form = new FormData(event.target);
+      try {
+        const order = await floreo('/orders', {
+          method: 'POST',
+          idempotencyKey: orderKey,
+          body: {
+            lines: cart.map(({ variantId, quantity }) => ({ variantId, quantity })),
+            fulfillment: 'pickup',
+            paymentMethod: form.get('paymentMethod'),
+            customer: { name: form.get('name'), phone: form.get('phone'), ...(form.get('email') && { email: form.get('email') }) },
+            // Paying online: where the buyer comes back to afterwards. It must be on one of the key's sites.
+            ...(form.get('paymentMethod') === 'online' && { returnUrl: location.origin + location.pathname }),
+          },
+        });
+        // Paying online: on to the payment page (in test mode, a pretend card page).
+        if (order.payment?.url) return location.assign(order.payment.url);
+        cart = [];
+        await showCart();
+        say(`Thank you. Order #${order.number} is placed. Follow it at ${order.orderUrl}`);
+      } catch (error) {
+        say(error.message, true);
+      }
+    };
+
+    // 5. Back from the payment page: the address carries floreo_order, floreo_token and floreo_payment.
+    async function afterPaying() {
+      const back = new URLSearchParams(location.search);
+      const number = back.get('floreo_order');
+      if (!number) return;
+      const token = back.get('floreo_token');
+      history.replaceState(null, '', location.pathname);
+      if (back.get('floreo_cancelled')) return say('The payment was cancelled. Nothing was charged.', true);
+      const payment = await floreo(`/orders/${number}/payments/${back.get('floreo_payment')}/confirm?t=${token}`, { method: 'POST' });
+      const order = await floreo(`/orders/${number}?t=${token}`);
+      if (payment.status === 'paid') say(`Paid. Thank you! Order #${order.number}. Your receipt: ${order.document ? order.document.pdfUrl : 'on its way to your email'}`);
+      else say(`The payment did not go through${payment.problem ? `: ${payment.problem}` : ''}. Try again from ${order.orderUrl}`, true);
+    }
+
+    showProducts().catch((error) => say(error.message, true));
+    afterPaying().catch((error) => say(error.message, true));
+  </script>
+</body>
+</html>

@@ -9,20 +9,13 @@
  * work), so it does not depend on the other tests.
  */
 
-import { createServer, type Server } from 'node:http';
-import { readFileSync } from 'node:fs';
-import type { AddressInfo } from 'node:net';
-import { type APIRequestContext, expect, type Page, test } from '@playwright/test';
+import { expect, type Page, test } from '@playwright/test';
+import { type OutsideSite, serveSite, setUpStore, SLUG, type Store } from './outside-site.ts';
 
 test.describe.configure({ mode: 'serial' });
 
-const SLUG = 'reef-goods';
-const OWNER = { name: 'Maya Reef', email: 'maya@reefgoods.test', password: 'reef goods test only 1' };
-const API = { 'X-Requested-With': 'etd-web', 'X-Business': SLUG };
-const cert = (name: string) => readFileSync(new URL(`../test/certs/${name}`, import.meta.url), 'utf8');
-
-let api: APIRequestContext;
-let site: Server;
+let store: Store;
+let site: OutsideSite;
 let siteUrl = '';
 let floreo = '';
 let key = '';
@@ -49,56 +42,19 @@ const PAGES: Record<string, () => string> = {
 
 test.beforeAll(async ({ playwright }, info) => {
   floreo = String(info.project.use.baseURL);
-  api = await playwright.request.newContext({ baseURL: floreo, extraHTTPHeaders: API });
-  // A business of its own, in test mode; signing in instead when an earlier run already made it.
-  const signup = await api.post('/v1/auth/signup', {
-    data: {
-      business: { legalName: 'Reef Goods Ltd', tradeName: 'Reef Goods', tin: '654321', address: { street: '12 Front Street', city: 'San Pedro', districtCode: '1' }, contact: { telephone: '501-226-0000', email: 'hello@reefgoods.test' } },
-      owner: OWNER, sells: 'products',
-    },
-  });
-  if (!signup.ok()) expect((await api.post('/v1/auth/login', { data: { business: SLUG, login: OWNER.email, password: OWNER.password } })).ok()).toBeTruthy();
-  expect((await api.put('/v1/certificate', { data: { certificatePem: cert('signer-654321.cert.pem'), privateKeyPem: cert('signer-654321.key.pem') } })).ok()).toBeTruthy();
-  const have = new Set(((await (await api.get('/v1/products')).json()).data as Array<{ handle: string }>).map((x) => x.handle));
-  const products = [
-    { title: 'Hot sauce trio', description: 'Three habanero sauces.\n\nMade in Belize.', status: 'active', variants: [{ price: '18.00', gstCategory: 'S', sellerCode: 'HOT-3' }] },
-    { title: 'Island T-shirt', description: 'Soft cotton, printed in San Pedro.', status: 'active', option1Name: 'Size', variants: [{ option1: 'S', price: '40.00', gstCategory: 'S', stock: 50 }, { option1: 'M', price: '40.00', gstCategory: 'S', stock: 3 }, { option1: 'L', price: '40.00', gstCategory: 'S', stock: 0 }] },
-    { title: 'Reef-safe sunscreen', description: 'Mineral sunscreen, SPF 30.', status: 'active', variants: [{ price: '24.00', gstCategory: 'S' }] },
-  ];
-  for (const product of products) {
-    if (!have.has(product.title.toLowerCase().replace(/[^a-z0-9]+/g, '-'))) expect((await api.post('/v1/products', { data: product })).status()).toBe(201);
-  }
-  const settings = await api.put('/v1/store-settings', {
-    data: {
-      enabled: true, delivery: { enabled: true, zones: [{ name: 'San Pedro', fee: '8.00' }] }, pickup: { enabled: true, instructions: 'Ask at the counter' },
-      payments: { bankTransfer: { enabled: true, instructions: 'Belize Bank 000-111, Reef Goods Ltd' }, cashOnDelivery: { enabled: true }, payAtPickup: { enabled: true }, online: { enabled: true, provider: 'test' } },
-    },
-  });
-  expect(settings.ok(), await settings.text()).toBeTruthy();
-  const made = await api.post('/v1/publishable-keys', { data: { name: `Browser test ${Date.now()}` } });
-  expect(made.status(), await made.text()).toBe(201);
-  key = (await made.json()).key;
-  expect(key).toMatch(/^pk_test_/);
-
-  // The outside site: its own server, so its own origin.
-  site = createServer((req, res) => {
-    const path = new URL(req.url ?? '/', 'http://x').pathname;
-    if (path === '/favicon.ico') return void res.writeHead(204).end();
-    const make = PAGES[path];
-    if (!make) return void res.writeHead(404).end('not found');
-    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }).end(make());
-  });
-  await new Promise<void>((resolve) => site.listen(0, '127.0.0.1', resolve));
-  siteUrl = `http://127.0.0.1:${(site.address() as AddressInfo).port}`;
+  store = await setUpStore(playwright, floreo);
+  key = store.key;
+  site = await serveSite((path) => (PAGES[path] ? { body: PAGES[path]!(), type: 'text/html; charset=utf-8' } : undefined));
+  siteUrl = site.url;
 });
 
 test.afterAll(async () => {
-  await api?.dispose();
-  await new Promise((resolve) => (site ? site.close(resolve) : resolve(null)));
+  await store?.api.dispose();
+  await site?.close();
 });
 
+const order = (number: string) => store.order(number);
 const overlay = (p: Page) => p.locator('floreo-overlay dialog');
-const order = async (number: string) => ((await (await api.get(`/v1/orders?view=all&q=${number}`)).json()).data as Array<{ number: number; paymentStatus: string; paymentMethod: string; documentId: string | null }>).find((o) => String(o.number) === number)!;
 
 async function fillContact(p: Page, scope = p.locator('body')) {
   await scope.getByLabel('Full name').fill('Ana Buyer');
