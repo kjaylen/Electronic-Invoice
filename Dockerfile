@@ -4,7 +4,7 @@
 # Node runs the TypeScript sources directly (type stripping), so there is no compile step
 # for the server; the web app is built in the first stage.
 
-FROM node:22-bookworm-slim AS web
+FROM node:25-bookworm-slim AS web
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
@@ -14,7 +14,7 @@ COPY scripts/compress-web.ts ./scripts/compress-web.ts
 # Built, then compressed ahead of time: the server sends scripts and styles a third of the size.
 RUN npm run web:build && npm run web:compress
 
-FROM node:22-bookworm-slim AS runtime
+FROM node:25-bookworm-slim AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
 # pg_dump and pg_restore for scripts/backup.sh and scripts/restore.sh.
