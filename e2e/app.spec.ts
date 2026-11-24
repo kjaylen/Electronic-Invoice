@@ -688,7 +688,8 @@ test('till: set a PIN, add a till and pair it from the link, sign in, open a shi
   await expect(till.locator('.cart .grand')).toContainText('BZ$3.94');
   await till.getByLabel('Cash received').fill('5');
   await till.getByRole('button', { name: /Issue receipt/ }).click();
-  await expect(till.locator('.last-sale')).toContainText('Authorized');
+  // Made on the till first (offline first), then sent.
+  await expect(till.locator('.last-sale')).toContainText('Saved on the till, not sent yet');
   await expect(till.locator('.shift-bar.open')).toContainText('Cash expected BZ$53.94');
 
   await till.getByRole('button', { name: 'Sales', exact: true }).click();

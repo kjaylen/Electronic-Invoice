@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const admin = new URL(process.env.E2E_ADMIN_DATABASE_URL ?? 'postgres://einvoicing:einvoicing@localhost:5432/einvoicing');
-admin.pathname = '/einvoicing_e2e';
+admin.pathname = `/${process.env.E2E_DB ?? 'einvoicing_e2e'}`;
 
 Object.assign(process.env, {
   DATABASE_URL: admin.toString(),

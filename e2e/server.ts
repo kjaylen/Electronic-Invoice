@@ -12,7 +12,8 @@ import pg from 'pg';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const admin = process.env.E2E_ADMIN_DATABASE_URL ?? 'postgres://einvoicing:einvoicing@localhost:5432/einvoicing';
-const name = 'einvoicing_e2e';
+// E2E_DB: another database, for a second run beside this one (another checkout's tests).
+const name = process.env.E2E_DB ?? 'einvoicing_e2e';
 
 const client = new pg.Client({ connectionString: admin });
 await client.connect();
