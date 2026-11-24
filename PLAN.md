@@ -1,170 +1,153 @@
-# Plan: the site builder as a flagship, then polish across Floreo
+# Plan: connect your own site to Floreo
 
-Who this is for: owners of small businesses in Belize, most of them not
-technical and many working from a phone, who use Business → Site to make and
-keep up their online store (home page, pages such as About and Contact, the
-look, menus) without code.
+Who this is for: small businesses in Belize, and the developers and agencies
+who build sites for them. They make a site with whatever tools they like
+(plain HTML and JavaScript first, React second) and connect it to Floreo for
+the catalogue, cart, checkout, payments, orders, stock and the BTS tax receipt
+every paid order gets. The target: from sign-up to a working product page and a
+test checkout in under 30 minutes.
 
 Status marks: `[ ]` to do, `[x]` done, `[-]` skipped (the reason is in DECISIONS.md).
 
-## What exists (read end to end, 23 Nov 2026)
+The plan before this one (the site builder and the polish pass) is finished and
+kept in `docs/plans/2026-11-site-builder.md`.
 
-- **Document model** (`src/commerce/site.ts`, `site-schema.ts`): one JSON site
-  per store (theme, header, footer, home, product-page sections, own pages),
-  twenty section types defined by schema, seven looks, eleven bundled fonts.
-  Every save goes through `normalizeSite`. Draft / publish / last 30 versions.
-- **Editor** (`web/src/pages/SiteEditor.tsx`, `web/src/site/*`): panel with
-  Pages / Theme / Header / Footer / Search tabs, forms built from the schema,
-  section list with drag to reorder, undo/redo, autosave after 700 ms, live
-  preview (the real storefront in a frame) at three sizes, history dialog.
-- **Storefront** (`web/src/pages/Shop.tsx`, `web/src/site/sections.tsx`,
-  `theme.ts`): renders the published site; `src/commerce/seo.ts` writes the
-  title, description, canonical and Open Graph tags, sitemap and robots.
+## What exists (read end to end, 24 Nov 2026)
 
-## What is broken or rough
+- **A public store API** (`src/api/storefront.ts`, `/v1/store/:slug/...`): store
+  details, products, collections, a product, photos, pricing a cart, placing an
+  order, the buyer's order page and receipt, starting and confirming an online
+  payment, gift cards, checkout reminders, buyer accounts (cookie). No sign-in;
+  rate limits per IP on the routes that write.
+- **Secret API keys** (`src/db/apikeys.ts`, `etd_<prefix>_<secret>`): one kind,
+  made by owners in Settings → Developers, 600 requests a minute, act as the
+  whole business. Needs the Business plan (a new business's trial has it).
+- **Webhooks** (`src/webhooks/webhooks.ts`, Pro plan): fourteen events from
+  database triggers, signed, retried six times over about a day, the last 50
+  deliveries per endpoint listed, a test ping, secret rotation.
+- **Reference** (`/docs`, from `/v1/openapi.json`): the key-authenticated API
+  only. The store API is described nowhere but the README.
+- **Test and live**: a business is in the BTS test environment or in
+  production, as a whole. Test documents have no fiscal value and there is a
+  pretend card page for payments.
 
-Found by reading the code and using the builder in the browser.
+## What an outside site hits today
 
-Losing work:
-1. Leaving the editor within 700 ms of an edit drops it: the pending save is
-   cancelled on unmount, and nothing warns on closing the tab.
-2. A failed save is never retried, the error never clears, and nothing is kept
-   on the device to recover from.
-3. Saves can overlap (an older request finishing after a newer one), and two
-   people (or two tabs) editing overwrite each other silently.
-4. A page whose address collides with another's, even for a moment while
-   typing it, is **dropped by the server** on the next autosave. A page with a
-   bad address is dropped too.
-5. The page address box strips a trailing hyphen on every keystroke, so
-   "about-us" cannot be typed.
-6. Renaming a page's address, or deleting a page, leaves menu links and
-   buttons pointing at an address that no longer exists (the delete prompt
-   says they go to the home page; they do not).
-7. Undo history is written inside a state updater, so React StrictMode (and
-   any re-run) records steps twice.
-8. The preview can stop following edits: the frame's `load` event can land
-   after the storefront says it is ready, and resets the flag.
-9. Discard, restore and add-section have no error handling (unhandled
-   rejections, no message).
+Found by acting as a customer: a business signed up on a private server, three
+products, the store opened, an API key made, and a static site on another
+origin (`http://localhost:3140`) calling the API with what the README says.
 
-Wasteful or wrong requests:
-10. The product picker in a link refetches every 200 ms for as long as there
-    is text in it (a new `exclude` array each render).
-11. "Ones I pick" refetches the whole product list in a loop when a picked
-    product no longer exists.
+1. **Nothing works from a browser.** The store API sends no CORS headers, so
+   `fetch` from any other site fails ("blocked by CORS policy") on the first
+   call, and every POST fails its preflight with 404. The only way in today is
+   a proxy on the customer's own server, which a non-developer cannot build.
+2. **Nothing says how to start.** Settings → Developers talks about issuing
+   documents from a POS. `/docs` has no store endpoints. There is no quick
+   start, no snippet, nothing to copy.
+3. **The only key is a secret one** that acts as the whole business. It must
+   not go into a page, and there is nothing that may.
+4. **Answers point inside Floreo.** A product has `imageId`, not an address;
+   an order answers with a `path` and a `redirectUrl` relative to Floreo; I
+   had to guess the photo address from the README.
+5. **Paying online never comes back.** The provider returns the buyer to
+   Floreo's own order page. The pretend card page finds its way back from the
+   browser's storage on Floreo's origin, so an order placed from another site
+   ends on the store's home page with nothing said.
+6. **No drop-in pieces.** No script, no buy button, no cart; everything is
+   to be built by hand against the API.
+7. **Errors are the validator's own words**: `querystring/limit must match
+   pattern "^\d{1,3}$"`, `body must have required property 'fulfillment'`.
+   Correct, but not what to do about it.
+8. **Lists differ.** Documents and customers page with `limit` and `cursor`;
+   store products take `limit` only and say nothing about more; orders stop at
+   300.
+9. **`Idempotency-Key` on store orders is ignored** (the hosted checkout sends
+   one): a retry after a dropped connection places a second order.
+10. **Test and live look the same** from outside: one boolean in the store's
+    details; keys carry no mark.
+11. **Webhooks**: nothing about a product or its stock changing, or a payment
+    failing; the delivery log shows no payload and no answer body; endpoints
+    must be public https, so nothing can be tried on a laptop without a tunnel
+    (and the docs do not say so).
+12. **Nothing to debug with.** No request log, no error log, no usage; a key
+    shows only when it was last used.
+13. **Buyer accounts and the store's own design** (`site`, `theme` in the
+    store's details) are tied to Floreo's own pages; an outside site gets a
+    large answer it has no use for.
 
-Slow path from nothing to a site:
-12. No starting sites: a new store gets a banner and a product grid, and every
-    new page starts empty. Looks change colours and fonts only.
-13. Nothing says the store is closed, so an owner can publish and still have
-    customers see "not open yet".
-14. Pictures over 2 MB (any phone photo) are refused with "make it smaller
-    first".
+## The plan, most helpful to a customer first
 
-Editing that is less direct than it should be:
-15. Text can only be edited in the side panel, never where it shows.
-16. Drag and drop only reorders sections, and not on touch screens; blocks and
-    menu links move with arrows only.
-17. A section cannot be reused on another page.
-18. New sections always land at the bottom of the page.
-19. Hide/show is an unlabelled dot.
+### A. A first integration that works
 
-Published sites:
-20. Content pictures have no alternative text.
-21. No structured data (products, the business) for search engines.
-22. The banner picture is a CSS background: no description, not prioritised.
-23. Menu drop-downs do not close with Escape; no skip link on the storefront.
+- [ ] 1. **Publishable keys.** `pk_test_…` / `pk_live_…`, safe in a page: they
+  open only the public store API, only for the sites on their list (any
+  `localhost` for a test key). Made, listed, changed and revoked by owners
+  (`/v1/publishable-keys`); kept in the store's settings, no schema change.
+- [ ] 2. **The store API answers other sites.** CORS for requests that carry a
+  publishable key from an allowed site, never with cookies; a refusal says
+  what is wrong and where to fix it, and is readable from the page. Requests
+  with no `Origin` (servers, the hosted store) work as before.
+- [ ] 3. **Answers an outside site can use.** Full addresses beside the old
+  fields (`imageUrl`, `url`, `orderUrl`, `payment.url`), `GET
+  /v1/store/:slug/info` (the store without its hosted design), `returnUrl` on
+  orders and payments so the buyer comes back to the site they bought on, and
+  the pretend card page returning there too.
+- [ ] 4. **The embed script.** One tag (`/embed.js`): `<floreo-products>`,
+  `<floreo-product>`, `<floreo-buy-button>`, `<floreo-cart>`,
+  `<floreo-checkout>`, styled with CSS variables and `::part`, English and
+  Spanish, a test-mode mark, and `window.Floreo` for developers. Served from a
+  fixed address with a short cache.
+- [ ] 5. **"Connect your site" in Settings → Developers.** Numbered steps, the
+  key made in place, the snippet to copy with the store and key filled in, and
+  a check that the site has called.
+- [ ] 6. **Docs that match.** The store API in the OpenAPI description and on
+  `/docs`; a quick start; the components' reference; worked examples for plain
+  HTML/JS and React, each one run.
 
-## The plan, by customer value
+### B. A predictable API
 
-### A. Never lose work
-- [x] A1. Saves are queued one at a time, flushed when leaving the editor or
-      the tab, retried after a failure, with a clear status and a Retry button.
-- [x] A2. A copy of unsaved work is kept on the device and offered back after a
-      crash or a failed save.
-- [x] A3. Editing in two places: the server refuses a save made on top of a
-      draft someone else changed since, and the editor says so and offers to
-      load theirs or keep yours.
-- [x] A4. Server keeps pages whose address collides or is invalid (gives them a
-      free address) instead of dropping them. Tests.
-- [x] A5. Page address: can be typed freely, checked on leaving the box, never
-      saved as a duplicate; renaming or deleting a page rewrites every link to
-      it. Tests.
-- [x] A6. Undo/redo recorded outside the state updater; undo works after
-      discard and restore; Ctrl+Z covered by a test.
-- [x] A7. Preview always follows the editor (ready-flag race), and says so when
-      there is no product to preview a product page with.
-- [x] A8. Errors from discard, restore, add section and publish are shown and
-      cleared on the next success.
+- [ ] 7. **Errors that say what to do.** Validation errors in plain words with
+  the field named; one list of codes in the docs; unknown routes point at the
+  reference. The `{ error: { code, message, details } }` shape stays.
+- [ ] 8. **One way to page.** `limit` + `cursor` → `nextCursor` on store
+  products and on `/v1/orders`, as documents and customers already do.
+- [ ] 9. **`Idempotency-Key` on store orders.** A retry returns the first
+  answer and never orders twice.
 
-### B. From a blank page to a published site, fast
-- [x] B1. Starting sites: complete home pages plus About and Contact pages for
-      a shop, a food business, a boutique and a service business, with
-      Belizean defaults, applied in one click (undoable). Offered first to a
-      store that has never published.
-- [x] B2. New pages start from a page template (About, Contact, Questions,
-      Delivery and returns, Blank).
-- [x] B3. The editor says when the store is closed and links to where it is
-      opened; Publish explains what customers will see.
-- [x] B4. Pictures are resized and compressed in the browser before upload, so
-      phone photos just work; drop files onto the library to upload.
+### C. Events
 
-### C. Editing that feels direct
-- [x] C1. Edit text in the preview: click a headline, text or button in the
-      page and type; the panel and the draft follow.
-- [x] C2. Fix the two request loops in the product pickers (items 10 and 11).
-- [x] C3. Add a section where you are (after the selected one, or from a "+"
-      between sections) instead of always at the bottom.
-- [x] C4. Saved sections: keep a section to reuse on any page.
-- [x] C5. Drag to reorder blocks and menu links; labelled show/hide control.
-      (With a mouse. On touch screens the arrows do it; see DECISIONS.md.)
+- [ ] 10. **More events.** `product.created`, `product.updated`,
+  `product.deleted`, `stock.changed`, `order.payment_failed`, written by the
+  code that makes the change (no new triggers).
+- [ ] 11. **A delivery log that explains.** One delivery with its payload, the
+  answer and each attempt's result; a test delivery of any event type with a
+  sample payload.
 
-### D. Published sites, good by default
-- [x] D1. Alternative text for content pictures (banner, picture with text,
-      columns, visit us). Gallery and logos stay decorative; see DECISIONS.md.
-- [x] D2. Structured data: Product on product pages, the business on the home
-      page. Also: pages that are not there answer 404 and stay out of search.
-- [x] D3. Banner picture as a real image (described, loaded first); pictures
-      below the fold stay lazy.
-- [x] D4. Storefront keyboard and screen-reader basics: skip link, Escape
-      closes menus, focus is visible on the themed colours.
+### D. A safe sandbox
 
-### E. The rest of the platform
-Worked page by page after A to D. How: a browser test that opens every page
-(about seventy, each at a computer's and a phone's width) and fails on an
-uncaught error, a logged error, a failed request, a missing heading or
-sideways scrolling (`e2e/sweep.spec.ts`); a script over every API route for
-permission checks and input schemas; and reading the pages themselves for
-copy and states that contradict each other.
+- [ ] 12. **Test and live kept apart.** Keys named for the environment they
+  work in, a test key refused on a live store (and the reverse) with the
+  reason, `test: true` on what a test store answers, test cards that come back
+  to the site. Documented as it is: a business is in test or live as a whole.
 
-- [x] E1. Every page loads cleanly at both widths. Found and fixed: the API
-      reference scrolled sideways on phones; the site editor had no page
-      heading; on phones the store's logo was squeezed to a dot when the
-      search button was on, and the site editor stacked settings over the
-      preview (now an Edit / Preview switch).
-- [x] E2. States that contradicted each other. Found and fixed: Gift cards
-      counted a used-up card as active above "No active gift cards"; Cash
-      register said "No shift open" above a shift listed as still open.
-- [x] E3. Copy and ways in. Found and fixed: the online store's settings had
-      no link to the site builder and described "About" as it worked before
-      the builder.
-- [x] E4. Security basics. Every tenant route has a permission check (writes
-      by permission, reads through shared helpers) except two, now fixed: the
-      plan and its invoices could be read by any member of staff. Nearly every
-      route has an input schema, and the few without answer malformed input
-      with 400 or 404. No secrets in the web source.
-- [x] E5. Wasteful requests. Found and fixed: scripts and styles were sent
-      uncompressed and re-checked on every page view (now compressed ahead of
-      time and cached for a year); every storefront page asked for a staff
-      sign-in; the store settings fetched payment accounts four times and the
-      overview asked for the orders to handle twice.
+### E. Security
 
-Found and left, with reasons, in DECISIONS.md.
+- [ ] 13. **Limits and rules.** Requests per minute per publishable key and
+  visitor; exact-match origins, `Vary: Origin`, no credentials; a secret key
+  sent from a web page is refused and says why; replacing a key without
+  downtime in the dashboard.
 
-### F. Finish
-- [x] F1. Full pass: `npm run check` (353 unit tests, none failing) and the
-      browser suite on a fresh database: 33 of 34 passed; the one that did not
-      was a new phone test tapping the wrong spot, corrected and passed when
-      rerun (with the other phone test) on that run's data. The suite was not
-      run a further time from scratch after that one-line test change.
-- [x] F2. Summary.
+### F. A dashboard to debug with
+
+- [ ] 14. **Usage and errors per key.** Requests and failures by day, by
+  endpoint and error code (counters in the existing rate-limit table), and
+  the most recent requests with their answers (`/v1/developer/...`).
+- [ ] 15. **Settings → Developers as a dashboard.** Connect your site, keys
+  (publishable and secret), webhooks, logs and usage, in tabs.
+
+### G. Proof
+
+- [ ] 16. **The test site again, from the docs alone.** A fresh business, a
+  fresh folder, only what `/docs` and the dashboard say; browse to checkout to
+  a paid test order with its receipt.
+- [ ] 17. **README, DECISIONS, the full check and the browser tests.**
