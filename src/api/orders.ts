@@ -230,7 +230,7 @@ export function registerOrderRoutes(app: FastifyInstance, deps: PipelineDeps, ct
           },
           message: request.body?.message?.trim() || null,
         }, { publicUrl: ctx.publicUrl, lang });
-        await ctx.mailer.send({ to: o.customer_email, replyTo: t.email, subject: mail.subject, text: mail.text, html: mail.html });
+        await ctx.mailer.send({ type: 'order-ready', tenantId: request.tenantId, userId: request.userId || null, to: o.customer_email, replyTo: t.email, subject: mail.subject, text: mail.text, html: mail.html });
         emailed = o.customer_email;
       }
       await audit(db, { tenantId: request.tenantId, userId: request.userId || null, action: 'order.ready', target: `#${o.number}`, details: { emailed }, ip: request.ip });

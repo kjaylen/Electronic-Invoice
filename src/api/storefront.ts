@@ -248,7 +248,7 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
       if (await overLimit(db, `contact|${request.ip}`, 5, HOUR_MS) || await overLimit(db, `contact|${s.tenantId}`, 100, 24 * HOUR_MS)) throw new ApiError(429, 'too_many_requests', 'Too many messages from here; try again later');
       const b = request.body;
       const lines = [`From: ${b.name.trim()} <${b.email.trim()}>`, ...(b.phone?.trim() ? [`Phone: ${b.phone.trim()}`] : []), '', b.message.trim()];
-      await ctx.mailer.send({
+      await ctx.mailer.send({ type: 'store-message', tenantId: s.tenantId,
         to: s.settings.notifyEmail || s.email,
         replyTo: b.email.trim(),
         subject: `Message from your store: ${b.name.trim().slice(0, 60)}`,
@@ -565,11 +565,11 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
           paid: o.payment_status === 'paid', url: link,
         },
       }, { publicUrl: ctx.publicUrl, lang });
-      await ctx.mailer.send({ to: o.customer_email, replyTo: s.email, subject: mail.subject, text: mail.text, html: mail.html });
+      await ctx.mailer.send({ type: 'order', tenantId: s.tenantId, to: o.customer_email, replyTo: s.email, subject: mail.subject, text: mail.text, html: mail.html });
     }
     const merchant = s.settings.notifyEmail || s.email;
     const admin = publicLink(ctx, `/${s.slug}/orders/${o.id}`);
-    await ctx.mailer.send({
+    await ctx.mailer.send({ type: 'new-order', tenantId: s.tenantId,
       to: merchant,
       subject: `New order #${o.number}: ${total}`,
       text: [`${o.customer_name} (${o.customer_phone}) ordered:`, items.join('\n'), `${PAYMENT_TEXT[o.payment_method]}, ${o.fulfillment === 'delivery' ? `delivery to ${o.delivery_zone}` : 'pickup'}.`, admin].join('\n\n'),
