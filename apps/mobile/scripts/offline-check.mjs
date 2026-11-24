@@ -65,7 +65,13 @@ async function openApp() {
   let socket = '';
   for (let i = 0; i < 60 && !socket; i++) {
     await sleep(500);
-    const pid = adb('shell', 'pidof', APP).split(/\s+/)[0];
+    // pidof fails until the app's process is there.
+    let pid = '';
+    try {
+      pid = adb('shell', 'pidof', APP).split(/\s+/)[0] ?? '';
+    } catch {
+      continue;
+    }
     if (!pid) continue;
     const unix = adb('shell', 'cat', '/proc/net/unix');
     socket = unix.split('\n').map((l) => l.trim().split(/\s+/).pop() ?? '').find((s) => s === `@webview_devtools_remote_${pid}`) ?? '';
