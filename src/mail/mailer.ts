@@ -22,8 +22,8 @@ export type { MailAttachment, OutgoingMail } from './smtp.ts';
 export { simpleHtml, escapeHtml } from './layout.ts';
 
 export interface MailMessage {
-  /** What this email is (types.ts): decides who it is from and how it is treated. (Optional only until every caller names it.) */
-  type?: MailType;
+  /** What this email is (types.ts): decides who it is from and how it is treated. */
+  type: MailType;
   /** The business it is from or about; its log shows it. Leave out for the platform's own. */
   tenantId?: string | null;
   to: string;

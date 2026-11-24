@@ -199,7 +199,7 @@ export async function createMailService(db: Queryable, keys: KeyProtector, optio
   // ---------- queueing ----------
 
   async function send(m: MailMessage): Promise<MailReceipt> {
-    const type = m.type ?? 'notice';
+    const type = m.type;
     const def = mailTypeDef(type);
     if (!def) throw new MailError('unknown_type', `"${String(type)}" is not a kind of email this platform sends`);
     const tenantId = m.tenantId ?? null;
