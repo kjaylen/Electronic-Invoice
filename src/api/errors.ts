@@ -2,9 +2,14 @@
  * One error format for every API response:
  *   { "error": { "code": "invalid_document", "message": "...", "details": ... } }
  * Engine errors are mapped to HTTP statuses here, so routes can simply throw.
+ *
+ * A request that does not fit a route's schema answers 400 `invalid_request`
+ * with a message in plain words that names the field (validation-words.ts);
+ * `details` keeps the validator's own findings.
  */
 
 import type { FastifyError, FastifyReply, FastifyRequest } from 'fastify';
+import { describeValidation, type ValidationFinding } from './validation-words.ts';
 
 export class ApiError extends Error {
   override name = 'ApiError';
@@ -26,8 +31,16 @@ const INVALID_DOCUMENT = new Set(['CalcError', 'UblError', 'EtduiError', 'EventE
 
 export function toApiError(error: unknown): ApiError {
   if (error instanceof ApiError) return error;
-  const e = error as FastifyError & { btsCode?: number; name?: string };
-  if (e?.validation) return new ApiError(400, 'invalid_request', e.message, e.validation);
+  const e = error as FastifyError & { btsCode?: number; name?: string; validationContext?: string };
+  if (e?.validation) {
+    const first = e.validation[0] as ValidationFinding | undefined;
+    return new ApiError(400, 'invalid_request', first ? describeValidation(first, e.validationContext) : e.message, e.validation);
+  }
+  // What the server itself refuses before a route runs: a body that is not JSON, or not said to be.
+  if (e?.code === 'FST_ERR_CTP_INVALID_MEDIA_TYPE') return new ApiError(415, 'invalid_request', 'Send the body as JSON, with the header Content-Type: application/json');
+  if (e?.code === 'FST_ERR_CTP_EMPTY_JSON_BODY') return new ApiError(400, 'invalid_request', 'The body is empty. Send JSON, or leave out the Content-Type header when there is nothing to send.');
+  if (e?.code === 'FST_ERR_CTP_BODY_TOO_LARGE') return new ApiError(413, 'invalid_request', 'The request body is too large');
+  if (e?.code === 'FST_ERR_CTP_INVALID_JSON_BODY' || (e instanceof SyntaxError && e.statusCode === 400)) return new ApiError(400, 'invalid_request', 'The body is not valid JSON. Look for a missing quote, comma or bracket.');
   if (e?.statusCode && e.statusCode >= 400 && e.statusCode < 500) return new ApiError(e.statusCode, 'invalid_request', e.message);
   switch (e?.name) {
     case 'CertificateError':

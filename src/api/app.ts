@@ -521,7 +521,10 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     // The till in a browser (the same app the iOS, Android and desktop tills run).
     if (hasTill && isPage && /^\/pos(\/|\?|$)/.test(request.url)) return reply.type('text/html').header('Cache-Control', 'no-cache').sendFile('pos.html');
     if (hasWeb && isPage) return reply.type('text/html').sendFile('index.html');
-    return reply.code(404).send({ error: { code: 'not_found', message: 'Route not found' } });
+    // An address under /v1 that is no endpoint: say what was asked for and where the list is.
+    const path = request.url.split('?')[0]!;
+    const message = request.url.startsWith('/v1') ? `There is no ${request.method} ${path} in this API. Check the address and the method against the reference at /docs.` : 'Route not found';
+    return reply.code(404).send({ error: { code: 'not_found', message } });
   });
 
   return app;
