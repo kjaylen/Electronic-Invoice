@@ -2,7 +2,7 @@
 
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { api, ApiError, type Me, type Permission, type SessionInfo, UNAUTHORIZED_EVENT } from './api';
-import { BUSINESS, rememberBusiness } from './business';
+import { BUSINESS, rememberBusiness, STORE_DOMAIN } from './business';
 import { useT } from './i18n';
 import { useToast } from './toast';
 
@@ -16,6 +16,8 @@ interface SessionState {
   refreshMe: () => Promise<void>;
   setSession: (s: SessionInfo | null) => void;
   logout: () => Promise<void>;
+  /** False while nobody has asked the server who is signed in (a page opened on the storefront). */
+  asked?: boolean;
 }
 
 /** Exported so the till app can supply its own session (a cashier signed in with a PIN). */
@@ -23,11 +25,14 @@ export type { SessionState };
 export const SessionContext = createContext<SessionState | null>(null);
 const Ctx = SessionContext;
 const POLL_MS = 30_000;
+/** A buyer on the storefront is not staff: the server is not asked who is signed in until a staff page needs to know. */
+const onStorefront = () => STORE_DOMAIN || /^\/[^/]+\/shop(\/|$)/.test(window.location.pathname);
 
 export function SessionProvider({ children }: { children: ReactNode }) {
   const t = useT();
   const toast = useToast();
-  const [loading, setLoading] = useState(Boolean(BUSINESS));
+  const [asked, setAsked] = useState(() => !onStorefront());
+  const [loading, setLoading] = useState(() => Boolean(BUSINESS) && !onStorefront());
   const [session, setSessionState] = useState<SessionInfo | null>(null);
   const [me, setMe] = useState<Me | null>(null);
   const wasDown = useRef(false);
@@ -38,6 +43,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const refresh = useCallback(async () => {
+    setAsked(true);
     if (!BUSINESS) return setLoading(false);
     try {
       const s = await api<SessionInfo>('/v1/auth/session');
@@ -61,7 +67,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    void refresh();
+    if (!onStorefront()) void refresh();
   }, [refresh]);
 
   // Signed out elsewhere, deactivated, or the session expired: back to the login page.
@@ -98,6 +104,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const permissions = new Set(session?.permissions ?? []);
   const value: SessionState = {
     loading,
+    asked,
     session,
     me,
     role: session?.user.role ?? null,

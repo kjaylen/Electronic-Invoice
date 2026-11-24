@@ -308,9 +308,13 @@ function Layout() {
 
 /** The business's pages, for someone signed in to it. */
 function RequireSession() {
-  const { loading, session } = useSession();
+  const { loading, session, asked, refresh } = useSession();
   const location = useLocation();
-  if (loading) return <main><PageSkeleton /></main>;
+  // Reached from the storefront, where nobody's sign-in is asked for: ask now.
+  useEffect(() => {
+    if (asked === false) void refresh();
+  }, [asked, refresh]);
+  if (loading || asked === false) return <main><PageSkeleton /></main>;
   if (!session) return <Navigate to="/login" replace state={{ from: location.pathname + location.search }} />;
   if (session.user.mustChangePassword) return <Suspense fallback={<main><PageSkeleton /></main>}><ChangePasswordRequired /></Suspense>;
   if (session.twoFactor?.setupRequired) return <Suspense fallback={<main><PageSkeleton /></main>}><TwoFactorRequired /></Suspense>;
