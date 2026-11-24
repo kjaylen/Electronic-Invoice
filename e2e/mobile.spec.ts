@@ -40,7 +40,7 @@ test('phone: the site editor shows its settings or the preview, one at a time; t
   await expect(page.locator('.se-sections')).toBeHidden();
   // Tapping a section in the preview brings its settings up.
   const preview = page.frameLocator('iframe[title="Preview of your store"]');
-  await preview.locator('.site-section').first().click({ position: { x: 5, y: 5 } });
+  await preview.locator('.site-section h1').first().click();
   await expect(page.getByRole('button', { name: '← Sections' })).toBeVisible();
   await expect(frame).toBeHidden();
   // In the store's header the logo is not squeezed away by the buttons beside it.

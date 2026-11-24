@@ -31,7 +31,11 @@ async function openSite(page: Page) {
 }
 
 const openBanner = (page: Page) => page.locator('.se-sections').getByRole('button', { name: /^Banner/ }).first().click();
-const saved = (page: Page) => expect(page.locator('.se-status')).not.toHaveText(/Saving|Not saved/);
+/** Everything changed so far has reached the server (a moment first, for the change just made to be noticed). */
+const saved = async (page: Page) => {
+  await page.waitForTimeout(200);
+  await expect(page.locator('.se-status')).not.toHaveText(/Saving|Not saved/);
+};
 const draftOf = async (page: Page) => (await (await page.request.get('/v1/store-site', { headers: API })).json()).draft;
 
 test('site builder: a change made just before leaving the editor is saved', async ({ page }) => {
@@ -176,8 +180,7 @@ test('site builder: a ready-made site in one click (and undone in one), a page f
 
   // One undo brings the old site back.
   await page.getByRole('button', { name: 'Undo' }).click();
-  await saved(page);
-  expect((await draftOf(page)).home).toEqual(before.home);
+  await expect.poll(async () => (await draftOf(page)).home).toEqual(before.home);
 
   // A page from a template.
   await page.getByRole('combobox', { name: 'Page' }).selectOption('home');

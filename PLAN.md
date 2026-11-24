@@ -130,15 +130,41 @@ Published sites:
       closes menus, focus is visible on the themed colours.
 
 ### E. The rest of the platform
-Worked page by page after A to D; findings are added here as they are found.
-- [ ] E1. Walk every page signed in as an owner at desktop and phone widths;
-      fix console errors, dead links and broken states.
-- [ ] E2. Empty, loading and error states are consistent.
-- [ ] E3. Copy, labels, confirmations.
-- [ ] E4. Auth checks on every route; input validation; nothing secret in the
-      web bundle.
-- [ ] E5. Obviously wasteful queries or requests.
+Worked page by page after A to D. How: a browser test that opens every page
+(about seventy, each at a computer's and a phone's width) and fails on an
+uncaught error, a logged error, a failed request, a missing heading or
+sideways scrolling (`e2e/sweep.spec.ts`); a script over every API route for
+permission checks and input schemas; and reading the pages themselves for
+copy and states that contradict each other.
+
+- [x] E1. Every page loads cleanly at both widths. Found and fixed: the API
+      reference scrolled sideways on phones; the site editor had no page
+      heading; on phones the store's logo was squeezed to a dot when the
+      search button was on, and the site editor stacked settings over the
+      preview (now an Edit / Preview switch).
+- [x] E2. States that contradicted each other. Found and fixed: Gift cards
+      counted a used-up card as active above "No active gift cards"; Cash
+      register said "No shift open" above a shift listed as still open.
+- [x] E3. Copy and ways in. Found and fixed: the online store's settings had
+      no link to the site builder and described "About" as it worked before
+      the builder.
+- [x] E4. Security basics. Every tenant route has a permission check (writes
+      by permission, reads through shared helpers) except two, now fixed: the
+      plan and its invoices could be read by any member of staff. Nearly every
+      route has an input schema, and the few without answer malformed input
+      with 400 or 404. No secrets in the web source.
+- [x] E5. Wasteful requests. Found and fixed: scripts and styles were sent
+      uncompressed and re-checked on every page view (now compressed ahead of
+      time and cached for a year); every storefront page asked for a staff
+      sign-in; the store settings fetched payment accounts four times and the
+      overview asked for the orders to handle twice.
+
+Found and left, with reasons, in DECISIONS.md.
 
 ### F. Finish
-- [ ] F1. Full pass: `npm run check`, `npm run e2e`, the builder by hand.
-- [ ] F2. Summary.
+- [x] F1. Full pass: `npm run check` (353 unit tests, none failing) and the
+      browser suite on a fresh database: 33 of 34 passed; the one that did not
+      was a new phone test tapping the wrong spot, corrected and passed when
+      rerun (with the other phone test) on that run's data. The suite was not
+      run a further time from scratch after that one-line test change.
+- [x] F2. Summary.

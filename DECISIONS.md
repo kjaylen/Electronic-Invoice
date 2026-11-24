@@ -72,6 +72,23 @@ make, and things I could not resolve. Newest at the bottom of each part.
   list is stored. They stay decorative (empty alt). Banner, picture with text,
   columns and visit us have one.
 
+- **The plan and its invoices need `business.manage` to read.** The app only
+  ever showed them to owners and admins; the API let any signed-in member of
+  staff read them. This narrows an API answer for cashiers, managers and
+  accountants (403 instead of the data). API keys keep access. What a plan
+  allows (in `/v1/me`) is unchanged, so nothing in the app changes for them.
+- **Compression is done at build time by a small script, not a server plugin.**
+  `npm run web:compress` writes Brotli and gzip copies beside the built files
+  and the server sends them as they are. No new dependency, nothing compressed
+  per request, and it does not rely on how the proxy in front is set up. It is
+  a separate step from `web:build` (the Docker image runs both) so the tills'
+  app bundles are not padded with compressed copies.
+- **The storefront does not ask who is signed in.** The staff session is only
+  asked for when a staff page is opened. Moving from a store page to a staff
+  page inside the app (nothing links that way today) asks at that point.
+- **On phones the store's language switch is in the footer.** With a logo,
+  search, sign-in and the cart there is no room for it in the header.
+
 ## Worth doing, deliberately not done
 
 - **Server-side picture variants (several widths, modern formats).** Would
@@ -88,6 +105,27 @@ make, and things I could not resolve. Newest at the bottom of each part.
   between them leaves a published site without its history entry. Low risk,
   but worth wrapping.
 
+- **The store's details are rebuilt on every page view.** `GET /v1/store/:slug`
+  loads the store, its plan, the published site (checked again each time) and
+  renders the business's Liquid templates and custom code. Fine at today's
+  size; a short per-store cache, dropped on publish and on saving settings or
+  templates, is the next step when traffic grows. Not done now because a
+  stale cache on a store is worse than a slow one, and it needs care.
+- **A product's photos can only be added after its first save.** One more
+  step on the way to a first product. Changing it means creating the product
+  as a draft behind the scenes, which touches the product flow more than a
+  polish pass should.
+- **A visitor's sign-in page logs one failed request** (asking who is signed
+  in answers 401 when nobody is). Harmless and expected; changing the answer
+  would change the auth flow, which the ground rules keep as it is.
+- **What I could not judge by eye.** The browser pane was hidden for this
+  session, so screenshots caught pages mid-transition. The site builder, the
+  starting-site dialog and the phone layouts were checked from screenshots;
+  the other pages were checked by the sweep and by reading their text, not
+  by looking at their spacing and colour. A visual pass by a person is still
+  worth doing.
+
 ## Blockers
 
-None so far.
+None that stopped an item. Two things to know: nothing was pushed (the work
+is local, on `site-builder-flagship`), and GitHub Actions has not run on it.
