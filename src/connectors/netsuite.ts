@@ -17,8 +17,12 @@
  * customer for the TIN and email. Then it is kept for issuing (see imports.ts).
  *
  * Writing back: once issued, the BTS number (and optionally the status and
- * ETDUI) goes into custom transaction body fields the business creates (by
- * default custbody_bts_number). Our own write-back is told from a person's
+ * ETDUI, and the address the document's QR code holds) goes into custom
+ * transaction body fields the business creates (by default
+ * custbody_bts_number). With the QR address in a field of its own, NetSuite's
+ * own printout can draw the code: in an Advanced PDF/HTML template,
+ * <barcode codetype="qrcode" showtext="false" value="${record.custbody_bts_qr}"/>.
+ * Our own write-back is told from a person's
  * edit by the content: what was read for issuing is hashed, and a re-read
  * with the same hash is not a change.
  */
@@ -29,6 +33,7 @@ import type { Queryable } from '../db/database.ts';
 import type { KeyProtector } from '../db/keystore.ts';
 import { type ConnectorLink, LINK_SELECT, writebackText } from './qbwc.ts';
 import type { QbAddress } from './qbxml.ts';
+import { qrUrl } from '../render/view.ts';
 
 export interface NetSuiteConfig {
   accountId?: string;
@@ -38,6 +43,10 @@ export interface NetSuiteConfig {
   numberField?: string;
   /** Optional custom transaction body field for the BTS status and ETDUI. */
   statusField?: string;
+  /** Optional custom transaction body field for the address the document's QR code holds (for NetSuite's own printout). */
+  qrField?: string;
+  /** SHA-256 of the token NetSuite's own script sends when a sale is saved, so it is read at once (see notifyScript). */
+  notifyTokenHash?: string;
 }
 
 export const DEFAULT_NUMBER_FIELD = 'custbody_bts_number';
@@ -450,6 +459,7 @@ async function writeBack(db: Queryable, client: NetSuiteClient, link: ConnectorL
   const out = { written: 0, failed: 0 };
   const numberField = link.config.numberField || DEFAULT_NUMBER_FIELD;
   const statusField = link.config.statusField || null;
+  const qrField = link.config.qrField || null;
   const rows = (await db.query<{ id: string; source_type: NsTxn['kind']; source_id: string; payload: { memo?: string | null }; status: string; problem: string | null; doc_status: string | null; series_number: number | null; serial: string | null; etdui: string | null }>(
     `select i.id, i.source_type, i.source_id, i.payload, i.status, i.problem, d.status as doc_status, d.series_number, d.serial::text as serial, d.etdui
      from connector_imports i left join documents d on d.id = i.document_id
@@ -459,6 +469,8 @@ async function writeBack(db: Queryable, client: NetSuiteClient, link: ConnectorL
     const text = writebackText({ ...r, payload: { memo: '' } });
     const fields: Record<string, string> = { [numberField]: r.status === 'issued' ? text.other : 'Not authorized' };
     if (statusField) fields[statusField] = text.memo.replace(/^\[|\]$/g, '').slice(0, 300);
+    // What the QR code on the printed copy holds: BTS's page for this document. Emptied when there is no document to show.
+    if (qrField) fields[qrField] = r.status === 'issued' && r.etdui ? qrUrl(r.etdui) : '';
     try {
       await client.update(RECORD_OF[r.source_type], r.source_id, fields);
       await db.query("update connector_imports set writeback = 'done', writeback_error = null, written_status = $2, updated_at = now() where id = $1", [r.id, r.doc_status]);
@@ -467,7 +479,7 @@ async function writeBack(db: Queryable, client: NetSuiteClient, link: ConnectorL
       const err = e as NetSuiteError;
       if (err.status === 400 || err.status === 404) {
         const hint = /field|INVALID_KEY_OR_REF|USER_ERROR|INVALID_FLD/i.test(`${err.code} ${err.message}`)
-          ? ` Create a Free-Form Text transaction body field with the ID ${[numberField, statusField].filter(Boolean).join(' and ')}, applied to sales (invoices, cash sales and credit memos), or change the field in Settings > Integrations.`
+          ? ` Create a Free-Form Text transaction body field with the ID ${[numberField, statusField, qrField].filter(Boolean).join(' and ')}, applied to sales (invoices, cash sales and credit memos), or change the field in Settings > Integrations.`
           : '';
         await db.query("update connector_imports set writeback = 'failed', writeback_error = $2, updated_at = now() where id = $1", [r.id, `${err.message}${hint}`.slice(0, 1000)]);
         out.failed++;
@@ -487,7 +499,7 @@ export async function pollDueNetSuite(deps: { db: Queryable; keys: KeyProtector;
     `update connector_links set next_poll_at = now() + make_interval(mins => $1)
      where id in (select id from connector_links where kind = 'netsuite' and status = 'active' and removed_at is null and config ? 'certificateId'
                   and coalesce(next_poll_at, '-infinity'::timestamptz) <= now() order by next_poll_at nulls first limit 10 for update skip locked)
-     returning id`, [options.everyMinutes ?? 5],
+     returning id`, [options.everyMinutes ?? 1],
   )).rows;
   for (const { id } of due) {
     const link = (await deps.db.query<ConnectorLink>(`${LINK_SELECT} where id = $1`, [id])).rows[0];
@@ -504,4 +516,56 @@ export async function pollDueNetSuite(deps: { db: Queryable; keys: KeyProtector;
     }
   }
   return out;
+}
+
+// ---------- told by NetSuite the moment a sale is saved ----------
+
+/** A new token for NetSuite's script, and what is kept of it (its hash). */
+export function newNotifyToken(): { token: string; hash: string } {
+  const token = randomBytes(32).toString('base64url');
+  return { token, hash: createHash('sha256').update(token).digest('hex') };
+}
+
+export const notifyTokenMatches = (token: string, hash: string | undefined) => Boolean(hash) && createHash('sha256').update(token).digest('hex') === hash;
+
+/**
+ * The script a NetSuite administrator installs (a SuiteScript 2.1 user event, deployed on Invoice,
+ * Cash Sale and Credit Memo): each time one is saved it tells this service, which reads it at once
+ * instead of at the next minute. It sends nothing about the record, only "something changed"; what
+ * changed is read through the connection as always. If the call fails, saving in NetSuite is not
+ * affected and the record is still picked up at the next read.
+ */
+export function notifyScript(url: string, token: string): string {
+  return `/**
+ * Floreo: tells Floreo the moment an invoice, cash sale or credit memo is saved,
+ * so it goes to the Belize Tax Service within seconds instead of at the next minute.
+ *
+ * Install: Customization > Scripting > Scripts > New, upload this file, Create Script Record
+ * (User Event), then deploy it three times: on Invoice, Cash Sale and Credit Memo
+ * (Status: Released; Execute As Role: Administrator; Audience: all roles).
+ *
+ * It sends no data about the record. If Floreo cannot be reached, saving is not affected.
+ *
+ * @NApiVersion 2.1
+ * @NScriptType UserEventScript
+ * @NModuleScope SameAccount
+ */
+define(['N/https', 'N/runtime', 'N/log'], (https, runtime, log) => {
+  const URL = ${JSON.stringify(url)};
+  const TOKEN = ${JSON.stringify(token)};
+
+  const afterSubmit = (context) => {
+    // Floreo's own write-back (the BTS number and QR address) is not news to Floreo.
+    if (runtime.executionContext === runtime.ContextType.REST_WEBSERVICES) return;
+    try {
+      const response = https.post({ url: URL, headers: { Authorization: 'Bearer ' + TOKEN, 'Content-Type': 'application/json' }, body: '{}' });
+      if (response.code >= 400) log.error({ title: 'Floreo', details: 'Floreo answered ' + response.code + ': ' + response.body });
+    } catch (e) {
+      log.error({ title: 'Floreo', details: e });
+    }
+  };
+
+  return { afterSubmit };
+});
+`;
 }

@@ -9,6 +9,7 @@ import { Link } from 'react-router';
 import { api, link } from '../api';
 import { useConfirm } from '../confirm';
 import { useT } from '../i18n';
+import { NetSuiteAddons } from './NetSuiteAddons';
 import { useToast } from '../toast';
 import { belizeToday, ErrorText, Field, Modal, money, Segmented, Select } from '../ui';
 import { usePollWhile } from './Dashboard';
@@ -20,6 +21,9 @@ interface NetSuiteDetails {
   certificateId: string | null;
   numberField: string;
   statusField: string | null;
+  qrField: string | null;
+  /** NetSuite's own script tells Floreo when a sale is saved (it has been downloaded for this connection). */
+  instant: boolean;
   configured: boolean;
   certificateExpiresAt: string | null;
   nextCheckAt: string | null;
@@ -145,7 +149,7 @@ export function ConnectorsSection() {
             <Segmented label={t('Show')} value={view} onChange={setView} options={[['attention', t('Needs attention')], ['issued', t('Sent to BTS')], ['all', t('All')]]} />
           </div>
           {imports === null ? <div className="skeleton" style={{ height: '5rem' }} /> : imports.length === 0 ? (
-            <p className="muted small">{view === 'attention' ? t('Nothing needs you: everything picked up was sent to BTS.') : t('Nothing picked up yet. QuickBooks and NetSuite are checked every 5 minutes.')}</p>
+            <p className="muted small">{view === 'attention' ? t('Nothing needs you: everything picked up was sent to BTS.') : t('Nothing picked up yet. QuickBooks is checked every 5 minutes and NetSuite every minute.')}</p>
           ) : (
             <div className="table-wrap">
               <table className="responsive">
@@ -191,7 +195,7 @@ export function ConnectorsSection() {
 
       {adding && <AddConnection kind={adding} onClose={() => setAdding(null)} onAdded={(c) => { setAdding(null); if (c.kind === 'netsuite') setSetup(c.id); else setCredentials(c as { id: string; kind: Kind; username: string; password: string }); load(); }} />}
       {credentials && <Credentials {...credentials} onClose={() => setCredentials(null)} />}
-      {setup && links?.find((l) => l.id === setup) && <NetSuiteSetup link={links.find((l) => l.id === setup)!} onClose={() => setSetup(null)} onSaved={() => { setSetup(null); load(); toast(t('Connected to NetSuite: it is read every 5 minutes')); }} />}
+      {setup && links?.find((l) => l.id === setup) && <NetSuiteSetup link={links.find((l) => l.id === setup)!} onClose={() => setSetup(null)} onSaved={() => { setSetup(null); load(); toast(t('Connected to NetSuite: it is read every minute')); }} />}
     </section>
   );
 }
@@ -249,6 +253,7 @@ function LinkCard({ link: l, onChanged, onCredentials, onSetup, act }: { link: C
         <span className="spacer" />
         <button className="link danger-link small" onClick={() => void confirm({ title: t('Disconnect {name}?', { name: l.name }), body: t('What was already sent to BTS stays.'), confirm: t('Disconnect'), danger: true }).then((yes) => { if (yes) void act(() => api(`/v1/connectors/${l.id}`, { method: 'DELETE' }), t('Disconnected')); })}>{t('Disconnect')}</button>
       </div>
+      {ns?.configured && <NetSuiteAddons linkId={l.id} numberField={ns.numberField} qrField={ns.qrField} instant={ns.instant} onChanged={onChanged} />}
       {codes.length > 0 && (
         <details className="connector-taxes" open={taxesOpen} onToggle={(e) => setTaxesOpen(e.currentTarget.open)}>
           <summary>{t('Tax codes')} {codes.some((c) => !map[c]) && <span className="badge pending">{t('Some not mapped')}</span>}</summary>

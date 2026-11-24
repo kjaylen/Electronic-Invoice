@@ -25,7 +25,8 @@ import type { Queryable } from '../db/database.ts';
 import { hashPassword } from '../db/users.ts';
 import { assertFeature } from '../billing/billing.ts';
 import { connectorTodo } from '../connectors/imports.ts';
-import { ACCOUNT_ID, DEFAULT_NUMBER_FIELD, FIELD_ID, makeKeyAndCertificate, type NetSuiteConfig, secretContext, testNetSuite } from '../connectors/netsuite.ts';
+import { ACCOUNT_ID, DEFAULT_NUMBER_FIELD, FIELD_ID, makeKeyAndCertificate, type NetSuiteConfig, newNotifyToken, notifyScript, notifyTokenMatches, secretContext, testNetSuite } from '../connectors/netsuite.ts';
+import { overLimit } from '../db/ratelimit.ts';
 import { type ConnectorLink, handleQbwc, LINK_SELECT, qwcFile } from '../connectors/qbwc.ts';
 import type { PipelineDeps } from '../pipeline/issue.ts';
 import { publicLink, type ServerContext } from './context.ts';
@@ -86,7 +87,7 @@ export function registerConnectorRoutes(app: FastifyInstance, deps: PipelineDeps
         lastError: l.last_error,
         settings: { taxCodes: l.settings.taxCodes ?? {}, exemptions: l.settings.exemptions ?? {}, pull: { invoices: l.settings.pull?.invoices !== false, salesReceipts: l.settings.pull?.salesReceipts !== false, creditMemos: l.settings.pull?.creditMemos !== false }, issueOnTaxMismatch: Boolean(l.settings.issueOnTaxMismatch) },
         netsuite: l.kind === 'netsuite'
-          ? { accountId: l.config.accountId ?? null, clientId: l.config.clientId ?? null, certificateId: l.config.certificateId ?? null, numberField: l.config.numberField || DEFAULT_NUMBER_FIELD, statusField: l.config.statusField ?? null, configured: Boolean(l.config.certificateId), certificateExpiresAt: iso(l.certificate_expires_at), nextCheckAt: iso(l.next_poll_at) }
+          ? { accountId: l.config.accountId ?? null, clientId: l.config.clientId ?? null, certificateId: l.config.certificateId ?? null, numberField: l.config.numberField || DEFAULT_NUMBER_FIELD, statusField: l.config.statusField ?? null, qrField: l.config.qrField ?? null, instant: Boolean(l.config.notifyTokenHash), configured: Boolean(l.config.certificateId), certificateExpiresAt: iso(l.certificate_expires_at), nextCheckAt: iso(l.next_poll_at) }
           : null,
         taxCodesSeen: codes.filter((c) => c.link_id === l.id && c.code).map((c) => c.code).sort(),
         counts: Object.fromEntries(counts.filter((c) => c.link_id === l.id).map((c) => [c.status, c.n])),
@@ -157,6 +158,19 @@ export function registerConnectorRoutes(app: FastifyInstance, deps: PipelineDeps
     return reply.type('application/x-pem-file').header('Content-Disposition', 'attachment; filename="floreo-netsuite.pem"').send(link.certificate_pem);
   });
 
+  // The script NetSuite runs when a sale is saved (see notifyScript). Each download makes a new token: the last script stops working.
+  app.post<{ Params: { id: string } }>('/connectors/:id/notify-script', { schema: { params: idParams } }, async (request) => {
+    requirePermission(request, 'business.manage');
+    const link = await loadLink(db, request.tenantId, request.params.id);
+    if (link.kind !== 'netsuite') throw new ApiError(409, 'not_netsuite', 'Only NetSuite connections have a script');
+    const url = publicLink(ctx, `/v1/netsuite/notify/${link.id}`);
+    if (!url.startsWith('https://')) throw new ApiError(503, 'not_configured', 'NetSuite only calls addresses that start with https://. Set PUBLIC_URL to this server\'s public https address.');
+    const { token, hash } = newNotifyToken();
+    await db.query(`update connector_links set config = config || jsonb_build_object('notifyTokenHash', $2::text) where id = $1`, [link.id, hash]);
+    await audit(db, { tenantId: request.tenantId, userId: request.userId || null, action: 'connector.notify_script', target: link.name, ip: request.ip });
+    return { filename: 'floreo_notify.js', url, script: notifyScript(url, token) };
+  });
+
   app.post<{ Params: { id: string } }>('/connectors/:id/sync', { schema: { params: idParams } }, async (request) => {
     requirePermission(request, 'business.manage');
     const link = await loadLink(db, request.tenantId, request.params.id);
@@ -188,6 +202,7 @@ export function registerConnectorRoutes(app: FastifyInstance, deps: PipelineDeps
                 certificateId: { type: 'string', maxLength: 100 },
                 numberField: { type: 'string', maxLength: 60 },
                 statusField: { type: 'string', maxLength: 60 },
+                qrField: { type: 'string', maxLength: 60 },
               },
             },
           },
@@ -217,9 +232,10 @@ export function registerConnectorRoutes(app: FastifyInstance, deps: PipelineDeps
           ...(n.certificateId !== undefined && { certificateId: clean(n.certificateId) }),
           ...(n.numberField !== undefined && { numberField: clean(n.numberField)!.toLowerCase() || DEFAULT_NUMBER_FIELD }),
           ...(n.statusField !== undefined && { statusField: clean(n.statusField)!.toLowerCase() || undefined }),
+          ...(n.qrField !== undefined && { qrField: clean(n.qrField)!.toLowerCase() || undefined }),
         };
         if (config.accountId && !ACCOUNT_ID.test(config.accountId)) throw new ApiError(422, 'invalid_account', 'The Account ID looks like 1234567 or 1234567_SB1 (Setup > Company > Company Information)');
-        for (const f of [config.numberField, config.statusField]) {
+        for (const f of [config.numberField, config.statusField, config.qrField]) {
           if (f && !FIELD_ID.test(f)) throw new ApiError(422, 'invalid_field', `"${f}" is not a transaction body field ID: those start with custbody, e.g. custbody_bts_number`);
         }
         if (!config.accountId || !config.clientId || !config.certificateId) throw new ApiError(422, 'incomplete', 'Enter the Account ID, Client ID and Certificate ID');
@@ -328,6 +344,27 @@ export function registerConnectorRoutes(app: FastifyInstance, deps: PipelineDeps
     if (!['attention', 'rejected', 'new'].includes(imp.status)) throw new ApiError(409, 'not_held', 'Only documents not yet sent can be skipped');
     await db.query("update connector_imports set status = 'skipped', updated_at = now() where id = $1", [imp.id]);
     return { ok: true };
+  });
+}
+
+/**
+ * Where NetSuite's script says "a sale was saved" (public; it carries the connection's own token).
+ * Nothing about the sale is taken from the call: it only brings the next read forward to now.
+ */
+export function registerNetSuiteNotifyRoutes(app: FastifyInstance, deps: PipelineDeps, options: { onNotify?: () => void } = {}) {
+  const { db } = deps;
+  app.post<{ Params: { id: string } }>('/notify/:id', { schema: { params: { type: 'object', required: ['id'], properties: { id: uuid } } } }, async (request, reply) => {
+    const token = /^Bearer (\S{20,200})$/.exec(String(request.headers.authorization ?? ''))?.[1] ?? '';
+    const link = (await db.query<{ id: string; config: NetSuiteConfig; status: string }>(`select id, config, status from connector_links where id = $1 and kind = 'netsuite' and removed_at is null`, [request.params.id])).rows[0];
+    // The same answer whether the connection or the token is wrong.
+    if (!link || !notifyTokenMatches(token, link.config.notifyTokenHash)) throw new ApiError(401, 'unauthorized', 'Unknown connection or token: download the script again from Floreo');
+    // A burst of saves (an import in NetSuite) is one read, not hundreds.
+    if (await overLimit(db, `netsuite-notify|${link.id}`, 120, 60_000)) return reply.code(202).send({ ok: true, queued: true });
+    if (link.status === 'active') {
+      await db.query('update connector_links set next_poll_at = now() where id = $1', [link.id]);
+      options.onNotify?.();
+    }
+    return reply.code(202).send({ ok: true });
   });
 }
 

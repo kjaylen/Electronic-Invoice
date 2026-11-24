@@ -362,6 +362,13 @@ export async function processConnectorImports(deps: PipelineDeps, options: { lim
       else await db.query("update connector_imports set status = 'new', updated_at = now() where id = $1", [imp.id]);
     }
   }
+  // NetSuite is written to when it is read: with an answer waiting (just issued, or a status that changed), that is now,
+  // not at the next minute. Only for answers of the last ten minutes, so one that cannot be written is not retried forever.
+  await db.query(
+    `update connector_links l set next_poll_at = now()
+     where l.kind = 'netsuite' and l.status = 'active' and l.removed_at is null and coalesce(l.next_poll_at, now()) > now()
+       and exists (select 1 from connector_imports i where i.link_id = l.id and i.writeback = 'pending' and i.updated_at > now() - interval '10 minutes')`,
+  );
   return result;
 }
 

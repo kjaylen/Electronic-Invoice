@@ -104,7 +104,7 @@ class PretendNetSuite {
       if (!t || t.record !== type) return json(404, { title: 'Not Found', status: 404 });
       if (init?.method === 'PATCH') {
         const body = JSON.parse(String(init.body)) as Rec;
-        const bad = Object.keys(body).find((k) => k !== 'custbody_bts_number' && k !== 'custbody_bts_status');
+        const bad = Object.keys(body).find((k) => k !== 'custbody_bts_number' && k !== 'custbody_bts_status' && k !== 'custbody_bts_qr');
         if (bad) return json(400, { type: 'https://www.rfc-editor.org/rfc/rfc9110.html#section-15.5.1', title: 'Bad Request', status: 400, 'o:errorDetails': [{ detail: `Invalid field: ${bad}.`, 'o:errorCode': 'INVALID_FLD' }] });
         this.patches.push({ path, body });
         Object.assign(t.rec, body);
@@ -241,6 +241,7 @@ test('NetSuite: connect with a certificate made here; invoices and cash sales ar
     assert.equal(second.written, 2);
     const invPatch = ns.patches.find((p) => p.path === '/services/rest/record/v1/invoice/101')!;
     assert.match(String(invPatch.body.custbody_bts_number), /^\d{3}-\d{9}$/);
+    assert.ok(!('custbody_bts_qr' in invPatch.body), 'no QR field was named, so none is written');
     assert.equal(Object.keys(invPatch.body).length, 1, 'no status field set up, so only the number');
     assert.ok((await imports(c)).every((x) => x.writeback === 'done'));
 
@@ -297,11 +298,18 @@ test('NetSuite: a write-back field that does not exist, other currencies, credit
     assert.match(failed.writebackError!, /Invalid field: custbody_wrong[\s\S]*Create a Free-Form Text transaction body field with the ID custbody_wrong/);
 
     // Fixed to the field they have (and a status field): written at the next read.
-    await app.inject({ method: 'PUT', url: `/v1/connectors/${id}`, headers: owner, payload: { netsuite: { numberField: 'custbody_bts_number', statusField: 'custbody_bts_status' } } });
+    // (And a field for the QR code's address, so NetSuite's own printout can draw the code. It must be a body field too.)
+    const badField = await app.inject({ method: 'PUT', url: `/v1/connectors/${id}`, headers: owner, payload: { netsuite: { qrField: 'bts_qr' } } });
+    assert.deepEqual([badField.statusCode, badField.json().error.code], [422, 'invalid_field']);
+    await app.inject({ method: 'PUT', url: `/v1/connectors/${id}`, headers: owner, payload: { netsuite: { numberField: 'custbody_bts_number', statusField: 'custbody_bts_status', qrField: ' Custbody_BTS_QR ' } } });
+    assert.equal((await app.inject({ method: 'GET', url: '/v1/connectors', headers: owner })).json().data[0].netsuite.qrField, 'custbody_bts_qr');
     await f.db.query("update connector_imports set writeback = 'pending', writeback_error = null where writeback = 'failed'");
     await readNow(c, id);
     const patch = ns.patches.find((p) => p.path.endsWith('/invoice/101'))!;
     assert.match(String(patch.body.custbody_bts_status), /^BTS \d{3}-\d{9} · authorized · ETDUI \d{44}$/);
+    // What the QR code holds: BTS's page for this very document (the test portal, for a test document).
+    const etdui = /ETDUI (\d{44})$/.exec(String(patch.body.custbody_bts_status))![1];
+    assert.equal(patch.body.custbody_bts_qr, `https://portal.test.bz.efdrciat.org/QRCode?UUID=${etdui}`);
 
     // NetSuite stops accepting the token, then the certificate (revoked): the connection says what to check.
     ns.refuseTokens = true;
@@ -333,3 +341,61 @@ test('NetSuite: reading a record keeps only what the e-invoice uses; the fingerp
   const edited = normalize('invoice', { ...rec, subtotal: 7 }, { companyName: 'Shop Ltd', custentity_tin: '000123' });
   assert.notEqual(contentHash(edited), contentHash(t));
 });
+
+test('NetSuite, as fast as it goes: the answer is written back right after issuing, and NetSuite\'s own script brings the next read forward to now', () =>
+  withBusiness(async (c) => {
+    const { app, owner, f, ns } = c;
+    const id = await connect(c, { qrField: 'custbody_bts_qr' });
+    await app.inject({ method: 'PUT', url: `/v1/connectors/${id}`, headers: owner, payload: { taxCodes: { 'S-BZ': 'S' } } });
+    const nextRead = async () => new Date((await f.db.query<{ next_poll_at: Date }>('select next_poll_at from connector_links where id = $1', [id])).rows[0]!.next_poll_at).getTime();
+    account(ns);
+
+    // Read by itself, a minute apart (not five).
+    await f.db.query('update connector_links set next_poll_at = now() where id = $1', [id]);
+    assert.equal((await pollDueNetSuite(f.deps, { fetch: ns.fetch })).picked, 2);
+    const wait = (await nextRead()) - Date.now();
+    assert.ok(wait > 30_000 && wait < 90_000, `the next read is about a minute away (${wait} ms)`);
+    assert.equal((await pollDueNetSuite(f.deps, { fetch: ns.fetch })).links, 0, 'not due yet');
+
+    // Issued: the answer does not wait for that minute. The next tick writes it, QR address included, with nobody asking.
+    assert.deepEqual(await processConnectorImports(f.deps), { issued: 2, held: 0, rejected: 0 });
+    assert.ok((await nextRead()) <= Date.now() + 1000, 'the read is brought forward to now');
+    assert.equal((await pollDueNetSuite(f.deps, { fetch: ns.fetch })).written, 2);
+    const patch = ns.patches.find((p) => p.path === '/services/rest/record/v1/invoice/101')!;
+    assert.match(String(patch.body.custbody_bts_number), /^\d{3}-\d{9}$/);
+    assert.match(String(patch.body.custbody_bts_qr), /^https:\/\/portal\.test\.bz\.efdrciat\.org\/QRCode\?UUID=\d{44}$/);
+    // Nothing left to write: it goes back to once a minute, not round and round.
+    await processConnectorImports(f.deps);
+    assert.ok((await nextRead()) > Date.now() + 30_000);
+
+    // The script for NetSuite: this connection's address and a token of its own, shown once.
+    assert.equal((await app.inject({ method: 'GET', url: '/v1/connectors', headers: owner })).json().data[0].netsuite.instant, false);
+    const made = await app.inject({ method: 'POST', url: `/v1/connectors/${id}/notify-script`, headers: owner, payload: {} });
+    assert.equal(made.statusCode, 200, made.body);
+    const { script, url, filename } = made.json() as { script: string; url: string; filename: string };
+    assert.equal(url, `https://app.example.test/v1/netsuite/notify/${id}`);
+    assert.equal(filename, 'floreo_notify.js');
+    assert.ok(script.includes('@NScriptType UserEventScript') && script.includes(JSON.stringify(url)) && script.includes('REST_WEBSERVICES'));
+    const token = /const TOKEN = "([A-Za-z0-9_-]{40,})";/.exec(script)![1]!;
+    assert.equal((await app.inject({ method: 'GET', url: '/v1/connectors', headers: owner })).json().data[0].netsuite.instant, true);
+    const stored = (await f.db.query<{ config: Record<string, string> }>('select config from connector_links where id = $1', [id])).rows[0]!.config;
+    assert.ok(stored.notifyTokenHash && !JSON.stringify(stored).includes(token), 'only its hash is kept');
+
+    // NetSuite saves a sale and says so: no sign-in, only the token; the read is now.
+    const notify = (auth: string | null, link = id) => app.inject({ method: 'POST', url: `/v1/netsuite/notify/${link}`, headers: { 'content-type': 'application/json', ...(auth && { authorization: auth }) }, payload: {} });
+    assert.equal((await notify(null)).statusCode, 401);
+    assert.equal((await notify('Bearer not-the-token-not-the-token-not-the-token')).statusCode, 401);
+    assert.equal((await notify(`Bearer ${token}`, '00000000-0000-4000-8000-000000000000')).statusCode, 401);
+    assert.ok((await nextRead()) > Date.now() + 30_000, 'a wrong token changes nothing');
+    const told = await notify(`Bearer ${token}`);
+    assert.equal(told.statusCode, 202, told.body);
+    assert.ok((await nextRead()) <= Date.now() + 1000);
+    assert.equal((await pollDueNetSuite(f.deps, { fetch: ns.fetch })).links, 1);
+
+    // Paused: told, but not read. A new script replaces the old one's token.
+    await app.inject({ method: 'PUT', url: `/v1/connectors/${id}`, headers: owner, payload: { paused: true } });
+    assert.equal((await notify(`Bearer ${token}`)).statusCode, 202);
+    assert.ok((await nextRead()) > Date.now() + 30_000);
+    await app.inject({ method: 'POST', url: `/v1/connectors/${id}/notify-script`, headers: owner, payload: {} });
+    assert.equal((await notify(`Bearer ${token}`)).statusCode, 401);
+  }));

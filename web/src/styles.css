@@ -2529,3 +2529,27 @@ main:has(.site-editor) { max-width: none; padding: 0.75rem 1rem 0.75rem; }
 .closed-records li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.3rem 1rem; }
 .closed-records strong { min-width: 3rem; }
 .closed-steps { margin: 0; padding-left: 1.1rem; display: grid; gap: 0.45rem; }
+/* What a NetSuite connection can add (web/src/pages/NetSuiteAddons.tsx): two rows on its card, each with a guide. */
+.addons { display: grid; gap: 0; border: 1px solid var(--hairline); border-radius: var(--radius); background: var(--sheet); }
+.addon { display: flex; align-items: center; gap: 0.75rem; padding: 0.7rem 0.85rem; }
+.addon + .addon { border-top: 1px solid var(--hairline); }
+.addon-text { display: grid; gap: 0.1rem; flex: 1; min-width: 0; }
+.addon .badge { flex: none; }
+@media (max-width: 640px) { .addon { flex-wrap: wrap; } .addon-text { flex-basis: 100%; } }
+.guide { list-style: none; margin: 0; padding: 0; display: grid; gap: 1.1rem; }
+.guide-step { display: grid; grid-template-columns: 1.9rem minmax(0, 1fr); gap: 0.75rem; align-items: start; }
+.guide-number { width: 1.9rem; height: 1.9rem; border-radius: 999px; display: grid; place-items: center; font-weight: 650; font-size: 0.9rem; background: var(--brand-soft); color: var(--brand-ink); border: 1px solid var(--brand-line); }
+.guide-step.done .guide-number { background: var(--lime-soft); color: var(--lime-ink); border-color: var(--lime-line); }
+.guide-body { display: grid; gap: 0.45rem; min-width: 0; justify-items: start; }
+.guide-body > .guide-spec, .guide-body > .guide-code, .guide-body > .guide-row { justify-self: stretch; }
+.guide-body > * + * { margin-top: 0; }
+.guide-body > strong { line-height: 1.9rem; }
+.guide-spec { margin: 0; display: grid; grid-template-columns: max-content minmax(0, 1fr); border: 1px solid var(--hairline); border-radius: var(--radius); overflow: hidden; font-size: 0.9rem; }
+.guide-spec > div { display: contents; }
+.guide-spec dt, .guide-spec dd { margin: 0; padding: 0.35rem 0.7rem; border-top: 1px solid var(--hairline); }
+.guide-spec > div:first-child dt, .guide-spec > div:first-child dd { border-top: 0; }
+.guide-spec dt { color: var(--muted); background: var(--sheet-2); }
+.guide-spec dd { font-family: var(--figures); overflow-wrap: anywhere; }
+.guide-code { margin: 0; padding: 0.7rem 0.85rem; max-height: 13rem; overflow: auto; background: var(--sheet-2); border: 1px solid var(--hairline); border-radius: var(--radius); font-family: var(--figures); font-size: 0.76rem; line-height: 1.5; white-space: pre; }
+.guide-row { gap: 0.5rem; flex-wrap: wrap; align-items: center; }
+.guide-row input { flex: 1; min-width: 12rem; max-width: 20rem; }

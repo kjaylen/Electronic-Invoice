@@ -89,6 +89,8 @@ const quickbooksApp = env.QBO_CLIENT_ID && env.QBO_CLIENT_SECRET
   ? { clientId: env.QBO_CLIENT_ID, clientSecret: env.QBO_CLIENT_SECRET, environment: env.QBO_ENVIRONMENT === 'production' ? 'production' as const : 'sandbox' as const }
   : undefined;
 const app = await buildApp({
+  // NetSuite's script said a sale was saved: read it, issue it and write the answer back now.
+  netsuite: { onNotify: () => hurryNetSuite() },
   pipeline,
   ...(mailer && { mailer }),
   ...(env.PUBLIC_URL && { publicUrl: env.PUBLIC_URL }),
@@ -192,19 +194,44 @@ const connectorTimer = intervalMs > 0
   : undefined;
 connectorTimer?.unref();
 
-// NetSuite accounts are read here: each every 5 minutes (NETSUITE_POLL_MINUTES), or at once when asked.
+// NetSuite accounts are read here: each every minute (NETSUITE_POLL_MINUTES), or at once when asked or when NetSuite says a sale was saved.
 let readingNetSuite = false;
 const netsuiteTimer = intervalMs > 0
   ? setInterval(() => {
       if (readingNetSuite) return;
       readingNetSuite = true;
-      void pollDueNetSuite(pipeline, { everyMinutes: Number(env.NETSUITE_POLL_MINUTES ?? 5) })
+      void pollDueNetSuite(pipeline, { everyMinutes: Number(env.NETSUITE_POLL_MINUTES ?? 1) })
         .then((r) => (r.picked || r.written || r.errors) && app.log.info(r, 'netsuite'))
         .catch((e) => app.log.error({ err: e }, 'netsuite failure'))
         .finally(() => (readingNetSuite = false));
     }, Number(env.NETSUITE_INTERVAL_MS ?? 15_000))
   : undefined;
 netsuiteTimer?.unref();
+
+// Told by NetSuite that a sale was saved (its script, see notifyScript): the three steps the timers
+// above would take over the next minute, taken at once: read, issue, write the answer back.
+// One run at a time; a save that arrives during a run is covered by one more run after it.
+let hurrying = false;
+let hurryAgain = false;
+function hurryNetSuite() {
+  if (intervalMs <= 0) return;
+  if (hurrying) {
+    hurryAgain = true;
+    return;
+  }
+  hurrying = true;
+  const options = { everyMinutes: Number(env.NETSUITE_POLL_MINUTES ?? 1) };
+  void (async () => {
+    do {
+      hurryAgain = false;
+      await pollDueNetSuite(pipeline, options);
+      await processConnectorImports(pipeline);
+      await pollDueNetSuite(pipeline, options);
+    } while (hurryAgain);
+  })()
+    .catch((e) => app.log.error({ err: e }, 'netsuite failure'))
+    .finally(() => (hurrying = false));
+}
 
 await app.listen({ port: Number(env.PORT ?? 3000), host: env.HOST ?? '0.0.0.0' });
 

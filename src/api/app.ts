@@ -76,7 +76,7 @@ import { registerPublicAssetRoutes, registerTemplateRoutes } from './templates.t
 import { registerImportRoutes } from './imports.ts';
 import { domainCache } from '../commerce/domains.ts';
 import { registerIntegrationCallback, registerIntegrationRoutes } from './integrations.ts';
-import { registerConnectorRoutes, registerQbwcRoutes } from './connectors.ts';
+import { registerConnectorRoutes, registerNetSuiteNotifyRoutes, registerQbwcRoutes } from './connectors.ts';
 import type { QuickBooksConfig } from '../integrations/quickbooks.ts';
 import { plansJson } from './billing.ts';
 import { TRIAL_DAYS } from '../billing/plans.ts';
@@ -136,7 +136,7 @@ export interface AppOptions {
   /** The platform's Intuit app, for the QuickBooks Online integration. */
   quickbooks?: { clientId: string; clientSecret: string; environment: 'sandbox' | 'production'; fetch?: typeof fetch };
   /** NetSuite connections: how NetSuite is called (replaceable in tests). */
-  netsuite?: { fetch?: typeof fetch };
+  netsuite?: { fetch?: typeof fetch; /** NetSuite said a sale was saved: read, issue and write back now rather than at the next tick. */ onNotify?: () => void };
   /** Extra origins the till apps call the API from (the built-in ones cover the iOS, Android and desktop apps). */
   tillOrigins?: string[];
   /** Prints documents from the businesses' templates (a headless Chromium). Unset: the built-in layouts. Closed with the app. */
@@ -418,6 +418,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
   // The QuickBooks Web Connector (SOAP): it signs in with a connection's own user name and password.
   await app.register(async (q) => registerQbwcRoutes(q, deps), { prefix: '/v1/qbwc' });
+  await app.register(async (n) => registerNetSuiteNotifyRoutes(n, deps, { ...(options.netsuite?.onNotify && { onNotify: options.netsuite.onNotify }) }), { prefix: '/v1/netsuite' });
 
   // The platform console, for our own staff.
   await app.register(async (platform) => registerPlatformRoutes(platform, deps, ctx, billingContext), { prefix: '/v1/platform' });
