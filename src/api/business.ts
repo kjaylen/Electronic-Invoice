@@ -115,7 +115,7 @@ export function registerBusinessRoutes(app: FastifyInstance, deps: PipelineDeps,
           'Documents already authorized by the Belize Tax Service stay registered with BTS.',
         ];
         for (const to of new Set([...owners.map((o) => o.email), b.email])) {
-          await ctx.mailer.send({ to, subject: `${name} was closed and will be erased on ${on}`, text: paragraphs.join('\n\n'), html: simpleHtml({ heading: `${name} was closed`, paragraphs }) })
+          await ctx.mailer.send({ type: 'business-closed', tenantId: request.tenantId, to, subject: `${name} was closed and will be erased on ${on}`, text: paragraphs.join('\n\n'), html: simpleHtml({ heading: `${name} was closed`, paragraphs }) })
             .catch((e: unknown) => request.log.warn({ err: e }, 'closing notice not sent'));
         }
       }

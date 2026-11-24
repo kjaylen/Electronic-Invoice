@@ -91,7 +91,7 @@ export async function emailServiceInvoice(deps: PipelineDeps, ctx: ServerContext
     return;
   }
   const url = ctx.publicUrl ? publicLink(ctx, `/${t.slug}/settings?tab=plan`) : undefined;
-  await ctx.mailer.send({
+  await ctx.mailer.send({ type: 'service-invoice', tenantId: invoice.tenant_id,
     to: t.email,
     subject: `${t.name}: your Floreo invoice (BZ$${j.total})`,
     text: [...lines, ...(url ? [url] : [])].join('\n\n'),

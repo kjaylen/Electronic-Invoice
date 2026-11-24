@@ -526,7 +526,7 @@ export function registerPlatformRoutes(app: FastifyInstance, deps: PipelineDeps,
     const token = await createPasswordLink(db, u.id, 'reset');
     const link = publicLink(ctx, `/${t.slug}/reset-password?token=${token}`);
     const name = t.trade_name ?? t.legal_name;
-    await ctx.mailer.send({
+    await ctx.mailer.send({ type: 'support-password-reset', tenantId: t.id,
       to: u.email,
       subject: `Reset your ${name} password`,
       text: `Hello ${u.name},
@@ -565,7 +565,7 @@ If you did not ask for help, ignore this email; your password stays the same.`,
       });
       if (off && u.email && ctx.mailConfigured) {
         const name = t.trade_name ?? t.legal_name;
-        void ctx.mailer.send({
+        void ctx.mailer.send({ type: 'two-factor-off', tenantId: t.id,
           to: u.email,
           subject: `Two-step sign-in was turned off for ${name}`,
           text: `Hello ${u.name},
@@ -660,7 +660,7 @@ If you did not ask for this, tell an owner of ${name} and reply to this email at
     if (!ctx.mailConfigured) return;
     const owners = (await db.query<{ email: string; name: string }>(`select email, name from users where tenant_id = $1 and role = 'owner' and status = 'active' and email is not null`, [t.id])).rows;
     for (const o of owners) {
-      await ctx.mailer.send({
+      await ctx.mailer.send({ type: 'support-notice', tenantId: t.id,
         to: o.email,
         subject,
         text: [`Hello ${o.name},`, ...lines].join('\n\n'),
@@ -680,7 +680,7 @@ If you did not ask for this, tell an owner of ${name} and reply to this email at
       ...(retired ? ['Install your production certificate in Settings → Business before issuing.'] : []),
     ];
     for (const o of owners) {
-      await ctx.mailer.send({
+      await ctx.mailer.send({ type: 'business-live', tenantId: t.id,
         to: o.email,
         subject: `${name} is live with BTS`,
         text: [`Hello ${o.name},`, ...lines, link].join('\n\n'),
