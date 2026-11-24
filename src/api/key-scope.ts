@@ -61,7 +61,7 @@ const AREA_OF: Record<string, KeyArea | 'people'> = {
   me: 'business', business: 'business', certificate: 'business', templates: 'business', 'payment-accounts': 'business', 'counter-settings': 'business',
   registers: 'business', shifts: 'business', timeclock: 'business', pos: 'business', integrations: 'business', connectors: 'business', billing: 'business',
   // People, signed in: accounts, keys, the logs. A key is refused these whatever its scope.
-  users: 'people', audit: 'people', 'api-keys': 'people', 'publishable-keys': 'people', developer: 'people',
+  users: 'people', audit: 'people', 'api-keys': 'people', 'publishable-keys': 'people', developer: 'people', mail: 'people',
 };
 
 /** POSTs that only work something out and change nothing: a read key may use them. */

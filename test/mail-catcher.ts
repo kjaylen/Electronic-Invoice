@@ -15,6 +15,7 @@
  */
 
 import { mkdirSync, renameSync, writeFileSync } from 'node:fs';
+import { createServer as createHttpServer } from 'node:http';
 import { createServer, type Server, type Socket } from 'node:net';
 import { join } from 'node:path';
 import { createSecureContext, createServer as createTlsServer, TLSSocket } from 'node:tls';
@@ -325,4 +326,51 @@ export async function startMailCatcher(options: MailCatcherOptions = {}): Promis
   });
   catcher.port = (server.address() as { port: number }).port;
   return catcher;
+}
+
+// ---------- looking at what was caught ----------
+
+const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
+
+/**
+ * A small web page over a catcher: the list of caught emails, each one as its
+ * recipient would see it, its plain text, and the raw message. Local only.
+ */
+export async function startMailViewer(catcher: MailCatcher, port: number, host = '127.0.0.1'): Promise<{ port: number; close(): Promise<void> }> {
+  const page = (title: string, body: string) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(title)}</title>
+<style>body{font:15px/1.5 system-ui,sans-serif;margin:0;color:#0f1117;background:#f4f5f7}main{max-width:1000px;margin:0 auto;padding:24px 16px}h1{font-size:20px}table{width:100%;border-collapse:collapse;background:#fff;border:1px solid #e6e8ec}td,th{padding:8px 10px;border-top:1px solid #eef0f3;text-align:left;font-size:14px;vertical-align:top}th{background:#f8f9fa;border-top:0}a{color:#6d2d93}.muted{color:#646b7b}iframe{width:100%;height:70vh;border:1px solid #e6e8ec;background:#fff}pre{white-space:pre-wrap;background:#fff;border:1px solid #e6e8ec;padding:12px;overflow-wrap:anywhere}</style></head><body><main>${body}</main></body></html>`;
+  const server = createHttpServer((req, res) => {
+    const url = new URL(req.url ?? '/', 'http://localhost');
+    const send = (status: number, type: string, body: string | Buffer, extra: Record<string, string> = {}) => {
+      res.writeHead(status, { 'Content-Type': type, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', ...extra });
+      res.end(body);
+    };
+    const m = /^\/m\/(\d+)(\/html|\/text|\/raw|\/a\/(\d+))?$/.exec(url.pathname);
+    if (url.pathname === '/messages.json') {
+      return send(200, 'application/json', JSON.stringify(catcher.mails.map((x) => ({ id: x.id, from: x.headers.from, to: x.to, subject: x.subject, type: x.headers['x-floreo-type'] ?? null, attachments: x.attachments.map((a) => a.filename), receivedAt: x.receivedAt.toISOString() }))));
+    }
+    if (url.pathname === '/') {
+      const rows = [...catcher.mails].reverse().map((x) => `<tr><td class="muted">${esc(x.receivedAt.toLocaleTimeString())}</td><td>${esc(x.to.join(', '))}</td><td><a href="/m/${x.id}">${esc(x.subject || '(no subject)')}</a><div class="muted">${esc(x.headers.from ?? '')}</div></td><td class="muted">${esc(x.headers['x-floreo-type'] ?? '')}</td><td class="muted">${x.attachments.map((a) => esc(a.filename)).join('<br>')}</td></tr>`).join('');
+      return send(200, 'text/html; charset=utf-8', page('Caught email', `<h1>Caught email (${catcher.mails.length})</h1><p class="muted">Nothing here was delivered to anyone. Newest first; reload to see more.</p><table><tr><th>When</th><th>To</th><th>Subject</th><th>Kind</th><th>Attachments</th></tr>${rows || '<tr><td colspan="5" class="muted">Nothing yet.</td></tr>'}</table>`));
+    }
+    const mail = m && catcher.mails.find((x) => x.id === Number(m[1]));
+    if (!m || !mail) return send(404, 'text/plain', 'Not found');
+    // The email's own HTML is shown in a frame that can run nothing.
+    if (m[2] === '/html') return send(200, 'text/html; charset=utf-8', mail.html || `<pre>${esc(mail.text)}</pre>`, { 'Content-Security-Policy': "sandbox; default-src 'none'; img-src data: http: https:; style-src 'unsafe-inline'" });
+    if (m[2] === '/text') return send(200, 'text/plain; charset=utf-8', mail.text);
+    if (m[2] === '/raw') return send(200, 'text/plain; charset=utf-8', mail.raw);
+    if (m[3]) {
+      const a = mail.attachments[Number(m[3])];
+      return a ? send(200, a.contentType, a.content, { 'Content-Disposition': `attachment; filename="${a.filename.replace(/[^\w.-]/g, '_')}"` }) : send(404, 'text/plain', 'Not found');
+    }
+    const head = (['from', 'to', 'reply-to', 'subject', 'list-unsubscribe', 'x-floreo-type'] as const).filter((h) => mail.headers[h]).map((h) => `<tr><th>${h}</th><td>${esc(mail.headers[h]!)}</td></tr>`).join('');
+    const files = mail.attachments.map((a, i) => `<a href="/m/${mail.id}/a/${i}">${esc(a.filename)}</a> <span class="muted">(${a.contentType}, ${a.content.length} bytes)</span>`).join('<br>');
+    return send(200, 'text/html; charset=utf-8', page(mail.subject, `<p><a href="/">&larr; All caught email</a></p><h1>${esc(mail.subject)}</h1><table>${head}${files ? `<tr><th>attachments</th><td>${files}</td></tr>` : ''}</table>
+<p><a href="/m/${mail.id}/html">HTML alone</a> · <a href="/m/${mail.id}/text">Plain text</a> · <a href="/m/${mail.id}/raw">Raw message</a></p><iframe title="The email" src="/m/${mail.id}/html" sandbox></iframe><h2>Plain text</h2><pre>${esc(mail.text)}</pre>`));
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(port, host, () => resolve());
+  });
+  return { port: (server.address() as { port: number }).port, close: () => new Promise((r) => server.close(() => r())) };
 }

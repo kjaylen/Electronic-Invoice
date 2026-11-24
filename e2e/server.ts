@@ -1,6 +1,6 @@
 /**
  * The server the browser tests run against: the local demo (stand-in BTS,
- * emails to an outbox folder) on its own port, with a fresh database and
+ * emails caught by a local SMTP server and kept in a folder) on its own port, with a fresh database and
  * demo folder every run, so the tests never touch your demo data.
  *
  * Needs PostgreSQL (docker compose up -d db) and a built web app (npm run web:build).
@@ -12,7 +12,8 @@ import pg from 'pg';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const admin = process.env.E2E_ADMIN_DATABASE_URL ?? 'postgres://einvoicing:einvoicing@localhost:5432/einvoicing';
-const name = 'einvoicing_e2e';
+const name = process.env.E2E_DATABASE_NAME ?? 'einvoicing_e2e';
+if (!/^[a-z0-9_]+$/.test(name)) throw new Error('E2E_DATABASE_NAME must be letters, digits and _');
 
 const client = new pg.Client({ connectionString: admin });
 await client.connect();
@@ -30,6 +31,9 @@ Object.assign(process.env, {
   DEMO_DIR: demoDir,
   PORT: process.env.E2E_PORT ?? '3100',
   DEMO_BTS_PORT: process.env.E2E_BTS_PORT ?? '8543',
+  DEMO_MAIL_PORT: process.env.E2E_MAIL_PORT ?? '3125',
+  DEMO_MAIL_VIEW_PORT: process.env.E2E_MAIL_VIEW_PORT ?? '3180',
+  MAIL_INTERVAL_MS: '500',
   WORKER_INTERVAL_MS: '3000',
   CONNECTOR_INTERVAL_MS: '2000',
 });

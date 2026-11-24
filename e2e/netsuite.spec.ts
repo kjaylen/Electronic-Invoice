@@ -20,7 +20,7 @@ const OWNER = { email: 'rosa@cornerstore.test', password: 'my brand new password
 const API = { 'X-Requested-With': 'etd-web', 'X-Business': SLUG };
 const DATABASE = (() => {
   const url = new URL(process.env.E2E_ADMIN_DATABASE_URL ?? 'postgres://einvoicing:einvoicing@localhost:5432/einvoicing');
-  url.pathname = '/einvoicing_e2e';
+  url.pathname = `/${process.env.E2E_DATABASE_NAME ?? 'einvoicing_e2e'}`;
   return url.toString();
 })();
 
