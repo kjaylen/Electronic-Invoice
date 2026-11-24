@@ -9,7 +9,9 @@
 
 import { defineConfig, devices } from '@playwright/test';
 
-const port = Number(process.env.E2E_PORT ?? 3100);
+// E2E_VIEW=1: run against the server from `node e2e/view.ts` (the data the last full run left), to work on one test.
+const view = process.env.E2E_VIEW === '1';
+const port = Number(process.env.E2E_PORT ?? (view ? 3110 : 3100));
 const channel = process.env.PW_CHANNEL ?? (process.platform === 'win32' ? 'msedge' : undefined);
 
 export default defineConfig({
@@ -30,12 +32,12 @@ export default defineConfig({
     // Runs after the desktop tests, which set up the business it logs in to.
     { name: 'mobile', use: { ...devices['Pixel 7'], ...(channel && { channel }) }, testMatch: /mobile/, dependencies: ['desktop'] },
   ],
-  webServer: {
+  ...(!view && { webServer: {
     command: 'node --disable-warning=ExperimentalWarning e2e/server.ts',
     url: `http://localhost:${port}/health`,
     reuseExistingServer: false,
     timeout: 60_000,
     stdout: 'ignore',
     stderr: 'pipe',
-  },
+  } }),
 });
