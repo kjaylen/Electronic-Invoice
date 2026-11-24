@@ -19,6 +19,7 @@
 import PDFDocument from 'pdfkit';
 import QRCode from 'qrcode';
 import { type PrintView, PrintError, qrUrl, REGULATORY_MESSAGES } from './view.ts';
+import { authorizationText, infoLines, regulatoryLines } from '../engine/print-view.ts';
 
 export interface RenderOptions {
   /** BTS's authorization protocol (the ETDUI of its reply). Required for previous-authorization documents unless draft. */
@@ -103,26 +104,7 @@ function collect(doc: Doc): Promise<Buffer> {
   });
 }
 
-export function authorizationText(view: PrintView, options: RenderOptions): string {
-  if (view.pendingAuthorization) return REGULATORY_MESSAGES.pendingAuthorization;
-  return options.protocolNumber ?? 'DRAFT - NOT AUTHORIZED BY BTS';
-}
-
-export function regulatoryLines(view: PrintView, options: RenderOptions): string[] {
-  const lines = [...view.regulatory];
-  if (!view.pendingAuthorization && !options.protocolNumber && options.draft) lines.unshift('DRAFT - NOT AUTHORIZED BY BTS');
-  if (view.contingency) lines.push(`Contingency since ${view.contingency.initDate} ${view.contingency.initTime}: ${view.contingency.reason}`);
-  if (view.reference) lines.push(`${view.typeName} for ${view.reference.documentType} ${view.reference.etdui}: ${view.reference.reason}`);
-  return lines;
-}
-
-export function infoLines(view: PrintView): string[] {
-  const lines: string[] = [];
-  if (view.payment?.dueDate) lines.push(`Payment due ${view.payment.dueDate}`);
-  if (view.payment?.terms) lines.push(`Terms: ${view.payment.terms}`);
-  if (view.note) lines.push(view.note);
-  return lines;
-}
+export { authorizationText, infoLines, regulatoryLines } from '../engine/print-view.ts';
 
 // =====================================================================
 // Single sheets (A4 / Letter)

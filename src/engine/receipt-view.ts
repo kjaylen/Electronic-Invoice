@@ -11,7 +11,7 @@
 
 import type { DocumentTotals } from './calc.ts';
 import { formatCents } from './decimal.ts';
-import type { PrintParty, PrintView } from '../render/view.ts';
+import { type PrintParty, type PrintView, REGULATORY_MESSAGES } from './print-view.ts';
 
 export interface ReceiptViewInput {
   etdui: string;
@@ -88,8 +88,8 @@ export function receiptPrintView(input: ReceiptViewInput): PrintView {
       payable: formatCents(t.payableAmount),
     },
     regulatory: [
-      ...(testEnvironment ? ['Transmitted to tests environment, no fiscal value'] : []),
-      ...(pendingAuthorization ? ['Pending of BTS authorization'] : []),
+      ...(testEnvironment ? [REGULATORY_MESSAGES.testEnvironment] : []),
+      ...(pendingAuthorization ? [REGULATORY_MESSAGES.pendingAuthorization] : []),
     ],
   };
   if (t.prepaidAmount !== 0n) view.totals.prepaid = formatCents(t.prepaidAmount);
