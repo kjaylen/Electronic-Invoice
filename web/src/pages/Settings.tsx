@@ -18,6 +18,7 @@ import { DevelopersTab } from './Developers';
 import { EmailTab } from './Email';
 import { IntegrationsTab } from './Integrations';
 import { StoreSettingsTab } from './StoreSettings';
+import { TaxSettingsCard } from './BusinessTax';
 import { PinCard, TillsTab, UserPinDialog } from './Tills';
 
 function readAsBase64(file: File): Promise<string> {
@@ -435,6 +436,7 @@ function BusinessTab() {
       </section>
       {editable && <SellsCard profile={profile} onSaved={() => void load()} />}
       {editable && <DailySummaryCard profile={profile} onSaved={() => void load()} />}
+      {editable && <TaxSettingsCard />}
       {editable && <LoyaltyCard />}
       {editable && <SecurityRules profile={profile} onSaved={() => void load()} />}
       {role === 'owner' && <DeleteBusinessCard profile={profile} />}

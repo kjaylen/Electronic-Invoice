@@ -4,6 +4,7 @@ import { useI18n, useT } from '../i18n';
 import { belizeToday, ErrorText, Field, fromCents, Modal, money, Segmented, toCents, usePageTitle } from '../ui';
 import { useSearchParams } from 'react-router';
 import { GstReturnView, ProfitView } from './Accounting';
+import { BusinessTaxView } from './BusinessTax';
 import { useSession } from '../session';
 import { HoursWorkedPanel } from './TimeClock';
 
@@ -145,9 +146,12 @@ export function Reports() {
   const { can } = useSession();
   usePageTitle(t('Reports'));
   const [params, setParams] = useSearchParams();
-  const view = (params.get('view') as 'sales' | 'gst' | 'profit' | null) ?? 'sales';
-  const [preset, setPreset] = useState<Preset>('month');
-  const [range, setRange] = useState<[string, string]>(() => presetRange('month'));
+  const view = (params.get('view') as 'sales' | 'gst' | 'business-tax' | 'profit' | null) ?? 'sales';
+  // A link can name the period (the overview's "coming up" opens last month's worksheet).
+  const asked = [params.get('from') ?? '', params.get('to') ?? ''] as [string, string];
+  const named = asked.every((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)) && asked[0] <= asked[1];
+  const [preset, setPreset] = useState<Preset>(named ? 'custom' : 'month');
+  const [range, setRange] = useState<[string, string]>(() => (named ? asked : presetRange('month')));
   const [summary, setSummary] = useState<Summary | null>(null);
   const [customers, setCustomers] = useState<CustomerRow[]>([]);
   const [items, setItems] = useState<ItemRow[]>([]);
@@ -226,8 +230,9 @@ export function Reports() {
         <span className="small muted num">{from} → {to}</span>
       </div>
       <ErrorText error={error} />
-      <Segmented switches label={t('Report')} value={view} onChange={(v) => setParams(v === 'sales' ? {} : { view: v }, { replace: true })} options={[['sales', t('Sales')], ['gst', t('GST return')], ['profit', t('Profit and loss')]]} />
+      <Segmented switches label={t('Report')} value={view} onChange={(v) => setParams(v === 'sales' ? {} : { view: v }, { replace: true })} options={[['sales', t('Sales')], ['gst', t('GST return')], ['business-tax', t('Business tax')], ['profit', t('Profit and loss')]]} />
       {view === 'gst' && <GstReturnView from={from} to={to} />}
+      {view === 'business-tax' && <BusinessTaxView from={from} to={to} />}
       {view === 'profit' && <ProfitView from={from} to={to} />}
 
       {view !== 'sales' ? null : !summary ? <div className="grid">{[0, 1, 2, 3].map((i) => <div key={i} className="skeleton" style={{ height: '6rem' }} />)}</div> : (

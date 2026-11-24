@@ -5,6 +5,7 @@ import { type T, useI18n, useT } from '../i18n';
 import { Icons } from '../icons';
 import { useSession } from '../session';
 import { belizeDate, belizeToday, CountUp, fromCents, money, PaymentBadge, StatusBadge, toCents, TYPE_NAMES, usePageTitle } from '../ui';
+import { ComingUp } from './BusinessTax';
 import { SalesChart } from './Reports';
 
 export function customerLabel(t: T, d: DocumentInfo): string {
@@ -185,6 +186,7 @@ export function Dashboard() {
               ))}
             </ul>
           )}
+          {reports && <ComingUp />}
         </section>
       </div>
 

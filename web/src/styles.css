@@ -1963,6 +1963,13 @@ button.tpl-img-upload { margin: 0.6rem 0.3rem 0.3rem; justify-content: center; }
 .station-categories { display: flex; flex-wrap: wrap; gap: 0.4rem; }
 .chip-toggle { min-height: 0; padding: 0.25rem 0.7rem; border-radius: 999px; font-size: 0.85rem; background: var(--sheet); color: var(--ink); border: 1px solid var(--hairline); box-shadow: none; }
 .chip-toggle[aria-pressed="true"] { background: var(--brand-soft); border-color: var(--brand-line); color: var(--brand-ink); font-weight: 600; }
+.coming-up { margin-top: 1rem; padding-top: 0.9rem; border-top: 1px solid var(--hairline); }
+.coming-up h3 { margin: 0 0 0.2rem; font-size: 0.78rem; font-weight: 620; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.coming-up .when { margin-left: auto; font-size: 0.85rem; color: var(--muted); white-space: nowrap; }
+.tax-settings { max-width: 46rem; }
+.tax-settings .rate-input { width: 6rem; }
+.tax-settings .own-date { align-items: flex-end; gap: 0.75rem; flex-wrap: wrap; }
+table.business-tax td .small { margin-top: 0.1rem; }
 .location-select { width: auto; min-width: 10rem; }
 .stock-places { margin-top: 0.1rem; }
 .stock-at { display: flex; flex-wrap: wrap; gap: 0.5rem; }

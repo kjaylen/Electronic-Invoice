@@ -82,11 +82,11 @@ constants in the code, because they change and because sources disagree.
 
 ### E. The end of the month
 
-- [ ] E1. **Business tax worksheet** (Reports → Business tax): the month's
+- [x] E1. **Business tax worksheet** (Reports → Business tax): the month's
   receipts by kind, the rate for each (the business chooses its kinds in
   Settings; 1.75% for trade and 6% for professions are filled in), less the
   contract tax customers withheld; CSV and PDF; in the accountant's pack.
-- [ ] E2. **What is due and when.** The overview and a monthly email say what
+- [x] E2. **What is due and when.** The overview and a monthly email say what
   is coming up: the GST return and the business tax return (the 15th), and
   dates the owner adds (trade licence, Social Security, insurance).
 
