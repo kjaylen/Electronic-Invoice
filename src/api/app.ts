@@ -505,6 +505,13 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       // Built scripts, styles and fonts have their content in their names: they never change, so browsers keep them.
       setHeaders: (reply, path) => {
         if (/[\\/]assets[\\/][^\\/]+-[\w-]{8,}\.[a-z0-9]+(\.(br|gz))?$/.test(path)) reply.header('Cache-Control', 'public, max-age=31536000, immutable');
+        // The embed script sits at a fixed address in other people's pages: it must be allowed to change, so a short
+        // cache, and any site may load it.
+        else if (/[\\/]embed\.js(\.(br|gz))?$/.test(path)) {
+          reply.header('Cache-Control', 'public, max-age=300');
+          reply.header('Access-Control-Allow-Origin', '*');
+          reply.header('Cross-Origin-Resource-Policy', 'cross-origin');
+        }
       },
     });
   }

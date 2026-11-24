@@ -6,7 +6,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { brotliCompressSync, brotliDecompressSync } from 'node:zlib';
@@ -46,6 +46,35 @@ test('built files: named-by-content assets are cached for good and sent compress
     const page = await app.inject({ method: 'GET', url: '/signup' });
     assert.equal(page.statusCode, 200);
     assert.doesNotMatch(String(page.headers['cache-control'] ?? ''), /immutable/);
+  } finally {
+    await app.close();
+    await f.close();
+  }
+});
+
+test('the embed script other sites load: a fixed address, a short cache, any site may load it, compressed when a copy was made', async () => {
+  const web = mkdtempSync(join(tmpdir(), 'static-'));
+  const source = readFileSync(new URL('../web/public/embed.js', import.meta.url), 'utf8');
+  writeFileSync(join(web, 'index.html'), '<!doctype html><html><head><title>Floreo</title></head><body></body></html>');
+  writeFileSync(join(web, 'embed.js'), source);
+  writeFileSync(join(web, 'embed.js.br'), brotliCompressSync(Buffer.from(source)));
+  const f = await setupPipeline();
+  const app = await buildApp({ pipeline: f.deps, cookieSecure: true, webRoot: web });
+  try {
+    const res = await app.inject({ method: 'GET', url: '/embed.js', headers: { origin: 'https://www.example.bz' } });
+    assert.equal(res.statusCode, 200);
+    assert.match(String(res.headers['content-type']), /javascript/);
+    assert.equal(res.headers['cache-control'], 'public, max-age=300', 'never kept for good: it changes with the platform');
+    assert.equal(res.headers['access-control-allow-origin'], '*');
+    assert.equal(res.headers['cross-origin-resource-policy'], 'cross-origin');
+    assert.equal(res.body, source);
+    const br = await app.inject({ method: 'GET', url: '/embed.js', headers: { 'accept-encoding': 'br' } });
+    assert.equal(br.headers['content-encoding'], 'br');
+    assert.equal(br.headers['cache-control'], 'public, max-age=300');
+    assert.equal(brotliDecompressSync(br.rawPayload).toString(), source);
+    // The script is what the docs say it is: the five elements, and nothing that needs a secret.
+    for (const name of ['floreo-products', 'floreo-product', 'floreo-buy-button', 'floreo-cart', 'floreo-checkout']) assert.ok(source.includes(`define('${name}'`), name);
+    assert.ok(!/credentials:\s*'include'/.test(source), 'never sends cookies');
   } finally {
     await app.close();
     await f.close();

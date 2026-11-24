@@ -7,9 +7,10 @@
  *   npm run web:compress
  *
  * The server sends the compressed file to browsers that accept it
- * (src/api/app.ts) and the plain one otherwise. Only web/dist/assets is
- * compressed: its files have their content in their names, so they never
- * change once written.
+ * (src/api/app.ts) and the plain one otherwise. web/dist/assets is
+ * compressed (its files have their content in their names, so they never
+ * change once written), and the embed script other sites load (a fixed name,
+ * compressed afresh on every build).
  */
 
 import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
@@ -17,12 +18,11 @@ import { fileURLToPath } from 'node:url';
 import { brotliCompressSync, constants, gzipSync } from 'node:zlib';
 
 const dir = fileURLToPath(new URL('../web/dist/assets/', import.meta.url));
+const embed = fileURLToPath(new URL('../web/dist/embed.js', import.meta.url));
 let before = 0;
 let after = 0;
 let files = 0;
-for (const name of readdirSync(dir)) {
-  if (!/\.(js|css|svg|json)$/.test(name)) continue;
-  const path = `${dir}${name}`;
+for (const path of [...readdirSync(dir).filter((name) => /\.(js|css|svg|json)$/.test(name)).map((name) => `${dir}${name}`), embed]) {
   const data = readFileSync(path);
   // Small files gain nothing worth a second file.
   if (data.length < 1024) continue;
