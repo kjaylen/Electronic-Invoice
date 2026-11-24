@@ -20,7 +20,6 @@
  * manual are covered by the tests.
  */
 
-import { randomInt } from 'node:crypto';
 
 export const ETD_TYPES = {
   TAX_INVOICE: '01',
@@ -104,9 +103,17 @@ export function computeCheckDigit(first43: string): number {
   return (11 - (total % 11)) % 10;
 }
 
-/** A 9-digit security code from a cryptographic random source. */
+/**
+ * A 9-digit security code from a cryptographic random source (Web Crypto, so
+ * the same code runs on the server and on a till making receipts offline).
+ * Uniform: draws of 4,000,000,000 and above are thrown away and drawn again.
+ */
 export function generateSecurityCode(): string {
-  return String(randomInt(0, 1_000_000_000)).padStart(9, '0');
+  const draw = new Uint32Array(1);
+  for (;;) {
+    globalThis.crypto.getRandomValues(draw);
+    if (draw[0]! < 4_000_000_000) return String(draw[0]! % 1_000_000_000).padStart(9, '0');
+  }
 }
 
 function assertOperModeAllowed(etdType: EtdType, operMode: OperMode): void {
