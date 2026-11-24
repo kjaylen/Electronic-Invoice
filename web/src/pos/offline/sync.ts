@@ -9,7 +9,7 @@
  *  - An event is marked sent only when the server says so (applied or duplicate). Until then it stays
  *    on the disk and is sent again: after a restart, a crash, an update.
  *  - A failure the server says may pass (it could not sign, the database was busy) holds the rest back,
- *    in order, and is tried again later: 2 s, 4 s, 8 s... up to 5 minutes, with some randomness so many
+ *    in order, and is tried again later: 2 s, 4 s, 8 s... up to 2 minutes, with some randomness so many
  *    tills do not all come back at once. One that cannot pass (the event is wrong) is set aside for a
  *    manager (the sync screen says why, and can try it again) and the rest go on.
  *  - Only one sender at a time, also across windows (Web Locks).
@@ -21,7 +21,8 @@ import type { LocalApi } from './local';
 import type { Snapshot, SyncEvent } from './types';
 
 const BATCH = 50;
-const MAX_BACKOFF_MS = 5 * 60_000;
+// At most 2 minutes between tries: a till whose server comes back catches up soon after.
+const MAX_BACKOFF_MS = 2 * 60_000;
 const SNAPSHOT_EVERY_MS = 5 * 60_000;
 const PING_ONLINE_MS = 60_000;
 const PING_OFFLINE_MS = 15_000;
