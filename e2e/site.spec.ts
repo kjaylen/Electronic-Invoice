@@ -220,6 +220,11 @@ test('site builder: a photo straight from a phone is made smaller and uploads', 
   // It is chosen as the banner's picture, and what was stored is well under the limit.
   await expect(page.getByRole('dialog')).toBeHidden({ timeout: 30_000 });
   await expect(page.locator('.se-image-thumb img').first()).toBeVisible();
+  // On the page it is a real picture, described for people who cannot see it.
+  const preview = page.frameLocator('iframe[title="Preview of your store"]');
+  await expect(preview.locator('img.site-hero-image')).toBeVisible();
+  await page.getByLabel('Describe the picture').fill('Our shop front on Albert Street');
+  await expect(preview.locator('img.site-hero-image')).toHaveAttribute('alt', 'Our shop front on Albert Street');
   const assets = (await (await page.request.get('/v1/templates/assets', { headers: API })).json()).data as Array<{ name: string; bytes: number }>;
   const stored = assets.find((a) => a.name === name);
   expect(stored).toBeTruthy();

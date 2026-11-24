@@ -859,8 +859,11 @@ pre.instructions { white-space: pre-wrap; font-family: var(--figures); font-size
 .site-buttons .button { text-decoration: none; }
 
 .site-hero { position: relative; border-radius: var(--radius-xl); overflow: hidden; display: flex; }
-.site-hero.has-image { background-size: cover; color: #fff; min-height: 340px; padding: clamp(1.5rem, 5vw, 4rem); }
-.site-hero.has-image::before { content: ''; position: absolute; inset: 0; background: rgba(0, 0, 0, var(--overlay, 0.3)); }
+.site-hero.has-image { color: #fff; min-height: 340px; padding: clamp(1.5rem, 5vw, 4rem); background: var(--ink); }
+.site-hero-image { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 0; }
+.site-hero.has-image::before { content: ''; position: absolute; inset: 0; z-index: 1; background: rgba(0, 0, 0, var(--overlay, 0.3)); }
+.site-hero.has-image .site-hero-inner { z-index: 2; }
+.shop-main:focus { outline: none; }
 .site-hero.has-image.height-small { min-height: 240px; }
 .site-hero.has-image.height-large { min-height: min(78vh, 640px); }
 .site-hero.has-image h1, .site-hero.has-image h2 { color: #fff !important; }

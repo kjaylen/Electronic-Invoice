@@ -394,9 +394,11 @@ function Hero({ settings, ctx, first }: { settings: Record<string, unknown>; ctx
   const t = useT();
   const src = imageSrc(settings.image, ctx.slug);
   const perks = b(settings.showPerks) && (ctx.delivery.enabled || ctx.pickup.enabled);
-  const style = src ? ({ '--overlay': String(n(settings.overlay, 30) / 100), backgroundImage: `url("${src}")`, backgroundPosition: s(settings.focus) || 'center' }) as React.CSSProperties : undefined;
+  const style = src ? ({ '--overlay': String(n(settings.overlay, 30) / 100) }) as React.CSSProperties : undefined;
   return (
     <div className={`site-hero ${src ? 'has-image' : 'shop-hero'} align-${s(settings.align) || 'left'} height-${s(settings.height) || 'medium'}`} style={style}>
+      {/* A real picture (described, and fetched first when it opens the page), not a background. */}
+      {src && <img className="site-hero-image" src={src} alt={s(settings.imageAlt)} style={{ objectPosition: s(settings.focus) || 'center' }} {...(first ? { fetchPriority: 'high' as const } : { loading: 'lazy' as const })} decoding="async" />}
       <div className="site-hero-inner">
         <Heading text={s(settings.heading)} first={first} />
         {s(settings.text) && <p><T k="text" v={s(settings.text)} /></p>}
@@ -495,6 +497,7 @@ function VisitUs({ settings, blocks, ctx }: { settings: Record<string, unknown>;
   const address = s(settings.address).trim() || [ctx.street, ctx.city].filter(Boolean).join(', ');
   const src = imageSrc(settings.image, ctx.slug);
   const wa = ctx.whatsapp?.replace(/\D/g, '');
+  const alt = s(settings.imageAlt) || ctx.name;
   return (
     <div className={`site-visit ${src ? 'with-image' : ''}`}>
       <div className="stack">
@@ -511,7 +514,7 @@ function VisitUs({ settings, blocks, ctx }: { settings: Record<string, unknown>;
           {b(settings.showWhatsapp) && wa && <a className="button secondary" href={`https://wa.me/${wa}`} target="_blank" rel="noreferrer">WhatsApp</a>}
         </div>
       </div>
-      {src && <img className="site-visit-image" src={src} alt="" loading="lazy" />}
+      {src && <img className="site-visit-image" src={src} alt={alt} loading="lazy" decoding="async" />}
     </div>
   );
 }
@@ -553,7 +556,7 @@ function SectionBody({ section, ctx, first }: { section: Section; ctx: SiteConte
       const src = imageSrc(st.image, ctx.slug);
       return (
         <div className={`site-split image-${s(st.imagePosition) || 'left'}`}>
-          <div className="site-split-image">{src ? <img src={src} alt="" loading="lazy" /> : <span aria-hidden="true">◇</span>}</div>
+          <div className="site-split-image">{src ? <img src={src} alt={s(st.imageAlt)} loading="lazy" decoding="async" /> : <span aria-hidden="true">◇</span>}</div>
           <div className="stack site-split-text">
             <Heading text={s(st.heading)} first={first} />
             <RichText text={s(st.text)} />
@@ -579,7 +582,7 @@ function SectionBody({ section, ctx, first }: { section: Section; ctx: SiteConte
               const src = imageSrc(blk.settings.image, ctx.slug);
               return (
                 <div key={blk.id} className="site-column">
-                  {src && <img src={src} alt="" loading="lazy" />}
+                  {src && <img src={src} alt={s(blk.settings.imageAlt)} loading="lazy" decoding="async" />}
                   {s(blk.settings.heading) && <h3><T k="heading" v={s(blk.settings.heading)} block={blk.id} /></h3>}
                   <RichText text={s(blk.settings.text)} />
                   {s(blk.settings.linkLabel) && <SiteLinkEl link={asLink(blk.settings.link)} className="site-view-all"><T k="linkLabel" v={s(blk.settings.linkLabel)} block={blk.id} /> →</SiteLinkEl>}
@@ -717,7 +720,7 @@ export function MenuLinks({ items, onNavigate }: { items: MenuItem[]; onNavigate
   return (
     <ul className="site-menu">
       {items.map((m) => (
-        <li key={m.id} className={m.children.length ? 'has-children' : ''} onMouseLeave={() => setOpen((o) => (o === m.id ? null : o))}>
+        <li key={m.id} className={m.children.length ? 'has-children' : ''} onMouseLeave={() => setOpen((o) => (o === m.id ? null : o))} onKeyDown={(e) => { if (e.key === 'Escape' && open === m.id) { setOpen(null); e.currentTarget.querySelector('button')?.focus(); } }}>
           {m.children.length ? (
             <>
               <button type="button" className="link site-menu-parent" aria-expanded={open === m.id} onClick={() => setOpen((o) => (o === m.id ? null : m.id))} onMouseEnter={() => setOpen(m.id)}>{m.label} <span aria-hidden="true">▾</span></button>

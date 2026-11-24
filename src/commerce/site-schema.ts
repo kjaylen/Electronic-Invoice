@@ -51,6 +51,8 @@ export const LINK_TYPES = ['home', 'catalog', 'collections', 'collection', 'page
 export type LinkType = (typeof LINK_TYPES)[number];
 export interface SiteLink { type: LinkType; value?: string }
 
+/** What a picture shows, for people who cannot see it and for search engines (shown only once there is a picture). */
+const imageAlt: Field = { key: 'imageAlt', type: 'text', label: 'Describe the picture', hint: 'For people who cannot see it, and for search engines. Leave empty if it is only decoration.', maxLength: 160, default: '', showIf: { key: 'image', in: ['*'] } };
 const background: Field = { key: 'background', type: 'select', label: 'Background', options: [['none', 'None'], ['soft', 'Soft tint'], ['primary', 'Brand colour'], ['dark', 'Dark']], default: 'none' };
 const align: Field = { key: 'align', type: 'select', label: 'Alignment', options: [['left', 'Left'], ['center', 'Centre']], default: 'left' };
 const button = (n = ''): Field[] => [
@@ -64,6 +66,7 @@ export const SECTIONS: SectionSchema[] = [
     type: 'hero', name: 'Banner', icon: 'image', description: 'A large opening section: a picture, a headline and buttons.',
     fields: [
       { key: 'image', type: 'image', label: 'Picture', hint: 'Wide pictures work best (at least 1600 pixels across).', default: '' },
+      imageAlt,
       { key: 'focus', type: 'select', label: 'Keep in view', options: [['center', 'Middle'], ['top', 'Top'], ['bottom', 'Bottom']], default: 'center', showIf: { key: 'image', in: ['*'] } },
       { key: 'heading', type: 'text', label: 'Headline', maxLength: 120, default: 'Welcome to our store' },
       { key: 'text', type: 'textarea', label: 'Text', maxLength: 400, default: 'Fresh picks every week, delivered or ready for pickup.' },
@@ -120,6 +123,7 @@ export const SECTIONS: SectionSchema[] = [
     type: 'image_with_text', name: 'Picture with text', icon: 'split', description: 'A picture beside a heading, text and a button.',
     fields: [
       { key: 'image', type: 'image', label: 'Picture', default: '' },
+      imageAlt,
       { key: 'heading', type: 'text', label: 'Heading', maxLength: 120, default: 'Our story' },
       { key: 'text', type: 'richtext', label: 'Text', maxLength: 3000, default: 'Tell customers who you are, where your products come from and why they will love them.' },
       ...button(),
@@ -145,6 +149,7 @@ export const SECTIONS: SectionSchema[] = [
       name: 'column', label: 'Column', max: 6,
       fields: [
         { key: 'image', type: 'image', label: 'Picture', default: '' },
+        imageAlt,
         { key: 'heading', type: 'text', label: 'Heading', maxLength: 80, default: 'Column' },
         { key: 'text', type: 'richtext', label: 'Text', maxLength: 1000, default: '' },
         { key: 'linkLabel', type: 'text', label: 'Link text', maxLength: 40, default: '' },
@@ -237,6 +242,7 @@ export const SECTIONS: SectionSchema[] = [
       { key: 'title', type: 'text', label: 'Title', maxLength: 80, default: 'Visit us' },
       { key: 'address', type: 'textarea', label: 'Address', hint: 'Leave empty to use your business address.', maxLength: 300, default: '' },
       { key: 'image', type: 'image', label: 'Picture of the shop', default: '' },
+      imageAlt,
       { key: 'showDirections', type: 'toggle', label: 'Directions button (Google Maps)', default: true },
       { key: 'showCall', type: 'toggle', label: 'Call button', default: true },
       { key: 'showWhatsapp', type: 'toggle', label: 'WhatsApp button', default: true },

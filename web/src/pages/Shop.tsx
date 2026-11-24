@@ -282,6 +282,15 @@ export function ShopLayout() {
   useEffect(() => {
     if (site) loadFonts([site.theme.fonts.heading, site.theme.fonts.body]);
   }, [site]);
+  // Escape closes the phone menu.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMenuOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [menuOpen]);
   // The store's own icon in the browser tab.
   useEffect(() => {
     const src = site ? imageSrc(site.theme.favicon, info?.slug ?? '') : null;
@@ -311,6 +320,7 @@ export function ShopLayout() {
   const ways = info ? [info.payments.bankTransfer && t('Bank transfer'), info.payments.cashOnDelivery && t('Cash on delivery'), info.payments.payAtPickup && t('Pay at pickup'), info.payments.online && t('Card or PayPal online')].filter(Boolean) : [];
   return (
     <div className={`shop ${site ? `site-spacing-${site.theme.spacing}` : ''}`}>
+      <a className="skip-link" href="#main">{t('Skip to content')}</a>
       {css && <style data-theme="site">{css}</style>}
       {theme.css && <style data-theme="store">{theme.css}</style>}
       {announcement?.enabled && announcement.text && (
@@ -340,7 +350,7 @@ export function ShopLayout() {
         </Link>
       </header>
       {menuOpen && menu.length > 0 && <nav className="site-drawer" aria-label={t('Store menu')}><MenuLinks items={menu} onNavigate={() => setMenuOpen(false)} /></nav>}
-      <main className="shop-main" id="main">
+      <main className="shop-main" id="main" tabIndex={-1}>
         <div className="page" key={location.pathname}>
           {outlet ? <Outlet context={outlet} /> : <div className="shop-grid">{[0, 1, 2, 3].map((i) => <div key={i} className="skeleton" style={{ height: '16rem' }} />)}</div>}
         </div>

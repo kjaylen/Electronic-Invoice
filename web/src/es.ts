@@ -3527,4 +3527,6 @@ export const ES: Record<string, string> = {
   "Up to {n} saved sections. Remove one under “Add section” first.": "Hasta {n} secciones guardadas. Quite una en “Agregar sección” primero.",
   "Your saved sections": "Sus secciones guardadas",
   "Remove “{name}” from your saved sections? Pages that use it keep their copy.": "¿Quitar “{name}” de sus secciones guardadas? Las páginas que la usan conservan su copia.",
+  "Describe the picture": "Describa la imagen",
+  "For people who cannot see it, and for search engines. Leave empty if it is only decoration.": "Para quienes no pueden verla y para los buscadores. Déjelo vacío si es solo decoración.",
 };
