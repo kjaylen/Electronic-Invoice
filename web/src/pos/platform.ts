@@ -35,6 +35,8 @@ export interface Platform {
   getItem(key: string): Promise<string | null>;
   setItem(key: string, value: string): Promise<void>;
   removeItem(key: string): Promise<void>;
+  /** Secrets (the till's token, the key of its local data), in the platform's secure storage. None in a browser. */
+  secret?: { get(key: string): Promise<string | null>; set(key: string, value: string): Promise<void>; remove(key: string): Promise<void> };
   /** The printer connections this device can use. */
   connections: PrinterConnection[];
   /** Send ESC/POS bytes to a receipt printer. */
@@ -75,6 +77,10 @@ interface TillHardwarePlugin {
   sendNetwork(o: { host: string; port: number; data: string }): Promise<void>;
   listBluetooth(): Promise<{ devices: BluetoothPrinter[] }>;
   sendBluetooth(o: { address: string; data: string }): Promise<void>;
+  /** Secure storage: Android Keystore, iOS Keychain. */
+  secretGet(o: { key: string }): Promise<{ value: string | null }>;
+  secretSet(o: { key: string; value: string }): Promise<void>;
+  secretRemove(o: { key: string }): Promise<void>;
 }
 interface AppPlugin { getInfo(): Promise<{ version: string }> }
 interface BarcodeScannerPlugin {
@@ -132,6 +138,8 @@ async function detectPlatform(): Promise<Platform> {
       getItem: (k) => desktop.store.get(k),
       setItem: (k, v) => desktop.store.set(k, v),
       removeItem: (k) => desktop.store.remove(k),
+      // The desktop store encrypts these keys with the operating system's key (safeStorage).
+      secret: desktop.store,
       connections: ['network', 'system'],
       sendRaw: async (target, data) => {
         if (target.connection !== 'network') throw new Error('This computer reaches receipt printers over the network or as installed printers');
@@ -155,6 +163,11 @@ async function detectPlatform(): Promise<Platform> {
       getItem: async (key) => (await prefs.get({ key })).value,
       setItem: (key, value) => prefs.set({ key, value }),
       removeItem: (key) => prefs.remove({ key }),
+      secret: {
+        get: async (key) => (await hardware.secretGet({ key })).value,
+        set: (key, value) => hardware.secretSet({ key, value }),
+        remove: (key) => hardware.secretRemove({ key }),
+      },
       connections: kind === 'android' ? ['network', 'bluetooth'] : ['network'],
       sendRaw: async (target, data) => {
         if (target.connection === 'network') return hardware.sendNetwork({ host: target.host, port: target.port, data: base64(data) });
