@@ -7,6 +7,7 @@
 //
 // Uses the browser tests' business (npm run e2e first) through e2e/view.ts on its own port.
 //   node scripts/offline-check.mjs            (from apps/desktop, after npm run web)
+//   CHECK_EXE="release/win-unpacked/Floreo Till.exe" node scripts/offline-check.mjs   (the packaged app, after npm run dist:win)
 
 import { _electron as electron, request } from '@playwright/test';
 import assert from 'node:assert/strict';
@@ -60,7 +61,10 @@ async function stopServer(child) {
   throw new Error('The server did not stop');
 }
 
-const launch = () => electron.launch({ executablePath, args: [appDir, `--user-data-dir=${userData}`], cwd: appDir, timeout: 30_000 });
+const packaged = process.env.CHECK_EXE ? join(appDir, process.env.CHECK_EXE) : null;
+const launch = () => (packaged
+  ? electron.launch({ executablePath: packaged, args: [`--user-data-dir=${userData}`], cwd: appDir, timeout: 30_000 })
+  : electron.launch({ executablePath, args: [appDir, `--user-data-dir=${userData}`], cwd: appDir, timeout: 30_000 }));
 
 async function signIn(page) {
   await page.waitForSelector('text=/Who is selling\\?|Rosa Owner/', { timeout: 30_000 });
