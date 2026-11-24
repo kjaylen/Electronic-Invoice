@@ -482,17 +482,37 @@ function PinPad({ user, deviceToken, offline, onBack, onSignedIn }: { user: Till
     setError(null);
     try {
       // With the server when it can be reached (and remembered for later); without it, the PIN remembered on this till.
-      let signed: SignedIn | null = null;
-      if (!offline || offline.sync.online) {
+      const withServer = async () => {
+        const s = await api<SignedIn>('/v1/pos/sign-in', { method: 'POST', token: deviceToken, body: { userId: user.id, pin: value }, signal: AbortSignal.timeout(8000) });
+        await offline?.rememberPin(value, s).catch(() => {});
+        return s;
+      };
+      const unreachable = (e: unknown) => (e instanceof ApiError && e.status === 0) || (e as Error).name === 'AbortError' || (e as Error).name === 'TimeoutError';
+      let signed: SignedIn;
+      if (!offline) {
+        signed = await withServer();
+      } else if (offline.sync.online) {
         try {
-          signed = await api<SignedIn>('/v1/pos/sign-in', { method: 'POST', token: deviceToken, body: { userId: user.id, pin: value }, signal: AbortSignal.timeout(8000) });
-          await offline?.rememberPin(value, signed).catch(() => {});
+          signed = await withServer();
         } catch (e) {
-          const unreachable = (e instanceof ApiError && e.status === 0) || (e as Error).name === 'AbortError' || (e as Error).name === 'TimeoutError';
-          if (!offline || !unreachable) throw e;
+          if (!unreachable(e)) throw e;
+          signed = await offline.signInOffline(user.id, value);
+        }
+      } else {
+        try {
+          signed = await offline.signInOffline(user.id, value);
+        } catch (e) {
+          // Not remembered here, or too long ago: the connection may be back before the till has noticed. Ask the server.
+          const code = e instanceof ApiError ? e.code : '';
+          if ((code !== 'not_remembered' && code !== 'offline_expired') || navigator.onLine === false) throw e;
+          try {
+            signed = await withServer();
+          } catch (again) {
+            throw unreachable(again) ? e : again;
+          }
         }
       }
-      onSignedIn(signed ?? await offline!.signInOffline(user.id, value), value);
+      onSignedIn(signed, value);
     } catch (e) {
       setError(e);
       setPin('');
