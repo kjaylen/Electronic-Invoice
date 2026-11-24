@@ -87,7 +87,7 @@ export function registerUserRoutes(app: FastifyInstance, deps: PipelineDeps, ctx
       const login = user.email;
       const welcome = kind === 'welcome';
       try {
-        await ctx.mailer.send({
+        await ctx.mailer.send({ type: welcome ? 'staff-invitation' : 'staff-password', tenantId: request.tenantId, userId: request.userId || null,
           to: user.email,
           subject: welcome ? `${inviter} created your ${b.name} account` : `Set a new password for ${b.name}`,
           text: `${welcome ? `${inviter} created an account for you at ${b.name} on Floreo.` : `${inviter} asked you to set a new password for ${b.name}.`}\n\nSign-in: ${login}\nChoose your password here (the link works for 7 days):\n${link}\n\nAfterwards, sign in at ${publicLink(ctx, `/${b.slug}`)}`,

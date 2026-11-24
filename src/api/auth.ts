@@ -407,7 +407,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: PipelineDeps, opt
         const token = await createPasswordLink(db, user.id, 'reset');
         const link = publicLink(options, `/${business.slug}/reset-password?token=${token}`);
         const name = business.tradeName ?? business.legalName;
-        await options.mailer.send({
+        await options.mailer.send({ type: 'password-reset', tenantId: business.id, userId: user.id,
           to: user.email,
           subject: `Reset your ${name} password`,
           text: `Hello ${user.name},\n\nSomeone (hopefully you) asked to reset your password for ${name} on Floreo.\n\nChoose a new password here (the link works for one hour):\n${link}\n\nIf you did not ask for this, ignore this email; your password stays the same.`,
