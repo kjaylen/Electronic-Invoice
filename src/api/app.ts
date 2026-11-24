@@ -70,6 +70,7 @@ import { registerGiftCardRoutes } from './giftcards.ts';
 import { registerSiteRoutes } from './site.ts';
 import { registerConnectRoutes } from './connect.ts';
 import { answerStorePreflight } from './store-access.ts';
+import { createDevLog, registerDeveloperRoutes, registerDevLogHook } from './devlog.ts';
 import { registerShiftRoutes } from './shifts.ts';
 import { registerPosAdminRoutes, registerPosDeviceRoutes, SESSION_TOKEN_PREFIX, tillMayUse, touchDevice } from './pos.ts';
 import { lookupSession } from '../db/users.ts';
@@ -203,6 +204,8 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   app.decorateRequest('userId', '');
   app.decorateRequest('posDevice', null);
   app.decorateRequest('storeCaller', null);
+  app.decorateRequest('integration', null);
+  app.decorateRequest('apiError', null);
   app.setErrorHandler(errorHandler);
 
   // The till apps call the API from their own origin with a bearer token. No cookies are allowed
@@ -272,6 +275,9 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     counters.requests++;
     if (reply.statusCode >= 500) counters.serverErrors++;
   });
+  // What each business's integrations asked and were answered, for Settings → Developers → Logs.
+  const devlog = createDevLog();
+  registerDevLogHook(app, db, devlog);
 
   // For load balancers: 200 while the database answers ("degraded" says something needs a look), 503 when it does not.
   app.get('/health', async (_request, reply) => {
@@ -330,6 +336,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       if (key) {
         const principal = await authenticateApiKey(db, key);
         if (!principal) throw new ApiError(401, 'unauthorized', 'Missing or invalid API key');
+        request.integration = { tenantId: principal.tenantId, key: { kind: 'secret', id: principal.keyId } };
         // Per key, per minute, shared by every server process.
         const limit = options.apiRateLimitPerMinute ?? 600;
         const used = await countHit(db, `apikey|${principal.keyId}`, 60_000);
@@ -395,6 +402,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     registerGiftCardRoutes(tenant, deps, ctx);
     registerSiteRoutes(tenant, deps);
     registerConnectRoutes(tenant, deps, ctx);
+    registerDeveloperRoutes(tenant, deps, devlog);
     registerShiftRoutes(tenant, deps);
     registerPosAdminRoutes(tenant, deps);
     registerTemplateRoutes(tenant, deps);

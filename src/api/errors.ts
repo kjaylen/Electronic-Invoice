@@ -87,5 +87,7 @@ export function toApiError(error: unknown): ApiError {
 export function errorHandler(error: unknown, request: FastifyRequest, reply: FastifyReply) {
   const api = toApiError(error);
   if (api.status >= 500) request.log.error({ err: error }, 'request failed');
+  // For the business's own log of what its integrations were answered (devlog.ts).
+  request.apiError = { code: api.code, message: api.message };
   return reply.code(api.status).send({ error: { code: api.code, message: api.message, ...(api.details !== undefined && { details: api.details }) } });
 }

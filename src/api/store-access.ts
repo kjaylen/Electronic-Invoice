@@ -105,6 +105,11 @@ export function registerStoreAccess(app: FastifyInstance, deps: PipelineDeps, ct
     const presented = presentedKey(request);
     if (!crossSite && (!presented || presented.startsWith('etd_'))) return;
 
+    // From here on the request is an integration's: it shows in the business's own log, refused or not.
+    const store = await loadStore(db, slug, { requireOpen: false });
+    const known = presented ? store.settings.connect.keys.find((k) => k.key === presented) : undefined;
+    request.integration = { tenantId: store.tenantId, key: { kind: 'publishable', id: known?.id ?? 'unknown' } };
+
     if (presented?.startsWith('etd_')) {
       throw new ApiError(403, 'secret_key_in_browser', `This is a secret API key, and it was sent from a web page (${origin}), where anyone can read it. Revoke it now in ${WHERE}, and use a publishable key (pk_…) in pages.`);
     }
@@ -113,7 +118,6 @@ export function registerStoreAccess(app: FastifyInstance, deps: PipelineDeps, ct
     }
     if (!looksPublishable(presented)) throw new ApiError(401, 'invalid_publishable_key', `"${presented.slice(0, 12)}…" is not a publishable key. They start with pk_test_ or pk_live_; copy yours from ${WHERE}.`);
 
-    const store = await loadStore(db, slug, { requireOpen: false });
     const check = checkKey(store.settings.connect, store.environment, presented);
     if (!check.ok) {
       if (check.reason === 'revoked') throw new ApiError(401, 'publishable_key_revoked', `This publishable key was revoked. Make a new one in ${WHERE} and put it in the site.`);
