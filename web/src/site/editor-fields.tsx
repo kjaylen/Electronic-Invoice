@@ -189,18 +189,25 @@ export function LinkInput({ value, onChange, ctx, label }: { value: SiteLink | n
 
 // ---------- products and collections ----------
 
-function ProductSearch({ onPick, placeholder, exclude = [] }: { onPick: (p: ProductRow) => void; placeholder: string; exclude?: string[] }) {
+function ProductSearch({ onPick, placeholder, exclude }: { onPick: (p: ProductRow) => void; placeholder: string; exclude?: string[] }) {
   const t = useT();
   const [q, setQ] = useState('');
-  const [results, setResults] = useState<ProductRow[]>([]);
+  const [found, setFound] = useState<ProductRow[] | null>(null);
+  // One request per pause in typing (what is already picked is left out when drawing, not by asking again).
   useEffect(() => {
-    if (!q.trim()) return setResults([]);
-    const timer = setTimeout(() => void api<{ data: ProductRow[] }>(`/v1/products?status=active&q=${encodeURIComponent(q.trim())}`).then((r) => setResults(r.data.filter((p) => !exclude.includes(p.handle)).slice(0, 8))).catch(() => {}), 200);
-    return () => clearTimeout(timer);
-  }, [q, exclude]);
+    if (!q.trim()) return setFound(null);
+    let live = true;
+    const timer = setTimeout(() => void api<{ data: ProductRow[] }>(`/v1/products?status=active&q=${encodeURIComponent(q.trim())}`).then((r) => live && setFound(r.data)).catch(() => live && setFound([])), 200);
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+  }, [q]);
+  const results = (found ?? []).filter((p) => !exclude?.includes(p.handle)).slice(0, 8);
   return (
     <div className="se-search">
       <input type="search" aria-label={t('Find a product')} placeholder={placeholder} value={q} onChange={(e) => setQ(e.target.value)} />
+      {found !== null && results.length === 0 && <p className="small muted" style={{ margin: 0 }}>{t('No product on sale matches.')}</p>}
       {results.length > 0 && (
         <ul className="se-search-results">
           {results.map((p) => <li key={p.id}><button type="button" className="link" onClick={() => { onPick(p); setQ(''); }}>{p.title}</button></li>)}
@@ -213,10 +220,12 @@ function ProductSearch({ onPick, placeholder, exclude = [] }: { onPick: (p: Prod
 export function ProductsInput({ value, onChange, label, max }: { value: string[]; onChange: (v: string[]) => void; label: string; max: number }) {
   const t = useT();
   const [titles, setTitles] = useState<Record<string, string>>({});
+  // The names of what is picked, asked for once (a product since deleted keeps showing its address).
+  const asked = useRef(false);
   useEffect(() => {
-    const missing = value.filter((h) => !titles[h]);
-    if (!missing.length) return;
-    void api<{ data: ProductRow[] }>('/v1/products?status=all').then((r) => setTitles(Object.fromEntries(r.data.map((p) => [p.handle, p.title])))).catch(() => {});
+    if (asked.current || value.every((h) => titles[h])) return;
+    asked.current = true;
+    void api<{ data: ProductRow[] }>('/v1/products?status=all').then((r) => setTitles((x) => ({ ...Object.fromEntries(r.data.map((p) => [p.handle, p.title])), ...x }))).catch(() => {});
   }, [value, titles]);
   const move = (i: number, d: number) => {
     const next = [...value];
