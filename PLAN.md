@@ -1,149 +1,110 @@
-# Plan: email (SMTP settings, one mail service, a queue, a log)
+# Plan: what a Belize shop, bar or restaurant still needs at the till
 
-Who this is for: small businesses in Belize and the people who buy from them.
-A business's customers get its invoices, receipts, order confirmations and
-reminders by email, so these must look like they come from the business and
-must arrive. The platform's own staff set up the server everything goes
-through; a business can add its own.
+Who this is for: the owner of a small Belizean business who sells over a
+counter: a grocery, a hardware or clothes shop, a bar, a restaurant, a shop
+with a second branch. The till is the product. Everything here either
+happens at the till or is what the owner does with the till's numbers at the
+end of the month.
+
+Payroll is out of scope, by decision: no pay runs, no Social Security
+contributions, no payslips. The time clock keeps exporting hours.
 
 Status marks: `[ ]` to do, `[x]` done, `[-]` skipped (the reason is in DECISIONS.md).
 
-The plan before this one (connecting a site built elsewhere) is finished and
-kept in `docs/plans/2026-11-connect-your-site.md`.
+The plan before this one (email) is finished and kept in `docs/plans/2026-11-email.md`.
 
-## What exists (read end to end, 24 Nov 2026)
+## What exists (read 24 Nov 2026)
 
-- **One small module** (`src/mail/mailer.ts`): `smtpMailer(SMTP_URL, MAIL_FROM)`
-  with nodemailer, an outbox of `.eml` files for development, and a memory
-  mailer for tests. Everything goes from one address set in the environment;
-  the business's address is only the reply-to.
-- **No queue.** Every email is sent inside the request that causes it (or the
-  housekeeping run). A slow mail server holds up checkout; a dead one loses
-  the order confirmation, or fails the request.
-- **No settings screens, no log, no test button.** A failure is a line in the
-  server log, or a row in `document_messages` for emailed documents.
-- **Templates** (`src/templates/`, Liquid): eleven customer-facing emails a
-  business can edit, with a live preview, versions and a Spanish default. The
-  other emails are built in code with `simpleHtml`, which looks different.
-- **Opt-outs** only for checkout reminders (`store_email_optouts`).
-- **No sign-up verification email.** A new business's owner signs in at once.
+The till is already strong: one app for desktop, Android, iPhone and any
+browser, selling offline first; barcode scanners and the camera; receipt
+printers and cash drawers; shifts with X and Z reports; discounts with a
+cashier limit; split payments; US$ cash taken at 2 to 1; held sales shared
+between tills; gift cards; loyalty points; wholesale and quantity prices;
+sales on account with credit limits; bundles; items sold by weight; stock
+with a ledger, purchase orders and counts; a GST return worksheet.
 
-## Every email the platform sends (27, from 25 places in the code)
+## What is missing, found by asking what a typical Belize business does
 
-From a business, to its customers and suppliers (its own server when it has one):
+Facts about Belize used below were looked up on 24 Nov 2026 and are written
+down in DECISIONS.md with where they came from. Rates are settings, never
+constants in the code, because they change and because sources disagree.
 
-| Type | Where | Template |
-|---|---|---|
-| `document` | `sendDocumentEmail` in `src/api/documents.ts`: invoices, receipts, credit notes, with PDF and XML | `email.document` |
-| `reminder` | the same function, for invoices coming due and overdue | `email.reminder` |
-| `statement` | `src/api/receivables.ts` | `email.statement` |
-| `quote` | `src/api/quotes.ts` | `email.quote` |
-| `purchase-order` | `src/api/purchasing.ts` | `email.purchase-order` |
-| `order` | `src/api/storefront.ts` (order confirmation) | `email.order` |
-| `order-ready` | `src/api/orders.ts` | `email.order-ready` |
-| `back-in-stock` | `src/commerce/stock-alerts.ts` | `email.back-in-stock` |
-| `checkout-reminder` | `src/commerce/checkouts.ts` (not transactional: unsubscribe link) | `email.checkout-reminder` |
-| `gift-card` | `src/api/giftcards.ts` | `email.gift-card` |
-| `sign-in-code` | `src/api/store-accounts.ts` | `email.sign-in-code` |
-| `account-link` | `src/api/accounts.ts` (built in code today) | new: `email.account-link` |
+### A. At the counter, every day
 
-From the platform, to a business and its people:
+- [ ] A1. **Mobile wallets as a way to pay** (DigiWallet, E-Kyash by hand):
+  a "Wallet" button beside Cash, Card and Transfer, with the reference typed
+  in; counted on its own line in the shift report and the Z report.
+- [ ] A2. **Prices in US dollars too.** A setting: the receipt, the customer
+  display and price labels show the total in US$ beside BZ$ (2 to 1), for
+  shops that sell to visitors.
+- [ ] A3. **Service charge.** A setting (off, or a percentage, usually 10%):
+  added to a sale with one tap, on by default for sales opened on a table,
+  shown as its own line on the receipt, with GST as the business has set it.
+- [ ] A4. **Tips.** When a customer adds a tip on a card or wallet payment,
+  the till records it with the sale; it is not part of the receipt or the
+  sales figures, and the shift report says how much is owed to staff.
+- [ ] A5. **Layaway.** Goods put aside for a customer who pays over time: a
+  deposit now, payments later, collected when paid in full; a list of
+  layaways with what is still owed and when each runs out; cancelling gives
+  back the goods and says what to refund.
 
-| Type | Where |
-|---|---|
-| `password-reset` | `src/api/auth.ts` |
-| `staff-invitation`, `staff-password` | `src/api/users.ts` |
-| `support-password-reset`, `two-factor-off`, `support-notice`, `business-live` | `src/api/platform.ts` |
-| `business-closed` | `src/api/business.ts` |
-| `service-invoice` | `src/api/billing.ts` (when there is no e-invoice to send) |
-| `store-message` | `src/api/storefront.ts` (the store's contact form, to the business) |
-| `new-order` | `src/api/storefront.ts` (to the business) |
-| `quote-answer` | `src/api/quotes.ts` (accepted or declined, to the business) |
-| `notice` | `src/notify/notifications.ts` (rejections, outages, certificates, plan, low stock) |
-| `daily-summary` | `src/notify/daily.ts` (not transactional: unsubscribe link) |
-| `test` | new: the "Send test email" button |
+### B. Bars and restaurants
 
-## A. Foundations
+- [ ] B1. **Tables and tabs.** A business says it serves at tables and names
+  them (Table 1 to 12, Bar, Patio). The till shows them: free, open (for how
+  long, how much), and opens a tab with a tap. A tab is added to over the
+  evening from any till, and paid like any sale.
+- [ ] B2. **Order tickets for the kitchen and the bar.** Items are marked as
+  kitchen, bar or neither. Sending a tab prints only what is new, on the
+  printer for that station, with the table, the time, who took it, and a note
+  per item ("no onions").
+- [ ] B3. **Splitting a bill.** Pay part of a tab: by item, or in equal
+  parts; each part gets its own receipt.
 
-- [x] A1. Migration `057_mail.sql`: `mail_settings` (the platform's row and one
-  per business), `mail_messages` (the queue and the log in one table),
-  `mail_suppressions`. New tables only. (054 to 056 are taken by branches not
-  merged yet.)
-- [x] A2. `src/mail/types.ts`: the catalogue of every email type above: who
-  sends it, who gets it, transactional or not, whether its text holds a secret.
-- [x] A3. `src/mail/address.ts`: one check for recipient addresses; subjects,
-  names and headers that cannot carry a line break (header injection).
-- [x] A4. `src/mail/settings.ts`: the settings themselves: validation in plain
-  words, presets, the password encrypted with the server's key and bound to
-  its row, never returned.
-- [x] A5. `src/mail/smtp.ts`: the only file that talks SMTP (nodemailer): the
-  three encryption modes, time limits, what a server's refusal means (retry,
-  give up, the address is dead, the settings are wrong) and a hint for a person.
-- [x] A6. `src/mail/service.ts`: the one mail service. `send()` checks, writes
-  the message to the queue and returns; delivery happens in the background.
+### C. More than one shop
 
-## B. The queue
+- [ ] C1. **Locations.** A business with a second shop adds it; stock is
+  kept per location; a till belongs to a location and sells from its stock;
+  receiving and counting are done per location; the stock report shows each
+  and the total.
+- [ ] C2. **Transfers** between locations: sent from one, received at the
+  other, with what is on the way.
 
-- [x] B1. Background delivery: claimed rows (safe with several servers), a
-  time limit per attempt, a message left "sending" by a crash goes back.
-- [x] B2. Retry with backoff on temporary failures (1 min, 5 min, 30 min,
-  2 h), failed after 5 attempts (`MAIL_MAX_ATTEMPTS`); permanent refusals fail at once.
-- [x] B3. A business's own server first; if it has none, or its server fails
-  for a reason that is the server's, the platform's sender with the business's
-  name as the from name, and the business told on its settings page.
-- [x] B4. Messages that hold a secret (reset links, codes) are scrubbed once
-  delivered, are never resent, and are not sent after they stop working.
-- [x] B5. Rate limit per business (per hour and per day); mail over the limit waits, it is not lost.
-- [x] B6. Housekeeping: the log is kept 90 days (`MAIL_LOG_DAYS`), message
-  bodies and attachments 30 (`MAIL_CONTENT_DAYS`).
+### D. Buying stock from abroad
 
-## C. Every email moved onto the service, one at a time
+- [ ] D1. **Landed cost.** When stock is received, freight, duty, brokerage
+  and other costs of bringing it in are entered once and spread over the
+  items by value, so the cost per item (and the margin the till shows) is
+  what the goods really cost.
 
-- [x] C1. `document`, `reminder`, `statement`
-- [x] C2. `quote`, `quote-answer`, `purchase-order`
-- [x] C3. `order`, `new-order`, `order-ready`, `store-message`
-- [x] C4. `back-in-stock`, `checkout-reminder`, `gift-card`, `sign-in-code`
-- [x] C5. `account-link` (now a template a business can edit)
-- [x] C6. `password-reset`, `staff-invitation`, `staff-password`
-- [x] C7. `support-password-reset`, `two-factor-off`, `support-notice`, `business-live`, `business-closed`, `service-invoice`
-- [x] C8. `notice`, `daily-summary`
-- [x] C9. Nothing but `src/mail/smtp.ts` imports nodemailer; a test keeps it so.
+### E. The end of the month
 
-## D. Settings
+- [ ] E1. **Business tax worksheet** (Reports → Business tax): the month's
+  receipts by kind, the rate for each (the business chooses its kinds in
+  Settings; 1.75% for trade and 6% for professions are filled in), less the
+  contract tax customers withheld; CSV and PDF; in the accountant's pack.
+- [ ] E2. **What is due and when.** The overview and a monthly email say what
+  is coming up: the GST return and the business tax return (the 15th), and
+  dates the owner adds (trade licence, Social Security, insurance).
 
-- [x] D1. Platform console → Email: host, port, encryption, username,
-  password, from name, from address, reply-to; presets; the password shown as
-  set with "Replace".
-- [x] D2. Settings → Email for a business (optional), the same fields.
-- [x] D3. "Send test email" on both: a real message, the server's own answer,
-  and the likely cause in plain words.
-- [x] D4. Presets: Gmail / Google Workspace, Outlook / Microsoft 365, Zoho,
-  Amazon SES, with the note where an app password is needed.
-- [x] D5. A business's server may not be an address inside the platform's own network.
+### F. Reaching customers and shopkeepers
 
-## E. Templates
+- [ ] F1. **Reminders by WhatsApp.** Getting paid lists who to remind today;
+  each has a WhatsApp button that opens the chat with the message and the
+  pay link written, for customers who do not read email.
+- [ ] F2. **The till in Chinese.** The counter, the till app and its receipts
+  screens in Simplified Chinese, chosen per person like Spanish.
 
-- [x] E1. One layout (`src/mail/layout.ts`) for every email built in code:
-  the business's logo or name, a heading, text, a button, a footer; phone-friendly; HTML and plain text.
-- [x] E2. The eleven Liquid templates keep working as they are; `account-link` joins them.
-- [x] E3. Everything put into an email is escaped; tests with hostile values.
+### G. Looked at, and not built here
 
-## F. Log, safeguards, deliverability
+- [-] G1. Payroll and Social Security: out of scope by decision.
+- [-] G2. Hotel tax and room or tour bookings.
+- [-] G3. Bank reconciliation and a balance sheet.
+- [-] G4. DigiWallet and E-Kyash taking the payment themselves at the till.
+- [-] G5. WhatsApp sending by itself.
 
-- [x] F1. The email log: recipient, subject, type, status, error, times. Staff
-  see all; a business sees its own. Resend.
-- [x] F2. Suppression list: an address a server says does not exist, and
-  people who opt out. Shown and removable on the settings page.
-- [x] F3. An unsubscribe link (and one-click header) on every email that is not transactional.
-- [x] F4. Deliverability guide: SPF, DKIM, DMARC in plain language, and a
-  check of the sending domain's DNS.
+### H. Proof
 
-## G. Proof
-
-- [x] G1. Tests: valid and invalid settings, each encryption mode, wrong
-  password, server unreachable, retry then success, retry then failure,
-  fallback to the platform, templates with missing and hostile values.
-- [x] G2. A local mail catcher (`npm run mail:catch`); the demo and the
-  browser tests send through it by SMTP.
-- [x] G3. Every type triggered end to end and looked at in the catcher.
-- [x] G4. README, `deploy/env.example`, DECISIONS.md, and the steps to go live.
+- [ ] H1. Unit tests for each item; the browser tests drive each new screen.
+- [ ] H2. The offline till still passes its own tests after every change to the counter.
+- [ ] H3. README, DECISIONS.md, and a summary of what changed for each kind of business.
