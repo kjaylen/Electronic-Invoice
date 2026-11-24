@@ -2447,7 +2447,8 @@ main:has(.site-editor) { max-width: none; padding: 0.75rem 1rem 0.75rem; }
 .se-list .grow { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .se-checks { display: grid; gap: 0.3rem; }
 .se-presets { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem; }
-.se-preset { display: grid; gap: 0.25rem; text-align: left; padding: 0.6rem; background: var(--sheet); border: 1px solid var(--hairline); color: var(--ink); box-shadow: none; min-height: 0; align-content: start; }
+/* Cards that are buttons: unlike other buttons their text wraps, and their content starts at the left edge. */
+.se-preset { display: grid; grid-template-columns: minmax(0, 1fr); justify-content: stretch; justify-items: start; white-space: normal; overflow-wrap: anywhere; gap: 0.25rem; text-align: left; padding: 0.6rem; background: var(--sheet); border: 1px solid var(--hairline); color: var(--ink); box-shadow: none; min-height: 0; align-content: start; }
 .se-preset:hover:not(:disabled) { border-color: var(--hairline-strong); background: var(--sheet-2); color: var(--ink); }
 .se-preset.active, .se-preset.active:hover:not(:disabled) { border-color: var(--brand); box-shadow: 0 0 0 1px var(--brand); background: var(--brand-soft); }
 .se-preset strong { font-size: 1.02rem; }
@@ -2469,9 +2470,9 @@ main:has(.site-editor) { max-width: none; padding: 0.75rem 1rem 0.75rem; }
 .collection-rule select, .collection-rule input { width: auto; flex: 1; min-width: 8rem; }
 .se-new-page input { flex: 1; min-width: 0; }
 .se-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 0.6rem; max-height: 60vh; overflow-y: auto; }
-.se-gallery-item { display: grid; gap: 0.3rem; align-content: start; text-align: left; padding: 0.7rem; background: var(--sheet); border: 1px solid var(--hairline); color: var(--ink); box-shadow: none; min-height: 0; }
+.se-gallery-item { display: grid; grid-template-columns: minmax(0, 1fr); justify-content: stretch; justify-items: start; white-space: normal; overflow-wrap: anywhere; gap: 0.3rem; align-content: start; text-align: left; padding: 0.7rem; background: var(--sheet); border: 1px solid var(--hairline); color: var(--ink); box-shadow: none; min-height: 0; }
 .se-gallery-item:hover:not(:disabled) { border-color: var(--brand); background: var(--brand-soft); color: var(--ink); }
-.se-gallery-art { height: 64px; border-radius: var(--radius); background: linear-gradient(135deg, var(--brand-soft), var(--sheet-2)); border: 1px solid var(--hairline); position: relative; overflow: hidden; }
+.se-gallery-art { justify-self: stretch; height: 64px; border-radius: var(--radius); background: linear-gradient(135deg, var(--brand-soft), var(--sheet-2)); border: 1px solid var(--hairline); position: relative; overflow: hidden; }
 .se-gallery-art::before, .se-gallery-art::after { content: ''; position: absolute; border-radius: 3px; background: var(--brand-line); }
 .se-gallery-art::before { left: 10%; top: 28%; width: 50%; height: 12%; }
 .se-gallery-art::after { left: 10%; top: 52%; width: 34%; height: 9%; opacity: 0.7; }
