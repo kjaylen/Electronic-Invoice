@@ -9,6 +9,7 @@
 
 import { readFileSync } from 'node:fs';
 import { PRESETS, SECTIONS } from '../src/commerce/site-schema.ts';
+import { PAGE_TEMPLATES, STARTERS } from '../src/commerce/site-starters.ts';
 
 const out = new Set<string>();
 for (const s of SECTIONS) {
@@ -25,6 +26,12 @@ for (const p of PRESETS) {
   out.add(p.name);
   out.add(p.description);
 }
+
+for (const x of [...STARTERS, ...PAGE_TEMPLATES]) {
+  out.add(x.name);
+  out.add(x.description);
+}
+for (const s of STARTERS) for (const i of s.includes) out.add(i);
 
 let labels = [...out];
 if (process.argv.includes('--missing')) {

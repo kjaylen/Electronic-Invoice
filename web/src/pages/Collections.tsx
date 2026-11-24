@@ -133,7 +133,7 @@ function CollectionEditor({ initial, onClose, onSaved }: { initial: Collection |
     await api(`/v1/collections/${initial.id}`, { method: 'DELETE' });
     onSaved();
   };
-  const editorCtx = { slug, builder: { sections: [], presets: [], fonts: [], icons: [], linkTypes: [], themeOptions: {}, categories, collections: [] }, site: null as unknown as SiteDoc };
+  const editorCtx = { slug, builder: { sections: [], presets: [], fonts: [], icons: [], linkTypes: [], themeOptions: {}, categories, collections: [], starters: [], pageTemplates: [] }, site: null as unknown as SiteDoc };
   return (
     <Modal title={initial ? initial.title : t('Add collection')} onClose={onClose} wide>
       <form className="stack" onSubmit={submit}>

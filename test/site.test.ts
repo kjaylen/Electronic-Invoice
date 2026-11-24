@@ -13,6 +13,7 @@ import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
 import { buildApp } from '../src/api/app.ts';
 import { storePageMeta, storeSitemap } from '../src/commerce/seo.ts';
 import { normalizeSite } from '../src/commerce/site.ts';
+import { PAGE_TEMPLATES, STARTERS } from '../src/commerce/site-starters.ts';
 import { createUser } from '../src/db/users.ts';
 import { memoryMailer } from '../src/mail/mailer.ts';
 import { setupPipeline, type PipelineFixture } from './pipeline-setup.ts';
@@ -284,6 +285,59 @@ test('two people editing: a save on top of a draft someone else changed is refus
     assert.equal((await put(c.owner, { site: mine, base: discarded.draftUpdatedAt })).statusCode, 200);
     assert.equal((await put(c.owner, { site: mine, base: 'yesterday' })).statusCode, 400);
   }));
+
+test('starting sites and page templates: a whole valid site over the current one, keeping the logo and the pages already made', () =>
+  withStore(async (c) => {
+    const loaded = (await c.app.inject({ method: 'GET', url: '/v1/store-site', headers: c.owner })).json();
+    assert.deepEqual(loaded.store, { open: true, planAllows: true });
+    assert.deepEqual(loaded.builder.starters.map((s: { key: string }) => s.key), ['shop', 'food', 'boutique', 'simple']);
+    assert.ok(loaded.builder.pageTemplates.find((p: { key: string }) => p.key === 'delivery'));
+
+    // The owner already has an About page of her own, a logo, and the Templates home section.
+    const mine = structuredClone(loaded.draft);
+    mine.theme.logo = 'a:11111111-2222-3333-4444-555555555555';
+    mine.pages = [{ slug: 'about', title: 'Our own story', sections: [{ type: 'rich_text', settings: { heading: 'Since 1998' } }] }];
+    await c.app.inject({ method: 'PUT', url: '/v1/store-site/draft', headers: c.owner, payload: { site: mine } });
+
+    for (const s of STARTERS) {
+      const res = await c.app.inject({ method: 'POST', url: `/v1/store-site/starters/${s.key}`, headers: c.owner, payload: {} });
+      assert.equal(res.statusCode, 200, res.body);
+      const site = res.json().site;
+      assert.deepEqual(normalizeSite(site), site, `${s.key} is a valid site as it stands`);
+      assert.equal(site.theme.preset, s.preset);
+      assert.equal(site.theme.logo, 'a:11111111-2222-3333-4444-555555555555', 'the logo stays');
+      assert.equal(site.home.sections[0].type, 'hero');
+      assert.equal(site.home.sections[0].settings.text, 'Fresh from Cayo', "the store's own tagline");
+      assert.equal(site.home.sections[1].type, 'template_section', 'the Templates home section keeps its place');
+      const about = site.pages.find((p: { slug: string }) => p.slug === 'about');
+      assert.equal(about.title, 'Our own story', 'a page already made is not replaced');
+      assert.equal(site.pages.filter((p: { slug: string }) => p.slug === 'about').length, 1);
+      // Every link to a page goes to a page that exists.
+      const slugs = new Set(site.pages.map((p: { slug: string }) => p.slug));
+      const links = JSON.stringify(site).match(/"type":"page","value":"[a-z0-9-]+"/g) ?? [];
+      for (const l of links) assert.ok(slugs.has(/"value":"([a-z0-9-]+)"/.exec(l)![1]), `${s.key}: ${l}`);
+      assert.equal(s.key === 'simple' ? links.length : Number(links.length > 0), s.key === 'simple' ? 0 : 1);
+      // Nothing was saved: applying is the editor's step (and can be undone).
+      assert.equal((await c.app.inject({ method: 'GET', url: '/v1/store-site', headers: c.owner })).json().draft.theme.preset, 'classic');
+    }
+    assert.equal((await c.app.inject({ method: 'POST', url: '/v1/store-site/starters/nope', headers: c.owner, payload: {} })).statusCode, 422);
+
+    for (const t of PAGE_TEMPLATES) {
+      const page = (await c.app.inject({ method: 'POST', url: `/v1/store-site/page-templates/${t.key}`, headers: c.owner, payload: {} })).json().page;
+      assert.equal(page.title, t.title);
+      assert.equal(page.sections.length > 0, t.key !== 'blank');
+      const kept = normalizeSite({ pages: [{ slug: 'x', title: 'x', sections: page.sections }] }).pages[0]!.sections;
+      assert.deepEqual(kept, page.sections, `${t.key} is valid as it stands`);
+    }
+    assert.equal((await c.app.inject({ method: 'POST', url: '/v1/store-site/page-templates/nope', headers: c.owner, payload: {} })).statusCode, 422);
+    await createUser(c.f.db, { tenantId: c.f.tenantA, name: 'Cass', email: 'cass@shop.example', role: 'cashier', password: PASSWORD });
+    assert.equal((await c.app.inject({ method: 'POST', url: '/v1/store-site/starters/shop', headers: await c.login('cass@shop.example'), payload: {} })).statusCode, 403);
+  }));
+
+test('the editor is told when the store is closed', () =>
+  withStore(async (c) => {
+    assert.equal((await c.app.inject({ method: 'GET', url: '/v1/store-site', headers: c.owner })).json().store.open, false);
+  }, { open: false }));
 
 test('normalizeSite keeps a site sound whatever it is given', () => {
   // Pages are kept whatever their address: made from the title, numbered when taken.

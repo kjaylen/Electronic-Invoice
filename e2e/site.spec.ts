@@ -154,3 +154,77 @@ test('site builder: undo and redo; a page address typed with hyphens, never the 
   await saved(page);
   expect(((await draftOf(page)).pages as Array<{ title: string }>).some((x) => x.title === title)).toBe(false);
 });
+
+test('site builder: a ready-made site in one click (and undone in one), a page from a template', async ({ page }) => {
+  await logIn(page);
+  const preview = await openSite(page);
+  page.on('dialog', (d) => void d.accept());
+  const before = await draftOf(page);
+
+  await page.getByRole('button', { name: 'Start again from a ready-made site' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: /^Food and drink/ }).click();
+  await expect(page.getByText('Your new site is ready to edit.')).toBeVisible();
+  await expect(preview.getByRole('heading', { name: 'Come by' })).toBeVisible();
+  await expect(preview.getByRole('heading', { name: 'Favourites' })).toBeVisible();
+  await saved(page);
+  const made = await draftOf(page);
+  expect(made.theme.preset).toBe('market');
+  // The page she made earlier is still hers; the starter's own pages came with it.
+  expect(made.pages.map((x: { slug: string }) => x.slug)).toEqual(expect.arrayContaining(['about-us', 'about', 'contact', 'questions']));
+  await preview.getByRole('link', { name: 'Contact' }).first().click();
+  await expect(preview.getByRole('heading', { name: 'Write to us' })).toBeVisible();
+
+  // One undo brings the old site back.
+  await page.getByRole('button', { name: 'Undo' }).click();
+  await saved(page);
+  expect((await draftOf(page)).home).toEqual(before.home);
+
+  // A page from a template.
+  await page.getByRole('combobox', { name: 'Page' }).selectOption('home');
+  await expect(preview.getByRole('heading', { level: 1 })).not.toHaveText('This page is not available');
+  await page.getByRole('button', { name: '+ New page' }).click();
+  await page.getByLabel('Start from').selectOption({ label: 'Delivery and returns' });
+  await page.getByRole('button', { name: 'Add', exact: true }).click();
+  await expect(preview.getByRole('heading', { name: 'Delivery and returns' })).toBeVisible();
+  await expect(preview.getByText('If something arrives damaged')).toBeVisible();
+  await page.getByText('Page settings').click();
+  await expect(page.getByLabel('Address')).toHaveValue('delivery-and-returns');
+  await page.getByRole('button', { name: 'Delete this page' }).click();
+  await saved(page);
+});
+
+test('site builder: a photo straight from a phone is made smaller and uploads', async ({ page }) => {
+  await logIn(page);
+  await openSite(page);
+  await openBanner(page);
+  // A 3000 x 2250 photo of noise: several megabytes as a JPEG, more than the server takes.
+  const photo = await page.evaluate(async () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 3000;
+    canvas.height = 2250;
+    const g = canvas.getContext('2d')!;
+    const data = g.createImageData(canvas.width, canvas.height);
+    for (let i = 0; i < data.data.length; i++) data.data[i] = i % 4 === 3 ? 255 : Math.floor(Math.random() * 256);
+    g.putImageData(data, 0, 0);
+    const blob = await new Promise<Blob>((resolve) => canvas.toBlob((b) => resolve(b!), 'image/jpeg', 0.97));
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    return btoa(binary);
+  });
+  const buffer = Buffer.from(photo, 'base64');
+  expect(buffer.length).toBeGreaterThan(2 * 1024 * 1024);
+  await page.getByRole('button', { name: /^(Choose|Change) a|the picture$/ }).first().click();
+  const name = `phone-${Date.now()}.jpg`;
+  await page.getByRole('dialog').locator('input[type=file]').setInputFiles({ name, mimeType: 'image/jpeg', buffer });
+  // It is chosen as the banner's picture, and what was stored is well under the limit.
+  await expect(page.getByRole('dialog')).toBeHidden({ timeout: 30_000 });
+  await expect(page.locator('.se-image-thumb img').first()).toBeVisible();
+  const assets = (await (await page.request.get('/v1/templates/assets', { headers: API })).json()).data as Array<{ name: string; bytes: number }>;
+  const stored = assets.find((a) => a.name === name);
+  expect(stored).toBeTruthy();
+  expect(stored!.bytes).toBeLessThan(2 * 1024 * 1024);
+  // Tidy up: the banner goes back to having no picture.
+  await page.getByRole('button', { name: 'Remove', exact: true }).first().click();
+  await saved(page);
+});

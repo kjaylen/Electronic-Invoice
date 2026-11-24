@@ -12,6 +12,8 @@
  *   POST /v1/store-site/versions/:id/restore    an earlier version as the draft
  *   POST /v1/store-site/render { code }         a custom code section as the store would show it (for the preview)
  *   POST /v1/store-site/sections { type }       a new section with its starting content
+ *   POST /v1/store-site/starters/:key           a ready-made site laid over the draft (returned, not saved: the editor applies it)
+ *   POST /v1/store-site/page-templates/:key     a ready-made page: its title and sections
  *
  *   GET|POST /v1/collections, GET|PUT|DELETE /v1/collections/:id
  *   POST /v1/collections/preview { rules } the products some rules would gather
@@ -21,7 +23,10 @@ import type { FastifyInstance } from 'fastify';
 import { audit } from '../db/audit.ts';
 import { catalog, CatalogError, type CatalogSort, categories, checkRules, collectionJson, type CollectionInput, deleteCollection, getCollection, listCollections, saveCollection } from '../commerce/catalog.ts';
 import { FONTS, ICONS, LINK_TYPES, PRESETS, SECTIONS, THEME_OPTIONS } from '../commerce/site-schema.ts';
-import { discardDraft, listVersions, loadSite, newSection, publishSite, restoreVersion, saveDraft, SiteError } from '../commerce/site.ts';
+import { discardDraft, listVersions, loadSite, newSection, publishSite, restoreVersion, saveDraft, SiteError, storeFacts } from '../commerce/site.ts';
+import { PAGE_TEMPLATES, pageFromTemplate, STARTERS, starterSite } from '../commerce/site-starters.ts';
+import { getSubscription } from '../billing/billing.ts';
+import { hasFeature } from '../billing/plans.ts';
 import type { PipelineDeps } from '../pipeline/issue.ts';
 import { renderStoreSection, storeContext } from '../templates/render.ts';
 import { ApiError } from './errors.ts';
@@ -82,8 +87,11 @@ export function registerSiteRoutes(app: FastifyInstance, deps: PipelineDeps) {
     return {
       ...site,
       slug,
+      // Whether customers can reach the store at all: publishing a site does not open a closed store.
+      store: { open: (await storeFacts(db, request.tenantId)).open, planAllows: hasFeature((await getSubscription(db, request.tenantId)).plan, 'store') },
       builder: {
         sections: SECTIONS, presets: PRESETS, fonts: FONTS, icons: ICONS, linkTypes: LINK_TYPES, themeOptions: THEME_OPTIONS,
+        starters: STARTERS, pageTemplates: PAGE_TEMPLATES,
         categories: await categories(db, request.tenantId),
         collections: cols.map((c) => ({ handle: c.handle, title: c.title, published: c.published })),
       },
@@ -134,6 +142,18 @@ export function registerSiteRoutes(app: FastifyInstance, deps: PipelineDeps) {
   app.post<{ Body: { type: string } }>('/store-site/sections', { schema: { body: { type: 'object', required: ['type'], additionalProperties: false, properties: { type: { type: 'string', maxLength: 40 } } } } }, async (request) => {
     requirePermission(request, 'business.manage');
     return wrap(async () => ({ section: newSection(request.body.type) }));
+  });
+
+  const key = { type: 'object', required: ['key'], properties: { key: { type: 'string', pattern: '^[a-z]{1,20}$' } } } as const;
+
+  app.post<{ Params: { key: string } }>('/store-site/starters/:key', { schema: { params: key } }, async (request) => {
+    requirePermission(request, 'business.manage');
+    return wrap(async () => ({ site: starterSite(request.params.key, await storeFacts(db, request.tenantId), (await loadSite(db, request.tenantId)).draft) }));
+  });
+
+  app.post<{ Params: { key: string } }>('/store-site/page-templates/:key', { schema: { params: key } }, async (request) => {
+    requirePermission(request, 'business.manage');
+    return wrap(async () => ({ page: pageFromTemplate(request.params.key, await storeFacts(db, request.tenantId)) }));
   });
 
   // ---------- collections ----------

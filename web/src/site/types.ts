@@ -80,4 +80,7 @@ export interface Builder {
   themeOptions: Record<string, readonly string[]>;
   categories: string[];
   collections: Array<{ handle: string; title: string; published: boolean }>;
+  /** Ready-made sites, and ready-made pages. */
+  starters: Array<{ key: string; name: string; description: string; preset: string; includes: string[] }>;
+  pageTemplates: Array<{ key: string; name: string; description: string; title: string }>;
 }

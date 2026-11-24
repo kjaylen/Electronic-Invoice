@@ -46,6 +46,7 @@ export function SiteEditor() {
   const [device, setDevice] = useState<Device>('desktop');
   const [adding, setAdding] = useState(false);
   const [history, setHistory] = useState(false);
+  const [starting, setStarting] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [html, setHtml] = useState<Record<string, string>>({});
   const [productHandle, setProductHandle] = useState<string | null | undefined>(undefined);
@@ -129,6 +130,14 @@ export function SiteEditor() {
     const path = pathFor(p);
     if (path) post({ type: 'site-navigate', path });
   };
+  // The page being edited is gone (undone, deleted, another version loaded): back to the home page.
+  const pageGone = Boolean(doc) && page.startsWith('page:') && !doc!.pages.some((x) => `page:${x.id}` === page);
+  useEffect(() => {
+    if (!pageGone) return;
+    setPage('home');
+    setSelected(null);
+    post({ type: 'site-navigate', path: '/shop' });
+  }, [pageGone, post]);
   useEffect(() => {
     if (selected) post({ type: 'site-highlight', id: selected });
   }, [selected, post]);
@@ -197,6 +206,12 @@ export function SiteEditor() {
         <a className="button secondary" href={`/${loaded.slug}/shop`} target="_blank" rel="noreferrer">{t('View store')}</a>
         <button type="button" onClick={() => void publish()} disabled={publishing || !changed || save === 'conflict'}>{publishing ? t('Publishing…') : t('Publish')}</button>
       </header>
+      {loaded.store && !loaded.store.open && (
+        <div className="banner info se-notice" role="note">
+          <div><strong>{t('Your store is closed')}</strong>{loaded.store.planAllows ? t('Customers cannot see it yet. Build and publish your site here, then open the store when you are ready.') : t('Your plan does not include the online store. You can build your site here; customers will see it once the store is open.')}</div>
+          <Link className="button secondary" to="/settings?tab=store">{t('Open the store')}</Link>
+        </div>
+      )}
       {save === 'conflict' && (
         <div className="banner warn se-notice" role="alert">
           <div><strong>{conflictName ? t('{name} changed the site while you were editing', { name: conflictName }) : t('Someone else changed the site while you were editing')}</strong>{t('Your changes are not saved yet. Load their version to carry on from it, or keep yours and replace theirs.')}</div>
@@ -249,14 +264,22 @@ export function SiteEditor() {
                   {pageOptions.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
                 </select>
               </Field>
-              <NewPage ctx={ctx} onAdd={(title) => {
+              {!loaded.publishedAt && !draft.canUndo && page === 'home' && (
+                <div className="se-welcome">
+                  <strong>{t('New here? Start from a ready-made site')}</strong>
+                  <span className="small muted">{t('A home page, About and Contact pages, a menu and a look, filled in with your store’s name. Change anything afterwards.')}</span>
+                  <button type="button" onClick={() => setStarting(true)}>{t('Choose a starting site')}</button>
+                </div>
+              )}
+              <NewPage templates={loaded.builder.pageTemplates} onAdd={(title, template) => act(async () => {
+                const made = template === 'blank' ? { sections: [] as Section[] } : (await api<{ page: { sections: Section[] } }>(`/v1/store-site/page-templates/${template}`, { method: 'POST', body: {} })).page;
                 const slug = freeSlug(doc.pages, title);
                 const id = newId();
-                update((d) => ({ ...d, pages: [...d.pages, { id, slug, title, seoTitle: '', seoDescription: '', sections: [] }] }));
+                update((d) => ({ ...d, pages: [...d.pages, { id, slug, title, seoTitle: '', seoDescription: '', sections: made.sections }] }));
                 setPage(`page:${id}`);
                 setSelected(null);
                 setTimeout(() => post({ type: 'site-navigate', path: `/shop/pages/${slug}` }), 150);
-              }} />
+              })} />
               {currentPage && <PageSettings key={currentPage.id} page={currentPage} onChange={(next) => update((d) => ({ ...d, pages: d.pages.map((p) => (p.id === next.id ? next : p)) }), `page-${next.id}`)}
                 onSlug={(wanted) => {
                   // Links to the page follow its new address; the preview moves there too.
@@ -284,6 +307,7 @@ export function SiteEditor() {
               )}
               <SectionList sections={sections} schemas={schemas} onSelect={setSelected} onChange={setSections} />
               <button type="button" onClick={() => setAdding(true)}>+ {t('Add section')}</button>
+              {page === 'home' && <div><button type="button" className="link small" onClick={() => setStarting(true)}>{t('Start again from a ready-made site')}</button></div>}
             </div>
           ))}
 
@@ -320,6 +344,14 @@ export function SiteEditor() {
         setSections([...sections, r.section]);
         setAdding(false);
         setSelected(r.section.id);
+      }} />}
+      {starting && <StarterDialog builder={loaded.builder} onClose={() => setStarting(false)} onPick={async (key) => {
+        const r = await api<{ site: SiteDoc }>(`/v1/store-site/starters/${key}`, { method: 'POST', body: {} });
+        update(r.site);
+        setStarting(false);
+        setTab('pages');
+        goTo('home');
+        toast(t('Your new site is ready to edit. Undo brings the old one back.'));
       }} />}
       {history && <HistoryDialog beforeRestore={draft.flush} onClose={() => setHistory(false)} onRestored={(r) => {
         draft.adopt(r, true);
@@ -470,24 +502,80 @@ function AddSection({ schemas, kind, onAdd, onClose }: { schemas: SectionSchema[
 
 // ---------- pages ----------
 
-function NewPage({ onAdd }: { ctx: EditorCtx; onAdd: (title: string) => void }) {
+function NewPage({ templates, onAdd }: { templates: Builder['pageTemplates']; onAdd: (title: string, template: string) => Promise<void> }) {
   const t = useT();
   const [open, setOpen] = useState(false);
+  const [template, setTemplate] = useState('blank');
   const [title, setTitle] = useState('');
+  const [busy, setBusy] = useState(false);
+  const chosen = templates.find((x) => x.key === template);
+  // The template's own title, until another is typed.
+  const name = title.trim() || (chosen?.title ? t(chosen.title) : '');
   if (!open) return <button type="button" className="link small" style={{ alignSelf: 'flex-start' }} onClick={() => setOpen(true)}>+ {t('New page')}</button>;
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (!title.trim()) return;
-    onAdd(title.trim());
-    setTitle('');
-    setOpen(false);
+    if (!name || busy) return;
+    setBusy(true);
+    void onAdd(name, template).finally(() => {
+      setBusy(false);
+      setTitle('');
+      setOpen(false);
+    });
   };
   return (
-    <form className="row se-new-page" onSubmit={submit}>
-      <input autoFocus aria-label={t('Page title')} placeholder={t('e.g. About us, Shipping, FAQ')} maxLength={120} value={title} onChange={(e) => setTitle(e.target.value)} />
-      <button type="submit" disabled={!title.trim()}>{t('Add')}</button>
-      <button type="button" className="link" onClick={() => setOpen(false)}>{t('Cancel')}</button>
+    <form className="stack se-new-page" onSubmit={submit}>
+      <Field label={t('Start from')} hint={chosen ? t(chosen.description) : undefined}>
+        <select value={template} onChange={(e) => setTemplate(e.target.value)}>
+          {templates.map((x) => <option key={x.key} value={x.key}>{t(x.name)}</option>)}
+        </select>
+      </Field>
+      <Field label={t('Page title')}><input autoFocus placeholder={chosen?.title ? t(chosen.title) : t('e.g. About us, Shipping, FAQ')} maxLength={120} value={title} onChange={(e) => setTitle(e.target.value)} /></Field>
+      <div className="row">
+        <button type="submit" disabled={!name || busy}>{busy ? t('Adding…') : t('Add')}</button>
+        <button type="button" className="link" onClick={() => setOpen(false)}>{t('Cancel')}</button>
+      </div>
     </form>
+  );
+}
+
+/** Ready-made sites: pick one, and the home page, menu, footer and look become its; own pages and the logo stay. */
+function StarterDialog({ builder, onPick, onClose }: { builder: Builder; onPick: (key: string) => Promise<void>; onClose: () => void }) {
+  const t = useT();
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  const pick = (key: string, name: string) => {
+    if (!window.confirm(t('Use the {name} site? Your home page, menu, footer and look are replaced. Your logo and the pages you made stay. You can undo this.', { name }))) return;
+    setBusy(key);
+    setError(null);
+    void onPick(key).catch(setError).finally(() => setBusy(null));
+  };
+  return (
+    <Modal title={t('Start from a ready-made site')} onClose={onClose} wide>
+      <div className="stack">
+        <p className="small muted" style={{ margin: 0 }}>{t('Each one is a complete site written for a kind of business, with your store’s name filled in. Nothing reaches customers until you publish.')}</p>
+        <ErrorText error={error} />
+        <div className="se-starters">
+          {builder.starters.map((s) => {
+            const look = builder.presets.find((x) => x.key === s.preset)?.theme;
+            return (
+              <button key={s.key} type="button" className="se-starter" disabled={busy !== null} onClick={() => pick(s.key, t(s.name))}>
+                {look && (
+                  <span className="se-starter-art" aria-hidden="true" style={{ background: look.colors.background, color: look.colors.text, fontFamily: FONT_FAMILIES[look.fonts.heading] }}>
+                    <span className="se-starter-bar" style={{ background: look.colors.surface }} />
+                    <span className="se-starter-title" style={{ textTransform: look.headingCase === 'upper' ? 'uppercase' : 'none' }}>{t(s.name)}</span>
+                    <span className="se-starter-button" style={{ background: look.buttons === 'outline' ? 'transparent' : look.colors.primary, color: look.buttons === 'outline' ? look.colors.text : look.colors.primaryText, border: `1px solid ${look.colors.primary}`, borderRadius: look.buttons === 'pill' ? 999 : look.radius === 'none' ? 0 : 6 }} />
+                    <span className="se-starter-row">{[0, 1, 2, 3].map((i) => <span key={i} style={{ background: look.colors.surface, borderRadius: look.radius === 'none' ? 0 : 4 }} />)}</span>
+                  </span>
+                )}
+                <strong>{busy === s.key ? t('Making your site…') : t(s.name)}</strong>
+                <span className="small muted">{t(s.description)}</span>
+                <span className="small">{s.includes.map((i) => t(i)).join(' · ')}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </Modal>
   );
 }
 

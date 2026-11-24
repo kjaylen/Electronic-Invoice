@@ -263,10 +263,10 @@ export function newSection(type: string): Section {
 
 // ---------- a store without a site yet ----------
 
-interface StoreFacts { name: string; tagline: string; about: string; logoAssetId: string | null; accounts: boolean }
+export interface StoreFacts { name: string; tagline: string; about: string; city: string; logoAssetId: string | null; accounts: boolean; open: boolean }
 
 /** The site a store has before it uses the builder: its name, tagline and every product, as the store looked before. */
-export function defaultSite(s: StoreFacts): SiteDoc {
+export function defaultSite(s: Pick<StoreFacts, 'name' | 'tagline' | 'about' | 'logoAssetId' | 'accounts'>): SiteDoc {
   const hero = newSection('hero');
   hero.settings = { ...hero.settings, heading: s.name, text: s.tagline, height: 'small', showPerks: true, buttonLabel: '', overlay: 30 };
   const grid = newSection('product_grid');
@@ -283,11 +283,11 @@ export function defaultSite(s: StoreFacts): SiteDoc {
   });
 }
 
-async function storeFacts(db: Queryable, tenantId: string): Promise<StoreFacts> {
-  const t = (await db.query<{ name: string; store_settings: { tagline?: string; about?: string; accounts?: { enabled?: boolean } } | null; logo_asset_id: string | null }>(
-    'select coalesce(trade_name, legal_name) as name, store_settings, logo_asset_id from tenants where id = $1', [tenantId],
+export async function storeFacts(db: Queryable, tenantId: string): Promise<StoreFacts> {
+  const t = (await db.query<{ name: string; city: string | null; store_settings: { enabled?: boolean; tagline?: string; about?: string; accounts?: { enabled?: boolean } } | null; logo_asset_id: string | null }>(
+    'select coalesce(trade_name, legal_name) as name, city, store_settings, logo_asset_id from tenants where id = $1', [tenantId],
   )).rows[0]!;
-  return { name: t.name, tagline: t.store_settings?.tagline ?? '', about: t.store_settings?.about ?? '', logoAssetId: t.logo_asset_id, accounts: t.store_settings?.accounts?.enabled ?? true };
+  return { name: t.name, city: t.city ?? '', tagline: t.store_settings?.tagline ?? '', about: t.store_settings?.about ?? '', logoAssetId: t.logo_asset_id, accounts: t.store_settings?.accounts?.enabled ?? true, open: t.store_settings?.enabled ?? false };
 }
 
 // ---------- drafts, publishing, versions ----------
