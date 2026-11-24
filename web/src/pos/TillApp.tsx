@@ -2,6 +2,11 @@
  * The till: pair it once with a code from the web app, then people sign in
  * with a PIN and sell. It locks itself after a few idle minutes. Runs in the
  * iOS, Android and desktop apps and in a browser at /pos.
+ *
+ * Offline first (pos/offline): the till sells from its own copy of the
+ * catalog, makes each Tax Receipt on the device and sends it to the server
+ * when it can. It needs the internet once, when it is set up; after that a
+ * lost connection only shows in the indicator at the top.
  */
 
 import { createContext, type FormEvent, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
@@ -20,6 +25,10 @@ import { type DocumentView, documentTicket, type Ticket } from './ticket';
 import { ticketLogo } from './logo';
 import { CameraScanner } from './CameraScanner';
 import { withTransition } from '../motion';
+import { ConnectivityContext } from '../connectivity';
+import { offlineTill, type OfflineTill, type SignedInInfo } from './offline/till';
+import { SyncIndicator, SyncScreen, useSyncState } from './offline/status';
+import type { Snapshot } from './offline/types';
 
 export interface TillInfo {
   business: { slug: string; name: string; tin: string; environment: string };
@@ -27,11 +36,7 @@ export interface TillInfo {
   users: Array<{ id: string; name: string; role: Role; hasPin: boolean }>;
 }
 
-interface SignedIn {
-  token: string;
-  user: { id: string; name: string; role: Role };
-  permissions: Permission[];
-}
+type SignedIn = SignedInInfo;
 
 interface TillContextValue {
   platform: Platform;
@@ -49,6 +54,8 @@ interface TillContextValue {
   openDrawer: () => Promise<void>;
   lock: () => void;
   unpair: () => Promise<void>;
+  /** The till's offline side (null where the device cannot keep data). */
+  offline: OfflineTill | null;
   /** Read a barcode with the camera, where the device has one. */
   scanWithCamera: (() => Promise<string | null>) | null;
 }
@@ -85,8 +92,34 @@ type Phase =
   | { kind: 'loading' }
   | { kind: 'pair'; server: string }
   | { kind: 'unreachable'; server: string; token: string; error: unknown }
+  /** Removed from the business with sales not sent yet: they wait here until it is paired again. */
+  | { kind: 'removed'; server: string; unsent: number }
   | { kind: 'lock'; server: string; token: string; till: TillInfo }
   | { kind: 'till'; server: string; token: string; till: TillInfo; session: SignedIn };
+
+const tillFrom = (s: Snapshot): TillInfo => ({
+  business: { slug: s.business.slug, name: s.business.name, tin: s.business.tin, environment: s.business.environment },
+  device: s.device,
+  users: s.users.map((u) => ({ id: u.id, name: u.name, role: u.role, hasPin: u.hasPin })),
+});
+
+/** The till's token: in the platform's secure storage where there is one (moved there from plain storage once). */
+async function savedToken(pl: Platform): Promise<string | null> {
+  const plain = await pl.getItem(TOKEN);
+  if (!pl.secret) return plain;
+  const kept = await pl.secret.get(TOKEN).catch(() => null);
+  if (kept) return kept;
+  if (plain) {
+    await pl.secret.set(TOKEN, plain);
+    if ((await pl.secret.get(TOKEN)) === plain && pl.kind !== 'desktop') await pl.removeItem(TOKEN);
+  }
+  return plain;
+}
+const saveToken = async (pl: Platform, token: string) => (pl.secret ? pl.secret.set(TOKEN, token) : pl.setItem(TOKEN, token));
+const removeToken = async (pl: Platform) => {
+  await pl.secret?.remove(TOKEN).catch(() => {});
+  await pl.removeItem(TOKEN);
+};
 
 export function TillApp() {
   const t = useT();
@@ -94,52 +127,96 @@ export function TillApp() {
   const [p, setPlatform] = useState<Platform | null>(null);
   const [hardware, setHardwareState] = useState<HardwareConfig | null>(null);
   const [phase, setPhase] = useState<Phase>({ kind: 'loading' });
+  const [offline, setOffline] = useState<OfflineTill | null>(null);
   const session = useRef<string | null>(null);
   const device = useRef<string | null>(null);
+  // Signed in without the server: the PIN, in memory only, to sign in with the server when it is back.
+  const pinForUpgrade = useRef<string | null>(null);
+  const sync = useSyncState(offline);
 
-  // Every call goes to the till's server: as the cashier once signed in, as the till before.
-  const useServer = useCallback((server: string, token: string | null) => {
+  // Every call goes to the till's own API first (offline first), then the till's server:
+  // as the person once signed in, as the till before.
+  const useServer = useCallback((server: string, token: string | null, ot: OfflineTill | null) => {
     device.current = token;
-    setTillTransport({ baseUrl: server, token: () => session.current ?? device.current });
+    setTillTransport({ baseUrl: server, token: () => session.current || device.current, ...(ot && { local: (path, options) => ot.local.handle(path, options) }) });
   }, []);
 
-  const loadTill = useCallback(async (server: string, token: string) => {
-    useServer(server, token);
+  /** Removed from the business: start again, unless sales are still waiting to be sent (they are never thrown away). */
+  const removed = useCallback(async (server: string, ot: OfflineTill | null) => {
+    const pl = await getPlatform();
+    const left = ot ? await ot.unsent() : { pending: 0, failed: 0 };
+    if (left.pending + left.failed > 0) return setPhase({ kind: 'removed', server, unsent: left.pending + left.failed });
+    await removeToken(pl);
+    if (ot) await ot.wipe().catch(() => {});
+    toast(t('This till was removed or paired again. Pair it with a new code.'), 'bad');
+    setPhase({ kind: 'pair', server });
+  }, [t, toast]);
+
+  const loadTill = useCallback(async (server: string, token: string, ot: OfflineTill | null) => {
+    useServer(server, token, ot);
+    if (ot) {
+      await ot.attach(server, token);
+      // Sells from its own copy at once; a fresh one comes in the background.
+      if (ot.snapshot) {
+        setPhase({ kind: 'lock', server, token, till: tillFrom(ot.snapshot) });
+        void ot.refresh().then((s) => setPhase((ph) => (ph.kind === 'lock' ? { ...ph, till: tillFrom(s) } : ph))).catch((e) => {
+          if (e instanceof ApiError && e.status === 401) void removed(server, ot);
+        });
+        return;
+      }
+      try {
+        setPhase({ kind: 'lock', server, token, till: tillFrom(await ot.refresh()) });
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 401) await removed(server, ot);
+        else setPhase({ kind: 'unreachable', server, token, error: e });
+      }
+      return;
+    }
     try {
       const till = await api<TillInfo>('/v1/pos/till', { token });
       setPhase({ kind: 'lock', server, token, till });
     } catch (e) {
-      if (e instanceof ApiError && e.status === 401) {
-        const pl = await getPlatform();
-        await pl.removeItem(TOKEN);
-        toast(t('This till was removed or paired again. Pair it with a new code.'), 'bad');
-        setPhase({ kind: 'pair', server });
-      } else {
-        setPhase({ kind: 'unreachable', server, token, error: e });
-      }
+      if (e instanceof ApiError && e.status === 401) await removed(server, null);
+      else setPhase({ kind: 'unreachable', server, token, error: e });
     }
-  }, [t, toast, useServer]);
+  }, [removed, useServer]);
 
   useEffect(() => {
     void (async () => {
       const pl = await getPlatform();
       setPlatform(pl);
       setHardwareState(await loadHardware(pl));
+      // The device's own database; a device that cannot keep one works online only, as before.
+      const ot = await offlineTill(pl).catch((e) => {
+        console.error('The till cannot keep sales on this device', e);
+        return null;
+      });
+      setOffline(ot);
       const fromLink = pl.kind === 'web' ? new URLSearchParams(window.location.search).get('pair') : null;
       const saved = normalizeServer((await pl.getItem(SERVER)) ?? '');
-      const token = await pl.getItem(TOKEN);
+      const token = await savedToken(pl);
       const server = pl.kind === 'web' ? window.location.origin : saved || normalizeServer(import.meta.env.VITE_TILL_SERVER ?? '');
-      if (token && !fromLink) await loadTill(server, token);
+      if (token && !fromLink) await loadTill(server, token, ot);
       else setPhase({ kind: 'pair', server });
     })();
   }, [loadTill]);
 
+  // The server says the till was removed: stop, keep what is unsent.
+  useEffect(() => {
+    if (sync?.unpaired && (phase.kind === 'lock' || phase.kind === 'till')) {
+      session.current = null;
+      offline?.signedIn(null);
+      void removed(phase.server, offline);
+    }
+  }, [sync?.unpaired, phase, offline, removed]);
+
   const lock = useCallback(() => {
     const token = session.current;
     session.current = null;
+    offline?.signedIn(null);
     if (token) void api('/v1/pos/sign-out', { method: 'POST', token }).catch(() => {});
     setPhase((ph) => (ph.kind === 'till' ? { kind: 'lock', server: ph.server, token: ph.token, till: ph.till } : ph));
-  }, []);
+  }, [offline]);
 
   // Signed out by the server (session expired, PIN changed, till removed): back to the lock screen.
   useEffect(() => {
@@ -167,9 +244,9 @@ export function TillApp() {
         initialServer={phase.server}
         onPaired={async (server, token) => {
           await p.setItem(SERVER, server);
-          await p.setItem(TOKEN, token);
+          await saveToken(p, token);
           if (p.kind === 'web' && window.location.search) window.history.replaceState(null, '', window.location.pathname);
-          await loadTill(server, token);
+          await loadTill(server, token, offline);
         }}
       />
     );
@@ -179,20 +256,43 @@ export function TillApp() {
     return (
       <div className="till-center">
         <div className="card stack till-card">
-          <h1>{t('Cannot reach the server')}</h1>
+          <h1>{offline ? t('Connect this till once') : t('Cannot reach the server')}</h1>
           <p className="muted">{phase.server}</p>
           <ErrorText error={phase.error} />
-          <p className="small muted">{t('Selling needs the internet: every receipt is signed and sent to BTS. Check the connection and try again.')}</p>
-          <button type="button" className="big" onClick={() => void loadTill(phase.server, phase.token)}>{t('Try again')}</button>
+          <p className="small muted">{offline
+            ? t('The first time, the till needs the internet to download the items and prices and get its own receipt numbers. After that it sells without a connection.')
+            : t('Selling needs the internet: every receipt is signed and sent to BTS. Check the connection and try again.')}</p>
+          <button type="button" className="big" onClick={() => void loadTill(phase.server, phase.token, offline)}>{t('Try again')}</button>
+        </div>
+      </div>
+    );
+  }
+
+  if (phase.kind === 'removed') {
+    return (
+      <div className="till-center">
+        <div className="card stack till-card">
+          <h1>{t('This till was removed')}</h1>
+          <p>{t('{n} sales made on this till have not reached the server yet. They are kept here.', { n: phase.unsent })}</p>
+          <p className="small muted">{t('Ask a manager for a new pairing code (Settings → Tills) and pair this till again: the sales are sent as soon as it is paired.')}</p>
+          <button type="button" className="big" onClick={() => setPhase({ kind: 'pair', server: phase.server })}>{t('Pair again')}</button>
         </div>
       </div>
     );
   }
 
   const unpair = async () => {
+    // Never with sales still on the till: they would be lost.
+    const left = offline ? await offline.unsent() : { pending: 0, failed: 0 };
+    if (left.pending + left.failed > 0) {
+      toast(t('{n} sales have not reached the server yet. Connect the till and wait until they are sent (Sync) before removing it.', { n: left.pending + left.failed }), 'bad');
+      return;
+    }
     await api('/v1/pos/unpair', { method: 'POST', token: phase.token }).catch(() => {});
     session.current = null;
-    await p.removeItem(TOKEN);
+    offline?.signedIn(null);
+    await offline?.wipe().catch(() => {});
+    await removeToken(p);
     setPhase({ kind: 'pair', server: phase.server });
   };
 
@@ -201,9 +301,13 @@ export function TillApp() {
       <Lock
         till={phase.till}
         deviceToken={phase.token}
-        onRefresh={() => void loadTill(phase.server, phase.token)}
-        onSignedIn={(s) => {
-          session.current = s.token;
+        offline={offline}
+        status={sync ? <SyncIndicator state={sync} /> : null}
+        onRefresh={() => void loadTill(phase.server, phase.token, offline)}
+        onSignedIn={(s, pin) => {
+          session.current = s.offline ? null : s.token;
+          offline?.signedIn(s);
+          pinForUpgrade.current = s.offline ? pin : null;
           setPhase({ kind: 'till', server: phase.server, token: phase.token, till: phase.till, session: s });
         }}
       />
@@ -212,7 +316,14 @@ export function TillApp() {
 
   return (
     <SignedInTill
-      key={phase.session.token}
+      key={`${phase.session.user.id}-${phase.session.token}`}
+      offline={offline}
+      deviceToken={phase.token}
+      pinForUpgrade={pinForUpgrade}
+      onUpgraded={(token) => {
+        session.current = token;
+        offline?.upgraded(token);
+      }}
       platform={p}
       server={phase.server}
       till={phase.till}
@@ -311,7 +422,7 @@ function Pair({ platform, initialServer, onPaired }: { platform: Platform; initi
 
 const initials = (name: string) => name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join('');
 
-function Lock({ till, deviceToken, onSignedIn, onRefresh }: { till: TillInfo; deviceToken: string; onSignedIn: (s: SignedIn) => void; onRefresh: () => void }) {
+function Lock({ till, deviceToken, offline, status, onSignedIn, onRefresh }: { till: TillInfo; deviceToken: string; offline: OfflineTill | null; status: React.ReactNode; onSignedIn: (s: SignedIn, pin: string) => void; onRefresh: () => void }) {
   const t = useT();
   const [who, setWho] = useState<TillInfo['users'][number] | null>(till.users.length === 1 && till.users[0]!.hasPin ? till.users[0]! : null);
   const [setup, setSetup] = useState(false);
@@ -331,10 +442,11 @@ function Lock({ till, deviceToken, onSignedIn, onRefresh }: { till: TillInfo; de
           <span className="muted"> · {till.device.name}</span>
           {till.business.environment !== 'production' && <span className="badge pending">{t('Test')}</span>}
         </div>
+        {status}
         <span className="till-clock num">{now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
       </header>
       {who ? (
-        <PinPad user={who} deviceToken={deviceToken} onBack={() => setWho(null)} onSignedIn={onSignedIn} />
+        <PinPad user={who} deviceToken={deviceToken} offline={offline} onBack={() => setWho(null)} onSignedIn={onSignedIn} />
       ) : (
         <main className="till-people">
           <h1>{t('Who is selling?')}</h1>
@@ -359,7 +471,7 @@ function Lock({ till, deviceToken, onSignedIn, onRefresh }: { till: TillInfo; de
   );
 }
 
-function PinPad({ user, deviceToken, onBack, onSignedIn }: { user: TillInfo['users'][number]; deviceToken: string; onBack: () => void; onSignedIn: (s: SignedIn) => void }) {
+function PinPad({ user, deviceToken, offline, onBack, onSignedIn }: { user: TillInfo['users'][number]; deviceToken: string; offline: OfflineTill | null; onBack: () => void; onSignedIn: (s: SignedIn, pin: string) => void }) {
   const t = useT();
   const [pin, setPin] = useState('');
   const [error, setError] = useState<unknown>(null);
@@ -369,13 +481,24 @@ function PinPad({ user, deviceToken, onBack, onSignedIn }: { user: TillInfo['use
     setBusy(true);
     setError(null);
     try {
-      onSignedIn(await api<SignedIn>('/v1/pos/sign-in', { method: 'POST', token: deviceToken, body: { userId: user.id, pin: value } }));
+      // With the server when it can be reached (and remembered for later); without it, the PIN remembered on this till.
+      let signed: SignedIn | null = null;
+      if (!offline || offline.sync.online) {
+        try {
+          signed = await api<SignedIn>('/v1/pos/sign-in', { method: 'POST', token: deviceToken, body: { userId: user.id, pin: value }, signal: AbortSignal.timeout(8000) });
+          await offline?.rememberPin(value, signed).catch(() => {});
+        } catch (e) {
+          const unreachable = (e instanceof ApiError && e.status === 0) || (e as Error).name === 'AbortError' || (e as Error).name === 'TimeoutError';
+          if (!offline || !unreachable) throw e;
+        }
+      }
+      onSignedIn(signed ?? await offline!.signInOffline(user.id, value), value);
     } catch (e) {
       setError(e);
       setPin('');
       setBusy(false);
     }
-  }, [busy, deviceToken, onSignedIn, user.id]);
+  }, [busy, deviceToken, offline, onSignedIn, user.id]);
   const press = (d: string) => setPin((v) => (v.length < 8 ? v + d : v));
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -451,9 +574,20 @@ function SetPin({ deviceToken, onDone, onCancel }: { deviceToken: string; onDone
 
 // ---------- signed in ----------
 
-type Tab = 'sell' | 'sales' | 'shift' | 'devices';
+type Tab = 'sell' | 'sales' | 'shift' | 'devices' | 'sync';
+
+/** A logo from the snapshot (data: URL, printed offline) or the server. */
+function logoBlob(url: string): Promise<Blob> {
+  const m = /^data:([^;,]+);base64,(.*)$/.exec(url);
+  if (!m) return apiBlob(url);
+  return Promise.resolve(new Blob([Uint8Array.from(atob(m[2]!), (c) => c.charCodeAt(0))], { type: m[1] }));
+}
 
 function SignedInTill(props: {
+  offline: OfflineTill | null;
+  deviceToken: string;
+  pinForUpgrade: React.MutableRefObject<string | null>;
+  onUpgraded: (token: string) => void;
   platform: Platform;
   server: string;
   till: TillInfo;
@@ -468,24 +602,27 @@ function SignedInTill(props: {
   const { platform: p, till, session, hardware, lock } = props;
   const [me, setMe] = useState<Me | null>(null);
   const [tab, setTab] = useState<Tab>('sell');
-  const [online, setOnline] = useState(() => navigator.onLine);
+  const [legacyOnline, setLegacyOnline] = useState(() => navigator.onLine);
   const [camera, setCamera] = useState<((code: string | null) => void) | null>(null);
+  const [hasSession, setHasSession] = useState(!session.offline);
   const permissions = useMemo(() => new Set(session.permissions), [session.permissions]);
   const isManager = ['owner', 'admin', 'manager'].includes(session.user.role);
+  const sync = useSyncState(props.offline);
+  const online = sync ? sync.phase !== 'offline' : legacyOnline;
 
   const refreshMe = useCallback(async () => {
     try {
       setMe(await api<Me>('/v1/me'));
-      setOnline(true);
+      setLegacyOnline(true);
     } catch (e) {
-      if (e instanceof ApiError && e.status === 0) setOnline(false);
+      if (e instanceof ApiError && e.status === 0) setLegacyOnline(false);
     }
   }, []);
   useEffect(() => {
     void refreshMe();
     const timer = setInterval(() => document.visibilityState === 'visible' && void refreshMe(), 30_000);
     const up = () => void refreshMe();
-    const down = () => setOnline(false);
+    const down = () => setLegacyOnline(false);
     window.addEventListener('online', up);
     window.addEventListener('offline', down);
     return () => {
@@ -494,6 +631,33 @@ function SignedInTill(props: {
       window.removeEventListener('offline', down);
     };
   }, [refreshMe]);
+
+  // Signed in without the server, and it is back: sign in with it too (the PIN is checked again there),
+  // so gift cards, points and email work. A PIN changed meanwhile locks the till.
+  const { pinForUpgrade, onUpgraded, deviceToken } = props;
+  useEffect(() => {
+    if (hasSession || !online || !pinForUpgrade.current) return;
+    let live = true;
+    void api<SignedInInfo>('/v1/pos/sign-in', { method: 'POST', token: deviceToken, body: { userId: session.user.id, pin: pinForUpgrade.current } })
+      .then(async (s) => {
+        if (!live) return;
+        await props.offline?.rememberPin(pinForUpgrade.current!, s).catch(() => {});
+        pinForUpgrade.current = null;
+        onUpgraded(s.token);
+        setHasSession(true);
+        void refreshMe();
+      })
+      .catch((e) => {
+        if (live && e instanceof ApiError && (e.status === 401 || e.status === 429)) {
+          pinForUpgrade.current = null;
+          toast(t('Your PIN was changed. Sign in again.'), 'bad');
+          lock();
+        }
+      });
+    return () => {
+      live = false;
+    };
+  }, [hasSession, online, pinForUpgrade, deviceToken, session.user.id, onUpgraded, lock, toast, t, refreshMe, props.offline]);
 
   // Lock after a few minutes without use.
   useEffect(() => {
@@ -539,7 +703,7 @@ function SignedInTill(props: {
       const view = await api<DocumentView>(`/v1/documents/${id}/view`);
       if (!view.printed.printable) throw new HardwareError(t('This document has no valid printed copy'));
       // The business's logo on top (fetched once; printed without it if it cannot be had).
-      const logo = view.logo ? await ticketLogo(view.logo, (url) => apiBlob(url)) : null;
+      const logo = view.logo ? await ticketLogo(view.logo, logoBlob).catch(() => null) : null;
       const ticket = documentTicket(view, { message: hardware.receiptMessage, ...(options.copy && { copy: true }), logo });
       for (let i = 0; i < (options.copy ? 1 : hardware.copies); i++) await printTicket(ticket, { openDrawer: i === 0 && options.openDrawer, title: view.view.typeName });
     },
@@ -550,6 +714,7 @@ function SignedInTill(props: {
     },
     lock,
     unpair: props.unpair,
+    offline: props.offline,
     scanWithCamera: p.scanBarcode
       ? () => p.scanBarcode!()
       : browserCanScan() ? () => new Promise<string | null>((resolve) => setCamera(() => resolve)) : null,
@@ -574,9 +739,14 @@ function SignedInTill(props: {
     logout: async () => lock(),
   };
 
-  const tabs: Array<[Tab, string]> = [['sell', t('Sell')], ['sales', t('Sales')], ['shift', t('Shift')], ...(isManager ? [['devices', t('Devices')] as [Tab, string]] : [])];
+  const tabs: Array<[Tab, string]> = [
+    ['sell', t('Sell')], ['sales', t('Sales')], ['shift', t('Shift')],
+    ...(isManager ? [['devices', t('Devices')] as [Tab, string]] : []),
+    ...(isManager && props.offline ? [['sync', t('Sync')] as [Tab, string]] : []),
+  ];
   return (
     <TillContext.Provider value={value}>
+      <ConnectivityContext.Provider value={{ online, serverFeatures: online && hasSession }}>
       <SessionContext.Provider value={sessionValue}>
         <div className="till">
           <header className="till-bar">
@@ -585,20 +755,23 @@ function SignedInTill(props: {
               {tabs.map(([k, label]) => <button key={k} type="button" className={tab === k ? 'active' : ''} aria-current={tab === k ? 'page' : undefined} onClick={() => k !== tab && withTransition(() => setTab(k))}>{label}</button>)}
             </nav>
             <span className="spacer" />
+            {sync && <SyncIndicator state={sync} onOpen={isManager ? () => withTransition(() => setTab('sync')) : undefined} />}
             <span className="till-user"><span className="avatar" aria-hidden="true">{initials(session.user.name)}</span>{session.user.name}</span>
             <button type="button" className="secondary small-button" onClick={lock}>{t('Lock')}</button>
           </header>
-          {!online && <div className="banner bad till-banner"><strong>{t('No connection.')}</strong> {t('Sales need the internet: every receipt is signed and sent to BTS.')}</div>}
+          {!online && !props.offline && <div className="banner bad till-banner"><strong>{t('No connection.')}</strong> {t('Sales need the internet: every receipt is signed and sent to BTS.')}</div>}
           {me?.contingency.active && <div className="banner warn till-banner">{t('BTS cannot be reached right now. Receipts are issued and sent when it is back.')}</div>}
           <main className="till-main">
             {tab === 'sell' && <Sell />}
             {tab === 'sales' && <Sales />}
             {tab === 'shift' && <ShiftPanel />}
             {tab === 'devices' && isManager && <HardwareSettings onError={(e) => toast(e instanceof Error ? e.message : String(e), 'bad')} />}
+            {tab === 'sync' && isManager && props.offline && sync && <SyncScreen till={props.offline} state={sync} />}
           </main>
         </div>
         {camera && <CameraScanner onClose={() => { camera(null); setCamera(null); }} onScan={(code) => { camera(code); setCamera(null); }} />}
       </SessionContext.Provider>
+      </ConnectivityContext.Provider>
     </TillContext.Provider>
   );
 }

@@ -80,3 +80,25 @@ body.till-body { overflow: hidden; background: var(--paper); padding: env(safe-a
 .display-total { display: flex; justify-content: space-between; align-items: baseline; font-size: 9vh; font-weight: 650; color: var(--lime); border-top: 1px solid rgba(251, 248, 241, 0.2); padding-top: 2vh; }
 .display-change { font-size: 5vh; text-align: right; }
 .display-message { flex: 1; display: grid; place-items: center; font-size: 8vh; font-weight: 650; text-align: center; }
+
+/* Offline first: the connection indicator, the sync screen, the counter's offline note. */
+.sync-indicator { display: inline-flex; align-items: center; gap: 0.45rem; padding: 0.3rem 0.65rem; border-radius: 999px; font-size: 0.85rem; font-weight: 560; background: transparent; color: inherit; border: 1px solid var(--hairline-strong); white-space: nowrap; }
+button.sync-indicator { cursor: pointer; min-height: 0; }
+.till-bar .sync-indicator { border-color: rgba(251, 248, 241, 0.3); }
+.sync-dot { width: 0.6rem; height: 0.6rem; border-radius: 999px; flex: none; background: var(--muted); }
+.sync-dot.ok { background: var(--success-dot); }
+.sync-dot.busy { background: var(--brand); animation: sync-pulse 1.2s var(--ease) infinite; }
+.sync-dot.off { background: var(--ochre); }
+.sync-dot.warn { background: var(--ochre); }
+.sync-dot.bad { background: var(--coral); }
+.sync-failed { padding: 0.05rem 0.45rem; border-radius: 999px; background: var(--coral-soft); color: var(--coral-ink); font-size: 0.75rem; }
+@keyframes sync-pulse { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .sync-dot.busy { animation: none; } }
+.sync-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); gap: 0.75rem; margin: 0; }
+.sync-facts dt { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+.sync-facts dd { margin: 0.15rem 0 0; font-size: 1.15rem; font-weight: 600; }
+.sync-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.5rem; }
+.sync-list > li:not(.card) { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; padding: 0.6rem 0.8rem; border: 1px solid var(--hairline); border-radius: var(--radius); background: var(--sheet); }
+.sync-list > li.card { display: grid; gap: 0.35rem; }
+.warn-text { color: var(--ochre-ink); }
+.offline-note { margin: 0; padding: 0.6rem 0.75rem; border-radius: var(--radius); background: rgba(251, 248, 241, 0.08); border: 1px dashed rgba(251, 248, 241, 0.3); }

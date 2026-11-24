@@ -77,7 +77,7 @@ export function ShiftBar({ refreshKey, openElsewhere = 0 }: { refreshKey?: strin
       {s ? (
         <div className="shift-bar open">
           <span className="shift-dot" aria-hidden="true" />
-          <span><strong>{t('Shift #{n}', { n: s.number })}</strong> · {s.register.name} · {t('since {time}', { time: time(s.openedAt) })}</span>
+          <span><strong>{s.number ? t('Shift #{n}', { n: s.number }) : t('New shift')}</strong> · {s.register.name} · {t('since {time}', { time: time(s.openedAt) })}</span>
           <span className="spacer" />
           <span className="small">{t('Cash expected {amount}', { amount: money(current.report?.cash.expected ?? s.openingFloat) })}</span>
           <button type="button" className="secondary small-button" onClick={() => setDialog('cash')}>{t('Cash in/out')}</button>
@@ -210,7 +210,7 @@ export function CloseShiftModal({ shift, report, onClose, onDone }: { shift: Shi
     }
   };
   return (
-    <Modal title={t('Close shift #{n}', { n: shift.number })} onClose={onClose} wide>
+    <Modal title={shift.number ? t('Close shift #{n}', { n: shift.number }) : t('Close the shift')} onClose={onClose} wide>
       <form className="stack" onSubmit={(e) => void submit(e)}>
         <p className="small muted">{t('Count the cash in the drawer without looking at what is expected; the difference shows once you have counted.')}</p>
         <div className="tabs" role="group" aria-label={t('How to count')}>

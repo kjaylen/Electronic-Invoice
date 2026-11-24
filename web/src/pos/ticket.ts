@@ -168,7 +168,7 @@ export function zReportTicket(z: ZReportData, now = new Date()): Ticket {
   text(`TIN ${z.business.tin}`, { align: 'center' });
   pair('Till', z.till);
   pair('Register', z.shift.register.name);
-  pair('Shift', `#${z.shift.number}`);
+  pair('Shift', z.shift.number ? `#${z.shift.number}` : 'New (not sent yet)');
   pair(`Opened ${belize(z.shift.openedAt)}`, z.shift.openedBy.name);
   if (z.shift.closedAt) pair(`Closed ${belize(z.shift.closedAt)}`, z.shift.closedBy ?? '');
   rule();
