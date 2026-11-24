@@ -2,7 +2,7 @@
 
 import { type FormEvent, useEffect, useState } from 'react';
 import { Link } from 'react-router';
-import { api, type CheckoutSummary, type StoreSettings } from '../api';
+import { api, type CheckoutSummary, type StoreSettings, apiShared } from '../api';
 import { useT } from '../i18n';
 import { useToast } from '../toast';
 import { ErrorText, Field, money, Select } from '../ui';
@@ -27,7 +27,7 @@ export function StoreSettingsTab() {
     void api<StoreSettings>('/v1/store-settings').then(setS).catch(setError);
   }, [accountsVersion]);
   useEffect(() => {
-    void api<Accounts>('/v1/payment-accounts').then((a) => {
+    void apiShared<Accounts>('/v1/payment-accounts').then((a) => {
       setTestAvailable(a.test.available);
       setConnected({ paypal: a.paypal.connected, belizebank: a.belizebank.connected, ekyash: a.ekyash.connected });
     }).catch(() => {});

@@ -1,7 +1,7 @@
 /** Settings → Online store, the extras: taking payments online, discount codes, the store on its own domain. */
 
 import { type FormEvent, useCallback, useEffect, useState } from 'react';
-import { api } from '../api';
+import { api, apiShared } from '../api';
 import { useT } from '../i18n';
 import { useToast } from '../toast';
 import { ErrorText, Field, Modal, money, Select } from '../ui';
@@ -25,7 +25,7 @@ export function BelizeBankConnect({ onChanged }: { onChanged: () => void }) {
   const [form, setForm] = useState({ userName: '', password: '', mode: 'sandbox' as 'sandbox' | 'live' });
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
-  const load = useCallback(() => api<Accounts>('/v1/payment-accounts').then((a) => {
+  const load = useCallback(() => apiShared<Accounts>('/v1/payment-accounts').then((a) => {
     setAccounts(a);
     setForm((f) => ({ ...f, userName: a.belizebank.userName ?? '', mode: a.belizebank.mode }));
   }).catch(setError), []);
@@ -90,7 +90,7 @@ export function EKyashConnect({ onChanged }: { onChanged: () => void }) {
   const [form, setForm] = useState({ sid: '', pinHash: '', apiKey: '', apiPassword: '', mode: 'sandbox' as 'sandbox' | 'live' });
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
-  const load = useCallback(() => api<Accounts>('/v1/payment-accounts').then((a) => {
+  const load = useCallback(() => apiShared<Accounts>('/v1/payment-accounts').then((a) => {
     setAccounts(a);
     setForm((f) => ({ ...f, sid: a.ekyash.sid ?? '', mode: a.ekyash.mode }));
   }).catch(setError), []);
@@ -165,7 +165,7 @@ export function PayPalConnect({ onChanged }: { onChanged: () => void }) {
   const [form, setForm] = useState({ clientId: '', secret: '', mode: 'sandbox' as 'sandbox' | 'live' });
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
-  const load = useCallback(() => api<Accounts>('/v1/payment-accounts').then((a) => {
+  const load = useCallback(() => apiShared<Accounts>('/v1/payment-accounts').then((a) => {
     setAccounts(a);
     setForm((f) => ({ ...f, clientId: a.paypal.clientId ?? '', mode: a.paypal.mode }));
   }).catch(setError), []);

@@ -5,7 +5,7 @@ import '@fontsource-variable/inter/opsz.css';
 import '@fontsource-variable/inter-tight';
 import '@fontsource-variable/geist-mono';
 import './styles.css';
-import { api, type Me, type Permission } from './api';
+import { api, type Me, type Permission, apiShared } from './api';
 import { Brand } from './art';
 import { BUSINESS, STORE_DOMAIN } from './business';
 import { ErrorBoundary } from './ErrorBoundary';
@@ -148,7 +148,7 @@ function Layout() {
 
   // How many online orders need doing, for the badge in the menu; refreshed as people move around.
   useEffect(() => {
-    void api<{ counts: { unpaid: number; unfulfilled: number } }>('/v1/orders?view=to_do&q=%23000000000')
+    void apiShared<{ counts: { unpaid: number; unfulfilled: number } }>('/v1/orders?view=to_do&q=%23000000000')
       .then((r) => setOrdersToDo(Math.max(r.counts.unpaid, r.counts.unfulfilled)))
       .catch(() => {});
   }, [location.pathname]);

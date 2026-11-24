@@ -103,6 +103,20 @@ export async function api<T = unknown>(path: string, options: CallOptions = {}):
   return data as T;
 }
 
+const asking = new Map<string, Promise<unknown>>();
+/**
+ * A read shared by everything that asks for it at the same moment: several panels of one page
+ * wanting the same list make one request, not one each. Asked again later, it is fetched again.
+ */
+export function apiShared<T = unknown>(path: string): Promise<T> {
+  let request = asking.get(path) as Promise<T> | undefined;
+  if (!request) {
+    request = api<T>(path).finally(() => asking.delete(path));
+    asking.set(path, request);
+  }
+  return request;
+}
+
 /** A plain link to the API (PDF, XML, CSV), naming the business since links cannot carry headers. */
 export function link(path: string): string {
   if (!BUSINESS) return path;

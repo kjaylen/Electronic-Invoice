@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
-import { api, type DocumentInfo, type Page, type Summary } from '../api';
+import { api, type DocumentInfo, type Page, type Summary, apiShared } from '../api';
 import { type T, useI18n, useT } from '../i18n';
 import { Icons } from '../icons';
 import { useSession } from '../session';
@@ -74,7 +74,7 @@ export function Dashboard() {
     void api<Page<DocumentInfo>>(`/v1/documents?limit=200&from=${today}&to=${today}`).then((r) => setTodayDocs(r.data)).catch(() => {});
     void api<Page<DocumentInfo>>('/v1/documents?status=rejected&limit=20').then((r) => setRejected(r.data)).catch(() => {});
     void api<Page<DocumentInfo>>('/v1/documents?status=pending&limit=20').then((r) => setPending(r.data)).catch(() => {});
-    void api<{ counts: { unpaid: number; unfulfilled: number } }>('/v1/orders?view=to_do&q=%23000000000').then((r) => setOrders(r.counts)).catch(() => {});
+    void apiShared<{ counts: { unpaid: number; unfulfilled: number } }>('/v1/orders?view=to_do&q=%23000000000').then((r) => setOrders(r.counts)).catch(() => {});
     if (reports) void api<Summary>(`/v1/reports/summary?from=${belizeDate(-13)}&to=${today}`).then(setSummary).catch(() => {});
     if (stockKeeper) void api<{ totals: { low: number; out: number } }>('/v1/inventory?filter=low&limit=1').then((r) => setStock(r.totals)).catch(() => {});
     if (stockKeeper) void api<{ data: Array<{ late: boolean }> }>('/v1/purchase-orders?status=open').then((r) => setLateOrders(r.data.filter((o) => o.late).length)).catch(() => {});
