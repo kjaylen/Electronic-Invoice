@@ -38,7 +38,7 @@ import { MAIL_TYPES } from '../mail/types.ts';
 import type { PipelineDeps } from '../pipeline/issue.ts';
 import type { ServerContext } from './context.ts';
 import { ApiError } from './errors.ts';
-import { requirePermission } from './permissions.ts';
+import { requirePersonWith } from './permissions.ts';
 import { uuid } from './schemas.ts';
 
 const text = (max: number) => ({ type: 'string', maxLength: max }) as const;
@@ -85,7 +85,8 @@ async function removeSuppression(db: Queryable, tenantId: string | null, id: str
 /** A business's own mail server, its log and its do-not-send list. */
 export function registerMailRoutes(app: FastifyInstance, deps: PipelineDeps, ctx: ServerContext, mail: MailService) {
   const { db, keys } = deps;
-  const allowed = (request: FastifyRequest) => requirePermission(request, 'business.manage');
+  // People only (owners and admins): an API key never reads or changes how a business's email is sent, or who it wrote to.
+  const allowed = (request: FastifyRequest) => requirePersonWith(request, 'business.manage');
   const restrictPorts = !mail.limits.allowPrivateHosts;
 
   const view = async (tenantId: string) => {
