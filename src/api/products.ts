@@ -29,6 +29,7 @@ import type { ServerContext } from './context.ts';
 import { assertFeature } from '../billing/billing.ts';
 import { getPaymentAccount, PROVIDER_NAMES } from '../commerce/payments.ts';
 import { addDomain, checkDomain, DomainError, domainJson, type DomainRow, normalizeDomain, verifyDomain } from '../commerce/domains.ts';
+import { emitEvent } from '../webhooks/emit.ts';
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const MAX_IMAGES = 10;
@@ -408,6 +409,7 @@ export function registerProductRoutes(app: FastifyInstance, deps: PipelineDeps, 
         [id, request.tenantId, b.title.trim(), handle, b.description ?? '', b.status ?? 'draft', b.option1Name || null, b.option2Name || null, b.badge?.trim() || null, cleanTags(b.tags)],
       );
       await saveVariants(tx, request.tenantId, id, b, request.userId || null);
+      await emitEvent(tx, request.tenantId, 'product.created', id);
     }).catch(barcodeConflict);
     return reply.code(201).send(await productDetail(db, request.tenantId, id));
   });
@@ -428,6 +430,7 @@ export function registerProductRoutes(app: FastifyInstance, deps: PipelineDeps, 
           [request.params.id, request.tenantId, b.title.trim(), handle, b.description ?? '', b.status ?? 'draft', b.option1Name || null, b.option2Name || null, b.badge?.trim() || null, b.tags ? cleanTags(b.tags) : null],
         );
         await saveVariants(tx, request.tenantId, request.params.id, b, request.userId || null);
+        await emitEvent(tx, request.tenantId, 'product.updated', request.params.id);
       }).catch(barcodeConflict);
       return productDetail(db, request.tenantId, request.params.id);
     },
@@ -437,6 +440,7 @@ export function registerProductRoutes(app: FastifyInstance, deps: PipelineDeps, 
     requirePermission(request, 'catalog.manage');
     const r = await db.query(`update products set status = 'archived', updated_at = now() where id = $1 and tenant_id = $2 returning id`, [request.params.id, request.tenantId]);
     if (!r.rows.length) throw notFound('Product');
+    await emitEvent(db, request.tenantId, 'product.deleted', request.params.id);
     return reply.code(204).send();
   });
 
@@ -468,6 +472,7 @@ export function registerProductRoutes(app: FastifyInstance, deps: PipelineDeps, 
         id, request.tenantId, request.params.id, count, type, data.length, key ? null : data, key,
       ]);
       await db.query('update products set updated_at = now() where id = $1', [request.params.id]);
+      await emitEvent(db, request.tenantId, 'product.updated', request.params.id);
       return reply.code(201).send({ id, contentType: type, bytes: data.length });
     },
   );
@@ -482,6 +487,7 @@ export function registerProductRoutes(app: FastifyInstance, deps: PipelineDeps, 
         [request.params.imageId, request.params.id, request.tenantId],
       );
       if (!r.rows.length) throw notFound('Photo');
+      await emitEvent(db, request.tenantId, 'product.updated', request.params.id);
       return productDetail(db, request.tenantId, request.params.id);
     },
   );
@@ -496,6 +502,7 @@ export function registerProductRoutes(app: FastifyInstance, deps: PipelineDeps, 
       const key = r.rows[0]!.storage_key;
       // Best effort: an object left behind costs a few kilobytes, a failed delete must not block the merchant.
       if (key && ctx.objects) await ctx.objects.delete(key).catch((e) => request.log.warn({ err: e, key }, 'photo object not deleted'));
+      await emitEvent(db, request.tenantId, 'product.updated', request.params.id);
       return reply.code(204).send();
     },
   );

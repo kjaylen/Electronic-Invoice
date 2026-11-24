@@ -103,7 +103,9 @@ test('webhooks: Pro plan; signed deliveries when documents are authorized or rej
 
     // The test button.
     const ping = await app.inject({ method: 'POST', url: `/v1/webhooks/${endpointId}/test`, headers: h });
-    assert.deepEqual(ping.json(), { ok: true, status: 200, error: null });
+    const { deliveryId: pingId, ...pinged } = ping.json();
+    assert.deepEqual(pinged, { ok: true, status: 200, error: null });
+    assert.match(pingId, /^[0-9a-f-]{36}$/);
     assert.equal(hook.got.at(-1)!.headers['x-floreo-event'], 'ping');
 
     // Twenty failures in a row switch the endpoint off.

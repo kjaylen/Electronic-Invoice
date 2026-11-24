@@ -21,6 +21,7 @@ import type { KeyProtector } from '../db/keystore.ts';
 import { formatCents } from '../engine/decimal.ts';
 import { belizeBankGateway } from './belizebank.ts';
 import { type EKyashCredentials, ekyashGateway } from './ekyash.ts';
+import { emitEvent } from '../webhooks/emit.ts';
 
 export type Provider = 'paypal' | 'test' | 'belizebank' | 'ekyash';
 export const PROVIDER_NAMES: Record<Provider, string> = { paypal: 'PayPal', test: 'Test payment', belizebank: 'Belize Bank card', ekyash: 'E-Kyash' };
@@ -290,7 +291,10 @@ export async function confirmPayment(db: Queryable, gateway: Gateway, paymentId:
     return (await db.query<PaymentRow>("update order_payments set status = 'paid', transaction_id = $2, updated_at = now() where id = $1 and status = 'pending' returning *", [paymentId, r.transactionId])).rows[0] ?? p;
   }
   if (r.status === 'failed') {
-    return (await db.query<PaymentRow>("update order_payments set status = 'failed', detail = coalesce(detail, '{}'::jsonb) || $2::jsonb, updated_at = now() where id = $1 and status = 'pending' returning *", [paymentId, JSON.stringify({ reason: r.reason })])).rows[0] ?? p;
+    const failed = (await db.query<PaymentRow>("update order_payments set status = 'failed', detail = coalesce(detail, '{}'::jsonb) || $2::jsonb, updated_at = now() where id = $1 and status = 'pending' returning *", [paymentId, JSON.stringify({ reason: r.reason })])).rows[0];
+    // Once, when it turns failed: the business's systems hear that an order's payment did not go through.
+    if (failed?.order_id) await emitEvent(db, failed.tenant_id, 'order.payment_failed', failed.order_id);
+    return failed ?? p;
   }
   return p;
 }

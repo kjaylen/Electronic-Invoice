@@ -11,6 +11,7 @@
 
 import { randomUUID } from 'node:crypto';
 import type { Queryable } from '../db/database.ts';
+import { emitEvent } from '../webhooks/emit.ts';
 
 export type MovementReason = 'initial' | 'sale' | 'sale_reversed' | 'order' | 'order_cancelled' | 'refund' | 'receive' | 'count' | 'damaged' | 'lost' | 'returned' | 'other';
 export const ADJUST_REASONS = ['count', 'damaged', 'lost', 'returned', 'other'] as const;
@@ -82,6 +83,8 @@ export async function moveStock(db: Queryable, m: Movement & { atLeast?: number 
     [m.itemId, m.tenantId, m.mode ?? 'change', q, m.unitCost ?? null, m.atLeast ?? null, Boolean(m.startTracking), id, m.reason, m.documentId ?? null, m.orderId ?? null,
       m.receiptId ?? null, m.reversesId ?? null, m.note?.trim() || null, m.userId ?? null],
   )).rows[0];
+  // Tell the business's other systems (a site showing what is in stock) that the level changed.
+  if (r && Number(r.change) !== 0) await emitEvent(db, m.tenantId, 'stock.changed', m.itemId);
   return r ? { id, balance: r.balance, change: r.change } : null;
 }
 

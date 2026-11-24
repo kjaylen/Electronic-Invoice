@@ -7,8 +7,10 @@
  *   PATCH  /v1/webhooks/:id                     { url?, events?, description?, enabled? }
  *   DELETE /v1/webhooks/:id
  *   POST   /v1/webhooks/:id/rotate-secret       a new secret, shown once
- *   POST   /v1/webhooks/:id/test                send a "ping" now and report the answer
- *   GET    /v1/webhooks/:id/deliveries          the last 50 deliveries
+ *   POST   /v1/webhooks/:id/test                send a "ping" now and report the answer; { event } sends that event's sample instead
+ *   GET    /v1/webhooks/:id/deliveries          the last 50 deliveries (status and type to narrow)
+ *   GET    /v1/webhooks/deliveries/:id          one delivery: what was sent, and what the endpoint answered
+ *   GET    /v1/webhooks/events                  every event type with a sample of what it carries
  *   POST   /v1/webhooks/deliveries/:id/retry    send a failed delivery again
  */
 
@@ -17,7 +19,8 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { assertFeature } from '../billing/billing.ts';
 import { audit } from '../db/audit.ts';
 import type { PipelineDeps } from '../pipeline/issue.ts';
-import { checkEndpointUrl, deliverDue, newSecret, WEBHOOK_EVENTS, WebhookError } from '../webhooks/webhooks.ts';
+import { checkEndpointUrl, deliverDue, deliveryBody, newSecret, WEBHOOK_EVENTS, WebhookError } from '../webhooks/webhooks.ts';
+import { SAMPLE_EVENT_DATA } from '../webhooks/samples.ts';
 import { ApiError, notFound } from './errors.ts';
 import { requirePermission } from './permissions.ts';
 import { uuid } from './schemas.ts';
@@ -127,14 +130,27 @@ export function registerWebhookRoutes(app: FastifyInstance, deps: PipelineDeps, 
     return { ...endpointJson(before), secret };
   });
 
-  app.post<{ Params: { id: string } }>('/webhooks/:id/test', { schema: { params: idParams } }, async (request) => {
+  // Every event type with a sample of its data: what the reference shows, and what a test delivery sends.
+  app.get('/webhooks/events', async (request) => {
+    requirePermission(request, 'business.manage');
+    return { data: WEBHOOK_EVENTS.map((type) => ({ type, sample: { id: '00000000-0000-4000-8000-000000000000', type, createdAt: '2026-11-24T16:07:02.511Z', data: SAMPLE_EVENT_DATA[type] } })) };
+  });
+
+  app.post<{ Params: { id: string }; Body?: { event?: (typeof WEBHOOK_EVENTS)[number] } }>(
+    '/webhooks/:id/test',
+    { schema: { params: idParams, body: { type: ['object', 'null'], additionalProperties: false, properties: { event: { type: 'string', enum: [...WEBHOOK_EVENTS] } } } } },
+    async (request) => {
     await guard(request);
     const ep = await load(request.tenantId, request.params.id);
     if (!ep.enabled) throw new ApiError(409, 'disabled', 'Switch the endpoint on first');
     const id = randomUUID();
+    // A ping, or the sample of an event (marked as a test, so the receiver can tell it from a real one).
+    const event = request.body?.event;
     await db.query(
-      `insert into webhook_deliveries (id, endpoint_id, tenant_id, type, payload, status, next_attempt_at) values ($1, $2, $3, 'ping', $4, 'pending', now() + interval '1 hour')`,
-      [id, ep.id, request.tenantId, JSON.stringify({ createdAt: new Date().toISOString(), data: { message: 'A test from Floreo. Your endpoint works.' } })],
+      `insert into webhook_deliveries (id, endpoint_id, tenant_id, type, payload, status, next_attempt_at) values ($1, $2, $3, $4, $5, 'pending', now() + interval '1 hour')`,
+      [id, ep.id, request.tenantId, event ?? 'ping', JSON.stringify(event
+        ? { createdAt: new Date().toISOString(), data: SAMPLE_EVENT_DATA[event], test: true }
+        : { createdAt: new Date().toISOString(), data: { message: 'A test from Floreo. Your endpoint works.' } })],
     );
     // Send just this one, now.
     await db.query('update webhook_deliveries set next_attempt_at = now() where id = $1', [id]);
@@ -142,14 +158,20 @@ export function registerWebhookRoutes(app: FastifyInstance, deps: PipelineDeps, 
     const d = (await db.query<{ status: string; response_status: number | null; error: string | null }>('select status, response_status, error from webhook_deliveries where id = $1', [id])).rows[0]!;
     // A test that failed is not retried later.
     if (d.status === 'pending') await db.query("update webhook_deliveries set status = 'failed' where id = $1", [id]);
-    return { ok: d.status === 'delivered', status: d.response_status, error: d.error };
-  });
+    return { ok: d.status === 'delivered', status: d.response_status, error: d.error, deliveryId: id };
+    },
+  );
 
-  app.get<{ Params: { id: string } }>('/webhooks/:id/deliveries', { schema: { params: idParams } }, async (request) => {
+  app.get<{ Params: { id: string }; Querystring: { status?: string; type?: string } }>(
+    '/webhooks/:id/deliveries',
+    { schema: { params: idParams, querystring: { type: 'object', additionalProperties: false, properties: { status: { type: 'string', enum: ['pending', 'delivered', 'failed'] }, type: { type: 'string', enum: ['ping', ...WEBHOOK_EVENTS] } } } } },
+    async (request) => {
     requirePermission(request, 'business.manage');
     const ep = await load(request.tenantId, request.params.id);
     const rows = (await db.query<{ id: string; type: string; status: string; attempts: number; response_status: number | null; error: string | null; created_at: Date; delivered_at: Date | null; next_attempt_at: Date }>(
-      'select id, type, status, attempts, response_status, error, created_at, delivered_at, next_attempt_at from webhook_deliveries where endpoint_id = $1 order by created_at desc limit 50', [ep.id],
+      `select id, type, status, attempts, response_status, error, created_at, delivered_at, next_attempt_at from webhook_deliveries
+       where endpoint_id = $1 and ($2::text is null or status = $2) and ($3::text is null or type = $3) order by created_at desc limit 50`,
+      [ep.id, request.query.status ?? null, request.query.type ?? null],
     )).rows;
     return {
       data: rows.map((r) => ({
@@ -157,11 +179,27 @@ export function registerWebhookRoutes(app: FastifyInstance, deps: PipelineDeps, 
         createdAt: iso(r.created_at), deliveredAt: iso(r.delivered_at), nextAttemptAt: r.status === 'pending' ? iso(r.next_attempt_at) : null,
       })),
     };
+    },
+  );
+
+  // One delivery in full: the body exactly as it was (or will be) sent, and what the endpoint last answered.
+  app.get<{ Params: { id: string } }>('/webhooks/deliveries/:id', { schema: { params: idParams } }, async (request) => {
+    requirePermission(request, 'business.manage');
+    const r = (await db.query<{ id: string; endpoint_id: string; type: string; status: string; attempts: number; response_status: number | null; response_body: string | null; error: string | null; created_at: Date; delivered_at: Date | null; next_attempt_at: Date; payload: { createdAt: string; data: unknown; test?: boolean } }>(
+      'select * from webhook_deliveries where id = $1 and tenant_id = $2', [request.params.id, request.tenantId],
+    )).rows[0];
+    if (!r) throw notFound('Delivery');
+    return {
+      id: r.id, endpointId: r.endpoint_id, type: r.type, status: r.status, attempts: r.attempts,
+      responseStatus: r.response_status, responseBody: r.response_body, error: r.error,
+      createdAt: iso(r.created_at), deliveredAt: iso(r.delivered_at), nextAttemptAt: r.status === 'pending' ? iso(r.next_attempt_at) : null,
+      body: deliveryBody(r.id, r.type, r.payload),
+    };
   });
 
   app.post<{ Params: { id: string } }>('/webhooks/deliveries/:id/retry', { schema: { params: idParams } }, async (request) => {
     await guard(request);
-    const r = await db.query("update webhook_deliveries set status = 'pending', next_attempt_at = now() where id = $1 and tenant_id = $2 and status = 'failed' and type <> 'ping' returning id", [request.params.id, request.tenantId]);
+    const r = await db.query("update webhook_deliveries set status = 'pending', next_attempt_at = now() where id = $1 and tenant_id = $2 and status = 'failed' and type <> 'ping' and not coalesce((payload ->> 'test')::boolean, false) returning id", [request.params.id, request.tenantId]);
     if (!r.rows.length) throw new ApiError(409, 'conflict', 'Only a failed delivery can be sent again');
     return { ok: true };
   });

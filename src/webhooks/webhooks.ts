@@ -1,8 +1,9 @@
 /**
  * Webhooks: telling a business's other systems when something happens.
  *
- * Database triggers write each event to event_outbox. The dispatcher turns
- * outbox rows into deliveries (one per endpoint that wants the event), then
+ * Database triggers write each event to event_outbox (products, stock levels
+ * and failed payments are written by the code that makes the change:
+ * emit.ts). The dispatcher turns outbox rows into deliveries (one per endpoint that wants the event), then
  * POSTs them as JSON:
  *
  *   { "id": "<delivery id>", "type": "document.authorized", "createdAt": "...", "data": { ... } }
@@ -32,6 +33,7 @@ import { toBigInt } from '../db/database.ts';
 import type { KeyProtector } from '../db/keystore.ts';
 import { formatCents } from '../engine/decimal.ts';
 import { paymentJson, type PaymentRow, receivable } from '../receivables/receivables.ts';
+import { productDetail } from '../api/products.ts';
 
 export const WEBHOOK_EVENTS = [
   'document.authorized',
@@ -40,6 +42,7 @@ export const WEBHOOK_EVENTS = [
   'document.issued_offline',
   'order.placed',
   'order.paid',
+  'order.payment_failed',
   'order.fulfilled',
   'order.cancelled',
   'order.refunded',
@@ -47,8 +50,14 @@ export const WEBHOOK_EVENTS = [
   'invoice.paid',
   'expense.recorded',
   'stock.received',
+  'stock.changed',
   'purchase_order.received',
+  'product.created',
+  'product.updated',
+  'product.deleted',
 ] as const;
+/** Events that say how something is now: several for one subject in one run are one delivery (the last). */
+const STATE_EVENTS = new Set(['stock.changed', 'product.updated']);
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number] | 'ping';
 
 export const RETRY_DELAYS_S = [60, 300, 1800, 7200, 21600, 43200];
@@ -204,9 +213,38 @@ export async function eventData(db: Queryable, type: string, tenantId: string, s
     if (!r) return null;
     return { refund: { id: r.id, amount: cents(r.amount_cents), reason: r.reason, lines: r.lines, delivery: r.delivery, documentId: r.document_id, createdAt: iso(r.created_at) }, order: await orderOf(String(r.order_id)) };
   }
+  if (type === 'order.payment_failed') {
+    const order = await orderOf(subjectId);
+    if (!order) return null;
+    const p = (await db.query<{ id: string; provider: string; status: string; amount_cents: unknown; detail: { reason?: string; error?: string } | null; created_at: Date }>(
+      "select id, provider, status, amount_cents, detail, created_at from order_payments where order_id = $1 and tenant_id = $2 and status = 'failed' order by updated_at desc limit 1", [subjectId, tenantId],
+    )).rows[0];
+    return { order, payment: p ? { id: p.id, provider: p.provider, status: p.status, reason: p.detail?.reason ?? p.detail?.error ?? null, amount: cents(p.amount_cents), createdAt: iso(p.created_at) } : null };
+  }
   if (type.startsWith('order.')) {
     const order = await orderOf(subjectId);
     return order ? { order } : null;
+  }
+  // A product as GET /v1/products/:id answers it (an archived one says status "archived").
+  if (type.startsWith('product.')) {
+    const product = await productDetail(db, tenantId, subjectId).catch(() => null);
+    return product ? { product } : null;
+  }
+  // An item's stock as it is now (a variant of a product names it).
+  if (type === 'stock.changed') {
+    const i = (await db.query<{ id: string; name: string; seller_code: string | null; stock: string | null; low_stock: string | null; product_id: string | null; handle: string | null }>(
+      `select i.id, i.name, i.seller_code, i.stock_quantity::text as stock, i.low_stock::text as low_stock, p.id as product_id, p.handle
+       from items i left join products p on p.id = i.product_id where i.id = $1 and i.tenant_id = $2`, [subjectId, tenantId],
+    )).rows[0];
+    if (!i) return null;
+    const quantity = i.stock === null ? null : String(Number(i.stock));
+    return {
+      item: {
+        id: i.id, name: i.name, code: i.seller_code, quantity, available: i.stock === null || Number(i.stock) > 0,
+        lowStock: i.stock !== null && i.low_stock !== null && Number(i.stock) <= Number(i.low_stock),
+        product: i.product_id ? { id: i.product_id, handle: i.handle } : null,
+      },
+    };
   }
   const invoiceOf = async (documentId: string) => {
     const r = await receivable(db, tenantId, documentId);
@@ -301,7 +339,11 @@ export async function fanOut(db: Queryable, limit = 200): Promise<number> {
     'select id, tenant_id, events from webhook_endpoints where enabled and tenant_id = any($1::uuid[])', [tenants],
   )).rows;
   let created = 0;
-  for (const row of rows.sort((a, b) => Number(a.id) - Number(b.id))) {
+  const ordered = rows.sort((a, b) => Number(a.id) - Number(b.id));
+  // The last of several "how it is now" events about one thing says everything the earlier ones would.
+  const last = new Map(ordered.filter((r) => STATE_EVENTS.has(r.type)).map((r) => [`${r.tenant_id}|${r.type}|${r.subject_id}`, r.id]));
+  for (const row of ordered) {
+    if (STATE_EVENTS.has(row.type) && last.get(`${row.tenant_id}|${row.type}|${row.subject_id}`) !== row.id) continue;
     const targets = endpoints.filter((e) => e.tenant_id === row.tenant_id && (e.events.includes('*') || e.events.includes(row.type)));
     if (!targets.length) continue;
     const data = await eventData(db, row.type, row.tenant_id, row.subject_id);
@@ -317,10 +359,15 @@ export async function fanOut(db: Queryable, limit = 200): Promise<number> {
   return created;
 }
 
+/** A delivery's body, as sent: { id, type, createdAt, data }, with "test": true on a test delivery of an event's sample. */
+export function deliveryBody(id: string, type: string, payload: { createdAt: string; data: unknown; test?: boolean }) {
+  return { id, type, createdAt: payload.createdAt, data: payload.data, ...(payload.test && { test: true }) };
+}
+
 /** Send the deliveries that are due. Returns how many were attempted. */
 export async function deliverDue(db: Queryable, options: DispatchOptions, limit = 25, onlyId?: string): Promise<number> {
   // Claim with a lease, so two processes never send the same delivery at once.
-  const due = (await db.query<{ id: string; endpoint_id: string; tenant_id: string; type: string; payload: { createdAt: string; data: unknown }; attempts: number }>(
+  const due = (await db.query<{ id: string; endpoint_id: string; tenant_id: string; type: string; payload: { createdAt: string; data: unknown; test?: boolean }; attempts: number }>(
     `update webhook_deliveries set next_attempt_at = now() + interval '2 minutes' where id in (
        select id from webhook_deliveries where status = 'pending' and next_attempt_at <= now() and ($2::uuid is null or id = $2::uuid)
        order by next_attempt_at limit $1 for update skip locked
@@ -336,7 +383,7 @@ export async function deliverDue(db: Queryable, options: DispatchOptions, limit 
       continue;
     }
     const secret = (await options.keys.decrypt(ep.secret_encrypted, `webhook:${d.endpoint_id}`)).toString('utf8');
-    const body = JSON.stringify({ id: d.id, type: d.type, createdAt: d.payload.createdAt, data: d.payload.data });
+    const body = JSON.stringify(deliveryBody(d.id, d.type, d.payload));
     const t = Math.floor(Date.now() / 1000);
     const result = await postJson(ep.url, body, { 'x-floreo-event': d.type, 'x-floreo-delivery': d.id, 'x-floreo-signature': signature(secret, t, body) }, { ...(options.allowPrivate && { allowPrivate: true }) });
     const attempts = d.attempts + 1;
