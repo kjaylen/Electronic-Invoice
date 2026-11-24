@@ -87,6 +87,8 @@ export class SyncEngine {
 
   async start() {
     this.stopped = false;
+    // Paired again after being removed: a new token, so try again.
+    this.state = { ...this.state, unpaired: false, lastError: null };
     this.state.lastSyncAt = (await this.deps.db.meta<string>('lastSyncAt')) ?? null;
     this.state.lastContactAt = (await this.deps.db.meta<string>('lastContactAt')) ?? null;
     window.addEventListener('online', this.onOnline);
