@@ -78,54 +78,55 @@ Published sites:
 ## The plan, by customer value
 
 ### A. Never lose work
-- [ ] A1. Saves are queued one at a time, flushed when leaving the editor or
+- [x] A1. Saves are queued one at a time, flushed when leaving the editor or
       the tab, retried after a failure, with a clear status and a Retry button.
-- [ ] A2. A copy of unsaved work is kept on the device and offered back after a
+- [x] A2. A copy of unsaved work is kept on the device and offered back after a
       crash or a failed save.
-- [ ] A3. Editing in two places: the server refuses a save made on top of a
+- [x] A3. Editing in two places: the server refuses a save made on top of a
       draft someone else changed since, and the editor says so and offers to
       load theirs or keep yours.
-- [ ] A4. Server keeps pages whose address collides or is invalid (gives them a
+- [x] A4. Server keeps pages whose address collides or is invalid (gives them a
       free address) instead of dropping them. Tests.
-- [ ] A5. Page address: can be typed freely, checked on leaving the box, never
+- [x] A5. Page address: can be typed freely, checked on leaving the box, never
       saved as a duplicate; renaming or deleting a page rewrites every link to
       it. Tests.
-- [ ] A6. Undo/redo recorded outside the state updater; undo works after
+- [x] A6. Undo/redo recorded outside the state updater; undo works after
       discard and restore; Ctrl+Z covered by a test.
-- [ ] A7. Preview always follows the editor (ready-flag race), and says so when
+- [x] A7. Preview always follows the editor (ready-flag race), and says so when
       there is no product to preview a product page with.
-- [ ] A8. Errors from discard, restore, add section and publish are shown and
+- [x] A8. Errors from discard, restore, add section and publish are shown and
       cleared on the next success.
 
 ### B. From a blank page to a published site, fast
-- [ ] B1. Starting sites: complete home pages plus About and Contact pages for
+- [x] B1. Starting sites: complete home pages plus About and Contact pages for
       a shop, a food business, a boutique and a service business, with
       Belizean defaults, applied in one click (undoable). Offered first to a
       store that has never published.
-- [ ] B2. New pages start from a page template (About, Contact, Questions,
+- [x] B2. New pages start from a page template (About, Contact, Questions,
       Delivery and returns, Blank).
-- [ ] B3. The editor says when the store is closed and links to where it is
+- [x] B3. The editor says when the store is closed and links to where it is
       opened; Publish explains what customers will see.
-- [ ] B4. Pictures are resized and compressed in the browser before upload, so
+- [x] B4. Pictures are resized and compressed in the browser before upload, so
       phone photos just work; drop files onto the library to upload.
 
 ### C. Editing that feels direct
-- [ ] C1. Edit text in the preview: click a headline, text or button in the
+- [x] C1. Edit text in the preview: click a headline, text or button in the
       page and type; the panel and the draft follow.
-- [ ] C2. Fix the two request loops in the product pickers (items 10 and 11).
-- [ ] C3. Add a section where you are (after the selected one, or from a "+"
+- [x] C2. Fix the two request loops in the product pickers (items 10 and 11).
+- [x] C3. Add a section where you are (after the selected one, or from a "+"
       between sections) instead of always at the bottom.
-- [ ] C4. Saved sections: keep a section to reuse on any page.
-- [ ] C5. Drag to reorder blocks and menu links; labelled show/hide control.
+- [x] C4. Saved sections: keep a section to reuse on any page.
+- [x] C5. Drag to reorder blocks and menu links; labelled show/hide control.
+      (With a mouse. On touch screens the arrows do it; see DECISIONS.md.)
 
 ### D. Published sites, good by default
-- [ ] D1. Alternative text for content pictures (banner, picture with text,
-      columns, gallery, logos, visit us), defaulting sensibly.
-- [ ] D2. Structured data: Product on product pages, the business on the home
-      page.
-- [ ] D3. Banner picture as a real image (described, loaded first); pictures
+- [x] D1. Alternative text for content pictures (banner, picture with text,
+      columns, visit us). Gallery and logos stay decorative; see DECISIONS.md.
+- [x] D2. Structured data: Product on product pages, the business on the home
+      page. Also: pages that are not there answer 404 and stay out of search.
+- [x] D3. Banner picture as a real image (described, loaded first); pictures
       below the fold stay lazy.
-- [ ] D4. Storefront keyboard and screen-reader basics: skip link, Escape
+- [x] D4. Storefront keyboard and screen-reader basics: skip link, Escape
       closes menus, focus is visible on the themed colours.
 
 ### E. The rest of the platform
