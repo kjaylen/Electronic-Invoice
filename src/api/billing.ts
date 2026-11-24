@@ -40,11 +40,15 @@ export function registerBillingRoutes(app: FastifyInstance, deps: PipelineDeps, 
   const { db } = deps;
   const billingTenant = billingTenantResolver(deps, ctx);
 
-  app.get('/billing', async (request) => ({
-    ...(await billingSummary(db, request.tenantId)),
-    plans: plansJson(),
-    paymentInstructions: ctx.billing?.paymentInstructions ?? null,
-  }));
+  // The plan, what is owed and its invoices are for whoever manages the business (as the Plan tab is), not every member of staff.
+  app.get('/billing', async (request) => {
+    requirePermission(request, 'business.manage');
+    return {
+      ...(await billingSummary(db, request.tenantId)),
+      plans: plansJson(),
+      paymentInstructions: ctx.billing?.paymentInstructions ?? null,
+    };
+  });
 
   app.put<{ Body: { plan: string } }>(
     '/billing/plan',
@@ -62,6 +66,7 @@ export function registerBillingRoutes(app: FastifyInstance, deps: PipelineDeps, 
   );
 
   app.get<{ Params: { id: string } }>('/billing/invoices/:id/pdf', { schema: { params: { type: 'object', required: ['id'], properties: { id: uuid } } } }, async (request, reply) => {
+    requirePermission(request, 'business.manage');
     const inv = (await db.query<{ document_id: string | null }>('select document_id from billing_invoices where id = $1 and tenant_id = $2', [request.params.id, request.tenantId])).rows[0];
     if (!inv) throw notFound('Invoice');
     const issuer = await billingTenant();

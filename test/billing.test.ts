@@ -72,6 +72,14 @@ test('a new business starts a 30-day trial of the Business plan, and sees its pl
     assert.deepEqual(b.usage, { documents: 0, documentsLimit: 1000, users: 1, usersLimit: 10 });
     const me = (await c.app.inject({ method: 'GET', url: '/v1/me', headers: c.owner })).json();
     assert.equal(me.billing.status, 'trialing');
+
+    // The plan and its invoices are for those who manage the business; a cashier is told no (and still knows what the plan allows).
+    await createUser(c.f.db, { tenantId: c.f.tenantA, name: 'Cass', email: 'cass@shop.example', role: 'cashier', password: PASSWORD });
+    const login = await c.app.inject({ method: 'POST', url: '/v1/auth/login', headers: CSRF, payload: { business: c.slug, login: 'cass@shop.example', password: PASSWORD } });
+    const cashier = { ...CSRF, cookie: cookieFrom(login), 'x-business': c.slug };
+    assert.equal((await c.app.inject({ method: 'GET', url: '/v1/billing', headers: cashier })).statusCode, 403);
+    assert.equal((await c.app.inject({ method: 'GET', url: '/v1/billing/invoices/00000000-0000-4000-8000-000000000000/pdf', headers: cashier })).statusCode, 403);
+    assert.ok((await c.app.inject({ method: 'GET', url: '/v1/me', headers: cashier })).json().billing.features.length > 0);
   }));
 
 test('limits: production documents per month (test documents are free), accounts, store and API keys by plan', () =>
