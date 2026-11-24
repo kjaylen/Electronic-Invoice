@@ -128,6 +128,9 @@ export class SyncEngine {
   static clockOffset = 0;
 
   private set(patch: Partial<SyncState>) {
+    // The device saying it has no network wins: an answer that was already on its way when the
+    // connection dropped does not make the till look online.
+    if (patch.phase && patch.phase !== 'offline' && navigator.onLine === false) patch = { ...patch, phase: 'offline' };
     this.state = { ...this.state, ...patch };
     this.deps.onChange(this.state);
   }
