@@ -22,6 +22,7 @@ import { authorizationText, infoLines, regulatoryLines, renderReceipt, renderShe
 import QRCode from 'qrcode';
 import { qrUrl, readEtdForPrint } from '../render/view.ts';
 import { type Queryable, toBigInt } from '../db/database.ts';
+import { MailError } from '../mail/service.ts';
 import { businessContext, renderEmail } from '../templates/render.ts';
 import { type CustomerBody, customerFromRow, likePattern, loadCustomer, loadItems, nextCursor, parsePage, priceForQuantity } from './catalog.ts';
 import { audit } from '../db/audit.ts';
@@ -551,7 +552,7 @@ export async function sendDocumentEmail(
   }, { publicUrl: ctx.publicUrl, lang });
   const id = randomUUID();
   try {
-    await ctx.mailer.send({
+    const receipt = await ctx.mailer.send({ type: reminder ? 'reminder' : 'document', tenantId, userId: opts.userId ?? null,
       to: opts.to,
       replyTo: biz.email,
       subject: mail.subject,
@@ -562,6 +563,7 @@ export async function sendDocumentEmail(
         { filename: `${copy.filename}.xml`, content: copy.signedXml, contentType: 'application/xml' },
       ],
     });
+    if (receipt?.status === 'suppressed') throw new MailError('suppressed', `Not sent: ${opts.to} is on the do-not-send list, because an earlier email to it came back. Check the address, or take it off the list in Settings → Email.`);
   } catch (e) {
     await deps.db.query(`insert into document_messages (id, tenant_id, document_id, channel, recipient, status, error, sent_by) values ($1, $2, $3, 'email', $4, 'failed', $5, $6)`,
       [id, tenantId, documentId, opts.to, String((e as Error).message ?? e).slice(0, 500), opts.userId ?? null]);

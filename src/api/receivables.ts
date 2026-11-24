@@ -267,7 +267,7 @@ export async function sendStatement(deps: PipelineDeps, ctx: ServerContext, extr
     },
   }, { publicUrl: ctx.publicUrl, lang });
   const pdf = await statementPdf(db, tenantId, s, settings);
-  await ctx.mailer.send({
+  await ctx.mailer.send({ type: 'statement', tenantId, userId,
     to, replyTo: biz.email, subject: mail.subject, text: mail.text, html: mail.html,
     attachments: [{ filename: `statement-${s.asOf}.pdf`, content: pdf, contentType: 'application/pdf' }],
   });
