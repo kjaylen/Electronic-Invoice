@@ -9,6 +9,7 @@
  */
 
 import { sweepIdempotency } from './idempotency.ts';
+import { pruneLoggedRequests } from './devlog.ts';
 import { type BillingContext, type BillingRunResult, runBilling } from '../billing/billing.ts';
 import type { Queryable } from '../db/database.ts';
 import { sweepRateLimits } from '../db/ratelimit.ts';
@@ -101,6 +102,8 @@ export async function runHousekeepingOnce(db: Queryable, options: HousekeepingOp
   if (options.purgeMail) await step('email log', options.purgeMail);
   // Answers kept so a retried store order is not placed twice.
   await step('order retries', () => sweepIdempotency(db));
+  // The developer log: a week of requests, and no more than each business's newest 10,000.
+  await step('developer log', () => pruneLoggedRequests(db));
   await step('heartbeat', () => heartbeat(db, 'housekeeping', { notifications: result.notifications, alerts: result.alerts }));
   return result;
 }

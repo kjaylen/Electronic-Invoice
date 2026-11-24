@@ -176,3 +176,26 @@ Checks at the end (item 17), run here rather than by GitHub Actions:
 before) and the whole browser suite, 49 of 49, the older specs included
 (run on a web build in a scratch folder with `WEB_ROOT`, so the demo's
 `web/dist` was left alone).
+
+## Afterwards: the two things the no-schema rule held back
+
+Built on 24 Nov 2026 once the go-ahead was given for the schema changes. They
+finish items 13 and 14 above (and DECISIONS.md's "A durable request log" and
+"Scoped secret keys").
+
+- [x] 18. **The request log in the database** (migration 055, `api_requests`).
+  It survives a restart and is the same on every server process; kept a week
+  and at most the newest 10,000 per business; written in batches so no request
+  waits on it; paged in the API and on the Logs page; erased with the
+  business.
+- [x] 19. **Secret keys that may do less** (migration 056: `access`, `areas`,
+  `expires_at` on `api_keys`). Read-only keys, keys for some parts of the
+  API, keys that end on a day; checked in one place by the route's address;
+  existing keys unchanged. Set in the dashboard, shown in the reference.
+
+Still not done, and why, is in DECISIONS.md: a history of every attempt of a
+webhook delivery, test data inside a live business, a test or live mark in a
+secret key's own text.
+
+Checked the same way as before: `npm run check` (types, 383 of 384 unit tests
+passing, one skipped as before) and the whole browser suite, 49 of 49.

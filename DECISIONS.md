@@ -329,3 +329,69 @@ pricing, the auth flow, the payment setup), or is a piece of work of its own.
 
 None that stopped an item. Nothing was pushed (the work is local, on
 `connect-your-site`), and GitHub Actions has not run on it.
+
+---
+
+# The request-log table and scoped secret keys (24 Nov 2026, afterwards)
+
+The ground rule against schema changes held back two things, written up above
+under "Worth doing, deliberately not done". The go-ahead for both was given
+after the summary, so they were built on the same branch. What was written
+above is left as it was written; this part says what is true now.
+
+- **Two migrations, numbered 055 and 056.** The branch `offline-first-tills`
+  already has an unmerged `054_offline_tills.sql`. The migration runner
+  applies any file it has not seen, by name, so the branches merge in either
+  order; 054 is left for the branch that owns it.
+- **The log is written in batches, a second later at most.** One insert per
+  request would put a write on every product view from an embedded store.
+  Rows wait in the process and go together (at once when a hundred wait); a
+  crash loses the last second of log at most, and a database that is away
+  loses what waited rather than holding requests up or piling rows in memory.
+  Reading the log writes this process's waiting rows first, so a request
+  just made is in the answer.
+- **A week, and the newest 10,000 per business.** Both numbers are mine. A
+  week is long enough to look into "it failed on Monday"; the cap keeps one
+  busy or broken integration from growing the table without limit. The 35
+  days of counts (by day, key, endpoint and error) are separate and unchanged.
+- **`since` became `keptDays`** in `GET /v1/developer/requests`, and the
+  answer gained `nextCursor`. The endpoint was added on this unmerged branch,
+  so nothing outside it read `since`.
+- **A row for a business erased meanwhile is left out of the batch** rather
+  than failing it, so one closed business cannot lose the others' rows. The
+  erase itself needed no change: it walks the database's foreign keys.
+- **Scopes are checked by the route's address, in one place, not by adding
+  checks to routes.** Many of the API's routes that only read have no permission check
+  of their own (anyone signed in may read), so narrowing the permission table
+  could not make a key read-only. The check runs where a key is recognized;
+  full keys skip it entirely.
+- **A route with no area stops the server from starting.** That is how a
+  route added later cannot end up outside the scopes: the first test run (or
+  the first start) says which line to add. `people` marks what keys never
+  reach (users, keys, the logs).
+- **Eight areas, following how the app is laid out**, not one per endpoint
+  group: documents, customers, catalogue, orders, reports, expenses, webhooks,
+  business. Finer ones can be split out later without changing existing keys
+  (a key's areas are a list of names).
+- **Reading means GET, plus four POSTs that change nothing** (a document's,
+  a collection's and a template's preview, checking a gift card's code).
+  Dry runs that are a flag in the body (imports, repricing) are not let
+  through for a read-only key: the body is not looked at.
+- **`GET /v1/me` always answers for a limited key**, and says what the key
+  may do (`apiKey`), so a program can find out why it is refused.
+- **A key keeps the limits it was made with.** Changing a live key's reach in
+  place is how an integration breaks at an unknown moment; making another
+  key and revoking the old one is the same rotation as before. Replace in the
+  dashboard copies the limits (an end date only while it is still ahead).
+- **An expired key says that it expired, and names itself**, but only to a
+  caller that presented its whole secret. A wrong secret is still just
+  "invalid key".
+- **Not included: a test or live mark in the secret key's own text**
+  (`etd_test_…`). The dashboard shows which the business is, and changing
+  the key's form risks integrations that check it.
+
+Still held back, for the same reason as before: a history of every attempt of
+a webhook delivery (a table), and test data inside a live business.
+
+Checked the same way as before: the web app built into a scratch folder and
+served with `WEB_ROOT`, so the demo's `web/dist` is still the old build.

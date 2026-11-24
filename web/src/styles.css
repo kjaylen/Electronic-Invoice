@@ -2596,6 +2596,16 @@ main:has(.site-editor) { max-width: none; padding: 0.75rem 1rem 0.75rem; }
 .dev-axis { margin-top: -0.5rem; }
 .dev-requests td { vertical-align: top; }
 .dev-requests .mono { overflow-wrap: anywhere; }
+/* Secret keys: the limits a new key may be given (what it may do, which parts, until when). */
+.dev-key-form { gap: 0.6rem; }
+.dev-limits > summary { cursor: pointer; color: var(--muted); width: fit-content; }
+.dev-limits[open] > summary { color: var(--ink); }
+.dev-limits-body { margin-top: 0.75rem; padding: 0.9rem 1rem; border: 1px solid var(--hairline); border-radius: var(--radius); background: var(--sheet-2); max-width: 44rem; }
+.dev-limits-body select { max-width: 22rem; }
+.dev-areas { display: grid; grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr)); gap: 0.4rem 1rem; padding-left: 1.6rem; }
+.dev-area { display: flex; gap: 0.5rem; align-items: flex-start; font-size: 0.9rem; cursor: pointer; }
+.dev-area input { margin-top: 0.2rem; }
+.dev-area > span { display: grid; gap: 0.05rem; }
 
 /* Email: Settings → Email and the console's Email page (web/src/pages/Email.tsx). */
 .mail-form { max-width: 44rem; }

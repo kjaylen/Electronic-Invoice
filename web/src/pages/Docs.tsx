@@ -38,6 +38,9 @@ interface Operation {
   parameters: Array<{ name: string; in: 'path' | 'query' | 'header'; required: boolean; schema: Schema; description?: string }>;
   requestBody?: { content: { 'application/json': { schema: Schema; example?: unknown } } };
   responses?: Record<string, { content?: { 'application/json'?: { example?: unknown } } }>;
+  /** The part of the API a limited secret key must include, and whether a read-only key may use it. */
+  'x-key-area'?: string;
+  'x-key-read-only'?: boolean;
 }
 
 interface StoreError {
@@ -267,6 +270,7 @@ export function Docs() {
                         <code className="doc-path">{path}</code>
                       </div>
                       <p>{op.summary}</p>
+                      {op['x-key-area'] && <p className="small muted doc-area">{t('Secret key area')}: <code>{op['x-key-area']}</code>{op['x-key-read-only'] === false && <> · {t('changes something: not for a read-only key')}</>}</p>}
                       {op.parameters.length > 0 && (
                         <>
                           <h4>{t('Parameters')}</h4>

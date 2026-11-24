@@ -166,9 +166,9 @@ test('closing a business: owners only, on purpose; then it is shut to everyone a
     assert.equal((await c.app.inject({ method: 'GET', url: '/v1/documents', headers: await as('cass@shop.example') })).statusCode, 200);
     assert.equal((await c.app.inject({ method: 'GET', url: '/v1/documents', headers: api })).statusCode, 200);
     assert.equal((await c.app.inject({ method: 'GET', url: `/v1/store/${c.slug}` })).statusCode, 200);
-    // Nothing was lost (the activity log has grown: it records the reopening and the sign-ins).
-    const { audit_events: logBefore, ...keptRecords } = kept;
-    const { audit_events: logAfter, ...records } = await rowsOf(c, c.f.tenantA);
+    // Nothing was lost (the activity log has grown: it records the reopening and the sign-ins; so may the developer log, which notes what the API key asked).
+    const { audit_events: logBefore, api_requests: _asked, ...keptRecords } = kept;
+    const { audit_events: logAfter, api_requests: _askedSince, ...records } = await rowsOf(c, c.f.tenantA);
     assert.deepEqual(records, keptRecords);
     assert.ok(logAfter! > logBefore!);
     const log = (await c.f.db.query<{ action: string }>(`select action from audit_events where tenant_id = $1 and action like 'business.%' order by id`, [c.f.tenantA])).rows.map((r) => r.action);
