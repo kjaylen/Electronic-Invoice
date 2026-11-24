@@ -1930,6 +1930,9 @@ button.tpl-img-upload { margin: 0.6rem 0.3rem 0.3rem; justify-content: center; }
 .tender.split input { width: 6.5rem; }
 .tender.split > span { font-size: 0.95rem; }
 .tender.account { flex-direction: column; align-items: stretch; gap: 0.45rem; font-size: 0.85rem; color: rgba(255, 255, 255, 0.85); }
+.tender.wallet { flex-direction: column; align-items: stretch; gap: 0.35rem; }
+.tender.wallet label { max-width: none; }
+.tender.wallet > span { font-family: inherit; font-size: 0.8rem; color: rgba(255, 255, 255, 0.7); padding-bottom: 0; }
 .tender.account > span { color: rgba(255, 255, 255, 0.85); font-family: var(--sans); font-size: 0.85rem; padding: 0; }
 .held-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; max-height: 60vh; overflow: auto; }
 .held-list li { display: flex; align-items: center; gap: 0.6rem; padding: 0.65rem 0.1rem; border-top: 1px solid var(--hairline); animation: row-in 260ms var(--ease-out) both; }

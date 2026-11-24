@@ -184,3 +184,27 @@ test('a cashier discounts within the limit the owner sets; managers and owners a
     await c.app.inject({ method: 'PUT', url: '/v1/counter-settings', headers: c.owner, payload: { cashierDiscountLimit: null } });
     assert.equal((await sale(cashier, [{ isCharge: false, reason: 'Discount', percent: '40' }])).statusCode, 201);
   }));
+
+test('a mobile wallet is a way to pay of its own: on the receipt, in a split, and on its own line of the shift report', () =>
+  withBusiness(async (c) => {
+    const shift = (await c.app.inject({ method: 'POST', url: '/v1/shifts', headers: c.owner, payload: { openingFloat: '20.00' } })).json().shift;
+    // Paid on the customer's phone (DigiWallet, E-Kyash); the cashier types the confirmation number.
+    const wallet = await c.app.inject({ method: 'POST', url: '/v1/documents', headers: c.owner, payload: { type: '02', lines: [line('16.00')], payment: { meansCode: '68', terms: 'Paid by mobile wallet (ref DW-48213)' } } });
+    assert.equal(wallet.statusCode, 201, wallet.body);
+    const xml = (await c.f.db.query<{ signed_xml: string }>('select signed_xml from documents where id = $1', [wallet.json().id])).rows[0]!.signed_xml;
+    assert.match(xml, /<cbc:PaymentMeansCode>68<\/cbc:PaymentMeansCode>/);
+    assert.match(xml, /Paid by mobile wallet \(ref DW-48213\)/);
+    // Part by wallet, the rest in cash.
+    const split = await c.app.inject({ method: 'POST', url: '/v1/documents', headers: c.owner, payload: { type: '02', lines: [line('40.00')], tenders: [{ meansCode: '68', amount: '30.00' }, { meansCode: '10', amount: '15.00' }] } });
+    assert.equal(split.statusCode, 201, split.body);
+    await receipt(c, c.owner, '8.00', '30');
+
+    const r = (await c.app.inject({ method: 'GET', url: '/v1/shifts/current', headers: c.owner })).json().report;
+    assert.deepEqual([r.takings.wallet, r.takings.cash, r.takings.bank_transfer, r.takings.other, r.totalTakings], ['48.00', '15.00', '9.00', '0.00', '72.00'], 'wallet 18 + 30; cash 15; a bank transfer stays a bank transfer');
+    assert.equal(r.cash.expected, '35.00', 'only the cash is in the drawer');
+    // On the printed Z report too.
+    const count = await c.app.inject({ method: 'POST', url: `/v1/shifts/${shift.id}/close`, headers: c.owner, payload: { countedCash: '35.00' } });
+    assert.equal(count.statusCode, 200, count.body);
+    const z = await c.app.inject({ method: 'GET', url: `/v1/shifts/${shift.id}/report.pdf`, headers: c.owner });
+    assert.equal(z.statusCode, 200);
+  }));

@@ -53,10 +53,10 @@ type Options = { method?: string; body?: unknown; headers?: Record<string, strin
 const json = (status: number, body: unknown) => new Response(status === 204 ? null : JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 const problem = (status: number, code: string, message: string) => json(status, { error: { code, message } });
 
-const MEANS = ['cash', 'card', 'bank_transfer', 'cheque', 'other'] as const;
+const MEANS = ['cash', 'card', 'bank_transfer', 'wallet', 'cheque', 'other'] as const;
 type Means = (typeof MEANS)[number];
-const fromCode = (code: string | null | undefined): Means => (code === '10' ? 'cash' : code === '48' || code === '54' || code === '55' ? 'card' : code === '30' || code === '31' || code === '42' ? 'bank_transfer' : code === '20' ? 'cheque' : 'other');
-const MEANS_NAMES: Record<string, string> = { '1': 'gift card', '10': 'cash', '20': 'cheque', '30': 'transfer', '31': 'transfer', '42': 'bank transfer', '48': 'card', '54': 'credit card', '55': 'debit card' };
+const fromCode = (code: string | null | undefined): Means => (code === '10' ? 'cash' : code === '48' || code === '54' || code === '55' ? 'card' : code === '30' || code === '31' || code === '42' ? 'bank_transfer' : code === '68' ? 'wallet' : code === '20' ? 'cheque' : 'other');
+const MEANS_NAMES: Record<string, string> = { '1': 'gift card', '10': 'cash', '20': 'cheque', '30': 'transfer', '31': 'transfer', '42': 'bank transfer', '48': 'card', '68': 'mobile wallet', '54': 'credit card', '55': 'debit card' };
 const GIFT_CARD = '1';
 
 const toCents = (amount: string): bigint => {

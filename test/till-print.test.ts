@@ -98,9 +98,9 @@ test('the Z report and the test page', () => {
     shift: { number: 4, register: { name: 'Front till' }, openedBy: { name: 'Cash' }, openedAt: '2026-11-22T14:00:00Z', closedAt: '2026-11-22T23:00:00Z', closedBy: 'Manny', status: 'closed', note: null },
     report: {
       documents: [{ name: 'Tax receipts', count: 3, total: '67.50' }], gst: '7.50',
-      takings: { cash: '45.00', card: '22.50', bank_transfer: '0.00', cheque: '0.00', other: '0.00' }, totalTakings: '67.50',
-      invoicePayments: { cash: '0.00', card: '0.00', bank_transfer: '0.00', cheque: '0.00', other: '0.00' },
-      refunds: { cash: '0.00', card: '0.00', bank_transfer: '0.00', cheque: '0.00', other: '0.00' }, refundCount: 0,
+      takings: { cash: '45.00', card: '22.50', bank_transfer: '0.00', wallet: '0.00', cheque: '0.00', other: '0.00' }, totalTakings: '67.50',
+      invoicePayments: { cash: '0.00', card: '0.00', bank_transfer: '0.00', wallet: '0.00', cheque: '0.00', other: '0.00' },
+      refunds: { cash: '0.00', card: '0.00', bank_transfer: '0.00', wallet: '0.00', cheque: '0.00', other: '0.00' }, refundCount: 0,
       voided: { count: 0, total: '0.00' },
       cash: { float: '50.00', in: '45.00', payIn: '0.00', payOut: '5.00', expected: '90.00', counted: '89.00', difference: '-1.00' },
       movements: [{ kind: 'pay_out', amount: '5.00', reason: 'Ice', at: '2026-11-22T16:00:00Z' }],

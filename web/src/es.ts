@@ -4068,4 +4068,8 @@ export const ES: Record<string, string> = {
   "Too many wrong PINs. Try again in 15 minutes.": "Demasiados PIN incorrectos. Intente otra vez en 15 minutos.",
   "Sign in on the till first": "Primero inicie sesión en la caja",
   "This till’s shift is already open": "El turno de esta caja ya está abierto",
+  "Wallet": "Billetera",
+  "Mobile wallet": "Billetera móvil",
+  "Wallet reference (optional)": "Referencia de la billetera (opcional)",
+  "The number the customer’s DigiWallet or E-Kyash shows after paying. It prints on the receipt.": "El número que muestra DigiWallet o E-Kyash del cliente después de pagar. Se imprime en el recibo.",
 };

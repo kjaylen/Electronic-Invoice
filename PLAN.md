@@ -31,7 +31,7 @@ constants in the code, because they change and because sources disagree.
 
 ### A. At the counter, every day
 
-- [ ] A1. **Mobile wallets as a way to pay** (DigiWallet, E-Kyash by hand):
+- [x] A1. **Mobile wallets as a way to pay** (DigiWallet, E-Kyash by hand):
   a "Wallet" button beside Cash, Card and Transfer, with the reference typed
   in; counted on its own line in the shift report and the Z report.
 - [ ] A2. **Prices in US dollars too.** A setting: the receipt, the customer

@@ -7,8 +7,8 @@
 import PDFDocument from 'pdfkit';
 import { formatAmount } from './pdf.ts';
 
-type Means = 'cash' | 'card' | 'bank_transfer' | 'cheque' | 'other';
-const MEANS_NAME: Record<Means, string> = { cash: 'Cash', card: 'Card', bank_transfer: 'Bank transfer', cheque: 'Cheque', other: 'Other' };
+type Means = 'cash' | 'card' | 'bank_transfer' | 'wallet' | 'cheque' | 'other';
+const MEANS_NAME: Record<Means, string> = { cash: 'Cash', card: 'Card', bank_transfer: 'Bank transfer', wallet: 'Mobile wallet', cheque: 'Cheque', other: 'Other' };
 
 export interface ZReportInput {
   business: { name: string; tin: string };

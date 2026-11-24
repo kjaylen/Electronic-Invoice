@@ -47,7 +47,8 @@ interface CartLine {
   breaks?: Array<{ minQuantity: string; unitPrice: string }>;
 }
 
-type Means = '10' | '48' | '30' | 'split' | 'account';
+/** 68: a mobile wallet (DigiWallet, E-Kyash): the customer pays on their phone and shows the confirmation. */
+type Means = '10' | '48' | '30' | '68' | 'split' | 'account';
 
 interface Sale {
   lines: CartLine[];
@@ -60,8 +61,10 @@ interface Sale {
   /** A percentage off every line. */
   discount?: string;
   customer?: { id: string; name: string; tin: string | null; email?: string | null; priceList?: 'retail' | 'wholesale' } | null;
-  /** Split payment: the card or transfer part; cash pays the rest. */
-  split?: { means: '48' | '30'; amount: string };
+  /** Split payment: the card, transfer or wallet part; cash pays the rest. */
+  split?: { means: '48' | '30' | '68'; amount: string };
+  /** The wallet's confirmation number, when the cashier types it. */
+  walletRef?: string;
   /** Charged to the customer's account: days until it is due. */
   dueDays?: number;
   /** Loyalty points the customer uses on this sale. */
@@ -407,7 +410,7 @@ export function CounterPanel(props: {
             ? { giftCard: { code: gift.code, amount: fromCents(giftApplied) }, ...(rest > 0n && { tenders: [{ meansCode: '1', amount: fromCents(giftApplied) }, { meansCode: means, amount: fromCents(rest) }] }) }
           : means === 'split'
             ? { tenders: [{ meansCode: sale.split!.means, amount: sale.split!.amount }, { meansCode: '10', amount: fromCents(cashDue!) }] }
-            : { payment: { meansCode: means, terms: means === '10' && sale.usd && tenderedBz !== null ? `Paid by cash (US$${fromCents(toCents(sale.tendered))} received)` : `Paid by ${means === '10' ? 'cash' : means === '48' ? 'card' : 'bank transfer'}` } }),
+            : { payment: { meansCode: means, terms: means === '10' && sale.usd && tenderedBz !== null ? `Paid by cash (US$${fromCents(toCents(sale.tendered))} received)` : means === '68' ? `Paid by mobile wallet${sale.walletRef?.trim() ? ` (ref ${sale.walletRef.trim().slice(0, 40)})` : ''}` : `Paid by ${means === '10' ? 'cash' : means === '48' ? 'card' : 'bank transfer'}` } }),
       };
       const doc = await api<DocumentInfo>('/v1/documents', { method: 'POST', headers: { 'Idempotency-Key': sale.idempotencyKey }, body });
       const changeText = change !== null ? fromCents(change) : null;
@@ -511,7 +514,7 @@ export function CounterPanel(props: {
     }
   };
 
-  const meansOptions: Array<[Means, string]> = [['10', t('Cash')], ['48', t('Card')], ['30', t('Transfer')], ...(sale.giftCard ? [] : [['split', t('Split')] as [Means, string], ...(sale.customer && serverFeatures ? [['account', t('On account')] as [Means, string]] : [])])];
+  const meansOptions: Array<[Means, string]> = [['10', t('Cash')], ['48', t('Card')], ['30', t('Transfer')], ['68', t('Wallet')], ...(sale.giftCard ? [] : [['split', t('Split')] as [Means, string], ...(sale.customer && serverFeatures ? [['account', t('On account')] as [Means, string]] : [])])];
   const lineNet = (l: CartLine) => {
     const i = valid.indexOf(l);
     if (previewFresh && preview && i >= 0 && preview.lines[i]) return preview.lines[i]!.net;
@@ -674,9 +677,10 @@ export function CounterPanel(props: {
           {means === 'split' && (
             <div className="tender split">
               <label>
-                <select aria-label={t('Paid with')} value={sale.split?.means ?? '48'} onChange={(e) => set({ split: { means: e.target.value as '48' | '30', amount: sale.split?.amount ?? '' } })}>
+                <select aria-label={t('Paid with')} value={sale.split?.means ?? '48'} onChange={(e) => set({ split: { means: e.target.value as '48' | '30' | '68', amount: sale.split?.amount ?? '' } })}>
                   <option value="48">{t('Card')}</option>
                   <option value="30">{t('Transfer')}</option>
+                  <option value="68">{t('Wallet')}</option>
                 </select>
                 <input inputMode="decimal" placeholder="0.00" aria-label={t('Amount by card or transfer')} value={sale.split?.amount ?? ''} onChange={(e) => set({ split: { means: sale.split?.means ?? '48', amount: e.target.value } })} />
               </label>
@@ -706,6 +710,15 @@ export function CounterPanel(props: {
                   ))}
                 </div>
               )}
+            </div>
+          )}
+          {means === '68' && (
+            <div className="tender wallet">
+              <label>
+                <span>{t('Wallet reference (optional)')}</span>
+                <input aria-label={t('Wallet reference (optional)')} value={sale.walletRef ?? ''} maxLength={40} autoComplete="off" onChange={(e) => set({ walletRef: e.target.value })} />
+              </label>
+              <span className="small muted">{t('The number the customer’s DigiWallet or E-Kyash shows after paying. It prints on the receipt.')}</span>
             </div>
           )}
           {means === 'account' && sale.customer && (

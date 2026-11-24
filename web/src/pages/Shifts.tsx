@@ -9,8 +9,8 @@ import { useSession } from '../session';
 import { useToast } from '../toast';
 import { ErrorText, Field, fromCents, Modal, money, Select, toCents, usePageTitle } from '../ui';
 
-type Means = 'cash' | 'card' | 'bank_transfer' | 'cheque' | 'other';
-const MEANS: Array<[Means, string]> = [['cash', 'Cash'], ['card', 'Card'], ['bank_transfer', 'Bank transfer'], ['cheque', 'Cheque'], ['other', 'Other']];
+type Means = 'cash' | 'card' | 'bank_transfer' | 'wallet' | 'cheque' | 'other';
+const MEANS: Array<[Means, string]> = [['cash', 'Cash'], ['card', 'Card'], ['bank_transfer', 'Bank transfer'], ['wallet', 'Mobile wallet'], ['cheque', 'Cheque'], ['other', 'Other']];
 const DENOMINATIONS = ['100', '50', '20', '10', '5', '2', '1', '0.50', '0.25', '0.10', '0.05', '0.01'] as const;
 
 export interface Shift {

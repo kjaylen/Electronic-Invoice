@@ -130,8 +130,8 @@ export function documentTicket(d: DocumentView, options: { message?: string; cop
   return t;
 }
 
-type Means = 'cash' | 'card' | 'bank_transfer' | 'cheque' | 'other';
-const MEANS_NAME: Record<Means, string> = { cash: 'Cash', card: 'Card', bank_transfer: 'Bank transfer', cheque: 'Cheque', other: 'Other' };
+type Means = 'cash' | 'card' | 'bank_transfer' | 'wallet' | 'cheque' | 'other';
+const MEANS_NAME: Record<Means, string> = { cash: 'Cash', card: 'Card', bank_transfer: 'Bank transfer', wallet: 'Mobile wallet', cheque: 'Cheque', other: 'Other' };
 
 export interface ZReportData {
   business: { name: string; tin: string };

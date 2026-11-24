@@ -32,10 +32,11 @@ import { ApiError, notFound } from './errors.ts';
 import { can, requirePermission } from './permissions.ts';
 import { money, uuid } from './schemas.ts';
 
-export type Means = 'cash' | 'card' | 'bank_transfer' | 'cheque' | 'other';
-const MEANS: Means[] = ['cash', 'card', 'bank_transfer', 'cheque', 'other'];
-const fromCode = (code: string | null): Means => (code === '10' ? 'cash' : code === '48' || code === '54' || code === '55' ? 'card' : code === '30' || code === '31' || code === '42' ? 'bank_transfer' : code === '20' ? 'cheque' : 'other');
-const fromMethod = (m: string): Means => (m === 'cash' || m === 'card' || m === 'bank_transfer' || m === 'cheque' ? m : 'other');
+/** How money came in. 'wallet': a mobile wallet (DigiWallet, E-Kyash) or another online payment service. */
+export type Means = 'cash' | 'card' | 'bank_transfer' | 'wallet' | 'cheque' | 'other';
+const MEANS: Means[] = ['cash', 'card', 'bank_transfer', 'wallet', 'cheque', 'other'];
+const fromCode = (code: string | null): Means => (code === '10' ? 'cash' : code === '48' || code === '54' || code === '55' ? 'card' : code === '30' || code === '31' || code === '42' ? 'bank_transfer' : code === '68' ? 'wallet' : code === '20' ? 'cheque' : 'other');
+const fromMethod = (m: string): Means => (m === 'cash' || m === 'card' || m === 'bank_transfer' || m === 'cheque' ? m : m === 'online' ? 'wallet' : 'other');
 /** Belize notes and coins, for counting the drawer. */
 export const DENOMINATIONS = ['100', '50', '20', '10', '5', '2', '1', '0.50', '0.25', '0.10', '0.05', '0.01'] as const;
 const COUNTED = "('authorized', 'authorized_with_alert', 'contingency_pending', 'pending')";

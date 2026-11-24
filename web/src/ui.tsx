@@ -46,6 +46,7 @@ export const PAYMENT_MEANS: Array<[string, string]> = [
   ['10', 'Cash'],
   ['48', 'Card'],
   ['30', 'Bank transfer'],
+  ['68', 'Mobile wallet'],
   ['20', 'Cheque'],
 ];
 
