@@ -249,7 +249,7 @@ test('the contact form emails the store (reply goes to the buyer); robots are ig
 
 test('two people editing: a save on top of a draft someone else changed is refused, unless it says to replace it', () =>
   withStore(async (c) => {
-    const put = (headers: Record<string, string>, payload: unknown) => c.app.inject({ method: 'PUT', url: '/v1/store-site/draft', headers, payload });
+    const put = (headers: Record<string, string>, payload: Record<string, unknown>) => c.app.inject({ method: 'PUT', url: '/v1/store-site/draft', headers, payload });
     const start = (await c.app.inject({ method: 'GET', url: '/v1/store-site', headers: c.owner })).json();
     assert.equal(start.draftUpdatedAt, null);
     const mine = structuredClone(start.draft);

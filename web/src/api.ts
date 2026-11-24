@@ -39,7 +39,7 @@ export function setTillTransport(t: TillTransport | null) {
   till = t;
 }
 
-type CallOptions = { method?: string; body?: unknown; headers?: Record<string, string>; signal?: AbortSignal; token?: string | null };
+type CallOptions = { method?: string; body?: unknown; headers?: Record<string, string>; signal?: AbortSignal; token?: string | null; /** Let the browser finish the request after the page is closed (small bodies only). */ keepalive?: boolean };
 
 async function call(path: string, options: CallOptions): Promise<Response> {
   const token = options.token !== undefined ? options.token : till?.token() ?? null;
@@ -58,6 +58,7 @@ async function call(path: string, options: CallOptions): Promise<Response> {
       },
       ...(options.body !== undefined && { body: JSON.stringify(options.body) }),
       ...(options.signal && { signal: options.signal }),
+      ...(options.keepalive && { keepalive: true }),
     });
   } catch (e) {
     if ((e as Error).name === 'AbortError') throw e;

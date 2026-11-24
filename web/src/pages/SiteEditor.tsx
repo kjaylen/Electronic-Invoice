@@ -10,35 +10,21 @@
 
 import { type DragEvent, type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router';
-import { api } from '../api';
+import { api, ApiError } from '../api';
 import { useT } from '../i18n';
 import { useToast } from '../toast';
 import { ErrorText, Field, Modal, usePageTitle } from '../ui';
 import { type EditorCtx, FieldInput, fieldShown, Group, ImageInput, LinkInput } from '../site/editor-fields';
+import { freeSlug, linksToPage, type PageKey, pageKind, removePage, sectionsOf, setPageSlug, typingSlug, withSections } from '../site/doc';
 import { contrast, FONT_FAMILIES, loadFonts } from '../site/theme';
 import type { Builder, MenuItem, Section, SectionSchema, SiteDoc, SiteLink, Theme } from '../site/types';
+import { useSiteDraft } from '../site/use-draft';
 
-type PageKey = 'home' | 'product' | `page:${string}`;
 type Tab = 'pages' | 'theme' | 'header' | 'footer' | 'seo';
 type Device = 'desktop' | 'tablet' | 'phone';
 
-interface Loaded { draft: SiteDoc; changed: boolean; publishedAt: string | null; slug: string; builder: Builder }
-
 const newId = () => Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 6);
 const clone = <T,>(x: T): T => structuredClone(x);
-const slugify = (s: string) => s.normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
-
-function sectionsOf(doc: SiteDoc, page: PageKey): Section[] {
-  if (page === 'home') return doc.home.sections;
-  if (page === 'product') return doc.product.sections;
-  return doc.pages.find((p) => `page:${p.id}` === page)?.sections ?? [];
-}
-function withSections(doc: SiteDoc, page: PageKey, sections: Section[]): SiteDoc {
-  if (page === 'home') return { ...doc, home: { sections } };
-  if (page === 'product') return { ...doc, product: { ...doc.product, sections } };
-  return { ...doc, pages: doc.pages.map((p) => (`page:${p.id}` === page ? { ...p, sections } : p)) };
-}
-const pageKind = (page: PageKey) => (page === 'home' ? 'home' : page === 'product' ? 'product' : 'page');
 
 /** What a section is about, for its row in the list. */
 function summary(s: Section, schema: SectionSchema | undefined): string {
@@ -51,13 +37,8 @@ export function SiteEditor() {
   const t = useT();
   const toast = useToast();
   usePageTitle(t('Site'));
-  const [loaded, setLoaded] = useState<Loaded | null>(null);
-  const [doc, setDoc] = useState<SiteDoc | null>(null);
-  const [past, setPast] = useState<SiteDoc[]>([]);
-  const [future, setFuture] = useState<SiteDoc[]>([]);
-  const lastEdit = useRef<{ key: string; at: number }>({ key: '', at: 0 });
-  const [changed, setChanged] = useState(false);
-  const [saving, setSaving] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const draft = useSiteDraft();
+  const { loaded, doc, update, undo, redo, changed, save } = draft;
   const [error, setError] = useState<unknown>(null);
   const [tab, setTab] = useState<Tab>('pages');
   const [page, setPage] = useState<PageKey>('home');
@@ -67,79 +48,27 @@ export function SiteEditor() {
   const [history, setHistory] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [html, setHtml] = useState<Record<string, string>>({});
-  const [productHandle, setProductHandle] = useState<string | null>(null);
+  const [productHandle, setProductHandle] = useState<string | null | undefined>(undefined);
   const frame = useRef<HTMLIFrameElement>(null);
   const frameReady = useRef(false);
-  const skipSave = useRef(true);
 
   useEffect(() => {
-    void api<Loaded>('/v1/store-site').then((r) => {
-      setLoaded(r);
-      setDoc(r.draft);
-      setChanged(r.changed);
-      loadFonts(r.builder.fonts.map((f) => f.key));
-    }).catch(setError);
-  }, []);
+    if (loaded) loadFonts(loaded.builder.fonts.map((f) => f.key));
+  }, [loaded]);
   useEffect(() => {
-    if (loaded) void api<{ data: Array<{ handle: string }> }>(`/v1/store/${loaded.slug}/products?limit=1`, { headers: { 'X-Site-Preview': '1' } }).then((r) => setProductHandle(r.data[0]?.handle ?? null)).catch(() => {});
+    if (loaded) void api<{ data: Array<{ handle: string }> }>(`/v1/store/${loaded.slug}/products?limit=1`, { headers: { 'X-Site-Preview': '1' } }).then((r) => setProductHandle(r.data[0]?.handle ?? null)).catch(() => setProductHandle(null));
   }, [loaded]);
 
-  /** Change the site: one step of undo per burst of typing in the same place. */
-  const update = useCallback((next: SiteDoc | ((d: SiteDoc) => SiteDoc), key = '') => {
-    setDoc((current) => {
-      if (!current) return current;
-      const value = typeof next === 'function' ? next(current) : next;
-      const now = Date.now();
-      if (!(key && lastEdit.current.key === key && now - lastEdit.current.at < 1200)) setPast((p) => [...p.slice(-60), current]);
-      lastEdit.current = { key, at: now };
-      setFuture([]);
-      return value;
-    });
-  }, []);
-  const undo = () => {
-    if (!past.length || !doc) return;
-    setFuture((f) => [doc, ...f]);
-    setDoc(past[past.length - 1]!);
-    setPast((p) => p.slice(0, -1));
-    lastEdit.current = { key: '', at: 0 };
-  };
-  const redo = () => {
-    if (!future.length || !doc) return;
-    setPast((p) => [...p, doc]);
-    setDoc(future[0]!);
-    setFuture((f) => f.slice(1));
-  };
+  // Ctrl+Z and Ctrl+Y (inside a text box, the browser's own undo of the typing applies instead).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!(e.ctrlKey || e.metaKey) || (e.target as HTMLElement).closest('input, textarea, select')) return;
+      if (!(e.ctrlKey || e.metaKey) || (e.target as HTMLElement).closest('input, textarea, select, [contenteditable]')) return;
       if (e.key.toLowerCase() === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
       if ((e.key.toLowerCase() === 'z' && e.shiftKey) || e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  });
-
-  // Saved as a draft a moment after each change.
-  useEffect(() => {
-    if (!doc) return;
-    if (skipSave.current) {
-      skipSave.current = false;
-      return;
-    }
-    setSaving('saving');
-    const timer = setTimeout(() => {
-      void api<{ draft: SiteDoc; changed: boolean }>('/v1/store-site/draft', { method: 'PUT', body: { site: doc } })
-        .then((r) => {
-          setChanged(r.changed);
-          setSaving('saved');
-        })
-        .catch((e) => {
-          setSaving('error');
-          setError(e);
-        });
-    }, 700);
-    return () => clearTimeout(timer);
-  }, [doc]);
+  }, [undo, redo]);
 
   // Custom code sections, rendered by the server for the preview.
   const codeKey = JSON.stringify(doc ? [...doc.home.sections, ...doc.product.sections, ...doc.pages.flatMap((p) => p.sections)].filter((s) => s.type === 'custom_code').map((s) => [s.id, s.settings.code]) : []);
@@ -204,7 +133,7 @@ export function SiteEditor() {
     if (selected) post({ type: 'site-highlight', id: selected });
   }, [selected, post]);
 
-  if (error && !doc) return <div className="stack"><h1>{t('Site')}</h1><ErrorText error={error} /></div>;
+  if (draft.loadError && !doc) return <div className="stack"><h1>{t('Site')}</h1><ErrorText error={draft.loadError} /><div><button type="button" onClick={() => window.location.reload()}>{t('Try again')}</button></div></div>;
   if (!doc || !loaded) return <div className="stack"><h1>{t('Site')}</h1><div className="skeleton" style={{ height: '24rem' }} /></div>;
 
   const ctx: EditorCtx = { slug: loaded.slug, builder: loaded.builder, site: doc };
@@ -214,32 +143,37 @@ export function SiteEditor() {
   const setSections = (next: Section[], key = '') => update((d) => withSections(d, page, next), key);
   const setSection = (id: string, next: Section, key = '') => setSections(sections.map((s) => (s.id === id ? next : s)), key);
 
-  const publish = async () => {
-    setPublishing(true);
+  /** One of the editor's actions: its problem is shown, and cleared by the next one that works. */
+  const act = async (f: () => Promise<void>) => {
+    setError(null);
     try {
-      // Whatever is still waiting to be saved goes first.
-      await api('/v1/store-site/draft', { method: 'PUT', body: { site: doc } });
-      await api('/v1/store-site/publish', { method: 'POST', body: {} });
-      setChanged(false);
-      toast(t('Published. Customers see the new site now.'));
+      await f();
     } catch (e) {
       setError(e);
-    } finally {
-      setPublishing(false);
     }
   };
-  const discard = async () => {
+  const publish = async () => {
+    setPublishing(true);
+    await act(async () => {
+      // Whatever is still waiting to be saved goes first; nothing is published that is not saved.
+      if (!(await draft.flush())) return;
+      await api('/v1/store-site/publish', { method: 'POST', body: {} });
+      draft.setChanged(false);
+      toast(loaded.store && !loaded.store.open ? t('Published. Customers will see it when you open the store.') : t('Published. Customers see the new site now.'));
+    });
+    setPublishing(false);
+  };
+  const discard = () => act(async () => {
     if (!window.confirm(t('Throw away every change since the last publish?'))) return;
-    const r = await api<{ draft: SiteDoc }>('/v1/store-site/discard', { method: 'POST', body: {} });
-    skipSave.current = true;
-    setPast([]);
-    setFuture([]);
-    setDoc(r.draft);
-    setChanged(false);
+    await draft.flush();
+    const r = await api<{ draft: SiteDoc; draftUpdatedAt: string | null }>('/v1/store-site/discard', { method: 'POST', body: {} });
+    draft.adopt({ ...r, changed: false }, true);
     setSelected(null);
     toast(t('Back to the published site'));
-  };
+  });
 
+  // Who saved meanwhile, from the server's message ("Ana changed the site while you were editing").
+  const conflictName = draft.saveError instanceof ApiError ? / changed the site while you were editing$/.test(draft.saveError.message) && !draft.saveError.message.startsWith('Someone else') ? draft.saveError.message.replace(/ changed the site while you were editing$/, '') : '' : '';
   const pageOptions: Array<[PageKey, string]> = [['home', t('Home page')], ['product', t('Product pages')], ...doc.pages.map((p) => [`page:${p.id}` as PageKey, p.title] as [PageKey, string])];
   const currentPage = page.startsWith('page:') ? doc.pages.find((p) => `page:${p.id}` === page) ?? null : null;
 
@@ -249,20 +183,40 @@ export function SiteEditor() {
         <Link to="/settings?tab=store" className="se-back" aria-label={t('Back to store settings')}>←</Link>
         <div className="se-title">
           <strong>{t('Site')}</strong>
-          <span className={`se-status ${saving}`} role="status">
-            {saving === 'saving' ? t('Saving…') : saving === 'error' ? t('Not saved') : changed ? t('Draft: not published yet') : t('Published')}
+          <span className={`se-status ${save}`} role="status">
+            {save === 'saving' || save === 'pending' ? t('Saving…') : save === 'error' || save === 'conflict' ? t('Not saved') : changed ? t('Draft: not published yet') : t('Published')}
           </span>
         </div>
         <span className="spacer" />
         <div className="tabs se-devices" role="group" aria-label={t('Preview size')}>
           {([['desktop', t('Computer')], ['tablet', t('Tablet')], ['phone', t('Phone')]] as Array<[Device, string]>).map(([d, l]) => <button key={d} type="button" aria-pressed={device === d} className={device === d ? 'active' : ''} onClick={() => setDevice(d)}>{l}</button>)}
         </div>
-        <button type="button" className="secondary" onClick={undo} disabled={!past.length} aria-label={t('Undo')} title={t('Undo')}>↶</button>
-        <button type="button" className="secondary" onClick={redo} disabled={!future.length} aria-label={t('Redo')} title={t('Redo')}>↷</button>
+        <button type="button" className="secondary" onClick={undo} disabled={!draft.canUndo} aria-label={t('Undo')} title={t('Undo')}>↶</button>
+        <button type="button" className="secondary" onClick={redo} disabled={!draft.canRedo} aria-label={t('Redo')} title={t('Redo')}>↷</button>
         <button type="button" className="secondary" onClick={() => setHistory(true)}>{t('History')}</button>
         <a className="button secondary" href={`/${loaded.slug}/shop`} target="_blank" rel="noreferrer">{t('View store')}</a>
-        <button type="button" onClick={() => void publish()} disabled={publishing || !changed || saving === 'saving'}>{publishing ? t('Publishing…') : t('Publish')}</button>
+        <button type="button" onClick={() => void publish()} disabled={publishing || !changed || save === 'conflict'}>{publishing ? t('Publishing…') : t('Publish')}</button>
       </header>
+      {save === 'conflict' && (
+        <div className="banner warn se-notice" role="alert">
+          <div><strong>{conflictName ? t('{name} changed the site while you were editing', { name: conflictName }) : t('Someone else changed the site while you were editing')}</strong>{t('Your changes are not saved yet. Load their version to carry on from it, or keep yours and replace theirs.')}</div>
+          <button type="button" className="secondary" onClick={() => void act(draft.loadTheirs)}>{t('Load their version')}</button>
+          <button type="button" onClick={() => void act(draft.keepMine)}>{t('Keep mine')}</button>
+        </div>
+      )}
+      {save === 'error' && (
+        <div className="banner warn se-notice" role="alert">
+          <div><strong>{t('Your last changes are not saved yet')}</strong>{draft.saveError instanceof ApiError && draft.saveError.status !== 0 ? t(draft.saveError.message) : t('Check your connection. Your work is kept on this device and will be saved when the connection returns.')}</div>
+          <button type="button" onClick={() => void draft.flush()}>{t('Try again')}</button>
+        </div>
+      )}
+      {draft.backup && (
+        <div className="banner se-notice" role="status">
+          <div><strong>{t('You have changes that were never saved')}</strong>{t('From {when}, kept on this device.', { when: new Date(draft.backup.at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) })}</div>
+          <button type="button" className="secondary" onClick={draft.dropBackup}>{t('Throw them away')}</button>
+          <button type="button" onClick={draft.restoreBackup}>{t('Bring them back')}</button>
+        </div>
+      )}
       <ErrorText error={error} />
       <div className="se-body">
         <aside className="se-panel" aria-label={t('Site settings')}>
@@ -296,20 +250,31 @@ export function SiteEditor() {
                 </select>
               </Field>
               <NewPage ctx={ctx} onAdd={(title) => {
-                const base = slugify(title) || 'page';
-                let slug = base;
-                for (let i = 2; doc.pages.some((p) => p.slug === slug); i++) slug = `${base}-${i}`;
+                const slug = freeSlug(doc.pages, title);
                 const id = newId();
                 update((d) => ({ ...d, pages: [...d.pages, { id, slug, title, seoTitle: '', seoDescription: '', sections: [] }] }));
                 setPage(`page:${id}`);
                 setSelected(null);
                 setTimeout(() => post({ type: 'site-navigate', path: `/shop/pages/${slug}` }), 150);
               }} />
-              {currentPage && <PageSettings page={currentPage} pages={doc.pages} onChange={(next) => update((d) => ({ ...d, pages: d.pages.map((p) => (p.id === next.id ? next : p)) }), `page-${next.id}`)} onDelete={() => {
-                if (!window.confirm(t('Delete the page “{title}”? Menus that link to it will go to the home page.', { title: currentPage.title }))) return;
-                update((d) => ({ ...d, pages: d.pages.filter((p) => p.id !== currentPage.id) }));
-                goTo('home');
-              }} />}
+              {currentPage && <PageSettings key={currentPage.id} page={currentPage} onChange={(next) => update((d) => ({ ...d, pages: d.pages.map((p) => (p.id === next.id ? next : p)) }), `page-${next.id}`)}
+                onSlug={(wanted) => {
+                  // Links to the page follow its new address; the preview moves there too.
+                  const next = setPageSlug(doc, currentPage.id, wanted);
+                  const slug = next.pages.find((p) => p.id === currentPage.id)!.slug;
+                  if (next !== doc) {
+                    update(next);
+                    setTimeout(() => post({ type: 'site-navigate', path: `/shop/pages/${slug}` }), 150);
+                  }
+                  return slug;
+                }}
+                onDelete={() => {
+                  const links = linksToPage(doc, currentPage.slug);
+                  if (!window.confirm(links ? t('Delete the page “{title}”? {n} links to it will go to the home page instead.', { title: currentPage.title, n: links }) : t('Delete the page “{title}”?', { title: currentPage.title }))) return;
+                  update((d) => removePage(d, currentPage.id));
+                  goTo('home');
+                }} />}
+              {page === 'product' && productHandle === null && <p className="small muted se-empty" style={{ margin: 0 }}>{t('Add a product to see product pages in the preview.')} <Link to="/products">{t('Products')}</Link></p>}
               {page === 'product' && (
                 <Group title={t('Every product page')}>
                   <p className="small muted" style={{ margin: 0 }}>{t('Sections here appear under every product, after its photos, price and description.')}</p>
@@ -345,7 +310,7 @@ export function SiteEditor() {
         </aside>
         <div className="se-stage">
           <div className={`se-frame device-${device}`}>
-            <iframe ref={frame} src={`/${loaded.slug}/shop?site-preview`} title={t('Preview of your store')} onLoad={() => { frameReady.current = false; }} />
+            <iframe ref={frame} src={`/${loaded.slug}/shop?site-preview`} title={t('Preview of your store')} />
           </div>
         </div>
       </div>
@@ -356,11 +321,8 @@ export function SiteEditor() {
         setAdding(false);
         setSelected(r.section.id);
       }} />}
-      {history && <HistoryDialog onClose={() => setHistory(false)} onRestored={(draft) => {
-        skipSave.current = true;
-        setPast((p) => [...p, doc]);
-        setDoc(draft);
-        setChanged(true);
+      {history && <HistoryDialog beforeRestore={draft.flush} onClose={() => setHistory(false)} onRestored={(r) => {
+        draft.adopt(r, true);
         setHistory(false);
         setSelected(null);
         toast(t('That version is your draft now. Publish it to bring it back.'));
@@ -483,15 +445,18 @@ function SectionEditor({ section, schema, ctx, onBack, onChange, onDuplicate, on
 function AddSection({ schemas, kind, onAdd, onClose }: { schemas: SectionSchema[]; kind: 'home' | 'page' | 'product'; onAdd: (type: string) => Promise<void>; onClose: () => void }) {
   const t = useT();
   const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const [q, setQ] = useState('');
   const shown = schemas.filter((s) => (!s.pages || s.pages.includes(kind)) && (!q.trim() || `${t(s.name)} ${t(s.description)}`.toLowerCase().includes(q.trim().toLowerCase())));
   return (
     <Modal title={t('Add a section')} onClose={onClose} wide>
       <div className="stack">
         <input type="search" autoFocus placeholder={t('Search sections')} aria-label={t('Search sections')} value={q} onChange={(e) => setQ(e.target.value)} />
+        <ErrorText error={error} />
+        {shown.length === 0 && <div className="empty">{t('No section matches “{q}”.', { q: q.trim() })}</div>}
         <div className="se-gallery">
           {shown.map((s) => (
-            <button key={s.type} type="button" className="se-gallery-item" disabled={busy !== null} onClick={async () => { setBusy(s.type); await onAdd(s.type).finally(() => setBusy(null)); }}>
+            <button key={s.type} type="button" className="se-gallery-item" disabled={busy !== null} onClick={() => { setBusy(s.type); setError(null); void onAdd(s.type).catch(setError).finally(() => setBusy(null)); }}>
               <span className={`se-gallery-art art-${s.type}`} aria-hidden="true" />
               <strong>{t(s.name)}</strong>
               <span className="small muted">{t(s.description)}</span>
@@ -526,13 +491,18 @@ function NewPage({ onAdd }: { ctx: EditorCtx; onAdd: (title: string) => void }) 
   );
 }
 
-function PageSettings({ page, pages, onChange, onDelete }: { page: SiteDoc['pages'][number]; pages: SiteDoc['pages']; onChange: (p: SiteDoc['pages'][number]) => void; onDelete: () => void }) {
+function PageSettings({ page, onChange, onSlug, onDelete }: { page: SiteDoc['pages'][number]; onChange: (p: SiteDoc['pages'][number]) => void; onSlug: (wanted: string) => string; onDelete: () => void }) {
   const t = useT();
-  const taken = pages.some((p) => p.id !== page.id && p.slug === page.slug);
+  // The address is typed freely and takes effect on leaving the box (made valid, never one another page has).
+  const [slug, setSlug] = useState(page.slug);
+  useEffect(() => setSlug(page.slug), [page.slug]);
+  const commit = () => setSlug(onSlug(slug));
   return (
     <Group title={t('Page settings')} open={false}>
       <Field label={t('Title')}><input maxLength={120} value={page.title} onChange={(e) => onChange({ ...page, title: e.target.value })} /></Field>
-      <Field label={t('Address')} hint={taken ? t('Another page already uses this address.') : `/shop/pages/${page.slug}`}><input value={page.slug} onChange={(e) => onChange({ ...page, slug: slugify(e.target.value) || page.slug })} /></Field>
+      <Field label={t('Address')} hint={`/shop/pages/${slug || page.slug} · ${t('Links to this page follow when you change it.')}`}>
+        <input value={slug} spellCheck={false} autoCapitalize="none" onChange={(e) => setSlug(typingSlug(e.target.value))} onBlur={commit} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commit(); } }} />
+      </Field>
       <Field label={t('Search title')} hint={t('Optional.')}><input maxLength={120} value={page.seoTitle} onChange={(e) => onChange({ ...page, seoTitle: e.target.value })} /></Field>
       <Field label={t('Search description')} hint={t('Optional.')}><textarea rows={2} maxLength={300} value={page.seoDescription} onChange={(e) => onChange({ ...page, seoDescription: e.target.value })} /></Field>
       <button type="button" className="link danger-link small" style={{ alignSelf: 'flex-start' }} onClick={onDelete}>{t('Delete this page')}</button>
@@ -732,10 +702,17 @@ function FooterPanel({ doc, ctx, onChange }: { doc: SiteDoc; ctx: EditorCtx; onC
 
 // ---------- history ----------
 
-function HistoryDialog({ onClose, onRestored }: { onClose: () => void; onRestored: (draft: SiteDoc) => void }) {
+function HistoryDialog({ onClose, onRestored, beforeRestore }: { onClose: () => void; onRestored: (r: { draft: SiteDoc; changed: boolean; draftUpdatedAt: string | null }) => void; beforeRestore: () => Promise<unknown> }) {
   const t = useT();
   const [versions, setVersions] = useState<Array<{ id: string; note: string | null; publishedAt: string; by: string | null }> | null>(null);
   const [error, setError] = useState<unknown>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const restore = (id: string) => {
+    setBusy(id);
+    setError(null);
+    // What is still waiting to be saved goes first, so the restored version is not overwritten by it.
+    void beforeRestore().then(() => api<{ draft: SiteDoc; changed: boolean; draftUpdatedAt: string | null }>(`/v1/store-site/versions/${id}/restore`, { method: 'POST', body: {} })).then(onRestored).catch(setError).finally(() => setBusy(null));
+  };
   useEffect(() => {
     void api<{ data: NonNullable<typeof versions> }>('/v1/store-site/versions').then((r) => setVersions(r.data)).catch(setError);
   }, []);
@@ -753,7 +730,7 @@ function HistoryDialog({ onClose, onRestored }: { onClose: () => void; onRestore
                   {i === 0 && <span className="badge authorized" style={{ marginLeft: '0.5rem' }}>{t('Live')}</span>}
                   <span className="small muted">{[v.by, v.note].filter(Boolean).join(' · ')}</span>
                 </span>
-                <button type="button" className="secondary" onClick={() => void api<{ draft: SiteDoc }>(`/v1/store-site/versions/${v.id}/restore`, { method: 'POST', body: {} }).then((r) => onRestored(r.draft)).catch(setError)}>{t('Bring back')}</button>
+                <button type="button" className="secondary" disabled={busy !== null} onClick={() => restore(v.id)}>{busy === v.id ? t('Bringing back…') : t('Bring back')}</button>
               </li>
             ))}
           </ul>

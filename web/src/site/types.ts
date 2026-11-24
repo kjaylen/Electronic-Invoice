@@ -36,6 +36,8 @@ export interface SiteDoc {
   home: { sections: Section[] };
   product: { sections: Section[]; showRelated: boolean; relatedTitle: string };
   pages: SitePage[];
+  /** Sections kept to reuse on any page (the editor's "Saved sections"); never shown to customers. */
+  saved?: Array<{ id: string; name: string; section: Section }>;
 }
 
 // ---------- the builder's catalog (from GET /v1/store-site) ----------

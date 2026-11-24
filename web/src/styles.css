@@ -2463,3 +2463,6 @@ main:has(.site-editor) { max-width: none; padding: 0.75rem 1rem 0.75rem; }
 .art-banner, .art-countdown { background: var(--brand-deep); }
 .art-spacer::before { top: 48%; left: 8%; width: 84%; height: 2px; }
 .art-spacer::after { display: none; }
+.se-notice { align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.se-notice > div { flex: 1; min-width: 14rem; }
+.se-notice button { min-height: 2.2rem; padding: 0.35rem 0.8rem; }
