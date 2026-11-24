@@ -72,9 +72,9 @@ async function signIn(page) {
 }
 
 async function sell(page) {
-  await page.click('.till-where');
-  await page.keyboard.type(COCONUT, { delay: 5 });
-  await page.keyboard.press('Enter');
+  const search = page.getByRole('combobox', { name: 'Add an item' });
+  await search.fill(COCONUT);
+  await search.press('Enter');
   await page.waitForSelector('.cart-lines li');
   await page.fill('input[aria-label="Cash received"]', '5');
   await page.click('button:has-text("Issue receipt")');
@@ -133,6 +133,8 @@ assert.equal(new Set(numbers).size, 5);
 step(`restarted offline, signed in offline, sold ${numbers[4]}; the sales list has all 5: ${await indicatorText(page)}`);
 
 // Nothing readable on the disk: the local database is encrypted, the key is sealed by Windows.
+// (With the app closed: its database files are locked while it runs.)
+await app.close();
 const files = [];
 const walk = (dir) => {
   for (const f of readdirSync(dir)) {
@@ -143,11 +145,11 @@ const walk = (dir) => {
 };
 walk(join(userData, 'IndexedDB'));
 const leaked = files.filter((f) => readFileSync(f).includes('Coconut water'));
+assert.ok(files.length > 0, 'the till has a local database');
 assert.deepEqual(leaked, [], 'item names are not in the local database in plain text');
 const store = JSON.parse(readFileSync(join(userData, 'till.json'), 'utf8'));
 assert.ok(String(store['till.dbkey']).startsWith('enc:') && String(store['till.token']).startsWith('enc:'), 'the key and the token are encrypted');
-step('on the disk: no business data in plain text; the data key and the till token are encrypted by the OS');
-await app.close();
+step(`on the disk (${files.length} database files): no business data in plain text; the data key and the till token are encrypted by the OS`);
 
 // 4. The server is back: everything goes up, once.
 server = startServer();
