@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { buildApp } from '../src/api/app.ts';
 import { createUser } from '../src/db/users.ts';
 import { SUBMIT_PATHS } from '../src/engine/transport.ts';
-import { columns, type DocumentView, documentTicket, DRAWER_KICK, pairLines, testTicket, toEscPos, toHtml, wrap, zReportTicket } from '../web/src/pos/ticket.ts';
+import { columns, type DocumentView, documentTicket, DRAWER_KICK, orderTicket, pairLines, testTicket, toEscPos, toHtml, wrap, zReportTicket } from '../web/src/pos/ticket.ts';
 import { AUTHORIZED, setupPipeline } from './pipeline-setup.ts';
 
 const CSRF = { 'x-requested-with': 'etd-web' };
@@ -113,4 +113,18 @@ test('the Z report and the test page', () => {
   assert.ok(texts.includes('10:00 Ice|-5.00'), 'Belize time');
   const page = toEscPos(testTicket({ printer: 'Bar', till: 'Front till', business: 'Cayo Coffee', options: { paperWidth: 80, codepage: 'cp1252', qr: 'native', cut: true } }), { paperWidth: 80, codepage: 'cp1252', qr: 'native', cut: true });
   assert.ok(includes(page, [0x1b, 0x74, 16]) && includes(page, [0xf1]), 'ñ in Windows-1252');
+});
+
+test('an order ticket for the kitchen: the station and the table in large type, each item with its note, no prices', () => {
+  const ticket = orderTicket({ station: 'Kitchen', table: 'Table 4', at: new Date('2026-11-24T19:05:00-06:00'), by: 'Rosa', lines: [{ quantity: '2', name: 'Rice and beans' }, { quantity: '1', name: 'Fried fish', note: ' no onions ' }] });
+  const text = ticket.filter((l) => l.kind === 'text').map((l) => (l as { text: string }).text);
+  assert.deepEqual(text.slice(0, 2), ['KITCHEN', 'Table 4']);
+  assert.match(text[2]!, /Rosa$/);
+  assert.deepEqual(text.slice(3), ['2 x Rice and beans', '1 x Fried fish', '   ** no onions']);
+  assert.ok(!text.join(' ').includes('$'), 'no money on an order ticket');
+  // It prints on the same printers as a receipt, and on paper from a browser.
+  const bytes = toEscPos(ticket, { paperWidth: 80, codepage: 'cp850', qr: 'native', cut: true });
+  assert.ok(includes(bytes, ascii('KITCHEN')));
+  assert.ok(includes(bytes, ascii('** no onions')));
+  assert.match(toHtml(ticket, { paperWidth: 80 }, 'Order'), /Fried fish/);
 });

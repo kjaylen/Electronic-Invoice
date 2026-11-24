@@ -187,6 +187,10 @@ export interface Me {
     serviceChargePercent?: string | null;
     /** A tip can be recorded with a card or wallet payment. */
     tips?: boolean;
+    /** A bar or restaurant's tables: each holds one open tab. */
+    tables?: string[];
+    /** Where order tickets print (Kitchen, Bar), each with the item categories it makes. */
+    stations?: Array<{ name: string; categories: string[] }>;
   };
   billing?: { plan: 'starter' | 'business' | 'pro'; planName: string; status: 'trialing' | 'active' | 'past_due' | 'suspended'; trialDaysLeft: number | null; overdueInvoices: number; features: Array<'store' | 'api' | 'webhooks' | 'integrations'> };
 }

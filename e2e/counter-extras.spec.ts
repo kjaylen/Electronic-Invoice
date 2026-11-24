@@ -160,3 +160,98 @@ test('layaway: started at the counter with a deposit, paid off, handed over; ano
   await page.getByRole('group', { name: 'Show' }).getByRole('button', { name: 'Cancelled' }).click();
   await expect(page.locator('table.layaways tbody tr', { hasText: name })).toContainText('BZ$4.00 given back');
 });
+
+test('tables: a tab opened on a table, order tickets for the kitchen and the bar, more added later, the bill split, and paid', async ({ page }) => {
+  await logIn(page);
+  // A small restaurant: three tables, a kitchen that makes Food and a bar that makes Drinks, 10% service.
+  const category = async (q: string, name: string) => {
+    const item = (await (await page.request.get(`/v1/items?q=${encodeURIComponent(q)}&limit=1`, { headers: API })).json()).data[0];
+    const saved = await page.request.put(`/v1/items/${item.id}`, { headers: API, data: { name: item.name, unitCode: item.unitCode, unitPrice: item.unitPrice, gstCategory: item.gstCategory, ...(item.sellerCode && { sellerCode: item.sellerCode }), ...(item.barcode && { barcode: item.barcode }), favorite: item.favorite, category: name } });
+    expect(saved.status(), await saved.text()).toBe(200);
+  };
+  await category('Coconut water', 'Drinks');
+  await category('Johnny cakes', 'Food');
+  const settings = await page.request.put('/v1/counter-settings', { headers: API, data: { tables: ['Table 1', 'Table 2', 'Bar'], stations: [{ name: 'Kitchen', categories: ['Food'] }, { name: 'Bar', categories: ['Drinks'] }], serviceChargePercent: '10' } });
+  expect(settings.status()).toBe(200);
+  // Whatever an earlier run left on the tables.
+  for (const h of (await (await page.request.get('/v1/held-sales', { headers: API })).json()).data) await page.request.delete(`/v1/held-sales/${h.id}`, { headers: API });
+
+  await page.goto(`/${SLUG}/counter`);
+  const search = page.getByRole('combobox', { name: 'Add an item' });
+  const tables = page.getByRole('dialog', { name: 'Tables' });
+  const printed = () => page.locator('iframe.print-frame').evaluate((f) => (f as HTMLIFrameElement).srcdoc);
+
+  // A free table becomes this sale's; the service charge comes with it.
+  await page.getByRole('button', { name: /^Tables/ }).click();
+  await expect(tables.locator('.table-tile')).toHaveCount(3);
+  await expect(tables.locator('.table-tile.free')).toHaveCount(3);
+  await tables.getByRole('button', { name: /Table 2/ }).click();
+  await expect(page.locator('.cart-table')).toContainText('Table 2');
+  await search.fill('2*7501000000017');
+  await search.press('Enter');
+  await search.fill('jc');
+  await search.press('Enter');
+  await expect(page.getByRole('button', { name: 'Service charge 10%: on (remove)' })).toBeVisible();
+  // A note for the kitchen on the Johnny cake.
+  await page.getByRole('button', { name: 'Discount on Johnny cakes' }).click();
+  await page.getByLabel('Note for the kitchen or bar').fill('no butter');
+  await expect(page.locator('.cart-lines .line-note')).toHaveText('no butter');
+
+  // Kept open: each station gets a ticket with what it makes.
+  await page.getByRole('button', { name: 'Keep the table open' }).click();
+  await expect(page.getByText('Table 2 is open. Order sent to: Kitchen, Bar.')).toBeVisible();
+  await expect(page.locator('.cart-lines li')).toHaveCount(0);
+  const bar = await printed();
+  expect(bar).toContain('BAR');
+  expect(bar).toContain('Table 2');
+  expect(bar).toContain('2 x Coconut water');
+  expect(bar).not.toContain('Johnny cakes');
+
+  // The table shows as open; taking it up brings the tab back, marked as sent.
+  await page.getByRole('button', { name: /^Tables/ }).click();
+  await expect(tables.locator('.table-tile.open')).toHaveCount(1);
+  await expect(tables.locator('.table-tile.open')).toContainText('Table 2');
+  await tables.getByRole('button', { name: /Table 2/ }).click();
+  await expect(page.locator('.cart-lines li')).toHaveCount(2);
+  await expect(page.locator('.cart-lines .line-sent')).toHaveCount(2);
+  await expect(page.locator('.cart-lines .line-note')).toHaveText('no butter');
+
+  // One more coconut water: only that one goes to the bar, nothing to the kitchen.
+  await page.getByRole('button', { name: 'One more Coconut water' }).click();
+  await page.getByRole('button', { name: 'Keep the table open' }).click();
+  await expect(page.getByText('Table 2 is open. Order sent to: Bar.')).toBeVisible();
+  const second = await printed();
+  expect(second).toContain('1 x Coconut water');
+  expect(second).not.toContain('3 x');
+
+  // One guest pays for one coconut water; the rest stays on the table.
+  await page.getByRole('button', { name: /^Tables/ }).click();
+  await tables.getByRole('button', { name: /Table 2/ }).click();
+  await page.getByRole('button', { name: 'Split the bill' }).click();
+  const split = page.getByRole('dialog', { name: 'Split the bill' });
+  await split.getByRole('button', { name: 'One more Coconut water' }).click();
+  await split.getByRole('button', { name: 'Pay these now' }).click();
+  await expect(page.getByText('Paying part of Table 2. The rest is still on the table.')).toBeVisible();
+  await expect(page.locator('.cart-table')).toHaveCount(0);
+  await expect(page.getByLabel('Quantity of Coconut water')).toHaveValue('1');
+  // 3.50 + 10% service = 3.85; GST 0.48; total 4.33.
+  await expect(page.locator('.cart .grand')).toContainText('BZ$4.33');
+  await page.keyboard.press('F2');
+  await expect(page.locator('.last-sale')).toContainText('BZ$4.33');
+
+  // The rest of the table: two coconut waters and the Johnny cake, paid together; then the table is free.
+  await page.getByRole('button', { name: /^Tables/ }).click();
+  await tables.getByRole('button', { name: /Table 2/ }).click();
+  await expect(page.getByLabel('Quantity of Coconut water')).toHaveValue('2');
+  await expect(page.getByLabel('Quantity of Johnny cakes')).toHaveValue('1');
+  // 8.50 + 0.85 service; GST 1.17.
+  await expect(page.locator('.cart .grand')).toContainText('BZ$10.52');
+  await page.keyboard.press('F2');
+  await expect(page.locator('.last-sale')).toContainText('Authorized');
+  await page.getByRole('button', { name: /^Tables/ }).click();
+  await expect(tables.locator('.table-tile.free')).toHaveCount(3);
+  await page.keyboard.press('Escape');
+
+  // Back to a shop without tables.
+  await page.request.put('/v1/counter-settings', { headers: API, data: { tables: [], stations: [], serviceChargePercent: null } });
+});

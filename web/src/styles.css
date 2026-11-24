@@ -1938,6 +1938,31 @@ button.tpl-img-upload { margin: 0.6rem 0.3rem 0.3rem; justify-content: center; }
 .tender.split > span { font-size: 0.95rem; }
 .tender.account { flex-direction: column; align-items: stretch; gap: 0.45rem; font-size: 0.85rem; color: rgba(255, 255, 255, 0.85); }
 .tender.wallet { flex-direction: column; align-items: stretch; gap: 0.35rem; }
+.cart .cart-table { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.35rem 0.6rem; border-radius: var(--radius); background: rgba(255, 255, 255, 0.1); }
+.cart .cart-table strong { color: var(--lime); font-size: 1.05rem; }
+.cart-lines .line-note { display: block; font-size: 0.78rem; color: rgba(255, 255, 255, 0.75); font-style: italic; }
+.cart-lines .line-sent { display: inline-block; margin-left: 0.4rem; font-size: 0.68rem; font-weight: 620; text-transform: uppercase; letter-spacing: 0.05em; color: rgba(255, 255, 255, 0.6); }
+.line-note-editor { grid-column: 1 / -1; display: grid; gap: 0.25rem; font-size: 0.75rem; color: rgba(255, 255, 255, 0.75); }
+.line-note-editor input { min-height: 0; padding: 0.3rem 0.5rem; }
+.table-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr)); gap: 0.6rem; }
+.table-tile { display: grid; gap: 0.15rem; justify-items: start; text-align: left; padding: 0.7rem 0.8rem; min-height: 4.6rem; border: 1px solid var(--hairline); border-radius: var(--radius); background: var(--sheet); color: var(--ink); box-shadow: none; }
+.table-tile.free { color: var(--muted); }
+.table-tile.free strong { color: var(--ink); }
+.table-tile.open { background: var(--ochre-soft); border-color: var(--ochre-line); color: var(--ochre-ink); }
+.table-tile.mine { background: var(--brand-soft); border-color: var(--brand-line); color: var(--brand-ink); }
+.table-tile:hover:not(:disabled) { background: var(--sheet-2); color: var(--ink); }
+.split-lines { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.5rem; }
+.split-lines li { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding-bottom: 0.5rem; border-bottom: 1px solid var(--hairline); }
+.split-lines .qty { display: inline-flex; align-items: center; gap: 0.5rem; }
+.split-lines .qty button { min-height: 0; padding: 0.2rem 0.65rem; }
+.split-lines output { min-width: 1.5rem; text-align: center; font-family: var(--figures); font-weight: 600; }
+.tables-settings { max-width: 40rem; }
+.tables-settings textarea { font-family: inherit; }
+.station { display: grid; gap: 0.5rem; padding: 0.75rem; border: 1px solid var(--hairline); border-radius: var(--radius); }
+.station .row { align-items: flex-end; gap: 0.75rem; }
+.station-categories { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.chip-toggle { min-height: 0; padding: 0.25rem 0.7rem; border-radius: 999px; font-size: 0.85rem; background: var(--sheet); color: var(--ink); border: 1px solid var(--hairline); box-shadow: none; }
+.chip-toggle[aria-pressed="true"] { background: var(--brand-soft); border-color: var(--brand-line); color: var(--brand-ink); font-weight: 600; }
 .tender .layaway-deposit { max-width: none; }
 .tender .layaway-deposit .row { gap: 0.5rem; flex-wrap: nowrap; }
 .tender .layaway-deposit select { flex: none; width: auto; }

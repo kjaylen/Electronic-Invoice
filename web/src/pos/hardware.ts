@@ -101,7 +101,7 @@ export function hardwareReport(config: HardwareConfig, p: Platform) {
 }
 
 /** Print through the browser's dialog (the till in a browser), from a hidden frame. */
-function printInBrowser(html: string): Promise<void> {
+export function printInBrowser(html: string): Promise<void> {
   return new Promise((resolve) => {
     document.querySelectorAll('iframe.print-frame').forEach((f) => f.remove());
     const frame = document.createElement('iframe');

@@ -158,6 +158,30 @@ export interface ZReportData {
 const belize = (iso: string) => new Date(new Date(iso).getTime() - 6 * 3600_000).toISOString().slice(0, 16).replace('T', ' ');
 
 /** The end-of-day (Z) report, or the running (X) report of an open shift. */
+/** What a kitchen or a bar is asked to make: only what is new since the last ticket for that table. */
+export interface OrderTicketData {
+  station: string;
+  table: string;
+  by: string | null;
+  at: Date;
+  lines: Array<{ quantity: string; name: string; note?: string | undefined }>;
+}
+
+/** An order ticket: the station and the table in large letters, then each thing to make with its note. Not a tax document. */
+export function orderTicket(o: OrderTicketData): Ticket {
+  const t: Ticket = [];
+  t.push({ kind: 'text', text: o.station.toUpperCase(), align: 'center', bold: true, size: 'large' });
+  t.push({ kind: 'text', text: o.table, align: 'center', bold: true, size: 'large' });
+  t.push({ kind: 'text', text: `${o.at.toLocaleTimeString('en-BZ', { hour: '2-digit', minute: '2-digit' })}${o.by ? ` · ${o.by}` : ''}`, align: 'center' });
+  t.push({ kind: 'rule' });
+  for (const l of o.lines) {
+    t.push({ kind: 'text', text: `${l.quantity} x ${l.name}`, bold: true, size: 'large' });
+    if (l.note?.trim()) t.push({ kind: 'text', text: `   ** ${l.note.trim()}` });
+  }
+  t.push({ kind: 'rule' }, { kind: 'feed', lines: 2 });
+  return t;
+}
+
 export function zReportTicket(z: ZReportData, now = new Date()): Ticket {
   const t: Ticket = [];
   const text = (s: string, o: Omit<Extract<TicketLine, { kind: 'text' }>, 'kind' | 'text'> = {}) => t.push({ kind: 'text', text: s, ...o });

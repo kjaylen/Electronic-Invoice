@@ -791,7 +791,9 @@ export class LocalApi {
     if (online) {
       try {
         for (const h of [...mine].reverse()) {
-          const res = await this.ctx.net('/v1/held-sales', { method: 'POST', body: { label: h.label, total: h.total, count: Math.max(1, h.count), sale: h.sale }, timeoutMs: 8000 });
+          // A table's tab kept open while offline goes up as that table's tab.
+          const table = (h.sale as { table?: string } | null)?.table;
+          const res = await this.ctx.net('/v1/held-sales', { method: 'POST', body: { label: h.label, ...(table && { table }), total: h.total, count: Math.max(1, h.count), sale: h.sale }, timeoutMs: 8000 });
           if (!res.ok) break;
           await db.write({ deleteHeld: [h.id] });
           mine.splice(mine.indexOf(h), 1);

@@ -50,16 +50,19 @@ constants in the code, because they change and because sources disagree.
 
 ### B. Bars and restaurants
 
-- [ ] B1. **Tables and tabs.** A business says it serves at tables and names
+- [x] B1. **Tables and tabs.** A business says it serves at tables and names
   them (Table 1 to 12, Bar, Patio). The till shows them: free, open (for how
   long, how much), and opens a tab with a tap. A tab is added to over the
   evening from any till, and paid like any sale.
-- [ ] B2. **Order tickets for the kitchen and the bar.** Items are marked as
+- [x] B2. **Order tickets for the kitchen and the bar.** Items are marked as
   kitchen, bar or neither. Sending a tab prints only what is new, on the
   printer for that station, with the table, the time, who took it, and a note
   per item ("no onions").
-- [ ] B3. **Splitting a bill.** Pay part of a tab: by item, or in equal
-  parts; each part gets its own receipt.
+- [x] B3. **Splitting a bill.** Pay part of a tab by item; each part gets
+  its own receipt and the rest stays on the table. (Equal parts are not
+  separate receipts: a tax receipt lists goods, and a third of a plate does
+  not add up to the cent. Friends who split evenly pay one receipt with the
+  Split payment.)
 
 ### C. More than one shop
 
