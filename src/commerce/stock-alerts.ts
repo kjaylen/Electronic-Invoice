@@ -60,7 +60,7 @@ export async function runStockAlerts(db: Queryable, options: { mailer: Mailer; p
         store: { name: a.store_name, city: a.city, telephone: a.telephone },
         product: { title: a.title, variant: [a.option1, a.option2].filter(Boolean).join(' / ') || null, price: priceWithGst(a.unit_price, a.gst_category), url },
       }, { publicUrl: options.publicUrl, lang });
-      await options.mailer.send({ to: a.email, replyTo: a.reply_to, subject: mail.subject, text: mail.text, html: mail.html });
+      await options.mailer.send({ type: 'back-in-stock', tenantId: a.tenant_id, to: a.email, replyTo: a.reply_to, subject: mail.subject, text: mail.text, html: mail.html });
       sent++;
     } catch {
       // Try again next run.

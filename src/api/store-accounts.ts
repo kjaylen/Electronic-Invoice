@@ -107,7 +107,7 @@ export function registerStoreAccountRoutes(app: FastifyInstance, deps: PipelineD
         const mail = await renderEmail(db, s.tenantId, 'email.sign-in-code', {
           store: { name: s.name, city: s.city, telephone: s.telephone, url: `${base}/${s.slug}/shop` }, code, minutes: CODE_MINUTES,
         }, { publicUrl: ctx.publicUrl, lang: await emailLanguage(db, s.tenantId) });
-        await ctx.mailer.send({ to: email, replyTo: s.email, subject: mail.subject, text: mail.text, html: mail.html });
+        await ctx.mailer.send({ type: 'sign-in-code', tenantId: s.tenantId, to: email, replyTo: s.email, subject: mail.subject, text: mail.text, html: mail.html });
       } catch (e) {
         await withdrawCode(db, challenge);
         request.log.error({ err: e }, 'sign-in code not sent');

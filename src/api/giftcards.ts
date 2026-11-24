@@ -50,7 +50,7 @@ export async function sendGiftCardEmail(deps: PipelineDeps, ctx: ServerContext, 
     card: { amount: formatCents(toBigInt(card.initial_cents)), balance: formatCents(toBigInt(card.balance_cents)), code: await cardCode(deps.keys, card), expires_on: card.expires_on },
     balance_url: online ? `${base}/${t.slug}/shop/gift-card` : null,
   }, { publicUrl: ctx.publicUrl, lang: await emailLanguage(db, card.tenant_id) });
-  await ctx.mailer.send({ to, replyTo: t.email, subject: mail.subject, text: mail.text, html: mail.html });
+  await ctx.mailer.send({ type: 'gift-card', tenantId: card.tenant_id, to, replyTo: t.email, subject: mail.subject, text: mail.text, html: mail.html });
 }
 
 export function registerGiftCardRoutes(app: FastifyInstance, deps: PipelineDeps, ctx: ServerContext) {

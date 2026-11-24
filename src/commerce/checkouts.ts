@@ -207,7 +207,7 @@ export async function runCheckoutReminders(db: Queryable, deps: Pick<PipelineDep
         unsubscribe_url: unsubscribeUrl,
         reminder: { number, last: number >= 2 || !r.second },
       }, { publicUrl: options.publicUrl, lang });
-      await options.mailer.send({
+      await options.mailer.send({ type: 'checkout-reminder', tenantId: c.tenant_id,
         to: c.email, replyTo: c.reply_to, subject: mail.subject, text: mail.text, html: mail.html,
         // One-click unsubscribe from the mail app (RFC 8058): a POST to the store's API.
         headers: { 'List-Unsubscribe': `<${base}/v1/store/${c.slug}/checkouts/unsubscribe?t=${token}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' },
