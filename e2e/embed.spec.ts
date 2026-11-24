@@ -10,7 +10,7 @@
  */
 
 import { expect, type Page, test } from '@playwright/test';
-import { type OutsideSite, serveSite, setUpStore, SLUG, type Store } from './outside-site.ts';
+import { type OutsideSite, OWNER, serveSite, setUpStore, SLUG, type Store } from './outside-site.ts';
 
 test.describe.configure({ mode: 'serial' });
 
@@ -282,4 +282,73 @@ test('window.Floreo for the page\'s own code: the cart, the store\'s API, events
   await expect(button).toContainText('Basket');
   await expect(p.locator('floreo-cart .count')).toHaveText('2');
   expect(await p.locator('floreo-cart').evaluate((el) => getComputedStyle(el).position)).toBe('fixed');
+});
+
+test('Settings → Developers: the connect guide, keys replaced and revoked, and the logs of what the site did', async ({ page: p }) => {
+  await p.goto(`/${SLUG}/login`);
+  await p.getByLabel('Email or username').fill(OWNER.email);
+  await p.getByLabel(/^Password/).fill(OWNER.password);
+  await p.getByRole('button', { name: /^Log in/ }).click();
+  await expect(p.locator('.biz-card')).toContainText('Reef Goods');
+  await p.goto(`/${SLUG}/settings?tab=keys`);
+
+  // The guide: a store with products and a key are there; the lines to paste carry this store and this key.
+  const guide = p.locator('.guide');
+  const step = (n: number) => guide.locator('.guide-step').nth(n - 1);
+  await expect(p.getByRole('heading', { name: 'Connect your own site' })).toBeVisible();
+  await expect(step(1)).toHaveClass(/done/);
+  await expect(step(1)).toContainText('3 products for sale, and your store is open.');
+  await expect(step(2)).toHaveClass(/done/);
+  await expect(step(2).locator('.dev-key')).toHaveText(key);
+  await expect(step(3).locator('.guide-code')).toContainText(`<script src="${floreo}/embed.js" data-store="${SLUG}" data-key="${key}" async></script>`);
+  await expect(step(3).locator('.guide-code')).toContainText('<floreo-products></floreo-products>');
+  await expect(p.getByText('You are in test mode')).toBeVisible();
+
+  // A site's address, typed the way people type it, is kept the way browsers send it; a wrong one says why.
+  await expect(step(4)).not.toHaveClass(/done/);
+  await step(4).getByLabel('Site address').fill('http://shop.example');
+  await step(4).getByRole('button', { name: 'Add site' }).click();
+  await expect(step(4).getByRole('alert')).toContainText('use https://');
+  await step(4).getByLabel('Site address').fill('www.reefgoods.example/shop');
+  await step(4).getByRole('button', { name: 'Add site' }).click();
+  await expect(step(4).locator('.dev-site-list')).toHaveText(/https:\/\/www\.reefgoods\.example/);
+  await expect(step(4)).toHaveClass(/done/);
+
+  // The earlier tests used this key from the outside site: the check says so.
+  await step(5).getByRole('button', { name: 'Check' }).click();
+  await expect(step(5)).toContainText(/\d+ requests from your site/);
+  await expect(step(5)).toHaveClass(/done/);
+  await expect(step(3)).toHaveClass(/done/);
+
+  // Keys: a new one, replaced (a second beside it, same name), and revoked after being asked.
+  await p.getByRole('group', { name: 'Developers' }).getByRole('button', { name: 'Keys' }).click();
+  const publishable = p.locator('section', { has: p.getByRole('heading', { name: 'Publishable keys' }) });
+  await publishable.getByLabel('Key name').fill('Second site');
+  await publishable.getByRole('button', { name: 'Make a key' }).click();
+  const second = publishable.locator('tbody tr', { hasText: 'Second site' });
+  await expect(second).toHaveCount(1);
+  await expect(second).toContainText('Your own computer only');
+  await second.getByRole('button', { name: 'Replace' }).click();
+  await expect(second).toHaveCount(2);
+  await second.first().getByRole('button', { name: 'Revoke' }).click();
+  const ask = p.getByRole('dialog', { name: 'Revoke the key “Second site”?' });
+  await expect(ask).toContainText('stops showing your store at once');
+  await ask.getByRole('button', { name: 'Revoke key' }).click();
+  await expect(publishable.locator('tbody tr', { hasText: 'Revoked' })).not.toHaveCount(0);
+  await expect(p.getByRole('heading', { name: 'Secret keys' })).toBeVisible();
+
+  // Logs: what the site asked and was answered, and what was refused (the page with a wrong key, earlier).
+  await p.getByRole('group', { name: 'Developers' }).getByRole('button', { name: 'Logs' }).click();
+  await expect(p.getByRole('heading', { name: 'Usage' })).toBeVisible();
+  await expect(p.locator('.dev-totals')).toContainText(/Requests\s*\d+/i);
+  await expect(p.locator('.dev-requests tbody tr').first()).toBeVisible();
+  await expect(p.locator('.dev-requests')).toContainText(`/v1/store/${SLUG}/products`);
+  await expect(p.getByRole('heading', { name: 'What fails' })).toBeVisible();
+  await expect(p.locator('section', { has: p.getByRole('heading', { name: 'What fails' }) })).toContainText('invalid_publishable_key');
+  await p.getByLabel('Only refused or failed').check();
+  await expect(p.locator('.dev-requests tbody tr .badge.authorized')).toHaveCount(0);
+
+  // Webhooks come with a higher plan than the trial's: said, not hidden.
+  await p.getByRole('group', { name: 'Developers' }).getByRole('button', { name: 'Webhooks' }).click();
+  await expect(p.getByText('Webhooks come with the Pro plan')).toBeVisible();
 });

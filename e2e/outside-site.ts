@@ -11,7 +11,7 @@ import type { AddressInfo } from 'node:net';
 import { type APIRequestContext, expect } from '@playwright/test';
 
 export const SLUG = 'reef-goods';
-const OWNER = { name: 'Maya Reef', email: 'maya@reefgoods.test', password: 'reef goods test only 1' };
+export const OWNER = { name: 'Maya Reef', email: 'maya@reefgoods.test', password: 'reef goods test only 1' };
 const cert = (name: string) => readFileSync(new URL(`../test/certs/${name}`, import.meta.url), 'utf8');
 
 const PRODUCTS = [

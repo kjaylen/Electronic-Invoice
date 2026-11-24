@@ -10,6 +10,7 @@
 
 import { type FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router';
+import embedExample from '../../examples/html-embed/index.html?raw';
 import { api } from '../api';
 import { useConfirm } from '../confirm';
 import { useT } from '../i18n';
@@ -86,33 +87,9 @@ export function embedSnippet(c: Pick<Connect, 'embedUrl' | 'store'>, key: string
   ].join('\n');
 }
 
-/** A whole page to start from, for someone with no site yet. */
+/** A whole page to start from, for someone with no site yet: the worked example the browser tests run, with this store's values in it. */
 function examplePage(c: Pick<Connect, 'embedUrl' | 'store'>, key: string): string {
-  return [
-    '<!doctype html>',
-    '<html lang="en">',
-    '<head>',
-    '  <meta charset="utf-8">',
-    '  <meta name="viewport" content="width=device-width, initial-scale=1">',
-    '  <title>My store</title>',
-    '  <style>',
-    '    body { font: 16px/1.5 system-ui, sans-serif; max-width: 960px; margin: 0 auto; padding: 1.5rem; }',
-    '    header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 2rem; }',
-    '    /* The store takes your colours: */',
-    '    :root { --floreo-accent: #0b6e69; --floreo-radius: 6px; }',
-    '  </style>',
-    `  <script src="${c.embedUrl}" data-store="${c.store}" data-key="${key}" async></script>`,
-    '</head>',
-    '<body>',
-    '  <header>',
-    '    <h1>My store</h1>',
-    '    <floreo-cart></floreo-cart>',
-    '  </header>',
-    '  <floreo-products></floreo-products>',
-    '</body>',
-    '</html>',
-    '',
-  ].join('\n');
+  return embedExample.replaceAll('https://YOUR-FLOREO/embed.js', c.embedUrl).replaceAll('your-store', c.store).replaceAll('pk_test_YOUR_KEY', key);
 }
 
 function ModeBadge({ mode }: { mode: 'test' | 'live' }) {
@@ -231,7 +208,7 @@ function ConnectGuide({ connect, reload, usage, loadUsage }: { connect: Connect;
             </>
           )}
         </Step>
-        <Step n={3} title={t('Paste this into your page')}>
+        <Step n={3} title={t('Paste this into your page')} done={Boolean(seen && seen.requests > 0)}>
           {key ? (
             <>
               <span className="small muted">{t('Put the script line in the page’s <head> (or anywhere, once). Put the other two lines where the products and the cart button should show. That is all: products open, go in the cart and check out on your own page.')}</span>
