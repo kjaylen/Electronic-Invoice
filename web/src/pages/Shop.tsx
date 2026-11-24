@@ -378,6 +378,8 @@ export function ShopLayout() {
         </div>
         {site?.footer.showPayments && ways.length > 0 && <p className="small site-payments">{t('We accept')}: {ways.join(' · ')}</p>}
         <ThemeSection html={theme.footer} className="shop-footer-section" />
+        {/* On a phone the header has no room for it. */}
+        <div className="site-footer-lang"><LanguageToggle /></div>
         <p className="small muted">{t('Every purchase comes with a receipt authorized by the Belize Tax Service.')} · Floreo</p>
       </footer>
     </div>

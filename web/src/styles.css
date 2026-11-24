@@ -799,7 +799,16 @@ pre.instructions { white-space: pre-wrap; font-family: var(--figures); font-size
 .shop-header.layout-center { flex-wrap: wrap; justify-content: center; }
 .shop-header.layout-center .shop-brand { order: -1; flex: 1 0 100%; align-items: center; text-align: center; }
 .shop-header.layout-center .site-nav { flex: 1 0 100%; justify-content: center; display: flex; }
-.site-logo { display: block; width: auto; max-width: 100%; object-fit: contain; object-position: left center; }
+.site-logo { display: block; width: auto; max-width: min(100%, 44vw); object-fit: contain; object-position: left center; }
+/* A logo keeps its size (a name in words may shorten instead). */
+.shop-header > .shop-brand:has(.site-logo) { flex-shrink: 0; }
+.site-footer-lang { display: none; }
+@media (max-width: 480px) {
+  .shop-header { gap: 0.4rem; padding-left: 0.75rem; padding-right: 0.75rem; }
+  .shop-header > .lang { display: none; }
+  .site-footer-lang { display: block; }
+  .cart-button { padding-left: 0.75rem; }
+}
 .shop-header > * { flex-shrink: 0; }
 .shop-header > .shop-brand { flex-shrink: 1; min-width: 0; max-width: min(260px, 42vw); }
 .shop-header.layout-center > .shop-brand { max-width: none; }
@@ -2371,10 +2380,16 @@ main:has(.site-editor) { max-width: none; padding: 0.75rem 1rem 0.75rem; }
 .se-frame.device-tablet { width: 820px; max-width: 100%; }
 .se-frame.device-phone { width: 390px; max-width: 100%; }
 .se-frame iframe { width: 100%; height: 100%; border: 0; display: block; }
+/* Wide: settings beside the preview, at a size to choose. Narrow (a phone, a small tablet): one or the other. */
+.se-show { display: none !important; }
 @media (max-width: 1000px) {
   .site-editor { height: auto; }
   .se-body { grid-template-columns: 1fr; }
-  .se-stage { height: 70vh; }
+  .se-stage { height: calc(100vh - 12.5rem); min-height: 420px; padding: 0.4rem; }
+  .se-show { display: inline-flex !important; }
+  .se-devices { display: none !important; }
+  .se-body.show-edit .se-stage, .se-body.show-preview .se-panel { display: none; }
+  .se-top { row-gap: 0.4rem; }
 }
 .se-heading { font-size: 1.15rem; margin: 0; }
 .se-group { border: 1px solid var(--hairline); border-radius: var(--radius); padding: 0 0.75rem; }

@@ -43,6 +43,8 @@ export function SiteEditor() {
   const [page, setPage] = useState<PageKey>('home');
   const [selected, setSelected] = useState<string | null>(null);
   const [device, setDevice] = useState<Device>('desktop');
+  // On a phone there is room for the settings or the preview, not both: one shows at a time.
+  const [show, setShow] = useState<'edit' | 'preview'>('edit');
   // Where a new section goes: undefined (not adding), null (at the end), or after the section with this id.
   const [addAfter, setAddAfter] = useState<string | null | undefined>(undefined);
   const fromPreview = useRef(false);
@@ -111,10 +113,12 @@ export function SiteEditor() {
         fromPreview.current = true;
         setTab('pages');
         setSelected(data.id);
+        setShow('edit');
       }
       if (data.type === 'site-add' && data.after) {
         setTab('pages');
         setAddAfter(data.after);
+        setShow('edit');
       }
       // Typed in the preview: only a section's own short texts, cut to their length, as the form would.
       if (data.type === 'site-edit' && data.id && typeof data.key === 'string' && typeof data.value === 'string' && doc && loaded) {
@@ -214,6 +218,10 @@ export function SiteEditor() {
           </span>
         </div>
         <span className="spacer" />
+        <div className="tabs se-show" role="group" aria-label={t('Show')}>
+          <button type="button" aria-pressed={show === 'edit'} className={show === 'edit' ? 'active' : ''} onClick={() => setShow('edit')}>{t('Edit')}</button>
+          <button type="button" aria-pressed={show === 'preview'} className={show === 'preview' ? 'active' : ''} onClick={() => setShow('preview')}>{t('Preview')}</button>
+        </div>
         <div className="tabs se-devices" role="group" aria-label={t('Preview size')}>
           {([['desktop', t('Computer')], ['tablet', t('Tablet')], ['phone', t('Phone')]] as Array<[Device, string]>).map(([d, l]) => <button key={d} type="button" aria-pressed={device === d} className={device === d ? 'active' : ''} onClick={() => setDevice(d)}>{l}</button>)}
         </div>
@@ -250,7 +258,7 @@ export function SiteEditor() {
         </div>
       )}
       <ErrorText error={error} />
-      <div className="se-body">
+      <div className={`se-body show-${show}`}>
         <aside className="se-panel" aria-label={t('Site settings')}>
           <div className="tabs se-tabs" role="group" aria-label={t('Edit')}>
             {([['pages', t('Pages')], ['theme', t('Theme')], ['header', t('Header')], ['footer', t('Footer')], ['seo', t('Search')]] as Array<[Tab, string]>).map(([k, l]) => <button key={k} type="button" aria-pressed={tab === k} className={tab === k ? 'active' : ''} onClick={() => setTab(k)}>{l}</button>)}
