@@ -836,3 +836,43 @@ test('platform console: staff move the business to BTS production', async ({ pag
   await page.goto(p('/settings?tab=activity'));
   await expect(page.locator('ol.activity')).toContainText('moved this business to BTS production');
 });
+
+test('site builder: a new headline live in the preview, a new look, a new page with a section, publish; buyers see it', async ({ page, browser }) => {
+  await logIn(page);
+  page.on('dialog', (d) => void d.accept());
+  await page.getByRole('navigation').getByRole('link', { name: 'Site' }).click();
+  const preview = page.frameLocator('iframe[title="Preview of your store"]');
+  await expect(preview.getByRole('heading', { level: 1 })).toHaveText('Corner Store');
+
+  // The banner's headline, changed in the panel, shows in the preview as it is typed.
+  await page.locator('.se-sections').getByRole('button', { name: /^Banner/ }).click();
+  await page.getByLabel('Headline').fill('Everything for the corner');
+  await expect(preview.getByRole('heading', { level: 1 })).toHaveText('Everything for the corner');
+  await page.getByRole('button', { name: '← Sections' }).click();
+
+  // A new look for the whole store.
+  await page.getByRole('group', { name: 'Edit' }).getByRole('button', { name: 'Theme' }).click();
+  await page.locator('.se-preset', { hasText: 'Fresh' }).click();
+  await expect(page.locator('.se-preset', { hasText: 'Fresh' })).toHaveAttribute('aria-pressed', 'true');
+
+  // A page of its own, with a text section.
+  await page.getByRole('group', { name: 'Edit' }).getByRole('button', { name: 'Pages' }).click();
+  await page.getByRole('button', { name: '+ New page' }).click();
+  await page.getByLabel('Page title').fill('About us');
+  await page.getByRole('button', { name: 'Add', exact: true }).click();
+  await page.getByRole('button', { name: '+ Add section' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: /^Text A heading/ }).click();
+  await expect(preview.getByRole('heading', { name: 'Made with care in Belize' })).toBeVisible();
+
+  // Nothing changes for buyers until it is published.
+  await expect(page.getByText('Draft: not published yet')).toBeVisible();
+  const buyer = await (await browser.newContext()).newPage();
+  await buyer.goto(p('/shop'));
+  await expect(buyer.getByRole('heading', { level: 1 })).toHaveText('Corner Store');
+  await page.getByRole('button', { name: 'Publish', exact: true }).click();
+  await expect(page.getByText('Published. Customers see the new site now.')).toBeVisible();
+  await buyer.reload();
+  await expect(buyer.getByRole('heading', { level: 1 })).toHaveText('Everything for the corner');
+  await buyer.goto(p('/shop/pages/about-us'));
+  await expect(buyer.getByRole('heading', { name: 'Made with care in Belize' })).toBeVisible();
+});

@@ -67,6 +67,7 @@ import { registerAccountLinkRoutes, registerPublicAccountRoutes } from './accoun
 import { registerItemSummaryRoutes } from './item-summary.ts';
 import { registerLoyaltyRoutes } from './loyalty.ts';
 import { registerGiftCardRoutes } from './giftcards.ts';
+import { registerSiteRoutes } from './site.ts';
 import { registerShiftRoutes } from './shifts.ts';
 import { registerPosAdminRoutes, registerPosDeviceRoutes, SESSION_TOKEN_PREFIX, tillMayUse, touchDevice } from './pos.ts';
 import { lookupSession } from '../db/users.ts';
@@ -161,7 +162,7 @@ const csp = (imageOrigins: string[]) => [
   "default-src 'self'",
   `img-src 'self' data: blob:${imageOrigins.map((o) => ` ${o}`).join('')}`,
   "style-src 'self' 'unsafe-inline'",
-  "frame-src 'self' blob:",
+  "frame-src 'self' blob: https://www.youtube-nocookie.com https://player.vimeo.com",
   "object-src 'none'",
   "base-uri 'self'",
   "form-action 'self'",
@@ -376,6 +377,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     registerItemSummaryRoutes(tenant, deps);
     registerLoyaltyRoutes(tenant, deps);
     registerGiftCardRoutes(tenant, deps, ctx);
+    registerSiteRoutes(tenant, deps);
     registerShiftRoutes(tenant, deps);
     registerPosAdminRoutes(tenant, deps);
     registerTemplateRoutes(tenant, deps);

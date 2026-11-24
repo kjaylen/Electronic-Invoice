@@ -7,6 +7,7 @@ import { useT } from '../i18n';
 import { useSession } from '../session';
 import { useToast } from '../toast';
 import { ErrorText, Field, GST_CATEGORIES, Modal, money, Segmented, Select, UNITS, usePageTitle } from '../ui';
+import { Collections } from './Collections';
 import { Items } from './Items';
 
 const STATUS_LABEL = { draft: 'Draft', active: 'On sale', archived: 'Archived' } as const;
@@ -33,7 +34,7 @@ export function Products() {
   const servicesOnly = me?.sells === 'services';
   usePageTitle(servicesOnly ? t('Services') : t('Products'));
   const [params, setParams] = useSearchParams();
-  const tab = servicesOnly || params.get('tab') === 'items' ? 'items' : 'products';
+  const tab: 'items' | 'collections' | 'products' = servicesOnly || params.get('tab') === 'items' ? 'items' : params.get('tab') === 'collections' ? 'collections' : 'products';
   const [list, setList] = useState<ProductSummary[] | null>(null);
   const [q, setQ] = useState('');
   const [error, setError] = useState<unknown>(null);
@@ -61,9 +62,9 @@ export function Products() {
       <div className="row">
         <div><span className="kicker">{t('Catalog')}</span><h1>{t('Products')}</h1></div>
         <span className="spacer" />
-        <Segmented switches label={t('Catalog')} value={tab} onChange={(v) => setParams(v === 'items' ? { tab: 'items' } : {}, { replace: true })} options={[['products', t('Online store')], ['items', t('All items')]]} />
+        <Segmented switches label={t('Catalog')} value={tab} onChange={(v) => setParams(v === 'products' ? {} : { tab: v }, { replace: true })} options={[['products', t('Online store')], ['collections', t('Collections')], ['items', t('All items')]]} />
       </div>
-      {tab === 'items' ? <Items /> : (
+      {tab === 'items' ? <Items /> : tab === 'collections' ? <Collections /> : (
         <>
           <div className="row">
             <input type="search" placeholder={t('Search products')} aria-label={t('Search products')} value={q} onChange={(e) => setQ(e.target.value)} style={{ maxWidth: 360 }} />
@@ -109,7 +110,7 @@ export function ProductEditor() {
   const { can, session } = useSession();
   const isNew = !id;
   const [product, setProduct] = useState<Product | null>(null);
-  const [form, setForm] = useState({ title: '', description: '', status: 'draft' as Product['status'], option1Name: '', option2Name: '' });
+  const [form, setForm] = useState({ title: '', description: '', status: 'draft' as Product['status'], option1Name: '', option2Name: '', badge: '', tags: '' });
   const [variants, setVariants] = useState<Variant[]>([blankVariant()]);
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
@@ -120,7 +121,7 @@ export function ProductEditor() {
 
   const fill = useCallback((p: Product) => {
     setProduct(p);
-    setForm({ title: p.title, description: p.description, status: p.status, option1Name: p.option1Name ?? '', option2Name: p.option2Name ?? '' });
+    setForm({ title: p.title, description: p.description, status: p.status, option1Name: p.option1Name ?? '', option2Name: p.option2Name ?? '', badge: p.badge ?? '', tags: (p.tags ?? []).join(', ') });
     setVariants(p.variants.length ? p.variants : [blankVariant()]);
   }, []);
   useEffect(() => {
@@ -141,11 +142,14 @@ export function ProductEditor() {
       status: form.status,
       option1Name: hasOptions ? form.option1Name.trim() : null,
       option2Name: hasOptions && form.option2Name.trim() ? form.option2Name.trim() : null,
+      badge: form.badge.trim() || null,
+      tags: form.tags.split(',').map((x) => x.trim()).filter(Boolean).slice(0, 30),
       variants: (hasOptions ? variants : variants.slice(0, 1)).map((v) => ({
         ...(v.id && { id: v.id }),
         option1: hasOptions ? v.option1?.trim() || null : null,
         option2: hasOptions && form.option2Name.trim() ? v.option2?.trim() || null : null,
         price: v.price,
+        compareAtPrice: v.compareAtPrice?.trim() || null,
         gstCategory: v.gstCategory,
         exemptionReasonCode: v.gstCategory === 'E' ? v.exemptionReasonCode : null,
         unitCode: v.unitCode,
@@ -220,6 +224,10 @@ export function ProductEditor() {
           <section className="card stack">
             <Field label={t('Title')}><input required autoFocus={isNew} value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></Field>
             <Field label={t('Description')} hint={t('What buyers read on the product page.')}><textarea rows={6} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></Field>
+            <div className="form-grid">
+              <Field label={t('Badge')} hint={t('Optional. A word on the picture: New, Limited, Best seller.')}><input maxLength={30} value={form.badge} onChange={(e) => setForm({ ...form, badge: e.target.value })} /></Field>
+              <Field label={t('Tags')} hint={t('Optional, separated by commas. Collections can gather products by tag.')}><input value={form.tags} onChange={(e) => setForm({ ...form, tags: e.target.value })} /></Field>
+            </div>
           </section>
 
           <section className="card stack">
@@ -262,6 +270,9 @@ export function ProductEditor() {
                   {hasOptions && form.option2Name.trim() && <Field label={form.option2Name}><input value={v.option2 ?? ''} onChange={(e) => setVariant(i, { option2: e.target.value })} /></Field>}
                   <Field label={t('Price (BZ$, before GST)')} hint={v.price ? t('Buyers pay {amount}', { amount: money(withGst(v.price, v.gstCategory)) }) : undefined}>
                     <input required inputMode="decimal" pattern="\d+(\.\d{1,6})?" value={v.price} onChange={(e) => setVariant(i, { price: e.target.value })} />
+                  </Field>
+                  <Field label={t('Was (before GST)')} hint={v.compareAtPrice && Number(v.compareAtPrice) > Number(v.price || 0) ? t('Shown crossed out: {amount}', { amount: money(withGst(v.compareAtPrice, v.gstCategory)) }) : t('Optional. Higher than the price to show a sale.')}>
+                    <input inputMode="decimal" pattern="\d+(\.\d{1,6})?" value={v.compareAtPrice ?? ''} onChange={(e) => setVariant(i, { compareAtPrice: e.target.value })} />
                   </Field>
                   <Field label="GST"><Select value={v.gstCategory} onChange={(e) => setVariant(i, { gstCategory: e.target.value as Variant['gstCategory'] })}>{GST_CATEGORIES.map(([c, n]) => <option key={c} value={c}>{t(n)}</option>)}</Select></Field>
                   <Field label={t('Stock')} hint={t('Empty: not tracked.')}><input inputMode="numeric" pattern="\d*" value={v.stock ?? ''} onChange={(e) => setVariant(i, { stock: e.target.value === '' ? null : Number(e.target.value.replace(/\D/g, '')) })} /></Field>

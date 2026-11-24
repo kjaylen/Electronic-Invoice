@@ -22,6 +22,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { audit } from '../db/audit.ts';
 import type { PipelineDeps } from '../pipeline/issue.ts';
+import { siteImageRefs } from '../commerce/site.ts';
 import { addAsset, type AssetMap, assetMap, assetPath, type AssetRow, assetType, listAssets, MAX_ASSET_BYTES, MAX_ASSETS } from '../templates/assets.ts';
 import { defaultSource, defaultSubject, TEMPLATES, type TemplateDef, templateDef } from '../templates/catalog.ts';
 import { emailLanguage, type Lang, LANGS } from '../templates/lang.ts';
@@ -116,6 +117,7 @@ export function registerTemplateRoutes(app: FastifyInstance, deps: PipelineDeps)
   app.delete<{ Params: { id: string } }>('/templates/assets/:id', { schema: { params: { type: 'object', required: ['id'], properties: { id: uuid } } } }, async (request, reply) => {
     requirePermission(request, 'business.manage');
     const a = (await db.query<{ name: string }>('select name from template_assets where id = $1 and tenant_id = $2', [request.params.id, request.tenantId])).rows[0];
+    if (a && (await siteImageRefs(db, request.tenantId)).has(`a:${request.params.id}`)) throw new ApiError(409, 'image_in_use', 'Your site uses this image; take it out of the site first');
     if (!a) throw notFound('Image');
     // A saved template that names it would stop rendering (and fall back to the default): say which.
     const using = (await db.query<{ key: string }>(

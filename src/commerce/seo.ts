@@ -7,6 +7,7 @@
 import type { Queryable } from '../db/database.ts';
 import { assetPath } from '../templates/assets.ts';
 import { loadStore, priceWithGst, StoreError } from './store.ts';
+import { publishedSite } from './site.ts';
 
 export interface PageMeta {
   title: string;
@@ -66,16 +67,43 @@ export async function storePageMeta(db: Queryable, slug: string, path: string, b
       available: variants.some((v) => v.stock_quantity === null || v.stock_quantity > 0),
     };
   }
+  // A picture the site builder chose: one of the business's images, or a product photo.
+  const picture = (ref: string | null | undefined) => (ref?.startsWith('a:') ? absolute(`/v1/assets/${ref.slice(2)}`) : ref?.startsWith('p:') ? absolute(`/v1/store/${s.slug}/images/${ref.slice(2)}`) : null);
+  const site = await publishedSite(db, s.tenantId);
+  const shared = picture(site.seo.image) ?? (logo ? absolute(assetPath(logo)) : null);
+  const collection = /^collections\/([a-z0-9-]{1,80})\/?$/.exec(path);
+  if (collection) {
+    const c = (await db.query<{ handle: string; title: string; description: string; image: string | null; seo_title: string | null; seo_description: string | null }>(
+      'select handle, title, description, image, seo_title, seo_description from store_collections where tenant_id = $1 and handle = $2 and published', [s.tenantId, collection[1]],
+    )).rows[0];
+    if (!c) return null;
+    return {
+      title: `${c.seo_title || c.title} · ${s.name}`,
+      description: plain(c.seo_description || c.description || `${c.title} from ${s.name}`, 200),
+      url: `${origin}/collections/${c.handle}`, image: picture(c.image) ?? shared, type: 'website', siteName: s.name,
+    };
+  }
+  const page = /^pages\/([a-z0-9-]{1,80})\/?$/.exec(path);
+  if (page) {
+    const p = site.pages.find((x) => x.slug === page[1]);
+    if (!p) return null;
+    const firstText = p.sections.map((x) => String(x.settings.text ?? x.settings.heading ?? '')).find(Boolean) ?? '';
+    return { title: `${p.seoTitle || p.title} · ${s.name}`, description: plain(p.seoDescription || firstText || `${p.title} · ${s.name}`, 200), url: `${origin}/pages/${p.slug}`, image: shared, type: 'website', siteName: s.name };
+  }
+  if (/^(all|collections)\/?$/.test(path)) {
+    const all = path.startsWith('all');
+    return { title: `${all ? 'All products' : 'Collections'} · ${s.name}`, description: plain(site.seo.description || s.settings.about || s.settings.tagline || s.name, 200), url: `${origin}/${all ? 'all' : 'collections'}`, image: shared, type: 'website', siteName: s.name };
+  }
   if (path.replace(/\/$/, '') !== '') return null;
-  // The home page: the store's tagline, and its logo or its newest product's picture.
+  // The home page: what the site builder says, or the store's tagline, and its logo or its newest product's picture.
   const first = logo ? null : (await db.query<{ id: string }>(
     `select i.id from product_images i join products p on p.id = i.product_id where p.tenant_id = $1 and p.status = 'active' order by p.created_at desc, i.position limit 1`, [s.tenantId],
   )).rows[0];
   return {
-    title: s.settings.tagline ? `${s.name} · ${plain(s.settings.tagline, 80)}` : s.name,
-    description: plain(s.settings.about || s.settings.tagline || `Shop ${s.name} online${s.city ? ` in ${s.city}` : ''}, Belize.`, 200),
+    title: site.seo.title || (s.settings.tagline ? `${s.name} · ${plain(s.settings.tagline, 80)}` : s.name),
+    description: plain(site.seo.description || s.settings.about || s.settings.tagline || `Shop ${s.name} online${s.city ? ` in ${s.city}` : ''}, Belize.`, 200),
     url: origin,
-    image: logo ? absolute(assetPath(logo)) : first ? absolute(`/v1/store/${s.slug}/images/${first.id}`) : null,
+    image: shared ?? (first ? absolute(`/v1/store/${s.slug}/images/${first.id}`) : null),
     type: 'website',
     siteName: s.name,
   };
@@ -120,7 +148,10 @@ export async function storeSitemap(db: Queryable, slug: string, base: string): P
     `select handle, updated_at from products where tenant_id = $1 and status = 'active' order by created_at desc limit 5000`, [s.tenantId],
   )).rows;
   const url = (loc: string, mod?: Date | string) => `<url><loc>${attr(loc)}</loc>${mod ? `<lastmod>${new Date(mod).toISOString().slice(0, 10)}</lastmod>` : ''}</url>`;
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${url(origin)}${products.map((p) => url(`${origin}/products/${p.handle}`, p.updated_at)).join('')}</urlset>\n`;
+  const collections = (await db.query<{ handle: string; updated_at: Date | string }>('select handle, updated_at from store_collections where tenant_id = $1 and published order by title', [s.tenantId])).rows;
+  const pages = (await publishedSite(db, s.tenantId)).pages;
+  const extra = [url(`${origin}/all`), ...collections.map((c) => url(`${origin}/collections/${c.handle}`, c.updated_at)), ...pages.map((p) => url(`${origin}/pages/${p.slug}`))].join('');
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${url(origin)}${extra}${products.map((p) => url(`${origin}/products/${p.handle}`, p.updated_at)).join('')}</urlset>\n`;
 }
 
 /** robots.txt for a store's own domain: the shop is open to search engines, and where its sitemap is. */

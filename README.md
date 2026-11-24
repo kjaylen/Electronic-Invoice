@@ -390,6 +390,29 @@ Every business can open an online store at `app.example.bz/<slug>/shop`. Its def
 
 **Next:** buyer accounts (order history, saved addresses), gift cards. **Later:** theme editor, social catalogs, one stock count across several locations.
 
+## Site builder (`src/commerce/site.ts`, `site-schema.ts`, `catalog.ts`; `web/src/site`, `web/src/pages/SiteEditor.tsx`)
+
+Business → Site edits the whole online store without code, with a live preview of the real storefront beside the panel (computer, tablet and phone sizes; clicking a section in the preview opens it).
+
+- **Pages and sections:** the home page, extra sections under every product (plus related products, same category first), and the business's own pages (`/shop/pages/<address>`, up to 40: About us, Shipping, FAQ...). Each is a list of sections to add from a gallery, drag (or move with the arrows) into order, hide, duplicate or remove. Twenty section types: banner (picture, headline, two buttons, overlay, height, alignment), promotion strip, all products (search and category buttons, or one collection, in any order), featured products (newest, on sale, best selling, a collection, a category, or hand-picked), collection tiles, picture with text, text, columns, highlights with icons, testimonials, questions and answers, gallery, logos, YouTube or Vimeo video, countdown, visit us (address, opening hours, directions, call and WhatsApp buttons), contact form (emailed to the store, with a honeypot and rate limits), the business's own HTML and Liquid (rendered and sanitized on the server), the old Templates home section, and space. Text fields take **bold**, *italics*, [links](https://...) and lists, drawn as text (never as HTML).
+- **Theme:** seven starting looks (Classic, Boutique, Fresh, Island, Market, Bold, Minimal), then six colours (with contrast warnings), heading and text fonts (eleven, bundled with the app: nothing loads from other sites), corners, buttons (solid, outline, pill), product cards, picture shape, page width, spacing, header layout and colour, capital headings, logo and its height, and the browser tab icon. The theme re-colours every storefront page, the cart and checkout included (`web/src/site/theme.ts` mixes hover, border and muted colours from the six).
+- **Header and footer:** an announcement bar (with a link), a menu with drop-down links (a drawer on phones) to any page, collection, product, category, the gift card balance, the account or a web address; sticky header and a search button; footer text, up to four link columns, contact details, ways to pay and social media links.
+- **Search and sharing:** the home page's title, description and picture for search engines and link previews; each page and collection has its own; the sitemap lists collections and pages.
+- **Drafts, publishing and history:** every change saves itself as a draft a moment later (undo and redo in the editor); customers see nothing until Publish. The last 30 published versions are kept; any can be brought back as the draft. Owners and admins edit the site (`business.manage`); the preview loads the store even while it is closed (the `X-Site-Preview` header, for staff who can edit the site). A store that never used the builder gets a site made from its settings that looks as the store did before.
+- **Every saved site is checked** (`normalizeSite`): unknown sections and fields dropped, text cut to its limit, choices back to their default, colours, links (`javascript:` and the like refused), picture references and page addresses checked, sizes limited. Pictures come from the business's images (up to 150; one the site uses cannot be deleted) or its product photos.
+- **Collections** (Products → Collections): a page of products at `/shop/collections/<address>`, picked by hand in order, or gathered by rules (category, title, tag, price with GST, on sale, in stock, added in the last N days; all or any of them) with a live count while editing; their own order, picture, description, search title and description; shown or hidden. `/shop/collections` lists them, `/shop/all` is every product (`?q=`, `?category=`).
+- **Products** gain a "was" price per variant (crossed out with a Sale badge and "Save BZ$x" while higher than the price), a badge ("New", "Limited") and tags (searched, and used by collection rules).
+- Spanish: every label the builder shows from its definitions is in `web/src/es.ts`; `node scripts/site-labels.ts --missing` lists any that are not.
+
+| Method and path | What it does |
+|---|---|
+| `GET /v1/store-site` | The draft, whether it differs from what is published, and the builder's catalog (section types and fields, looks, fonts, icons, categories, collections) |
+| `PUT /v1/store-site/draft`, `POST .../publish`, `POST .../discard` | Save the draft (returned as checked), publish it, or go back to what is published |
+| `GET /v1/store-site/versions`, `POST .../versions/:id/restore` | Published versions; one back as the draft |
+| `POST /v1/store-site/sections`, `POST .../render` | A new section with its starting content; a custom code section as the store shows it |
+| `GET/POST /v1/collections`, `GET/PUT/DELETE /v1/collections/:id`, `POST /v1/collections/preview` | Collections; what some rules would gather |
+| `GET /v1/store/:slug/collections[/:handle]`, `POST /v1/store/:slug/contact` | The storefront's collections; the contact form |
+
 ## Getting paid (`src/receivables`, `src/api/receivables.ts`)
 
 Accounts receivable on top of the BTS documents, without touching them:

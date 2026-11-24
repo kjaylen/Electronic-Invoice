@@ -28,6 +28,12 @@ interface TillTransport {
 }
 let till: TillTransport | null = null;
 
+/** The site builder's preview: store calls say so, so staff see their store even while it is closed. */
+let sitePreview = false;
+export function setSitePreview(on: boolean) {
+  sitePreview = on;
+}
+
 /** Make every API call go to the till's server with its bearer token (the POS apps). */
 export function setTillTransport(t: TillTransport | null) {
   till = t;
@@ -45,6 +51,7 @@ async function call(path: string, options: CallOptions): Promise<Response> {
         'X-Requested-With': 'etd-web',
         // Which business this call is for: each business has its own sign-in cookie.
         ...(!till && BUSINESS && { 'X-Business': BUSINESS }),
+        ...(sitePreview && { 'X-Site-Preview': '1' }),
         ...(till && token && { Authorization: `Bearer ${token}` }),
         ...(options.body !== undefined && { 'Content-Type': 'application/json' }),
         ...options.headers,
@@ -354,6 +361,8 @@ export interface Variant {
   option2: string | null;
   price: string;
   priceWithGst?: string;
+  /** The "was" price, before GST (shown crossed out while higher than the price). */
+  compareAtPrice?: string | null;
   gstCategory: 'S' | 'Z' | 'E';
   exemptionReasonCode: string | null;
   unitCode: string;
@@ -370,6 +379,8 @@ export interface Product {
   status: 'draft' | 'active' | 'archived';
   option1Name: string | null;
   option2Name: string | null;
+  badge?: string | null;
+  tags?: string[];
   variants: Variant[];
   images: Array<{ id: string; contentType: string; bytes: number }>;
 }

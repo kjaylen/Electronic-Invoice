@@ -54,12 +54,17 @@ const ShopResume = page(() => import('./pages/Shop'), 'ShopResume');
 const ShopUnsubscribe = page(() => import('./pages/Shop'), 'ShopUnsubscribe');
 const ShopAccount = page(() => import('./pages/Shop'), 'ShopAccount');
 const ShopGiftCardBalance = page(() => import('./pages/Shop'), 'ShopGiftCardBalance');
+const ShopCatalog = page(() => import('./pages/Shop'), 'ShopCatalog');
+const ShopCollections = page(() => import('./pages/Shop'), 'ShopCollections');
+const ShopCollection = page(() => import('./pages/Shop'), 'ShopCollection');
+const ShopPage = page(() => import('./pages/Shop'), 'ShopPage');
 const Reports = page(() => import('./pages/Reports'), 'Reports');
 const Receivables = page(() => import('./pages/Receivables'), 'Receivables');
 const Expenses = page(() => import('./pages/Expenses'), 'Expenses');
 const Inventory = page(() => import('./pages/Inventory'), 'Inventory');
 const Shifts = page(() => import('./pages/Shifts'), 'Shifts');
 const GiftCards = page(() => import('./pages/GiftCards'), 'GiftCards');
+const SiteEditor = page(() => import('./pages/SiteEditor'), 'SiteEditor');
 const ShiftDetail = page(() => import('./pages/Shifts'), 'ShiftDetail');
 const ReceiveStock = page(() => import('./pages/Inventory'), 'ReceiveStock');
 const CustomerAccount = page(() => import('./pages/Account'), 'CustomerAccount');
@@ -181,6 +186,7 @@ function Layout() {
       { to: '/reports', label: t('Reports'), icon: Icons.reports, permission: 'reports.view' },
     ]],
     [t('Business'), [
+      ...(sells !== 'services' ? [{ to: '/site', label: t('Site'), icon: Icons.store, permission: 'business.manage' as Permission }] : []),
       { to: '/templates', label: t('Templates'), icon: Icons.templates, permission: 'business.manage' },
       { to: '/settings', label: t('Settings'), icon: Icons.settings },
     ]],
@@ -375,6 +381,10 @@ function BusinessApp() {
           <Route path="unsubscribe" element={<ShopUnsubscribe />} />
           <Route path="account" element={<ShopAccount />} />
           <Route path="gift-card" element={<ShopGiftCardBalance />} />
+          <Route path="all" element={<ShopCatalog />} />
+          <Route path="collections" element={<ShopCollections />} />
+          <Route path="collections/:handle" element={<ShopCollection />} />
+          <Route path="pages/:slug" element={<ShopPage />} />
         </Route>
       </Route>
       <Route element={<RequireSession />}>
@@ -398,6 +408,7 @@ function BusinessApp() {
         <Route path="/inventory" element={<Allowed permission="catalog.manage"><Inventory /></Allowed>} />
         <Route path="/shifts" element={<Allowed permission="documents.issue"><Shifts /></Allowed>} />
         <Route path="/gift-cards" element={<Allowed permission="documents.issue"><GiftCards /></Allowed>} />
+        <Route path="/site" element={<Allowed permission="business.manage"><SiteEditor /></Allowed>} />
         <Route path="/shifts/:id" element={<Allowed permission="documents.issue"><ShiftDetail /></Allowed>} />
         <Route path="/inventory/receive" element={<Allowed permission="catalog.manage"><ReceiveStock /></Allowed>} />
         <Route path="/inventory/orders/new" element={<Allowed permission="catalog.manage"><PurchaseOrderEditor /></Allowed>} />
@@ -440,6 +451,10 @@ function StoreDomainApp() {
           <Route path="unsubscribe" element={<ShopUnsubscribe />} />
           <Route path="account" element={<ShopAccount />} />
           <Route path="gift-card" element={<ShopGiftCardBalance />} />
+          <Route path="all" element={<ShopCatalog />} />
+          <Route path="collections" element={<ShopCollections />} />
+          <Route path="collections/:handle" element={<ShopCollection />} />
+          <Route path="pages/:slug" element={<ShopPage />} />
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/shop" replace />} />

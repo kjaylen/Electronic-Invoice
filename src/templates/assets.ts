@@ -12,7 +12,7 @@ import { randomUUID } from 'node:crypto';
 import type { Queryable } from '../db/database.ts';
 
 export const MAX_ASSET_BYTES = 2 * 1024 * 1024;
-export const MAX_ASSETS = 40;
+export const MAX_ASSETS = 150;
 
 export type AssetType = 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp' | 'image/svg+xml';
 const EXTENSIONS: Record<AssetType, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp', 'image/svg+xml': 'svg' };

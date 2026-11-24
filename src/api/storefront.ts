@@ -3,7 +3,13 @@
  * address (slug), and only works while its store is open.
  *
  *   GET  /v1/store/:slug                         store details, delivery zones, payment methods
- *   GET  /v1/store/:slug/products                active products
+ *   GET  /v1/store/:slug/products                active products (q, category, collection, sort, limit, handles, onSale, relatedTo)
+ *   GET  /v1/store/:slug/collections[/:handle]   published collections; one with its products
+ *   POST /v1/store/:slug/contact                 a message from the contact form, emailed to the store
+ *
+ * The store's details include its published site (theme, header, footer,
+ * pages and sections; see src/commerce/site.ts). Staff who can edit the site
+ * may load a closed store with the header X-Site-Preview: 1 (the builder's preview).
  *   GET  /v1/store/:slug/products/:handle        one product with its variants
  *   GET  /v1/store/:slug/images/:id              a product photo (long-cached)
  *   POST /v1/store/:slug/orders/:n/pay?t=        start (or retry) paying an order online → where to send the buyer
@@ -48,6 +54,11 @@ import { formatCents } from '../engine/decimal.ts';
 import { emailLanguage, PHRASES } from '../templates/lang.ts';
 import { addStockAlert, StockAlertError } from '../commerce/stock-alerts.ts';
 import { cardJson, findCard, payingCard } from '../commerce/giftcards.ts';
+import { catalog, type CatalogSort, collectionJson, listCollections, SORTS } from '../commerce/catalog.ts';
+import { customCodeSections, publishedSite } from '../commerce/site.ts';
+import { renderStoreSection } from '../templates/render.ts';
+import { sessionFromRequest } from './auth.ts';
+import { can } from './permissions.ts';
 import { sendDocumentEmail } from './documents.ts';
 
 
@@ -68,10 +79,17 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
   const { db } = deps;
   const slugOf = async (tenantId: string) => (await db.query<{ slug: string }>('select slug from tenants where id = $1', [tenantId])).rows[0]!.slug;
   const gatewaySettings = gatewayOptions(deps, slugOf, payments);
+  // The site builder's preview: staff who can edit the site see their store even while it is closed.
+  const previewing = async (request: FastifyRequest<{ Params: { slug: string } }>) => {
+    if (request.headers['x-site-preview'] !== '1') return false;
+    const session = await sessionFromRequest(deps, request);
+    return Boolean(session && session.business.slug === request.params.slug.toLowerCase() && can(session.user.role, 'business.manage'));
+  };
   // A store on a plan without the online store (after a downgrade) is closed to buyers.
   const store = async (request: FastifyRequest<{ Params: { slug: string } }>) => {
-    const s = await loadStore(db, request.params.slug);
-    if (!hasFeature((await getSubscription(db, s.tenantId)).plan, 'store')) throw new StoreError('store_closed', 'This store is not open right now');
+    const preview = await previewing(request);
+    const s = await loadStore(db, request.params.slug, { requireOpen: !preview });
+    if (!preview && !hasFeature((await getSubscription(db, s.tenantId)).plan, 'store')) throw new StoreError('store_closed', 'This store is not open right now');
     return s;
   };
 
@@ -81,9 +99,16 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
     // On the store's own domain the shop lives at /shop; on ours, at /<slug>/shop.
     const own = ctx.publicUrl ? new URL(ctx.publicUrl).hostname : null;
     const base = own && request.hostname.split(':')[0] !== own ? '/shop' : `/${s.slug}/shop`;
+    const context = await storeContext(db, s.tenantId, { base });
+    // The published site; its custom code sections rendered and cleaned here.
+    const site = await publishedSite(db, s.tenantId);
+    for (const section of customCodeSections(site)) section.settings.html = await renderStoreSection(db, s.tenantId, String(section.settings.code ?? ''), context);
     return {
+      site,
       slug: s.slug,
-      theme: await renderStoreTheme(db, s.tenantId, await storeContext(db, s.tenantId, { base })),
+      theme: await renderStoreTheme(db, s.tenantId, context),
+      email: s.email,
+      street: s.street,
       name: s.name,
       tagline: s.settings.tagline,
       about: s.settings.about,
@@ -102,46 +127,94 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
     };
   });
 
-  app.get<{ Params: { slug: string }; Querystring: { q?: string; category?: string } }>(
+  app.get<{ Params: { slug: string }; Querystring: { q?: string; category?: string; collection?: string; sort?: CatalogSort; limit?: string; handles?: string; onSale?: string; relatedTo?: string } }>(
     '/:slug/products',
-    { schema: { params: { type: 'object', required: ['slug'], properties: slugParams }, querystring: { type: 'object', additionalProperties: false, properties: { q: { type: 'string', maxLength: 100 }, category: { type: 'string', maxLength: 80 } } } } },
+    {
+      schema: {
+        params: { type: 'object', required: ['slug'], properties: slugParams },
+        querystring: {
+          type: 'object', additionalProperties: false,
+          properties: {
+            q: { type: 'string', maxLength: 100 }, category: { type: 'string', maxLength: 80 }, collection: { type: 'string', maxLength: 80 },
+            sort: { type: 'string', enum: SORTS }, limit: { type: 'string', pattern: '^\\d{1,3}$' }, handles: { type: 'string', maxLength: 1200 },
+            onSale: { type: 'string', enum: ['1'] }, relatedTo: { type: 'string', maxLength: 80 },
+          },
+        },
+      },
+    },
     async (request) => {
       const s = await store(request);
-      const params: unknown[] = [s.tenantId];
-      let where = `p.tenant_id = $1 and p.status = 'active'`;
-      if (request.query.q?.trim()) {
-        params.push(`%${request.query.q.trim().replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
-        where += ` and (p.title ilike $${params.length} or p.description ilike $${params.length})`;
-      }
-      // A product's category is its variants' (the items' categories).
-      const category = `(select min(i.category) from items i where i.product_id = p.id and i.archived_at is null and i.category is not null)`;
-      if (request.query.category) {
-        params.push(request.query.category);
-        where += ` and lower(${category}) = lower($${params.length})`;
-      }
-      const rows = (await db.query<{ id: string; handle: string; title: string; image_id: string | null; category: string | null; prices: Array<{ price: string; gst: 'S' | 'Z' | 'E'; stock: number | null }> | null }>(
-        `select p.id, p.handle, p.title, ${category} as category,
-           (select g.id from product_images g where g.product_id = p.id order by g.position, g.created_at limit 1) as image_id,
-           (select json_agg(json_build_object('price', i.unit_price::text, 'gst', i.gst_category, 'stock', i.stock_quantity::float8)) from items i where i.product_id = p.id and i.archived_at is null) as prices
-         from products p where ${where} order by p.created_at desc limit 500`,
-        params,
-      )).rows;
+      const q = request.query;
       return {
-        data: rows.filter((r) => r.prices?.length).map((r) => {
-          const prices = r.prices!.map((x) => priceWithGst(x.price, x.gst)).map(Number);
-          const min = Math.min(...prices);
-          const max = Math.max(...prices);
-          return {
-            handle: r.handle,
-            title: r.title,
-            imageId: r.image_id,
-            price: min.toFixed(2),
-            priceVaries: min !== max,
-            soldOut: r.prices!.every((x) => x.stock !== null && x.stock <= 0),
-            category: r.category,
-          };
+        data: await catalog(db, s.tenantId, {
+          ...(q.q && { q: q.q }), ...(q.category && { category: q.category }), ...(q.collection && { collection: q.collection }), ...(q.sort && { sort: q.sort }),
+          ...(q.limit && { limit: Number(q.limit) }), ...(q.handles !== undefined && { handles: q.handles.split(',').map((h) => h.trim()).filter(Boolean).slice(0, 50) }),
+          ...(q.onSale && { onSale: true }), ...(q.relatedTo && { relatedTo: q.relatedTo }),
         }),
       };
+    },
+  );
+
+  app.get<{ Params: { slug: string } }>('/:slug/collections', { schema: { params: { type: 'object', required: ['slug'], properties: slugParams } } }, async (request) => {
+    const s = await store(request);
+    const rows = await listCollections(db, s.tenantId, { publishedOnly: true });
+    return {
+      data: await Promise.all(rows.map(async (c) => {
+        const j = await collectionJson(db, s.tenantId, c);
+        return { handle: j.handle, title: j.title, description: j.description, image: j.image, productCount: j.productCount };
+      })),
+    };
+  });
+
+  app.get<{ Params: { slug: string; handle: string }; Querystring: { sort?: CatalogSort } }>(
+    '/:slug/collections/:handle',
+    { schema: { params: { type: 'object', required: ['slug', 'handle'], properties: { ...slugParams, handle: { type: 'string', maxLength: 80 } } }, querystring: { type: 'object', additionalProperties: false, properties: { sort: { type: 'string', enum: SORTS } } } } },
+    async (request) => {
+      const s = await store(request);
+      const c = (await listCollections(db, s.tenantId, { publishedOnly: true })).find((x) => x.handle === request.params.handle);
+      if (!c) throw new StoreError('not_found', 'This collection is not available');
+      return {
+        handle: c.handle, title: c.title, description: c.description, image: c.image, seoTitle: c.seo_title, seoDescription: c.seo_description,
+        products: await catalog(db, s.tenantId, { collection: c.handle, ...(request.query.sort && { sort: request.query.sort }) }),
+      };
+    },
+  );
+
+  // A message from the store's contact form, emailed to the store (the buyer's address to reply to).
+  app.post<{ Params: { slug: string }; Body: { name: string; email: string; phone?: string; message: string; website?: string } }>(
+    '/:slug/contact',
+    {
+      schema: {
+        params: { type: 'object', required: ['slug'], properties: slugParams },
+        body: {
+          type: 'object', required: ['name', 'email', 'message'], additionalProperties: false,
+          properties: {
+            name: { type: 'string', minLength: 1, maxLength: 120 },
+            email: { type: 'string', maxLength: 254, pattern: '^[^\\s@,;<>]+@[^\\s@,;<>]+\\.[^\\s@,;<>]+$' },
+            phone: { type: 'string', maxLength: 30 },
+            message: { type: 'string', minLength: 1, maxLength: 4000 },
+            // Left empty by people; filled in by form-filling robots.
+            website: { type: 'string', maxLength: 200 },
+          },
+        },
+      },
+    },
+    async (request) => {
+      const s = await store(request);
+      if (request.body.website) return { sent: true };
+      if (!ctx.mailConfigured) throw new ApiError(503, 'email_unavailable', 'This store cannot receive messages right now; call or message it instead');
+      if (await overLimit(db, `contact|${request.ip}`, 5, HOUR_MS) || await overLimit(db, `contact|${s.tenantId}`, 100, 24 * HOUR_MS)) throw new ApiError(429, 'too_many_requests', 'Too many messages from here; try again later');
+      const b = request.body;
+      const lines = [`From: ${b.name.trim()} <${b.email.trim()}>`, ...(b.phone?.trim() ? [`Phone: ${b.phone.trim()}`] : []), '', b.message.trim()];
+      await ctx.mailer.send({
+        to: s.settings.notifyEmail || s.email,
+        replyTo: b.email.trim(),
+        subject: `Message from your store: ${b.name.trim().slice(0, 60)}`,
+        text: lines.join('\n'),
+        html: simpleHtml({ heading: `A message from ${b.name.trim()}`, paragraphs: lines.filter(Boolean) }),
+      });
+      await audit(db, { tenantId: s.tenantId, action: 'store.contact', target: b.email.trim().toLowerCase(), ip: request.ip });
+      return { sent: true };
     },
   );
 
@@ -150,18 +223,19 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
     { schema: { params: { type: 'object', required: ['slug', 'handle'], properties: { ...slugParams, handle: { type: 'string', maxLength: 80 } } } } },
     async (request) => {
       const s = await store(request);
-      const p = (await db.query<{ id: string; handle: string; title: string; description: string; option1_name: string | null; option2_name: string | null }>(
-        `select id, handle, title, description, option1_name, option2_name from products where tenant_id = $1 and handle = $2 and status = 'active'`, [s.tenantId, request.params.handle],
+      const p = (await db.query<{ id: string; handle: string; title: string; description: string; option1_name: string | null; option2_name: string | null; badge: string | null }>(
+        `select id, handle, title, description, option1_name, option2_name, badge from products where tenant_id = $1 and handle = $2 and status = 'active'`, [s.tenantId, request.params.handle],
       )).rows[0];
       if (!p) throw new StoreError('not_found', 'This product is not available');
-      const variants = (await db.query<{ id: string; option1: string | null; option2: string | null; unit_price: string; gst_category: 'S' | 'Z' | 'E'; stock_quantity: number | null }>(
-        `select id, option1, option2, unit_price::text as unit_price, gst_category, stock_quantity::float8 as stock_quantity from items where product_id = $1 and archived_at is null order by position, created_at`, [p.id],
+      const variants = (await db.query<{ id: string; option1: string | null; option2: string | null; unit_price: string; compare_at_price: string | null; gst_category: 'S' | 'Z' | 'E'; stock_quantity: number | null }>(
+        `select id, option1, option2, unit_price::text as unit_price, compare_at_price::text as compare_at_price, gst_category, stock_quantity::float8 as stock_quantity from items where product_id = $1 and archived_at is null order by position, created_at`, [p.id],
       )).rows;
       const images = (await db.query<{ id: string }>('select id from product_images where product_id = $1 order by position, created_at', [p.id])).rows;
       return {
         handle: p.handle,
         title: p.title,
         description: p.description,
+        badge: p.badge,
         options: [p.option1_name, p.option2_name].filter((x): x is string => Boolean(x)),
         images: images.map((i) => i.id),
         variants: variants.map((v) => ({
@@ -170,6 +244,8 @@ export function registerStorefrontRoutes(app: FastifyInstance, deps: PipelineDep
           option1: v.option1,
           option2: v.option2,
           price: priceWithGst(v.unit_price, v.gst_category),
+          // The "was" price, while it is higher than the price.
+          compareAt: v.compare_at_price && Number(v.compare_at_price) > Number(v.unit_price) ? priceWithGst(v.compare_at_price, v.gst_category) : null,
           available: v.stock_quantity === null || v.stock_quantity > 0,
           // Only say how many are left when it is few.
           left: v.stock_quantity !== null && v.stock_quantity <= 5 ? v.stock_quantity : null,

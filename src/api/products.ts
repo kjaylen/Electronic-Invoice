@@ -38,6 +38,8 @@ interface VariantBody {
   option1?: string | null;
   option2?: string | null;
   price: string;
+  /** The "was" price, before GST; shown crossed out while higher than the price. */
+  compareAtPrice?: string | null;
   gstCategory: 'S' | 'Z' | 'E';
   exemptionReasonCode?: string | null;
   unitCode?: string;
@@ -53,6 +55,8 @@ interface ProductBody {
   status?: 'draft' | 'active' | 'archived';
   option1Name?: string | null;
   option2Name?: string | null;
+  badge?: string | null;
+  tags?: string[];
   variants: VariantBody[];
 }
 
@@ -70,6 +74,8 @@ const productSchema = {
     status: { type: 'string', enum: ['draft', 'active', 'archived'] },
     option1Name: nullableText(40),
     option2Name: nullableText(40),
+    badge: nullableText(30),
+    tags: { type: 'array', maxItems: 30, items: { type: 'string', minLength: 1, maxLength: 40 } },
     variants: {
       type: 'array',
       minItems: 1,
@@ -83,6 +89,7 @@ const productSchema = {
           option1: nullableText(60),
           option2: nullableText(60),
           price: decimal,
+          compareAtPrice: { anyOf: [{ type: 'null' }, decimal] },
           gstCategory: { type: 'string', enum: ['S', 'Z', 'E'] },
           exemptionReasonCode: nullableText(50),
           unitCode: { type: 'string', pattern: '^[A-Z0-9]{1,3}$' },
@@ -103,6 +110,8 @@ interface ProductRow {
   status: string;
   option1_name: string | null;
   option2_name: string | null;
+  badge: string | null;
+  tags: string[];
   created_at: string | Date;
   updated_at: string | Date;
 }
@@ -112,6 +121,7 @@ interface VariantRow {
   option1: string | null;
   option2: string | null;
   unit_price: string;
+  compare_at_price: string | null;
   gst_category: 'S' | 'Z' | 'E';
   exemption_reason_code: string | null;
   unit_code: string;
@@ -128,6 +138,7 @@ const variantJson = (v: VariantRow) => ({
   option2: v.option2,
   price: trimDecimal(v.unit_price),
   priceWithGst: priceWithGst(v.unit_price, v.gst_category),
+  compareAtPrice: v.compare_at_price ? trimDecimal(v.compare_at_price) : null,
   gstCategory: v.gst_category,
   exemptionReasonCode: v.exemption_reason_code,
   unitCode: v.unit_code,
@@ -158,7 +169,7 @@ export async function productDetail(db: Queryable, tenantId: string, id: string)
   const p = (await db.query<ProductRow>('select * from products where id = $1 and tenant_id = $2', [id, tenantId])).rows[0];
   if (!p) throw notFound('Product');
   const variants = (await db.query<VariantRow>(
-    `select id, option1, option2, unit_price::text as unit_price, gst_category, exemption_reason_code, unit_code, seller_code, barcode, stock_quantity::float8 as stock_quantity, position
+    `select id, option1, option2, unit_price::text as unit_price, compare_at_price::text as compare_at_price, gst_category, exemption_reason_code, unit_code, seller_code, barcode, stock_quantity::float8 as stock_quantity, position
      from items where product_id = $1 and tenant_id = $2 and archived_at is null order by position, created_at`,
     [id, tenantId],
   )).rows;
@@ -173,11 +184,19 @@ export async function productDetail(db: Queryable, tenantId: string, id: string)
     status: p.status,
     option1Name: p.option1_name,
     option2Name: p.option2_name,
+    badge: p.badge,
+    tags: p.tags ?? [],
     variants: variants.map(variantJson),
     images: images.map((i) => ({ id: i.id, contentType: i.content_type, bytes: i.bytes })),
     createdAt: new Date(p.created_at).toISOString(),
     updatedAt: new Date(p.updated_at).toISOString(),
   };
+}
+
+/** Tags as typed, without duplicates (ignoring case) or blanks. */
+function cleanTags(tags: string[] | undefined): string[] {
+  const seen = new Set<string>();
+  return (tags ?? []).map((t) => t.trim()).filter((t) => t && !seen.has(t.toLowerCase()) && seen.add(t.toLowerCase()));
 }
 
 function checkVariants(b: ProductBody) {
@@ -199,7 +218,7 @@ async function saveVariants(tx: Queryable, tenantId: string, productId: string, 
   for (const v of b.variants) {
     const vt = variantTitle({ option1: v.option1 ?? null, option2: v.option2 ?? null });
     const name = vt ? `${b.title} – ${vt}` : b.title;
-    const values = [v.option1 || null, v.option2 || null, v.price, v.gstCategory, v.gstCategory === 'E' ? v.exemptionReasonCode ?? null : null, v.unitCode ?? 'H87', v.sellerCode || null, v.barcode || null, position++, name];
+    const values = [v.option1 || null, v.option2 || null, v.price, v.gstCategory, v.gstCategory === 'E' ? v.exemptionReasonCode ?? null : null, v.unitCode ?? 'H87', v.sellerCode || null, v.barcode || null, position++, name, v.compareAtPrice || null];
     let itemId: string;
     let before: string | null = null;
     if (v.id) {
@@ -209,14 +228,14 @@ async function saveVariants(tx: Queryable, tenantId: string, productId: string, 
       before = (await tx.query<{ s: string | null }>('select stock_quantity::text as s from items where id = $1', [v.id])).rows[0]!.s;
       await tx.query(
         `update items set option1 = $3, option2 = $4, unit_price = $5, gst_category = $6, exemption_reason_code = $7, unit_code = $8, seller_code = $9, barcode = $10,
-           position = $11, name = $12, description = $12 where id = $1 and tenant_id = $2`,
+           position = $11, name = $12, description = $12, compare_at_price = $13 where id = $1 and tenant_id = $2`,
         [v.id, tenantId, ...values],
       );
     } else {
       itemId = randomUUID();
       await tx.query(
-        `insert into items (id, tenant_id, product_id, option1, option2, unit_price, gst_category, exemption_reason_code, unit_code, seller_code, barcode, position, name, description)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $13)`,
+        `insert into items (id, tenant_id, product_id, option1, option2, unit_price, gst_category, exemption_reason_code, unit_code, seller_code, barcode, position, name, description, compare_at_price)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $13, $14)`,
         [itemId, tenantId, productId, ...values],
       );
     }
@@ -385,8 +404,8 @@ export function registerProductRoutes(app: FastifyInstance, deps: PipelineDeps, 
     await db.transaction(async (tx) => {
       const handle = await freeHandle(tx, request.tenantId, b.handle ?? b.title);
       await tx.query(
-        'insert into products (id, tenant_id, title, handle, description, status, option1_name, option2_name) values ($1, $2, $3, $4, $5, $6, $7, $8)',
-        [id, request.tenantId, b.title.trim(), handle, b.description ?? '', b.status ?? 'draft', b.option1Name || null, b.option2Name || null],
+        'insert into products (id, tenant_id, title, handle, description, status, option1_name, option2_name, badge, tags) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)',
+        [id, request.tenantId, b.title.trim(), handle, b.description ?? '', b.status ?? 'draft', b.option1Name || null, b.option2Name || null, b.badge?.trim() || null, cleanTags(b.tags)],
       );
       await saveVariants(tx, request.tenantId, id, b, request.userId || null);
     }).catch(barcodeConflict);
@@ -405,8 +424,8 @@ export function registerProductRoutes(app: FastifyInstance, deps: PipelineDeps, 
         if (!current) throw notFound('Product');
         const handle = b.handle && b.handle !== current.handle ? await freeHandle(tx, request.tenantId, b.handle, request.params.id) : current.handle;
         await tx.query(
-          `update products set title = $3, handle = $4, description = $5, status = $6, option1_name = $7, option2_name = $8, updated_at = now() where id = $1 and tenant_id = $2`,
-          [request.params.id, request.tenantId, b.title.trim(), handle, b.description ?? '', b.status ?? 'draft', b.option1Name || null, b.option2Name || null],
+          `update products set title = $3, handle = $4, description = $5, status = $6, option1_name = $7, option2_name = $8, badge = $9, tags = coalesce($10, tags), updated_at = now() where id = $1 and tenant_id = $2`,
+          [request.params.id, request.tenantId, b.title.trim(), handle, b.description ?? '', b.status ?? 'draft', b.option1Name || null, b.option2Name || null, b.badge?.trim() || null, b.tags ? cleanTags(b.tags) : null],
         );
         await saveVariants(tx, request.tenantId, request.params.id, b, request.userId || null);
       }).catch(barcodeConflict);

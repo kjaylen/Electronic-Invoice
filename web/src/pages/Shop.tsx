@@ -8,7 +8,10 @@
 
 import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { Link, Outlet, useLocation, useNavigate, useOutletContext, useParams, useSearchParams } from 'react-router';
-import { api, ApiError, type PaymentMethod } from '../api';
+import { api, ApiError, type PaymentMethod, setSitePreview } from '../api';
+import { CollectionTiles, imageSrc, MenuLinks, ProductCardView, ProductGrid, RelatedProducts, RichText, Sections, SiteIcon, SiteLinkEl, type SiteContext, useCatalogParams, useCollections, type ProductCard as SiteProductCard } from '../site/sections';
+import { FONT_FAMILIES, loadFonts, themeCss } from '../site/theme';
+import type { SiteDoc } from '../site/types';
 import { BUSINESS } from '../business';
 import { LanguageToggle, useT } from '../i18n';
 import { PROVIDER_NOTE, WalletPay, type WalletInfo } from '../wallet';
@@ -35,7 +38,14 @@ interface StoreInfo {
   accounts?: boolean;
   /** The business's theme (Settings, Templates), rendered and sanitized by the server. Empty strings: none. */
   theme?: StoreTheme;
+  /** The published site (the site builder). */
+  site?: SiteDoc;
+  email?: string;
+  street?: string;
 }
+
+/** What pages get from the layout: the store, its theme, the site (or the builder's draft in the preview), and the context sections need. */
+type ShopContext = StoreInfo & { theme: StoreTheme; site: SiteDoc; siteCtx: SiteContext };
 
 interface StoreTheme { css: string; announcement: string; home: string; footer: string }
 const NO_THEME: StoreTheme = { css: '', announcement: '', home: '', footer: '' };
@@ -48,6 +58,8 @@ interface ProductCard {
   priceVaries: boolean;
   soldOut: boolean;
   category?: string | null;
+  compareAt?: string | null;
+  badge?: string | null;
 }
 
 interface ProductPage {
@@ -56,7 +68,8 @@ interface ProductPage {
   description: string;
   options: string[];
   images: string[];
-  variants: Array<{ id: string; title: string | null; option1: string | null; option2: string | null; price: string; available: boolean; left: number | null }>;
+  badge?: string | null;
+  variants: Array<{ id: string; title: string | null; option1: string | null; option2: string | null; price: string; compareAt?: string | null; available: boolean; left: number | null }>;
 }
 
 const slug = BUSINESS ?? '';
@@ -196,6 +209,44 @@ function ThemeSection({ html, className }: { html: string; className: string }) 
   return <div className={`theme-section ${className}`} onClick={onClick} dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
+// ---------- the site builder's preview ----------
+
+/** Opened by the site builder (a frame with ?site-preview): show its draft, and tell it what is clicked. */
+const SITE_PREVIEW = typeof window !== 'undefined' && window.parent !== window && new URLSearchParams(window.location.search).has('site-preview');
+if (SITE_PREVIEW) setSitePreview(true);
+
+function useSitePreview(): SiteDoc | null {
+  const [site, setSite] = useState<SiteDoc | null>(null);
+  const navigate = useNavigate();
+  const location = useLocation();
+  useEffect(() => {
+    if (!SITE_PREVIEW) return;
+    const onMessage = (e: MessageEvent) => {
+      if (e.origin !== window.location.origin || e.source !== window.parent) return;
+      const data = e.data as { type?: string; site?: SiteDoc; path?: string; id?: string };
+      if (data?.type === 'site-preview' && data.site) setSite(data.site);
+      if (data?.type === 'site-navigate' && typeof data.path === 'string' && data.path.startsWith('/shop')) navigate(data.path);
+      if (data?.type === 'site-highlight' && data.id) {
+        const el = document.querySelector<HTMLElement>(`[data-section-id="${CSS.escape(data.id)}"]`);
+        document.querySelectorAll('.site-section.selected').forEach((x) => x.classList.remove('selected'));
+        if (el) {
+          el.classList.add('selected');
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }
+    };
+    window.addEventListener('message', onMessage);
+    window.parent.postMessage({ type: 'site-ready' }, window.location.origin);
+    return () => window.removeEventListener('message', onMessage);
+  }, [navigate]);
+  useEffect(() => {
+    if (SITE_PREVIEW) window.parent.postMessage({ type: 'site-location', path: location.pathname }, window.location.origin);
+  }, [location.pathname]);
+  return site;
+}
+
+const SOCIAL: Array<[keyof SiteDoc['social'], string]> = [['facebook', 'Facebook'], ['instagram', 'Instagram'], ['tiktok', 'TikTok'], ['youtube', 'YouTube'], ['x', 'X']];
+
 // ---------- layout ----------
 
 export function ShopLayout() {
@@ -205,8 +256,17 @@ export function ShopLayout() {
   const { count } = useCart();
   const location = useLocation();
   const preview = useThemePreview();
+  const draft = useSitePreview();
+  const [menuOpen, setMenuOpen] = useState(false);
   const theme = useMemo(() => ({ ...NO_THEME, ...info?.theme, ...preview }), [info, preview]);
-  const outlet = useMemo(() => info && { ...info, theme }, [info, theme]);
+  const site = draft ?? info?.site ?? null;
+  const css = useMemo(() => (site ? themeCss(site.theme, FONT_FAMILIES) : ''), [site]);
+  const siteCtx = useMemo<SiteContext | null>(() => info && {
+    slug: info.slug, name: info.name, city: info.city, telephone: info.telephone, street: info.street, whatsapp: info.whatsapp,
+    delivery: info.delivery, pickup: info.pickup, preview: SITE_PREVIEW,
+    templateSection: theme.home ? <ThemeSection html={theme.home} className="shop-home-section" /> : null,
+  }, [info, theme.home]);
+  const outlet = useMemo(() => info && site && siteCtx && { ...info, theme, site, siteCtx }, [info, theme, site, siteCtx]);
   useEffect(() => {
     void api<StoreInfo>(shopApi('')).then(setInfo).catch(setError);
   }, []);
@@ -216,7 +276,23 @@ export function ShopLayout() {
   }, [info?.accounts]);
   useEffect(() => {
     window.scrollTo({ top: 0 });
+    setMenuOpen(false);
   }, [location.pathname]);
+  useEffect(() => {
+    if (site) loadFonts([site.theme.fonts.heading, site.theme.fonts.body]);
+  }, [site]);
+  // The store's own icon in the browser tab.
+  useEffect(() => {
+    const src = site ? imageSrc(site.theme.favicon, info?.slug ?? '') : null;
+    if (!src) return;
+    const link = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
+    if (!link) return;
+    const before = link.href;
+    link.href = src;
+    return () => {
+      link.href = before;
+    };
+  }, [site, info?.slug]);
 
   if (error) {
     const closed = error instanceof ApiError && (error.code === 'store_closed' || error.status === 404);
@@ -226,31 +302,70 @@ export function ShopLayout() {
       </div>
     );
   }
+  const logo = site ? imageSrc(site.theme.logo, info?.slug ?? '') : null;
+  const announcement = site?.header.announcement;
+  const menu = site?.header.menu ?? [];
+  const social = site ? SOCIAL.filter(([k]) => site.social[k]) : [];
+  const wa = whatsappNumber(info?.whatsapp ?? null);
+  const ways = info ? [info.payments.bankTransfer && t('Bank transfer'), info.payments.cashOnDelivery && t('Cash on delivery'), info.payments.payAtPickup && t('Pay at pickup'), info.payments.online && t('Card or PayPal online')].filter(Boolean) : [];
   return (
-    <div className="shop">
+    <div className={`shop ${site ? `site-spacing-${site.theme.spacing}` : ''}`}>
+      {css && <style data-theme="site">{css}</style>}
       {theme.css && <style data-theme="store">{theme.css}</style>}
+      {announcement?.enabled && announcement.text && (
+        <div className={`site-announcement tone-${announcement.style}`}>
+          {announcement.link ? <SiteLinkEl link={announcement.link}>{announcement.text}</SiteLinkEl> : announcement.text}
+        </div>
+      )}
       <ThemeSection html={theme.announcement} className="shop-announcement" />
       {info?.test && <div className="shop-test" role="note">{t('Test store: orders are not real and receipts have no fiscal value.')}</div>}
-      <header className="shop-header">
+      <header className={`shop-header layout-${site?.theme.headerLayout ?? 'left'} ${site && !site.header.sticky ? 'not-sticky' : ''}`}>
+        {menu.length > 0 && <button type="button" className="icon-button site-menu-toggle" aria-label={t('Menu')} aria-expanded={menuOpen} onClick={() => setMenuOpen((o) => !o)}>{menuOpen ? '✕' : '☰'}</button>}
         <Link to="/shop" className="shop-brand" viewTransition>
-          <span className="shop-name">{info?.name ?? ' '}</span>
-          {info?.tagline && <span className="shop-tagline">{info.tagline}</span>}
+          {logo ? <img className="site-logo" src={logo} alt={info?.name ?? ''} style={{ height: site!.theme.logoHeight }} /> : (
+            <>
+              <span className="shop-name">{info?.name ?? ' '}</span>
+              {info?.tagline && <span className="shop-tagline">{info.tagline}</span>}
+            </>
+          )}
         </Link>
+        {menu.length > 0 && <nav className="site-nav" aria-label={t('Store menu')}><MenuLinks items={menu} /></nav>}
         <span className="spacer" />
+        {site?.header.showSearch && <Link to="/shop/all" className="site-search-link" aria-label={t('Search the store')} viewTransition><SiteIcon name="search" /></Link>}
         <LanguageToggle />
         {info?.accounts && <Link to="/shop/account" className="shop-account-link" viewTransition>{account ? t('Account') : t('Sign in')}</Link>}
         <Link to="/shop/cart" className="button cart-button" viewTransition aria-label={t('Cart, {n} items', { n: count })}>
           {t('Cart')}<span className="chip" aria-hidden="true">{count}</span>
         </Link>
       </header>
+      {menuOpen && menu.length > 0 && <nav className="site-drawer" aria-label={t('Store menu')}><MenuLinks items={menu} onNavigate={() => setMenuOpen(false)} /></nav>}
       <main className="shop-main" id="main">
         <div className="page" key={location.pathname}>
           {outlet ? <Outlet context={outlet} /> : <div className="shop-grid">{[0, 1, 2, 3].map((i) => <div key={i} className="skeleton" style={{ height: '16rem' }} />)}</div>}
         </div>
       </main>
-      <footer className="shop-footer">
-        {info?.about && <p>{info.about}</p>}
-        <p className="small">{info?.city && `${info.city} · `}{info?.telephone}{info?.whatsapp && <> · <a href={`https://wa.me/${whatsappNumber(info.whatsapp) ?? ''}`} target="_blank" rel="noreferrer">WhatsApp</a></>}</p>
+      <footer className="shop-footer site-footer">
+        <div className="site-footer-grid">
+          <div className="site-footer-about stack">
+            <strong className="site-footer-name">{info?.name}</strong>
+            {site ? site.footer.text && <RichText text={site.footer.text} /> : info?.about && <p>{info.about}</p>}
+            {(!site || site.footer.showContact) && (
+              <p className="small">{info?.city && `${info.city} · `}{info?.telephone}{site?.footer.showContact && info?.email && <> · <a href={`mailto:${info.email}`}>{info.email}</a></>}{wa && <> · <a href={`https://wa.me/${wa}`} target="_blank" rel="noreferrer">WhatsApp</a></>}</p>
+            )}
+            {site?.footer.showSocial && social.length > 0 && (
+              <div className="site-social">
+                {social.map(([k, label]) => <a key={k} href={site.social[k]} target="_blank" rel="noreferrer" aria-label={label}><SiteIcon name={k} /></a>)}
+              </div>
+            )}
+          </div>
+          {site?.footer.columns.map((col) => (
+            <div key={col.id} className="site-footer-col">
+              {col.title && <h2 className="site-footer-title">{col.title}</h2>}
+              <ul>{col.links.map((l) => <li key={l.id}><SiteLinkEl link={l.link}>{l.label}</SiteLinkEl></li>)}</ul>
+            </div>
+          ))}
+        </div>
+        {site?.footer.showPayments && ways.length > 0 && <p className="small site-payments">{t('We accept')}: {ways.join(' · ')}</p>}
         <ThemeSection html={theme.footer} className="shop-footer-section" />
         <p className="small muted">{t('Every purchase comes with a receipt authorized by the Belize Tax Service.')} · Floreo</p>
       </footer>
@@ -258,55 +373,99 @@ export function ShopLayout() {
   );
 }
 
-const useStoreInfo = () => useOutletContext<StoreInfo>();
+const useStoreInfo = () => useOutletContext<ShopContext>();
 
 // ---------- pages ----------
 
 export function ShopHome() {
-  const t = useT();
   const info = useStoreInfo();
   usePageTitle(info.tagline ? info.tagline : '', info.name);
-  const [products, setProducts] = useState<ProductCard[] | null>(null);
-  const [q, setQ] = useState('');
-  // Browse by category (the items' categories), when the store uses them.
-  const [category, setCategory] = useState<string | null>(null);
-  const categories = [...new Set((products ?? []).map((p) => p.category).filter((c): c is string => Boolean(c)))].sort((a, b) => a.localeCompare(b));
-  const shown = (products ?? []).filter((p) => !category || p.category === category);
-  useEffect(() => {
-    const timer = setTimeout(() => void api<{ data: ProductCard[] }>(shopApi(`/products${q.trim() ? `?q=${encodeURIComponent(q.trim())}` : ''}`)).then((r) => setProducts(r.data)), q ? 250 : 0);
-    return () => clearTimeout(timer);
-  }, [q]);
+  return <div className="stack site-page"><Sections sections={info.site.home.sections} ctx={info.siteCtx} firstIsTitle /></div>;
+}
+
+/** /shop/all: every product, with search and categories (?q=, ?category=). */
+export function ShopCatalog() {
+  const t = useT();
+  const info = useStoreInfo();
+  usePageTitle(t('All products'), info.name);
+  const initial = useCatalogParams();
+  return <div className="stack site-page"><ProductGrid key={`${initial.q}|${initial.category ?? ''}`} settings={{ showSearch: true, showCategories: true, columns: 4 }} ctx={info.siteCtx} title={t('All products')} initial={initial} /></div>;
+}
+
+/** /shop/collections: every published collection. */
+export function ShopCollections() {
+  const t = useT();
+  const info = useStoreInfo();
+  usePageTitle(t('Collections'), info.name);
+  const collections = useCollections(info.slug);
   return (
-    <div className="stack">
-      <div className="shop-hero">
-        <h1>{info.name}</h1>
-        {info.tagline && <p>{info.tagline}</p>}
-        <div className="shop-perks small">
-          {info.delivery.enabled && <span>{t('Delivery')}{info.delivery.zones.length > 0 && `: ${info.delivery.zones.map((z) => z.name).join(', ')}`}</span>}
-          {info.pickup.enabled && <span>{t('Pickup in {city}', { city: info.city })}</span>}
+    <div className="stack site-page">
+      <h1>{t('Collections')}</h1>
+      {collections === null ? <div className="skeleton" style={{ height: '14rem' }} /> : collections.length === 0 ? <div className="shop-empty"><p className="muted">{t('No collections yet.')}</p><Link className="button" to="/shop/all">{t('See all products')}</Link></div> : <CollectionTiles collections={collections} ctx={info.siteCtx} columns={3} />}
+    </div>
+  );
+}
+
+interface CollectionPage { handle: string; title: string; description: string; image: string | null; products: SiteProductCard[] }
+
+/** /shop/collections/:handle: a collection and its products, in the order chosen (or another). */
+export function ShopCollection() {
+  const t = useT();
+  const info = useStoreInfo();
+  const { handle } = useParams();
+  const [sort, setSort] = useState('');
+  const [c, setC] = useState<CollectionPage | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  usePageTitle(c?.title ?? '', info.name);
+  useEffect(() => {
+    void api<CollectionPage>(shopApi(`/collections/${handle}${sort ? `?sort=${sort}` : ''}`)).then(setC).catch(setError);
+  }, [handle, sort]);
+  if (error) return <div className="shop-empty"><h1>{t('This collection is not available')}</h1><Link className="button" to="/shop">{t('Back to the store')}</Link></div>;
+  if (!c) return <div className="skeleton" style={{ height: '20rem' }} />;
+  const src = imageSrc(c.image, info.slug);
+  return (
+    <div className="stack site-page">
+      <div className={`site-collection-head ${src ? 'with-image' : ''}`}>
+        {src && <img src={src} alt="" />}
+        <div className="stack">
+          <h1>{c.title}</h1>
+          {c.description && <RichText text={c.description} />}
         </div>
       </div>
-      <ThemeSection html={info.theme?.home ?? ''} className="shop-home-section" />
-      <input type="search" className="shop-search" placeholder={t('Search the store')} aria-label={t('Search the store')} value={q} onChange={(e) => setQ(e.target.value)} />
-      {categories.length > 1 && (
-        <div className="quick-tabs shop-categories" role="group" aria-label={t('Categories')}>
-          <button type="button" aria-pressed={category === null} onClick={() => setCategory(null)}>{t('Everything')}</button>
-          {categories.map((c) => <button key={c} type="button" aria-pressed={category === c} onClick={() => setCategory(c)}>{c}</button>)}
-        </div>
+      <div className="row">
+        <span className="small muted">{c.products.length === 1 ? t('1 product') : t('{n} products', { n: c.products.length })}</span>
+        <span className="spacer" />
+        <label className="row small site-sort">{t('Sort')}
+          <select value={sort} onChange={(e) => setSort(e.target.value)}>
+            <option value="">{t('Featured')}</option>
+            <option value="newest">{t('Newest first')}</option>
+            <option value="price_asc">{t('Price, low to high')}</option>
+            <option value="price_desc">{t('Price, high to low')}</option>
+            <option value="title">{t('Name, A to Z')}</option>
+            <option value="best_selling">{t('Best selling')}</option>
+          </select>
+        </label>
+      </div>
+      {c.products.length === 0 ? <div className="shop-empty"><p className="muted">{t('Nothing here yet.')}</p></div> : (
+        <div className="shop-grid site-grid" style={{ '--columns': '4' } as React.CSSProperties}>{c.products.map((p) => <ProductCardView key={p.handle} p={p} slug={info.slug} />)}</div>
       )}
-      {products === null ? <div className="shop-grid">{[0, 1, 2, 3].map((i) => <div key={i} className="skeleton" style={{ height: '16rem' }} />)}</div> : shown.length === 0 ? (
-        <div className="shop-empty"><p className="muted">{q ? t('Nothing matches your search.') : t('No products yet. Check back soon.')}</p></div>
-      ) : (
-        <div className="shop-grid">
-          {shown.map((p) => (
-            <Link key={p.handle} to={`/shop/products/${p.handle}`} className={`shop-card ${p.soldOut ? 'sold-out' : ''}`} viewTransition>
-              <div className="shop-thumb">{p.imageId ? <img src={imageUrl(p.imageId)} alt="" loading="lazy" /> : <span aria-hidden="true">◇</span>}{p.soldOut && <span className="sold-tag">{t('Sold out')}</span>}</div>
-              <span className="shop-card-title">{p.title}</span>
-              <span className="shop-price num">{p.priceVaries ? t('From {price}', { price: money(p.price) }) : money(p.price)}</span>
-            </Link>
-          ))}
-        </div>
-      )}
+    </div>
+  );
+}
+
+/** /shop/pages/:slug: a page the business made in the site builder. */
+export function ShopPage() {
+  const t = useT();
+  const info = useStoreInfo();
+  const { slug: pageSlug } = useParams();
+  const page = info.site.pages.find((x) => x.slug === pageSlug);
+  usePageTitle(page ? page.seoTitle || page.title : '', info.name);
+  if (!page) return <div className="shop-empty"><h1>{t('This page is not available')}</h1><Link className="button" to="/shop">{t('Back to the store')}</Link></div>;
+  const opensWithTitle = ['hero', 'rich_text', 'image_with_text'].includes(page.sections.find((x) => !x.hidden)?.type ?? '');
+  return (
+    <div className="stack site-page">
+      {!opensWithTitle && <h1>{page.title}</h1>}
+      <Sections sections={page.sections} ctx={info.siteCtx} firstIsTitle={opensWithTitle} />
     </div>
   );
 }
@@ -322,7 +481,8 @@ export function ShopProduct() {
   const [photo, setPhoto] = useState(0);
   const [quantity, setQuantity] = useState(1);
   const [added, setAdded] = useState(false);
-  usePageTitle(p?.title ?? '', useStoreInfo().name);
+  const info = useStoreInfo();
+  usePageTitle(p?.title ?? '', info.name);
   useEffect(() => {
     void api<ProductPage>(shopApi(`/products/${handle}`)).then((r) => {
       setP(r);
@@ -355,8 +515,9 @@ export function ShopProduct() {
       </div>
       <div className="stack buy">
         <Link to="/shop" className="small" viewTransition>← {t('All products')}</Link>
+        {p.badge && <span className="site-badge-inline">{p.badge}</span>}
         <h1>{p.title}</h1>
-        <p className="shop-price big num">{variant ? money(variant.price) : '—'}</p>
+        <p className="shop-price big num">{variant ? money(variant.price) : '—'}{variant?.compareAt && <s className="was-price">{money(variant.compareAt)}</s>}{variant?.compareAt && <span className="site-save">{t('Save {amount}', { amount: money((Number(variant.compareAt) - Number(variant.price)).toFixed(2)) })}</span>}</p>
         <p className="small muted">{t('GST included')}</p>
         {p.options.map((name, i) => (
           <fieldset key={name} className="plain option-picker">
@@ -393,6 +554,11 @@ export function ShopProduct() {
           </div>
         )}
         {p.description && <div className="description">{p.description.split(/\n{2,}/).map((para, i) => <p key={i}>{para}</p>)}</div>}
+      </div>
+      {/* The site's sections for every product page, then related products. */}
+      <div className="site-product-extras">
+        <Sections sections={info.site.product.sections} ctx={info.siteCtx} />
+        {info.site.product.showRelated && <RelatedProducts title={info.site.product.relatedTitle} handle={p.handle} ctx={info.siteCtx} />}
       </div>
     </div>
   );

@@ -266,6 +266,16 @@ export async function renderStoreTheme(db: Queryable, tenantId: string, context:
 /** A store section as the store will show it (for the editor's preview). */
 export const sanitizeSection = (html: string) => sanitizeHtml(html, SECTION_HTML);
 
+/** A site builder custom code section: its Liquid rendered with the store's context, then cleaned like the theme's sections. */
+export async function renderStoreSection(db: Queryable, tenantId: string, source: string, context: Record<string, unknown>): Promise<string> {
+  try {
+    const ctx = withAssets(context, await assetMap(db, tenantId, [source], { kind: 'url' }));
+    return sanitizeHtml(await renderHtml(source, ctx), SECTION_HTML).trim();
+  } catch {
+    return '';
+  }
+}
+
 /** What store templates see: the store and its newest products (prices with GST). */
 export async function storeContext(db: Queryable, tenantId: string, options: { base?: string } = {}): Promise<Record<string, unknown>> {
   const t = (await db.query<{ slug: string; name: string; telephone: string; email: string; city: string; store_settings: { tagline?: string; about?: string } | null }>(
