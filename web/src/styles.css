@@ -2554,6 +2554,25 @@ main:has(.site-editor) { max-width: none; padding: 0.75rem 1rem 0.75rem; }
 .guide-row { gap: 0.5rem; flex-wrap: wrap; align-items: center; }
 .guide-row input { flex: 1; min-width: 12rem; max-width: 20rem; }
 
+/* /docs: the guides for a site built elsewhere (web/src/pages/DocsGuides.tsx). */
+.doc-guide h3 { margin: 1.25rem 0 0.35rem; font-size: 1rem; }
+.doc-guide h3 code { font-size: 0.95em; }
+.doc-steps, .doc-list { margin: 0.5rem 0; padding-left: 1.3rem; display: grid; gap: 0.5rem; }
+.doc-sample { margin: 0.75rem 0; }
+.doc-sample-head { padding: 0.4rem 0.4rem 0.4rem 1rem; background: #2a1d3a; color: #efe6fa; border-radius: var(--radius) var(--radius) 0 0; min-height: 2.4rem; }
+.doc-sample-head .small-button { background: transparent; color: #efe6fa; border-color: rgba(239, 230, 250, 0.35); }
+.doc-sample .doc-code { margin: 0; border-radius: 0 0 var(--radius) var(--radius); max-height: 30rem; overflow: auto; }
+.doc-answer { max-height: 22rem; overflow: auto; background: var(--sheet-2); color: var(--ink); border: 1px solid var(--hairline); }
+.doc-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+.doc-table th { text-align: left; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); padding: 0.4rem 0.75rem 0.4rem 0; border-bottom: 1px solid var(--hairline-strong); }
+.doc-table td { padding: 0.45rem 0.75rem 0.45rem 0; border-bottom: 1px solid var(--hairline); vertical-align: top; }
+.doc-table td:first-child { white-space: nowrap; }
+@media (max-width: 640px) { .doc-table td:first-child { white-space: normal; overflow-wrap: anywhere; } }
+.doc-events { display: grid; gap: 0.35rem; }
+.doc-events details { border: 1px solid var(--hairline); border-radius: var(--radius); background: var(--sheet); }
+.doc-events summary { padding: 0.5rem 0.8rem; cursor: pointer; }
+.doc-events .doc-sample { margin: 0 0.6rem 0.6rem; }
+
 /* Settings → Developers (web/src/pages/Developers.tsx): the connect guide, keys, and the logs. */
 .dev-head { flex-wrap: wrap; gap: 0.75rem; }
 .dev-title { display: grid; gap: 0.25rem; }

@@ -1,7 +1,9 @@
 /**
- * /docs: the API reference, rendered from /v1/openapi.json (which the server
- * builds from its own route schemas), with guides for authentication,
- * errors, idempotency, rate limits and webhook signatures.
+ * /docs: for people building on Floreo. Guides for a site built elsewhere
+ * (DocsGuides.tsx, from the examples the tests run), then the API reference,
+ * rendered from /v1/openapi.json (which the server builds from its own route
+ * schemas): every endpoint with what it takes and an example of what it
+ * answers, the webhook events with a sample each, and the error codes.
  */
 
 import { type ReactNode, useEffect, useMemo, useState } from 'react';
@@ -10,6 +12,7 @@ import { api } from '../api';
 import { Brand } from '../art';
 import { LanguageToggle, useT } from '../i18n';
 import { usePageTitle } from '../ui';
+import { guideLinks, Sample, StoreGuides } from './DocsGuides';
 
 type Schema = {
   type?: string | string[];
@@ -33,7 +36,14 @@ interface Operation {
   summary: string;
   operationId: string;
   parameters: Array<{ name: string; in: 'path' | 'query' | 'header'; required: boolean; schema: Schema; description?: string }>;
-  requestBody?: { content: { 'application/json': { schema: Schema } } };
+  requestBody?: { content: { 'application/json': { schema: Schema; example?: unknown } } };
+  responses?: Record<string, { content?: { 'application/json'?: { example?: unknown } } }>;
+}
+
+interface StoreError {
+  code: string;
+  status: number;
+  meaning: string;
 }
 
 interface Spec {
@@ -41,6 +51,8 @@ interface Spec {
   servers: Array<{ url: string }>;
   tags: Array<{ name: string; description: string }>;
   paths: Record<string, Record<string, Operation>>;
+  webhooks?: Record<string, { post: { requestBody: { content: { 'application/json': { example: unknown } } } } }>;
+  'x-store-errors'?: StoreError[];
 }
 
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
@@ -129,11 +141,14 @@ function example(s: Schema, depth = 0): unknown {
 }
 
 function Curl({ method, path, op, server }: { method: string; path: string; op: Operation; server: string }) {
-  const base = server === '/' ? 'https://app.example.bz' : server.replace(/\/$/, '');
-  const body = op.requestBody ? (method === 'post' && path === '/v1/documents' ? ISSUE_EXAMPLE : example(op.requestBody.content['application/json'].schema)) : null;
+  const base = server.replace(/\/$/, '');
+  const json = op.requestBody?.content['application/json'];
+  const body = json ? (method === 'post' && path === '/v1/documents' ? ISSUE_EXAMPLE : json.example ?? example(json.schema)) : null;
+  // The store API takes a publishable key (or none, from a server); the rest takes a secret key.
+  const key = path.startsWith('/v1/store/') ? 'pk_test_…' : 'etd_…';
   const lines = [
     `curl -X ${method.toUpperCase()} '${base}${path.replace(/\{(\w+)\}/g, ':$1')}' \\`,
-    `  -H 'Authorization: Bearer etd_…'${body ? ' \\' : ''}`,
+    `  -H 'Authorization: Bearer ${key}'${body ? ' \\' : ''}`,
     ...(body ? [`  -H 'Content-Type: application/json' \\`, `  -d '${JSON.stringify(body, null, 2).replace(/\n/g, '\n     ')}'`] : []),
   ];
   return <pre className="doc-code">{lines.join('\n')}</pre>;
@@ -173,6 +188,9 @@ export function Docs() {
     })).filter((g) => g.ops.length);
   }, [spec, q]);
   const guides = spec ? [...spec.info.description.matchAll(/^## (.+)$/gm)].map((m) => m[1]!) : [];
+  const server = !spec || (spec.servers[0]?.url ?? '/') === '/' ? window.location.origin : spec.servers[0]!.url.replace(/\/$/, '');
+  const events = Object.entries(spec?.webhooks ?? {});
+  const storeErrors = spec?.['x-store-errors'] ?? [];
 
   return (
     <div className="docs-page">
@@ -186,12 +204,16 @@ export function Docs() {
       <div className="docs-body">
         <nav className="docs-nav" aria-label={t('API reference')}>
           <input type="search" placeholder={t('Search endpoints')} aria-label={t('Search endpoints')} value={q} onChange={(e) => setQ(e.target.value)} />
+          <span className="docs-nav-head">{t('Your own site')}</span>
+          {guideLinks(t).map(([id, title]) => <a key={id} href={`#${id}`}>{title}</a>)}
           <span className="docs-nav-head">{t('Guides')}</span>
           {guides.map((g) => <a key={g} href={`#${slug(g)}`}>{g}</a>)}
           <a href="#verify-signatures">{t('Checking signatures')}</a>
+          {events.length > 0 && <a href="#events">{t('Webhook events')}</a>}
+          {storeErrors.length > 0 && <a href="#error-codes">{t('Error codes')}</a>}
           {groups.map((g) => (
             <div key={g.tag.name}>
-              <a className="docs-nav-head" href={`#${slug(g.tag.name)}`}>{g.tag.name}</a>
+              <a className="docs-nav-head" href={`#api-${slug(g.tag.name)}`}>{g.tag.name}</a>
               {g.ops.map((o) => <a key={o.op.operationId} href={`#${o.op.operationId}`} className="docs-nav-op"><span className={`method ${o.method}`}>{o.method.toUpperCase()}</span>{o.path.replace('/v1', '')}</a>)}
             </div>
           ))}
@@ -201,14 +223,41 @@ export function Docs() {
           {!spec ? !error && <div className="skeleton" style={{ height: '20rem' }} /> : (
             <>
               <h1>{spec.info.title}</h1>
+              <StoreGuides server={server} />
               <Markdown text={spec.info.description} />
               <section id="verify-signatures" className="doc-guide">
                 <h2>{t('Checking signatures')}</h2>
                 <p>{t('In Node.js (the same idea in any language): recompute the HMAC of "<t>.<raw body>" with your secret and compare in constant time.')}</p>
                 <pre className="doc-code">{NODE_VERIFY}</pre>
               </section>
+              {events.length > 0 && (
+                <section id="events" className="doc-guide">
+                  <h2>{t('Webhook events')}</h2>
+                  <p>{t('Every event, with a sample of the delivery’s body. “Send a test” in Settings → Developers → Webhooks delivers these same samples to your endpoint, marked "test": true.')}</p>
+                  <div className="doc-events">
+                    {events.map(([type, hook]) => (
+                      <details key={type}>
+                        <summary><code>{type}</code></summary>
+                        <Sample code={JSON.stringify(hook.post.requestBody.content['application/json'].example, null, 2)} />
+                      </details>
+                    ))}
+                  </div>
+                </section>
+              )}
+              {storeErrors.length > 0 && (
+                <section id="error-codes" className="doc-guide">
+                  <h2>{t('Error codes')}</h2>
+                  <p>{t('What the store API answers when it refuses a request, and what to do about each. The answer’s message says the same in words, for the request at hand.')}</p>
+                  <div className="table-wrap">
+                    <table className="doc-table">
+                      <thead><tr><th scope="col">{t('Code')}</th><th scope="col">{t('Status')}</th><th scope="col">{t('What it means, and what to do')}</th></tr></thead>
+                      <tbody>{storeErrors.map((e) => <tr key={e.code}><td><code>{e.code}</code></td><td>{e.status}</td><td>{e.meaning}</td></tr>)}</tbody>
+                    </table>
+                  </div>
+                </section>
+              )}
               {groups.map((g) => (
-                <section key={g.tag.name} id={slug(g.tag.name)} className="doc-tag">
+                <section key={g.tag.name} id={`api-${slug(g.tag.name)}`} className="doc-tag">
                   <h2>{g.tag.name}</h2>
                   <p className="muted">{g.tag.description}</p>
                   {g.ops.map(({ path, method, op }) => (
@@ -237,7 +286,13 @@ export function Docs() {
                           <Fields schema={op.requestBody.content['application/json'].schema} />
                         </>
                       )}
-                      <Curl method={method} path={path} op={op} server={spec.servers[0]?.url ?? '/'} />
+                      <Curl method={method} path={path} op={op} server={server} />
+                      {Object.values(op.responses ?? {})[0]?.content?.['application/json']?.example !== undefined && (
+                        <>
+                          <h4>{t('Answer')}</h4>
+                          <pre className="doc-code doc-answer" tabIndex={0}>{JSON.stringify(Object.values(op.responses!)[0]!.content!['application/json']!.example, null, 2)}</pre>
+                        </>
+                      )}
                     </article>
                   ))}
                 </section>

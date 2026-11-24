@@ -131,3 +131,25 @@ test('the React example: products, the cart priced by the store, an order', asyn
   await expect(page.getByRole('link', { name: 'See your order' })).toHaveAttribute('href', new RegExp(`^${floreo}/${SLUG}/shop/orders/\\d+\\?t=`));
   expect(errors).toEqual([]);
 });
+
+test('the reference shows these same files, and what the store API answers', async ({ page }) => {
+  await page.goto('/docs');
+  const shown = async (within: string, name: string) => (await page.locator(`${within} .doc-sample`, { has: page.locator('.doc-sample-head', { hasText: name }) }).locator('pre').evaluate((el) => el.textContent ?? '')).replaceAll('\r\n', '\n');
+  const file = (path: string) => readFileSync(join(examples, path), 'utf8').replaceAll('\r\n', '\n').replaceAll('https://YOUR-FLOREO', floreo);
+  // Each sample is its file, with this server's address where the placeholder was.
+  expect(await shown('#quick-start', 'index.html')).toBe(file('html-embed/index.html'));
+  expect(await shown('#your-own-code', 'index.html')).toBe(file('html-fetch/index.html'));
+  expect(await shown('#your-own-code', 'floreo.js')).toBe(file('react/floreo.js'));
+  expect(await shown('#your-own-code', 'App.jsx')).toBe(file('react/App.jsx'));
+  // The guides the dashboard links to are there, the store API comes first with example answers, and every event has a sample.
+  for (const id of ['quick-start', 'embed', 'your-own-code', 'paying', 'keys', 'errors', 'webhooks', 'events', 'error-codes']) await expect(page.locator(`#${id}`)).toHaveCount(1);
+  const first = page.locator('.doc-op').first();
+  await expect(first).toContainText('/v1/store/{slug}/info');
+  await expect(first.locator('.doc-answer')).toContainText('"currency": "BZD"');
+  await expect(first).toContainText("-H 'Authorization: Bearer pk_test_…'");
+  await expect(page.locator('#events details')).toHaveCount(19);
+  await expect(page.locator('#error-codes tbody tr', { hasText: 'origin_not_allowed' })).toContainText('403');
+  // In Spanish, the guides are too.
+  await page.getByRole('button', { name: 'Change language' }).click();
+  await expect(page.locator('#quick-start h2')).toHaveText('Inicio rápido');
+});
