@@ -187,9 +187,9 @@ test('offline: the app is closed in the middle of a sale; the sale is there once
   let tab = till;
   for (const wait of [0, 15, 60]) {
     // Scan, take cash, press issue, and close the app before (or while) it is saved.
-    await tab.locator('.till-where').click();
-    await tab.keyboard.type(COCONUT, { delay: 5 });
-    await tab.keyboard.press('Enter');
+    const search = tab.getByRole('combobox', { name: 'Add an item' });
+    await search.fill(COCONUT);
+    await search.press('Enter');
     await expect(tab.locator('.cart-lines li')).toHaveCount(1);
     await tab.getByLabel('Cash received').fill('5');
     void tab.getByRole('button', { name: /Issue receipt/ }).click().catch(() => {});
