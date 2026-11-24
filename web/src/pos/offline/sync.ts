@@ -238,7 +238,8 @@ export class SyncEngine {
       const batch = await db.outbox('pending', BATCH);
       if (!batch.length) break;
       sent = true;
-      this.set({ phase: 'syncing' });
+      // A try while offline stays "offline" until the server answers (then it is sending).
+      if (this.state.phase !== 'offline') this.set({ phase: 'syncing' });
       let results: ServerResult[];
       try {
         const events = await Promise.all(batch.map((r) => db.open<SyncEvent>(r.payload)));
