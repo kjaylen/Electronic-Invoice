@@ -13,6 +13,7 @@ import { useToast } from '../toast';
 import { CodeForm, RecoveryCodes, SetupSteps, type TwoFactorSetupInfo } from '../twofactor';
 import { DISTRICTS, ErrorText, Field, Modal, money, Pager, Segmented, Select, usePageTitle, usePages } from '../ui';
 import { PlanTab, UpgradeNotice } from './Billing';
+import { DeleteBusinessCard } from './Closed';
 import { WebhooksPanel } from './Webhooks';
 import { IntegrationsTab } from './Integrations';
 import { StoreSettingsTab } from './StoreSettings';
@@ -349,7 +350,7 @@ function LoyaltyCard() {
 function BusinessTab() {
   const t = useT();
   const toast = useToast();
-  const { me, can, refresh, refreshMe } = useSession();
+  const { me, can, refresh, refreshMe, role } = useSession();
   const [profile, setProfile] = useState<BusinessProfile | null>(null);
   const [form, setForm] = useState<{ legalName: string; tradeName: string; street: string; city: string; districtCode: string; telephone: string; email: string } | null>(null);
   const editable = can('business.manage');
@@ -435,6 +436,7 @@ function BusinessTab() {
       {editable && <DailySummaryCard profile={profile} onSaved={() => void load()} />}
       {editable && <LoyaltyCard />}
       {editable && <SecurityRules profile={profile} onSaved={() => void load()} />}
+      {role === 'owner' && <DeleteBusinessCard profile={profile} />}
     </div>
   );
 }

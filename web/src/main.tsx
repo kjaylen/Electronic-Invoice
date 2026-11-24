@@ -13,6 +13,7 @@ import { Icons } from './icons';
 import { I18nProvider, LanguageToggle, useI18n } from './i18n';
 import { ROLE_LABEL } from './permissions';
 import { SessionProvider, useSession } from './session';
+import { ConfirmProvider } from './confirm';
 import { ToastProvider } from './toast';
 import { installIndicators } from './motion';
 import { AuthShell } from './scene/AuthShell';
@@ -32,6 +33,7 @@ const Pricing = page(() => import('./pages/Legal'), 'Pricing');
 const Terms = page(() => import('./pages/Legal'), 'Terms');
 const Privacy = page(() => import('./pages/Legal'), 'Privacy');
 const TwoFactorRequired = page(() => import('./pages/Auth'), 'TwoFactorRequired');
+const BusinessClosed = page(() => import('./pages/Closed'), 'BusinessClosed');
 const Onboarding = page(() => import('./pages/Onboarding'), 'Onboarding');
 const Dashboard = page(() => import('./pages/Dashboard'), 'Dashboard');
 const Counter = page(() => import('./pages/Counter'), 'Counter');
@@ -318,6 +320,8 @@ function RequireSession() {
   if (!session) return <Navigate to="/login" replace state={{ from: location.pathname + location.search }} />;
   if (session.user.mustChangePassword) return <Suspense fallback={<main><PageSkeleton /></main>}><ChangePasswordRequired /></Suspense>;
   if (session.twoFactor?.setupRequired) return <Suspense fallback={<main><PageSkeleton /></main>}><TwoFactorRequired /></Suspense>;
+  // Closed by an owner: nothing of the app, only when it will be erased and how to reopen it.
+  if (session.business.closed) return <Suspense fallback={<main><PageSkeleton /></main>}><BusinessClosed /></Suspense>;
   return <Layout />;
 }
 
@@ -498,9 +502,11 @@ createRoot(document.getElementById('root')!).render(
     <BrowserRouter {...(BUSINESS && !STORE_DOMAIN && { basename: `/${BUSINESS}` })}>
       <I18nProvider>
         <ToastProvider>
-          <SessionProvider>
-            {STORE_DOMAIN ? <StoreDomainApp /> : BUSINESS ? <BusinessApp /> : <PublicApp />}
-          </SessionProvider>
+          <ConfirmProvider>
+            <SessionProvider>
+              {STORE_DOMAIN ? <StoreDomainApp /> : BUSINESS ? <BusinessApp /> : <PublicApp />}
+            </SessionProvider>
+          </ConfirmProvider>
         </ToastProvider>
       </I18nProvider>
     </BrowserRouter>

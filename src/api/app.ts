@@ -169,6 +169,13 @@ const csp = (imageOrigins: string[]) => [
   "frame-ancestors 'self'",
 ].join('; ');
 
+/** What an owner may still do in a business they have closed: reopen it, and take its records with them. */
+function allowedWhileClosed(request: { method: string; url: string }): boolean {
+  const path = request.url.split('?')[0]!;
+  if (request.method === 'POST') return path === '/v1/business/reopen';
+  return request.method === 'GET' && (path === '/v1/business' || /^\/v1\/reports\/(documents|accountant-pack|archive)$/.test(path));
+}
+
 export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   if (options.adminToken !== undefined && options.adminToken.length < 32) {
     throw new Error('ADMIN_TOKEN must be at least 32 characters');
@@ -336,6 +343,8 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       if (session.user.mustChangePassword) throw new ApiError(403, 'password_change_required', 'Choose a new password first');
       // The business requires two-step sign-in for owners and admins: set it up before anything else.
       if (session.twoFactor.required && !session.twoFactor.enabled) throw new ApiError(403, 'two_factor_setup_required', 'Set up two-step sign-in first');
+      // A closed business: its owner may reopen it and download its records, nothing else.
+      if (session.business.closed && !allowedWhileClosed(request)) throw new ApiError(403, 'business_closed', 'This business is closed. Reopen it to carry on.');
       request.tenantId = session.business.id;
       request.principal = session.user.role;
       request.userId = session.user.id;

@@ -11,6 +11,7 @@
 import { type DragEvent, type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { api, ApiError } from '../api';
+import { useConfirm } from '../confirm';
 import { useT } from '../i18n';
 import { useToast } from '../toast';
 import { ErrorText, Field, Modal, usePageTitle } from '../ui';
@@ -36,6 +37,7 @@ export function SiteEditor() {
   const t = useT();
   const toast = useToast();
   usePageTitle(t('Site'));
+  const confirm = useConfirm();
   const draft = useSiteDraft();
   const { loaded, doc, update, undo, redo, changed, save } = draft;
   const [error, setError] = useState<unknown>(null);
@@ -194,7 +196,7 @@ export function SiteEditor() {
     setPublishing(false);
   };
   const discard = () => act(async () => {
-    if (!window.confirm(t('Throw away every change since the last publish?'))) return;
+    if (!(await confirm({ title: t('Discard your changes?'), body: t('Everything changed since the last publish goes back to how customers see it now. Undo brings your changes back.'), confirm: t('Discard changes'), danger: true }))) return;
     await draft.flush();
     const r = await api<{ draft: SiteDoc; draftUpdatedAt: string | null }>('/v1/store-site/discard', { method: 'POST', body: {} });
     draft.adopt({ ...r, changed: false }, true);
@@ -321,9 +323,10 @@ export function SiteEditor() {
                   }
                   return slug;
                 }}
-                onDelete={() => {
+                onDelete={async () => {
                   const links = linksToPage(doc, currentPage.slug);
-                  if (!window.confirm(links ? t('Delete the page “{title}”? {n} links to it will go to the home page instead.', { title: currentPage.title, n: links }) : t('Delete the page “{title}”?', { title: currentPage.title }))) return;
+                  const body = links ? `${links === 1 ? t('One link to it will go to the home page instead.') : t('{n} links to it will go to the home page instead.', { n: links })} ${t('Undo brings it back.')}` : t('Undo brings it back.');
+                  if (!(await confirm({ title: t('Delete the page “{title}”?', { title: currentPage.title }), body, confirm: t('Delete page'), danger: true }))) return;
                   update((d) => removePage(d, currentPage.id));
                   goTo('home');
                 }} />}
@@ -467,6 +470,7 @@ function SectionEditor({ section, schema, ctx, onBack, onChange, onDuplicate, on
   onAddBelow: () => void; onSave: (name: string) => void; canSave: boolean;
 }) {
   const t = useT();
+  const confirm = useConfirm();
   const [openBlock, setOpenBlock] = useState<string | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
   if (!schema) return <div className="stack"><button type="button" className="link" onClick={onBack}>← {t('Sections')}</button><p className="muted">{t('This section type is no longer available.')}</p></div>;
@@ -535,7 +539,7 @@ function SectionEditor({ section, schema, ctx, onBack, onChange, onDuplicate, on
         <button type="button" className="secondary" onClick={onAddBelow}>{t('Add below')}</button>
         {saving === null && <button type="button" className="secondary" disabled={!canSave} title={canSave ? undefined : t('Up to {n} saved sections. Remove one under “Add section” first.', { n: MAX_SAVED })} onClick={() => setSaving(String(section.settings.heading || section.settings.title || t(schema.name)).slice(0, 60))}>{t('Save for reuse')}</button>}
         <span className="spacer" />
-        <button type="button" className="link danger-link" onClick={() => { if (window.confirm(t('Remove this section?'))) onDelete(); }}>{t('Remove section')}</button>
+        <button type="button" className="link danger-link" onClick={() => void confirm({ title: t('Remove this section?'), body: t('Undo brings it back.'), confirm: t('Remove section'), danger: true }).then((yes) => { if (yes) onDelete(); })}>{t('Remove section')}</button>
       </div>
     </div>
   );
@@ -546,6 +550,7 @@ function AddSection({ schemas, saved, kind, onAdd, onForget, onClose }: {
   onAdd: (type: string, saved?: Section) => Promise<void>; onForget: (id: string) => void; onClose: () => void;
 }) {
   const t = useT();
+  const confirm = useConfirm();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [q, setQ] = useState('');
@@ -571,7 +576,7 @@ function AddSection({ schemas, saved, kind, onAdd, onForget, onClose }: {
                 <li key={x.id}>
                   <span className="grow"><strong>{x.name}</strong> <span className="small muted">{name(x.section.type)}</span></span>
                   <button type="button" className="secondary" disabled={busy !== null} onClick={() => add(x.id, x.section.type, x.section)}>{t('Add')}</button>
-                  <button type="button" className="link small" onClick={() => { if (window.confirm(t('Remove “{name}” from your saved sections? Pages that use it keep their copy.', { name: x.name }))) onForget(x.id); }} aria-label={t('Remove {name}', { name: x.name })}>✕</button>
+                  <button type="button" className="link small" onClick={() => void confirm({ title: t('Remove “{name}” from your saved sections?', { name: x.name }), body: t('Pages that use it keep their copy.'), confirm: t('Remove'), danger: true }).then((yes) => { if (yes) onForget(x.id); })} aria-label={t('Remove {name}', { name: x.name })}>✕</button>
                 </li>
               ))}
             </ul>
@@ -635,8 +640,9 @@ function StarterDialog({ builder, onPick, onClose }: { builder: Builder; onPick:
   const t = useT();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<unknown>(null);
-  const pick = (key: string, name: string) => {
-    if (!window.confirm(t('Use the {name} site? Your home page, menu, footer and look are replaced. Your logo and the pages you made stay. You can undo this.', { name }))) return;
+  const confirm = useConfirm();
+  const pick = async (key: string, name: string) => {
+    if (!(await confirm({ title: t('Use the {name} site?', { name }), body: t('Your home page, menu, footer and look are replaced. Your logo and the pages you made stay. Undo brings the old site back.'), confirm: t('Use this site') }))) return;
     setBusy(key);
     setError(null);
     void onPick(key).catch(setError).finally(() => setBusy(null));
@@ -650,7 +656,7 @@ function StarterDialog({ builder, onPick, onClose }: { builder: Builder; onPick:
           {builder.starters.map((s) => {
             const look = builder.presets.find((x) => x.key === s.preset)?.theme;
             return (
-              <button key={s.key} type="button" className="se-starter" disabled={busy !== null} onClick={() => pick(s.key, t(s.name))}>
+              <button key={s.key} type="button" className="se-starter" disabled={busy !== null} onClick={() => void pick(s.key, t(s.name))}>
                 {look && (
                   <span className="se-starter-art" aria-hidden="true" style={{ background: look.colors.background, color: look.colors.text, fontFamily: FONT_FAMILIES[look.fonts.heading] }}>
                     <span className="se-starter-bar" style={{ background: look.colors.surface }} />
@@ -708,6 +714,7 @@ const OPTION_TITLES: Record<string, string> = { radius: 'Corners', buttons: 'But
 
 function ThemePanel({ theme, builder, ctx, onChange }: { theme: Theme; builder: Builder; ctx: EditorCtx; onChange: (t: Theme, key?: string) => void }) {
   const t = useT();
+  const confirm = useConfirm();
   const c = theme.colors;
   const textContrast = contrast(c.text, c.background);
   const buttonContrast = contrast(c.primaryText, c.primary);
@@ -718,7 +725,10 @@ function ThemePanel({ theme, builder, ctx, onChange }: { theme: Theme; builder: 
         <div className="se-presets">
           {builder.presets.map((p) => (
             <button key={p.key} type="button" className={`se-preset ${theme.preset === p.key ? 'active' : ''}`} aria-pressed={theme.preset === p.key}
-              onClick={() => { if (theme.preset === p.key || window.confirm(t('Use the {name} look? Your colours, fonts and shapes change; your logo and content stay.', { name: t(p.name) }))) onChange({ ...p.theme, logo: theme.logo, logoHeight: theme.logoHeight, favicon: theme.favicon }); }}>
+              onClick={async () => {
+                if (theme.preset !== p.key && !(await confirm({ title: t('Use the {name} look?', { name: t(p.name) }), body: t('Your colours, fonts and shapes change. Your logo and everything you wrote stay. Undo brings the old look back.'), confirm: t('Use this look') }))) return;
+                onChange({ ...p.theme, logo: theme.logo, logoHeight: theme.logoHeight, favicon: theme.favicon });
+              }}>
               <span className="se-swatches" aria-hidden="true">{(['background', 'primary', 'accent', 'text'] as const).map((k) => <span key={k} style={{ background: p.theme.colors[k] }} />)}</span>
               <strong style={{ fontFamily: FONT_FAMILIES[p.theme.fonts.heading] }}>{t(p.name)}</strong>
               <span className="small muted">{t(p.description)}</span>

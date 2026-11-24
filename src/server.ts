@@ -53,6 +53,7 @@ import { startWebhookDispatcher } from './webhooks/webhooks.ts';
 import { objectStoreFromEnv } from './storage/objects.ts';
 import { runQuickBooksSync } from './integrations/quickbooks.ts';
 import { migrate, pgDatabase } from './db/database.ts';
+import { eraseDueBusinesses } from './db/closure.ts';
 import { keyringFromEnv } from './db/keystore.ts';
 import { type Mailer, noMailer, outboxMailer, smtpMailer } from './mail/mailer.ts';
 import { cachingClientProvider } from './pipeline/clients.ts';
@@ -140,6 +141,10 @@ const housekeeping = housekeepingMs > 0
       reconcilePayments: () => reconcilePayments(pipeline, backgroundCtx, gatewayOptions(pipeline, slugOf, { ...(env.PUBLIC_URL && { publicUrl: env.PUBLIC_URL }), ...(ekyash && { ekyash }) })),
       reminders: () => runReminders(pipeline, backgroundCtx, { ...(ekyash && { ekyash }) }),
       recurring: () => runRecurring(pipeline, backgroundCtx, { ...(ekyash && { ekyash }) }),
+      // Businesses their owners closed more than 30 days ago are erased for good.
+      eraseClosed: async () => {
+        for (const e of await eraseDueBusinesses(db, { ...(objectStore && { objects: objectStore }), onError: (id, err) => app.log.error({ tenantId: id, err }, 'could not erase a closed business') })) app.log.info({ slug: e.slug, rows: e.rows, files: e.files }, 'closed business erased');
+      },
       ...(mailer && { mailer }),
       ...(env.PUBLIC_URL && { publicUrl: env.PUBLIC_URL }),
       ...(env.ALERT_WEBHOOK_URL && { alertWebhookUrl: env.ALERT_WEBHOOK_URL }),

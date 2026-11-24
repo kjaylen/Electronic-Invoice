@@ -43,7 +43,7 @@ export async function runStockAlerts(db: Queryable, options: { mailer: Mailer; p
     `select a.id, a.tenant_id, a.email, t.slug, coalesce(t.trade_name, t.legal_name) as store_name, t.city, t.telephone, t.email as reply_to, t.store_settings,
        p.handle, p.title, i.option1, i.option2, i.unit_price::text as unit_price, i.gst_category
      from stock_alerts a join items i on i.id = a.item_id join products p on p.id = i.product_id join tenants t on t.id = a.tenant_id
-     where a.notified_at is null and p.status = 'active' and i.archived_at is null and (i.stock_quantity is null or i.stock_quantity > 0)
+     where a.notified_at is null and t.closed_at is null and p.status = 'active' and i.archived_at is null and (i.stock_quantity is null or i.stock_quantity > 0)
      order by a.created_at limit $1`,
     [options.limit ?? 200],
   )).rows;

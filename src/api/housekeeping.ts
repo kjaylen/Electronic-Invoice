@@ -38,6 +38,8 @@ export interface HousekeepingOptions {
   reminders?: () => Promise<unknown>;
   /** Issues recurring invoices that are due. */
   recurring?: () => Promise<unknown>;
+  /** Erases businesses whose owners closed them more than 30 days ago. */
+  eraseClosed?: () => Promise<unknown>;
   intervalMs?: number;
   onError?: (step: string, error: unknown) => void;
 }
@@ -72,6 +74,7 @@ export async function runHousekeepingOnce(db: Queryable, options: HousekeepingOp
   await step('due dates', () => backfillDueDates(db));
   await step('repeating expenses', () => runRecurringExpenses(db));
   if (options.recurring) await step('recurring invoices', options.recurring);
+  if (options.eraseClosed) await step('closed businesses', options.eraseClosed);
   if (options.reminders) await step('reminders', options.reminders);
   if (options.mailer) {
     const mailer = options.mailer;

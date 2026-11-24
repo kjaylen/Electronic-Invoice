@@ -172,7 +172,7 @@ export async function runRecurring(deps: PipelineDeps, ctx: ServerContext, extra
   const { db } = deps;
   const result = { issued: 0, failed: 0 };
   const due = (await db.query<RecurringRow>(
-    `select ${COLUMNS} from recurring_invoices r where r.status = 'active' and r.next_date <= $1 order by r.next_date limit 100`, [belizeToday()],
+    `select ${COLUMNS} from recurring_invoices r where r.status = 'active' and r.next_date <= $1 and r.tenant_id not in (select id from tenants where closed_at is not null) order by r.next_date limit 100`, [belizeToday()],
   )).rows;
   for (const r of due) {
     const outcome = await runOne(deps, ctx, r, r.next_date, extras);

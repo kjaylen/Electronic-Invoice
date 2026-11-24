@@ -311,7 +311,7 @@ export async function processConnectorImports(deps: PipelineDeps, options: { lim
   );
   const claimed = (await db.query<ImportRow>(
     `update connector_imports set status = 'issuing', attempts = attempts + 1, updated_at = now()
-     where id in (select id from connector_imports where status = 'new' order by created_at limit $1 for update skip locked) returning *`,
+     where id in (select id from connector_imports where status = 'new' and tenant_id not in (select id from tenants where closed_at is not null) order by created_at limit $1 for update skip locked) returning *`,
     [options.limit ?? 25],
   )).rows;
   for (const imp of claimed) {

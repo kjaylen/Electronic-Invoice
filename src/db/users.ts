@@ -56,6 +56,8 @@ export interface BusinessRef {
   legalName: string;
   tradeName: string | null;
   environment: string;
+  /** Closed by an owner: when, and when it will be erased unless an owner reopens it (src/db/closure.ts). */
+  closed?: { at: string; eraseAfter: string };
 }
 
 interface UserRow {
@@ -339,7 +341,8 @@ export async function lookupSession(db: Queryable, token: string): Promise<Sessi
   const row = (await db.query<UserRow & { session_id: string; s_created_at: string | Date; expires_at: string | Date; slug: string; legal_name: string; trade_name: string | null; environment: string; require_two_factor: boolean; tf_enabled: boolean; device_id: string | null; device_register: string | null; device_revoked: boolean | null; suspended: boolean }>(
     `select ${USER_COLUMNS}, s.id as session_id, s.created_at as s_created_at, s.expires_at, t.slug, t.legal_name, t.trade_name, t.environment, t.require_two_factor,
        exists (select 1 from two_factor tf where tf.owner_kind = 'user' and tf.owner_id = u.id and tf.confirmed_at is not null) as tf_enabled,
-       s.device_id, d.register_id as device_register, d.revoked_at is not null as device_revoked, t.suspended_at is not null as suspended
+       s.device_id, d.register_id as device_register, d.revoked_at is not null as device_revoked, t.suspended_at is not null as suspended,
+       t.closed_at, t.erase_after
      from sessions s join users u on u.id = s.user_id join tenants t on t.id = u.tenant_id left join pos_devices d on d.id = s.device_id
      where s.token_hash = $1`,
     [tokenHash(token)],
@@ -347,6 +350,9 @@ export async function lookupSession(db: Queryable, token: string): Promise<Sessi
   if (!row) return null;
   // A suspended business: refused while suspended (the session works again if it is reactivated in time).
   if (row.suspended) return null;
+  // A closed business: only its owners, in the web app, until it is reopened or erased.
+  const closed = (row as { closed_at?: Date | string | null; erase_after?: Date | string | null });
+  if (closed.closed_at && (row.role !== 'owner' || row.device_id)) return null;
   const now = Date.now();
   const created = new Date(row.s_created_at).getTime();
   const [idle, max] = row.device_id ? [POS_SESSION_IDLE_MS, POS_SESSION_MAX_MS] : [SESSION_IDLE_MS, SESSION_MAX_MS];
@@ -361,7 +367,10 @@ export async function lookupSession(db: Queryable, token: string): Promise<Sessi
   return {
     id: row.session_id,
     user: toUser(row),
-    business: { id: row.tenant_id, slug: row.slug, legalName: row.legal_name, tradeName: row.trade_name, environment: row.environment },
+    business: {
+      id: row.tenant_id, slug: row.slug, legalName: row.legal_name, tradeName: row.trade_name, environment: row.environment,
+      ...(closed.closed_at && closed.erase_after && { closed: { at: new Date(closed.closed_at).toISOString(), eraseAfter: new Date(closed.erase_after).toISOString() } }),
+    },
     ...(row.device_id && { device: { id: row.device_id, registerId: row.device_register! } }),
     twoFactor: { enabled: row.tf_enabled, required: row.require_two_factor && TWO_FACTOR_ROLES.includes(row.role) },
   };

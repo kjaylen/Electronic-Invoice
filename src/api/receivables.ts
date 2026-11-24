@@ -172,7 +172,7 @@ async function sendReminder(deps: PipelineDeps, ctx: ServerContext, tenantId: st
 export async function runReminders(deps: PipelineDeps, ctx: ServerContext, options: { perBusiness?: number; ekyash?: { sandboxUrl?: string; liveUrl?: string } } = {}): Promise<{ sent: number; failed: number }> {
   const result = { sent: 0, failed: 0 };
   if (!ctx.mailConfigured) return result;
-  const tenants = (await deps.db.query<{ id: string }>("select id from tenants where receivable_settings #>> '{reminders,enabled}' = 'true'")).rows;
+  const tenants = (await deps.db.query<{ id: string }>("select id from tenants where receivable_settings #>> '{reminders,enabled}' = 'true' and closed_at is null")).rows;
   for (const t of tenants) {
     const settings = await receivableSettings(deps.db, t.id);
     let budget = options.perBusiness ?? 50;
@@ -211,7 +211,7 @@ export async function runMonthlyStatements(deps: PipelineDeps, ctx: ServerContex
   const today = options.today ?? belizeToday();
   if (Number(today.slice(8, 10)) > 7) return result;
   const month = today.slice(0, 7);
-  const tenants = (await deps.db.query<{ id: string }>("select id from tenants where receivable_settings #>> '{monthlyStatements}' = 'true'")).rows;
+  const tenants = (await deps.db.query<{ id: string }>("select id from tenants where receivable_settings #>> '{monthlyStatements}' = 'true' and closed_at is null")).rows;
   for (const t of tenants) {
     let budget = options.perBusiness ?? 100;
     const owing = new Map<string, string>();

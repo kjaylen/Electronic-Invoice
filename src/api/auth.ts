@@ -281,6 +281,8 @@ export function registerAuthRoutes(app: FastifyInstance, deps: PipelineDeps, opt
         if (result.reason === 'disabled') throw new ApiError(403, 'account_disabled', 'This account is deactivated. Ask an administrator of this business.');
         throw new ApiError(401, 'invalid_credentials', 'Email, username or password is incorrect');
       }
+      // Closed by its owner: only an owner comes in (to reopen it or take its records), until it is erased.
+      if (business.isClosed && result.user.role !== 'owner') throw new ApiError(403, 'business_closed', 'This business has been closed by its owner.');
       const next = await passwordAccepted(reply, result.user, business.slug, request.body.remember ?? true);
       if (!('twoFactorRequired' in next)) await audit(db, { tenantId: business.id, userId: result.user.id, action: 'login', ip: request.ip });
       return next;

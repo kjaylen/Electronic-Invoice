@@ -313,7 +313,7 @@ export async function runBilling(ctx: BillingContext, now = new Date()): Promise
   const { db } = ctx.deps;
   const result: BillingRunResult = { trialsEnded: 0, renewed: 0, invoices: 0, statusChanges: 0 };
 
-  const trials = (await db.query<SubRow>("select * from subscriptions where status = 'trialing' and trial_ends_at <= $1", [now.toISOString()])).rows.map(toSub);
+  const trials = (await db.query<SubRow>("select * from subscriptions where status = 'trialing' and trial_ends_at <= $1 and tenant_id not in (select id from tenants where closed_at is not null)", [now.toISOString()])).rows.map(toSub);
   for (const sub of trials) {
     const start = sub.trialEndsAt!;
     const end = addMonth(start);
@@ -330,7 +330,7 @@ export async function runBilling(ctx: BillingContext, now = new Date()): Promise
   // Renew every period that has ended (several, if the run was off for a while).
   for (let guard = 0; guard < 24; guard++) {
     const due = (await db.query<SubRow>(
-      "select * from subscriptions where status <> 'trialing' and current_period_end is not null and current_period_end <= $1", [now.toISOString()],
+      "select * from subscriptions where status <> 'trialing' and current_period_end is not null and current_period_end <= $1 and tenant_id not in (select id from tenants where closed_at is not null)", [now.toISOString()],
     )).rows.map(toSub);
     if (!due.length) break;
     for (const sub of due) {

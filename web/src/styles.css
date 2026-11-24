@@ -2399,6 +2399,8 @@ main:has(.site-editor) { max-width: none; padding: 0.75rem 1rem 0.75rem; }
 .se-group > .stack { padding-bottom: 0.85rem; }
 .se-sections { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.35rem; grid-template-columns: minmax(0, 1fr); }
 .se-panel > *, .se-panel .stack > * { min-width: 0; }
+/* The panel scrolls when its content is long; nothing in it gives up height instead (the tab row used to be squashed flat). */
+.se-panel > * { flex-shrink: 0; }
 .se-sections li { display: flex; align-items: center; gap: 0.35rem; border: 1px solid var(--hairline); border-radius: var(--radius); padding: 0.35rem 0.45rem; background: var(--sheet); transition: border-color 140ms var(--ease), box-shadow 140ms var(--ease); }
 .se-sections li:hover { border-color: var(--hairline-strong); }
 .se-sections li.drop-target { border-color: var(--brand); box-shadow: 0 -3px 0 var(--brand); }
@@ -2517,3 +2519,13 @@ main:has(.site-editor) { max-width: none; padding: 0.75rem 1rem 0.75rem; }
 .se-block.drop-target { border-color: var(--brand); box-shadow: 0 -3px 0 var(--brand); }
 .se-block[draggable='true'] > .se-block-head { cursor: grab; }
 .se-title h1 { font-size: 1rem; font-weight: 650; margin: 0; letter-spacing: 0; line-height: 1.2; }
+/* The app's own "are you sure?" (web/src/confirm.tsx). */
+.confirm-body { color: var(--ink-2); line-height: 1.5; }
+.confirm-actions { gap: 0.5rem; margin-top: 0.25rem; }
+/* A business its owner has closed, and the dialog that closes it (web/src/pages/Closed.tsx). */
+.closed-page { min-height: 100vh; display: grid; place-items: start center; padding: clamp(1rem, 6vh, 4rem) 1rem; }
+.closed-card { width: 100%; max-width: 640px; }
+.closed-records { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.6rem; }
+.closed-records li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.3rem 1rem; }
+.closed-records strong { min-width: 3rem; }
+.closed-steps { margin: 0; padding-left: 1.1rem; display: grid; gap: 0.45rem; }

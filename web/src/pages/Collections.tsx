@@ -6,6 +6,7 @@
 
 import { type FormEvent, useCallback, useEffect, useState } from 'react';
 import { api } from '../api';
+import { useConfirm } from '../confirm';
 import { useT } from '../i18n';
 import { useSession } from '../session';
 import { useToast } from '../toast';
@@ -128,8 +129,9 @@ function CollectionEditor({ initial, onClose, onSaved }: { initial: Collection |
       setBusy(false);
     }
   };
+  const confirm = useConfirm();
   const remove = async () => {
-    if (!initial || !window.confirm(t('Delete the collection “{title}”? Its products stay; menus that link to it will show all collections.', { title: initial.title }))) return;
+    if (!initial || !(await confirm({ title: t('Delete the collection “{title}”?', { title: initial.title }), body: t('Its products stay. Menus that link to it will show all collections.'), confirm: t('Delete collection'), danger: true }))) return;
     await api(`/v1/collections/${initial.id}`, { method: 'DELETE' });
     onSaved();
   };

@@ -7,6 +7,7 @@
 import { type FormEvent, useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import { api, link } from '../api';
+import { useConfirm } from '../confirm';
 import { useT } from '../i18n';
 import { useToast } from '../toast';
 import { belizeToday, ErrorText, Field, Modal, money, Segmented, Select } from '../ui';
@@ -209,6 +210,7 @@ function LinkCard({ link: l, onChanged, onCredentials, onSetup, act }: { link: C
   const system = systemOf(l.kind);
   const certDays = ns?.certificateExpiresAt ? Math.floor((new Date(ns.certificateExpiresAt).getTime() - Date.now()) / 86_400_000) : null;
   const notYet = ns ? (ns.configured ? t('Connected: the first read is on its way.') : t('Not connected yet: finish the NetSuite setup.')) : t('Not connected yet: add the .qwc file to the Web Connector.');
+  const confirm = useConfirm();
   const save = () => act(() => api(`/v1/connectors/${l.id}`, {
     method: 'PUT',
     body: { taxCodes: Object.fromEntries(Object.entries(map).filter(([, v]) => v)), exemptions: Object.fromEntries(Object.entries(reasons).filter(([c]) => map[c] === 'E')) },
@@ -245,7 +247,7 @@ function LinkCard({ link: l, onChanged, onCredentials, onSetup, act }: { link: C
         )}
         <button className="secondary small-button" onClick={() => void act(() => api(`/v1/connectors/${l.id}`, { method: 'PUT', body: { paused: !l.paused } }), l.paused ? t('Resumed') : t('Paused'))}>{l.paused ? t('Resume') : t('Pause')}</button>
         <span className="spacer" />
-        <button className="link danger-link small" onClick={() => { if (window.confirm(t('Disconnect {name}? What was already sent to BTS stays.', { name: l.name }))) void act(() => api(`/v1/connectors/${l.id}`, { method: 'DELETE' }), t('Disconnected')); }}>{t('Disconnect')}</button>
+        <button className="link danger-link small" onClick={() => void confirm({ title: t('Disconnect {name}?', { name: l.name }), body: t('What was already sent to BTS stays.'), confirm: t('Disconnect'), danger: true }).then((yes) => { if (yes) void act(() => api(`/v1/connectors/${l.id}`, { method: 'DELETE' }), t('Disconnected')); })}>{t('Disconnect')}</button>
       </div>
       {codes.length > 0 && (
         <details className="connector-taxes" open={taxesOpen} onToggle={(e) => setTaxesOpen(e.currentTarget.open)}>

@@ -839,7 +839,6 @@ test('platform console: staff move the business to BTS production', async ({ pag
 
 test('site builder: a new headline live in the preview, a new look, a new page with a section, publish; buyers see it', async ({ page, browser }) => {
   await logIn(page);
-  page.on('dialog', (d) => void d.accept());
   await page.getByRole('navigation').getByRole('link', { name: 'Site' }).click();
   const preview = page.frameLocator('iframe[title="Preview of your store"]');
   await expect(preview.getByRole('heading', { level: 1 })).toHaveText('Corner Store');
@@ -853,6 +852,9 @@ test('site builder: a new headline live in the preview, a new look, a new page w
   // A new look for the whole store.
   await page.getByRole('group', { name: 'Edit' }).getByRole('button', { name: 'Theme' }).click();
   await page.locator('.se-preset', { hasText: 'Fresh' }).click();
+  // Asked in the app's own dialog (never the browser's), which says what changes and what stays.
+  await expect(page.getByRole('dialog', { name: 'Use the Fresh look?' })).toContainText('Your logo and everything you wrote stay');
+  await page.getByRole('dialog').getByRole('button', { name: 'Use this look' }).click();
   await expect(page.locator('.se-preset', { hasText: 'Fresh' })).toHaveAttribute('aria-pressed', 'true');
 
   // A page of its own, with a text section.

@@ -34,7 +34,7 @@ export async function authenticateApiKey(db: Database, presented: string): Promi
   const [, prefix, secret] = m;
   const row = (
     await db.query<{ id: string; tenant_id: string; name: string; key_hash: string; revoked_at: unknown; suspended: boolean }>(
-      'select k.id, k.tenant_id, k.name, k.key_hash, k.revoked_at, t.suspended_at is not null as suspended from api_keys k join tenants t on t.id = k.tenant_id where k.prefix = $1',
+      'select k.id, k.tenant_id, k.name, k.key_hash, k.revoked_at, (t.suspended_at is not null or t.closed_at is not null) as suspended from api_keys k join tenants t on t.id = k.tenant_id where k.prefix = $1',
       [prefix],
     )
   ).rows[0];

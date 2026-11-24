@@ -149,7 +149,11 @@ export interface Account {
 
 export interface SessionInfo {
   user: Account;
-  business: { id: string; slug: string; legalName: string; tradeName: string | null; environment: 'test' | 'production' };
+  business: {
+    id: string; slug: string; legalName: string; tradeName: string | null; environment: 'test' | 'production';
+    /** Closed by an owner: when, and when it is erased unless an owner reopens it. Only owners get this far. */
+    closed?: { at: string; eraseAfter: string };
+  };
   permissions: Permission[];
   twoFactor: { enabled: boolean; required: boolean; setupRequired: boolean };
 }

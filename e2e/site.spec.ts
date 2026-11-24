@@ -121,7 +121,6 @@ test('site builder: someone else changes the site meanwhile; nothing is overwrit
 test('site builder: undo and redo; a page address typed with hyphens, never the same as another page', async ({ page }) => {
   await logIn(page);
   const preview = await openSite(page);
-  page.on('dialog', (d) => void d.accept());
   await openBanner(page);
   const before = await page.getByLabel('Headline').inputValue();
   await page.getByLabel('Headline').fill('To be undone');
@@ -155,6 +154,7 @@ test('site builder: undo and redo; a page address typed with hyphens, never the 
   expect(pages.filter((x) => x.slug === 'about-us')).toHaveLength(1);
   // Deleting it again.
   await page.getByRole('button', { name: 'Delete this page' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Delete page' }).click();
   await saved(page);
   expect(((await draftOf(page)).pages as Array<{ title: string }>).some((x) => x.title === title)).toBe(false);
 });
@@ -162,11 +162,11 @@ test('site builder: undo and redo; a page address typed with hyphens, never the 
 test('site builder: a ready-made site in one click (and undone in one), a page from a template', async ({ page }) => {
   await logIn(page);
   const preview = await openSite(page);
-  page.on('dialog', (d) => void d.accept());
   const before = await draftOf(page);
 
   await page.getByRole('button', { name: 'Start again from a ready-made site' }).click();
   await page.getByRole('dialog').getByRole('button', { name: /^Food and drink/ }).click();
+  await page.getByRole('dialog', { name: 'Use the Food and drink site?' }).getByRole('button', { name: 'Use this site' }).click();
   await expect(page.getByText('Your new site is ready to edit.')).toBeVisible();
   await expect(preview.getByRole('heading', { name: 'Come by' })).toBeVisible();
   await expect(preview.getByRole('heading', { name: 'Favourites' })).toBeVisible();
@@ -193,6 +193,7 @@ test('site builder: a ready-made site in one click (and undone in one), a page f
   await page.getByText('Page settings').click();
   await expect(page.getByLabel('Address')).toHaveValue('delivery-and-returns');
   await page.getByRole('button', { name: 'Delete this page' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Delete page' }).click();
   await saved(page);
 });
 
@@ -240,7 +241,6 @@ test('site builder: a photo straight from a phone is made smaller and uploads', 
 test('site builder: type in the preview, add a section where you are, reuse a saved section on another page', async ({ page }) => {
   await logIn(page);
   const preview = await openSite(page);
-  page.on('dialog', (d) => void d.accept());
 
   // Click the headline in the page itself and type: the form and the draft follow.
   const headline = preview.locator('section.site-hero h1 .site-editable');
@@ -273,16 +273,30 @@ test('site builder: type in the preview, add a section where you are, reuse a sa
   await page.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(page.getByText('Saved. Find it under “Add section” on any page.')).toBeVisible();
   await page.getByRole('button', { name: 'Remove section' }).click();
+  await page.getByRole('dialog', { name: 'Remove this section?' }).getByRole('button', { name: 'Remove section' }).click();
   await page.getByRole('combobox', { name: 'Page' }).selectOption({ label: 'About us' });
   await page.getByRole('button', { name: '+ Add section' }).click();
   const kept = page.getByRole('dialog').locator('.se-list li', { hasText: 'My strip' }).first();
   await kept.getByRole('button', { name: 'Add', exact: true }).click();
   await expect(preview.getByText(strip)).toBeVisible();
   await page.getByRole('button', { name: 'Remove section' }).click();
+  await page.getByRole('dialog', { name: 'Remove this section?' }).getByRole('button', { name: 'Remove section' }).click();
   // Tidy up the saved section.
   await page.getByRole('button', { name: '+ Add section' }).click();
   await page.getByRole('dialog').getByRole('button', { name: 'Remove My strip' }).first().click();
-  await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click();
+  // Cancel leaves it; then for real. Escape closes only the question, not the dialog under it.
+  const question = page.getByRole('dialog', { name: /from your saved sections\?$/ });
+  await question.getByRole('button', { name: 'Cancel' }).click();
+  await expect(question).toBeHidden();
+  await expect(page.getByRole('dialog', { name: 'Add a section' }).locator('.se-list li', { hasText: 'My strip' }).first()).toBeVisible();
+  await page.getByRole('dialog').getByRole('button', { name: 'Remove My strip' }).first().click();
+  await page.keyboard.press('Escape');
+  await expect(question).toBeHidden();
+  await expect(page.getByRole('dialog', { name: 'Add a section' })).toBeVisible();
+  await page.getByRole('dialog').getByRole('button', { name: 'Remove My strip' }).first().click();
+  await question.getByRole('button', { name: 'Remove', exact: true }).click();
+  await expect(question).toBeHidden();
+  await page.getByRole('dialog', { name: 'Add a section' }).getByRole('button', { name: 'Close' }).click();
   await saved(page);
 });
 

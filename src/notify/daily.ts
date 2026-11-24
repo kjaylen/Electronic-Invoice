@@ -179,7 +179,7 @@ export async function runDailySummaries(db: Queryable, options: DailyOptions): P
   if (belizeNow(now).getUTCHours() < (options.sendFromHour ?? 7)) return result;
   const day = dayOf(now, -1);
   const tenants = (await db.query<{ id: string; slug: string; name: string; email: string }>(
-    'select id, slug, coalesce(trade_name, legal_name) as name, email from tenants where daily_summary',
+    'select id, slug, coalesce(trade_name, legal_name) as name, email from tenants where daily_summary and closed_at is null',
   )).rows;
   for (const t of tenants) {
     const key = `daily-summary:${t.id}:${day}`;

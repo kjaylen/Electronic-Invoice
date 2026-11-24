@@ -44,7 +44,7 @@ import {
 import { verifyDocumentSignature } from '../engine/verify.ts';
 import type { Database, Queryable } from '../db/database.ts';
 import type { KeyProtector } from '../db/keystore.ts';
-import { loadTenantContext, type TenantContext } from '../db/tenants.ts';
+import { loadTenantContext, type TenantContext, TenantError } from '../db/tenants.ts';
 
 export interface ClientProvider {
   /** The BtsClient for this tenant's current certificate. */
@@ -388,6 +388,8 @@ function contingencyReason(outcomeReason: string): string {
 
 /** Issue one document: number, build, sign, store, send, settle; reissue in contingency if BTS cannot be reached. */
 export async function issueDocument(deps: PipelineDeps, tenantId: string, req: IssueRequest): Promise<IssueResult> {
+  // A business closed by its owner issues nothing new, whoever asks (a recurring invoice, an accounting connector).
+  if ((await deps.db.query('select 1 from tenants where id = $1 and closed_at is not null', [tenantId])).rows.length) throw new TenantError('This business is closed');
   const ctx = await loadTenantContext(deps.db, deps.keys, tenantId);
   const contingencyEnabled = deps.contingency?.enabled ?? true;
 

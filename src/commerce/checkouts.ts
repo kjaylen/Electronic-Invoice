@@ -150,7 +150,7 @@ export async function runCheckoutReminders(db: Queryable, deps: Pick<PipelineDep
   if (!options.publicUrl) return out;
   const base = options.publicUrl.replace(/\/$/, '');
   const due = (await db.query<CheckoutRow & { slug: string; store_name: string; city: string; telephone: string; reply_to: string; store_settings: unknown; suspended: boolean; street: string; environment: string }>(
-    `select c.*, t.slug, coalesce(t.trade_name, t.legal_name) as store_name, t.city, t.street, t.telephone, t.email as reply_to, t.environment, t.store_settings, t.suspended_at is not null as suspended
+    `select c.*, t.slug, coalesce(t.trade_name, t.legal_name) as store_name, t.city, t.street, t.telephone, t.email as reply_to, t.environment, t.store_settings, (t.suspended_at is not null or t.closed_at is not null) as suspended
      from store_checkouts c join tenants t on t.id = c.tenant_id
      where c.status = 'open' and c.reminders_sent < 2 and c.updated_at < now() - interval '1 hour'
      order by c.updated_at limit $1`,
