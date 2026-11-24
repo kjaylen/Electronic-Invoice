@@ -208,7 +208,7 @@ export function SiteEditor() {
       <header className="se-top">
         <Link to="/settings?tab=store" className="se-back" aria-label={t('Back to store settings')}>←</Link>
         <div className="se-title">
-          <strong>{t('Site')}</strong>
+          <h1>{t('Site')}</h1>
           <span className={`se-status ${save}`} role="status">
             {save === 'saving' || save === 'pending' ? t('Saving…') : save === 'error' || save === 'conflict' ? t('Not saved') : changed ? t('Draft: not published yet') : t('Published')}
           </span>
