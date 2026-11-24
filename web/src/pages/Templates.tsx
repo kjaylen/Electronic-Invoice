@@ -11,6 +11,7 @@ import { api, ApiError } from '../api';
 import { BUSINESS } from '../business';
 import type { CodeEditorHandle } from '../code-editor';
 import { useT } from '../i18n';
+import { prepareImage } from '../images';
 import { Icons } from '../icons';
 import { withTransition } from '../motion';
 import { useSession } from '../session';
@@ -571,13 +572,9 @@ function useAssets() {
 }
 
 async function uploadImage(file: File): Promise<Asset> {
-  const dataUrl = await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(reader.error ?? new Error('Could not read the file'));
-    reader.readAsDataURL(file);
-  });
-  return api<Asset>('/v1/templates/assets', { method: 'POST', body: { name: file.name, dataBase64: dataUrl.slice(dataUrl.indexOf(',') + 1) } });
+  // Large photos are made smaller in the browser first.
+  const { name, dataBase64 } = await prepareImage(file, { maxBytes: 2 * 1024 * 1024 });
+  return api<Asset>('/v1/templates/assets', { method: 'POST', body: { name, dataBase64 } });
 }
 
 const ACCEPT = 'image/png,image/jpeg,image/gif,image/webp,image/svg+xml';

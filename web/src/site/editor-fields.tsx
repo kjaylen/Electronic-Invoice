@@ -7,6 +7,7 @@
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { useT } from '../i18n';
+import { prepareImage } from '../images';
 import { ErrorText, Field as FieldWrap, Modal } from '../ui';
 import { imageSrc, SiteIcon } from './sections';
 import type { Builder, Field, LinkType, SiteDoc, SiteLink } from './types';
@@ -22,12 +23,8 @@ export interface EditorCtx {
 interface Asset { id: string; name: string; contentType: string; bytes: number }
 interface ProductRow { id: string; title: string; handle: string; imageId: string | null; status: string }
 
-const readAsBase64 = (file: File) => new Promise<string>((resolve, reject) => {
-  const r = new FileReader();
-  r.onload = () => resolve(String(r.result).replace(/^data:[^,]*,/, ''));
-  r.onerror = () => reject(r.error);
-  r.readAsDataURL(file);
-});
+/** What the server takes for one picture. */
+const MAX_UPLOAD_BYTES = 2 * 1024 * 1024;
 
 /** The business's pictures (and its product photos): pick one, or upload a new one. */
 export function ImageLibrary({ ctx, onPick, onClose }: { ctx: EditorCtx; onPick: (ref: string) => void; onClose: () => void }) {
@@ -36,6 +33,7 @@ export function ImageLibrary({ ctx, onPick, onClose }: { ctx: EditorCtx; onPick:
   const [assets, setAssets] = useState<Asset[] | null>(null);
   const [products, setProducts] = useState<ProductRow[] | null>(null);
   const [busy, setBusy] = useState(false);
+  const [dropping, setDropping] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const file = useRef<HTMLInputElement>(null);
   const load = () => void api<{ data: Asset[] }>('/v1/templates/assets').then((r) => setAssets(r.data.filter((a) => a.contentType.startsWith('image/')))).catch(setError);
@@ -43,15 +41,17 @@ export function ImageLibrary({ ctx, onPick, onClose }: { ctx: EditorCtx; onPick:
   useEffect(() => {
     if (tab === 'products' && products === null) void api<{ data: ProductRow[] }>('/v1/products?status=active').then((r) => setProducts(r.data.filter((p) => p.imageId))).catch(setError);
   }, [tab, products]);
-  const upload = async (files: FileList | null) => {
-    if (!files?.length) return;
+  const upload = async (list: FileList | File[] | null) => {
+    const files = [...(list ?? [])].filter((f) => f.type.startsWith('image/'));
+    if (!files.length) return;
     setBusy(true);
     setError(null);
     try {
       let last: Asset | null = null;
-      for (const f of [...files]) {
-        if (f.size > 2 * 1024 * 1024) throw new Error(t('{name} is over 2 MB. Make it smaller first.', { name: f.name }));
-        last = await api<Asset>('/v1/templates/assets', { method: 'POST', body: { name: f.name.replace(/[^\w.-]+/g, '-').slice(-100) || 'image.png', dataBase64: await readAsBase64(f) } });
+      for (const f of files) {
+        // Photos from a phone are made smaller here, before they are sent.
+        const { name, dataBase64 } = await prepareImage(f, { maxBytes: MAX_UPLOAD_BYTES });
+        last = await api<Asset>('/v1/templates/assets', { method: 'POST', body: { name, dataBase64 } });
       }
       load();
       if (last && files.length === 1) onPick(`a:${last.id}`);
@@ -64,7 +64,12 @@ export function ImageLibrary({ ctx, onPick, onClose }: { ctx: EditorCtx; onPick:
   };
   return (
     <Modal title={t('Choose a picture')} onClose={onClose} wide>
-      <div className="stack">
+      <div
+        className={`stack se-dropzone ${dropping ? 'dropping' : ''}`}
+        onDragOver={(e) => { if (e.dataTransfer.types.includes('Files')) { e.preventDefault(); setDropping(true); } }}
+        onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropping(false); }}
+        onDrop={(e) => { e.preventDefault(); setDropping(false); setTab('uploads'); void upload(e.dataTransfer.files); }}
+      >
         <div className="row">
           <div className="tabs" role="group" aria-label={t('Pictures')}>
             <button type="button" aria-pressed={tab === 'uploads'} className={tab === 'uploads' ? 'active' : ''} onClick={() => setTab('uploads')}>{t('Your pictures')}</button>
@@ -76,7 +81,7 @@ export function ImageLibrary({ ctx, onPick, onClose }: { ctx: EditorCtx; onPick:
         </div>
         <ErrorText error={error} />
         {tab === 'uploads' ? (
-          assets === null ? <div className="skeleton" style={{ height: '10rem' }} /> : assets.length === 0 ? <div className="empty">{t('No pictures yet. Upload one (PNG, JPEG, WebP; up to 2 MB).')}</div> : (
+          assets === null ? <div className="skeleton" style={{ height: '10rem' }} /> : assets.length === 0 ? <div className="empty">{t('No pictures yet. Upload one, or drop it here. Photos from your phone are fine.')}</div> : (
             <div className="se-library">
               {assets.map((a) => <button key={a.id} type="button" className="se-library-item" onClick={() => onPick(`a:${a.id}`)} title={a.name}><img src={`/v1/assets/${a.id}`} alt={a.name} loading="lazy" /><span className="small">{a.name}</span></button>)}
             </div>
@@ -86,7 +91,7 @@ export function ImageLibrary({ ctx, onPick, onClose }: { ctx: EditorCtx; onPick:
             {products.map((p) => <button key={p.id} type="button" className="se-library-item" onClick={() => onPick(`p:${p.imageId}`)} title={p.title}><img src={`/v1/store/${ctx.slug}/images/${p.imageId}`} alt={p.title} loading="lazy" /><span className="small">{p.title}</span></button>)}
           </div>
         )}
-        <p className="small muted" style={{ margin: 0 }}>{t('Pictures load from your store; large photos are best under 1 MB.')}</p>
+        <p className="small muted" style={{ margin: 0 }}>{t('Drop pictures anywhere here to upload them. Large photos are made smaller for you, so pages load quickly.')}</p>
       </div>
     </Modal>
   );

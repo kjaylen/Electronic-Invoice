@@ -5,21 +5,13 @@ import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-r
 import { api, link, type Product, type ProductSummary, type Variant } from '../api';
 import { useT } from '../i18n';
 import { useSession } from '../session';
+import { prepareImage } from '../images';
 import { useToast } from '../toast';
 import { ErrorText, Field, GST_CATEGORIES, Modal, money, Segmented, Select, UNITS, usePageTitle } from '../ui';
 import { Collections } from './Collections';
 import { Items } from './Items';
 
 const STATUS_LABEL = { draft: 'Draft', active: 'On sale', archived: 'Archived' } as const;
-
-function readAsBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result).split(',')[1] ?? '');
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
-  });
-}
 
 /** Price with GST, as buyers see it: 12.5% on standard-rated items. */
 function withGst(price: string, gst: string): string {
@@ -175,7 +167,8 @@ export function ProductEditor() {
     setUploading(true);
     setError(null);
     try {
-      for (const file of [...files]) await api(`/v1/products/${product.id}/images`, { method: 'POST', body: { dataBase64: await readAsBase64(file) } });
+      // Photos from a phone are made smaller here, so they upload and load quickly.
+      for (const file of [...files]) await api(`/v1/products/${product.id}/images`, { method: 'POST', body: { dataBase64: (await prepareImage(file, { maxBytes: 5 * 1024 * 1024, maxSide: 1600 })).dataBase64 } });
       fill(await api<Product>(`/v1/products/${product.id}`));
     } catch (err) {
       setError(err);
