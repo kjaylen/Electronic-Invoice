@@ -578,3 +578,152 @@ system). The parts above this line are the earlier jobs' and are unchanged.
 
 None that stopped an item. Nothing was pushed, and GitHub Actions has not run
 on this branch.
+
+---
+
+# A POS platform for Belize: the gaps (24 Nov 2026)
+
+Judgment calls made while working through the fourth PLAN.md: what a typical
+Belizean business needs at the counter that was missing. The owner's
+direction was "the main focus is a POS platform" and "no payroll". The parts
+above this line are the earlier jobs' and are unchanged.
+
+## How the work was done
+
+- **A folder of its own**: the git worktree `../eInvoicing-pos`, branch
+  `pos-platform`, cut from `main` after the email and offline-till work was
+  merged. Its own browser-test database (`einvoicing_e2e_pos`) and ports.
+  Nothing was pushed or merged.
+- **Migrations 058 to 062**: counter settings, charges and tips (058),
+  layaways (059), table tabs (060), locations, transfers and landed cost
+  (061), tax settings (062). All add tables or columns; none changes a row.
+- **One commit per item**, server first where the screens could not compile
+  without it, each after its unit tests and its browser test passed.
+- **What was looked up**, on 24 Nov 2026, and where:
+  - Business tax is paid monthly on gross receipts, by the 15th of the next
+    month; 1.75% for a trade or business, 6% for a profession, 3% for rents
+    (Belize Tax Service, bts.gov.bz, FAQ pages; belize.org's summary of the
+    tax regime; BELTRAIDE, beltraide.bz).
+  - GST is 12.5%; a business registers above BZ$75,000 a year; the return is
+    due by the 15th (bts.gov.bz).
+  - Hotel and tourist accommodation tax is 9%; a rise has been discussed
+    (Belize Tourism Board, belizetourismboard.org).
+  - A service charge of about 10% is common in restaurants and hotels. No
+    source said plainly how GST applies to it.
+
+## Choices that could have gone another way
+
+- **A mobile wallet is payment means code 68** (online payment service), the
+  code online-store receipts already send. BTS has accepted it from the store;
+  it has not been tried from the counter on the real test server.
+- **The US-dollar total is information, not a second currency.** Documents
+  stay in BZD. The US$ line is in the receipt's message space, at the fixed
+  BZ$2 to US$1, rounded up to the cent.
+- **The service charge is a charge on each line, with GST.** That is the
+  cautious reading (it is part of what the customer pays for the supply) and
+  it keeps every line's tax right when a sale mixes rates. If an accountant
+  says a business's service charge is outside GST, that business should not
+  use this switch yet. Flagged for the owner.
+- **Tips are never on the tax document.** They are the staff's money, taken
+  with a card or wallet payment and paid out of the drawer; putting them on a
+  receipt would make them a sale. They are kept beside the sale and reported.
+- **A layaway is a tax invoice on account, issued at the start.** The goods
+  are taken off the shelf then, GST falls due then, and payments are ordinary
+  invoice payments. The other way (a receipt only when fully paid) would have
+  needed a new kind of non-tax document for deposits. Whether GST on a
+  layaway is due at the start or at collection is a question for the
+  business's accountant. No cancellation fee; the customer's credit limit is
+  not applied to a layaway.
+- **A table's tab is a held sale with a table's name.** Held sales were
+  already shared by every till and worked offline; a second mechanism would
+  have had to be kept in step with it.
+- **Stations by item category; tickets on the till's own printer.** A
+  separate kitchen printer per station needs printer routing on each device,
+  which belongs with the till app's device settings. Left for later.
+- **A bill is split by item only.** A tax receipt lists goods, and a third of
+  a plate does not add up to the cent. Friends who split evenly pay one
+  receipt with the Split payment.
+- **The item's stock stays the total; other locations hold their share; the
+  main one has the rest.** Storing a level for every location including the
+  main one would have needed every path that touches stock to keep two
+  numbers in step, and any path that missed would drift silently. This way
+  the main shop's level cannot be wrong by construction, and nothing that
+  reads the total had to change.
+- **The online store sells the total**, wherever the stock is. A business
+  that ships from one shop moves stock there with a transfer.
+- **A transfer is received whole.** What went missing on the way is
+  adjusted afterwards as lost, so the history says so.
+- **Landed cost changes the cost on the shelf, not the supplier's bill.**
+  The freight and duty bills are recorded as expenses by whoever pays them;
+  profit and loss counts expenses, so nothing is counted twice.
+- **Business tax counts a sale when its document is issued**, like every
+  other report here. The law taxes receipts; for a shop the two are the same
+  day. A business that sells a lot on account should ask its accountant, and
+  the worksheet says so.
+- **The rates are settings.** Three are offered because three were
+  confirmed. Nothing stops a business typing another kind and rate.
+- **The monthly reminder is on unless turned off.** It is one email a month
+  about a legal deadline, with how to stop it in its footer. A business that
+  has issued nothing and added no dates gets nothing.
+- **WhatsApp reminders are a link, not an integration.** The WhatsApp
+  Business API needs an approved account and template messages per business.
+  A wa.me link works today on any phone, costs nothing, and the message goes
+  from the business's own number, which is what its customers trust.
+- **Chinese is a third language for the till's screens only** (about 470
+  strings): the counter, the till app, shifts and devices. The top bar's
+  switch stays English and Spanish; all three are under My account and on
+  the till's sign-in screen. Translated by the assistant, not by a native
+  speaker: have a Chinese-speaking shopkeeper read it before it is announced.
+
+## Worth doing, deliberately not done
+
+- **Payroll and Social Security.** Out of scope by the owner's decision.
+  The time clock's hours export stays; Social Security's dates can be added
+  to "Dates of your own".
+- **Hotel tax and room or tour bookings.** The BTS document carries GST and
+  the environmental and excise schemes only; there is nowhere on it for a 9%
+  accommodation tax. A hotel can charge it as a line of its own today, but
+  reporting it properly, and bookings with deposits and check-in dates, is a
+  product of its own.
+- **Bank reconciliation and a balance sheet.** That makes this an accounting
+  system. The accountant's pack exists so a real one can be used.
+- **DigiWallet and E-Kyash taking the payment at the till themselves** (a QR
+  the customer scans, confirmed by the provider). E-Kyash exists for online
+  invoices; at a till it needs the provider's merchant agreement and test
+  credentials per business. Until then the wallet is a way to pay recorded by
+  hand, with the reference.
+- **WhatsApp sent by the server.** See above.
+- **A cancellation fee on a layaway, and a kitchen printer per station.**
+- **Low-stock warnings per location.** They are on the total.
+- **Receiving a transfer short.**
+
+## How it was proved
+
+- **Unit tests** (PGlite, a real HTTP app): `test/shifts.test.ts` (wallet,
+  counter settings, service charge and tips, tables and stations),
+  `test/pos-sync.test.ts` (an offline sale with a service charge, a wallet
+  payment and a tip), `test/layaways.test.ts`, `test/held.test.ts` (table
+  tabs), `test/till-print.test.ts` (the order ticket), `test/locations.test.ts`
+  (one shop sees nothing; stock by location; a till that sells from its shop;
+  transfers; landed cost), `test/business-tax.test.ts` (the worksheet, CSV,
+  PDF, the accountant's pack, due dates, the monthly email),
+  `test/receivables.test.ts` (the WhatsApp reminder).
+- **Browser tests** (Edge, a real server and database):
+  `e2e/counter-extras.spec.ts` (US$, service charge, wallet with a tip, the
+  shift report; a layaway; tables, order tickets and a split bill),
+  `e2e/locations.spec.ts`, `e2e/business-tax.spec.ts`, `e2e/reach.spec.ts`
+  (WhatsApp; the counter in Chinese).
+- **The offline till's own tests** were run after the counter changed.
+
+## Found, not fixed
+
+- **F2 at the counter does nothing while the total is being worked out**
+  (a fraction of a second after a sale is recalled). A cashier who presses it
+  at once has to press again. It was like this before; the browser test waits
+  for the total.
+
+## Blockers
+
+None that stopped an item. Not checked anywhere real: BTS's test server with
+a wallet payment from the counter; a real receipt printer with an order
+ticket; a real phone opening the WhatsApp link; GitHub Actions on this branch.
