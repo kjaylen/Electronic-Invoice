@@ -243,7 +243,7 @@ export function OrderScreen({ checkId, onBack, onPay, print }: { checkId: string
         </section>
       </div>
 
-      {choosing && <ModifierDialog entry={choosing} groups={data.modifierGroups.filter((g) => choosing.modifierGroupIds.includes(g.id))} allergy={c.allergy} onClose={() => setChoosing(null)} onAdd={(m, n, note) => { addItem(choosing, m, n, note); setChoosing(null); }} />}
+      {choosing && <ModifierDialog entry={choosing} unitCents={priceNow({ id: choosing.id, category: choosing.category, priceCents: choosing.priceCents }, data.periods, clock.minutes, clock.weekday, override).priceCents} groups={data.modifierGroups.filter((g) => choosing.modifierGroupIds.includes(g.id))} allergy={c.allergy} onClose={() => setChoosing(null)} onAdd={(m, n, note) => { addItem(choosing, m, n, note); setChoosing(null); }} />}
       {editingItem && <ItemDialog item={editingItem} check={c} others={checks.filter((x) => x.id !== c.id && x.status === 'open')} onClose={() => setEditing(null)} run={run} />}
       {dialog === 'pay' && <PayDialog check={c} ctx={ctx} hotel={data.venue.hotel} label={label} onClose={() => setDialog(null)} run={run} onPay={() => { setDialog(null); onPay(); }} />}
       {dialog === 'more' && <MoreDialog check={c} data={data} onClose={() => setDialog(null)} run={run} open={(d) => setDialog(d)} />}
@@ -294,12 +294,14 @@ function TicketProblems({ failed }: { failed: Array<{ id: string; stationId: str
   );
 }
 
-function ModifierDialog({ entry, groups, allergy, onClose, onAdd }: { entry: MenuEntry; groups: ModifierGroup[]; allergy: string | null; onClose: () => void; onAdd: (m: ReturnType<typeof defaultModifiers>, quantity: number, note: string) => void }) {
+function ModifierDialog({ entry, unitCents, groups, allergy, onClose, onAdd }: { entry: MenuEntry; unitCents: number; groups: ModifierGroup[]; allergy: string | null; onClose: () => void; onAdd: (m: ReturnType<typeof defaultModifiers>, quantity: number, note: string) => void }) {
   const t = useT();
   const [chosen, setChosen] = useState(() => defaultModifiers(groups));
   const [quantity, setQuantity] = useState(1);
   const [note, setNote] = useState('');
   const problem = modifierProblem(groups, chosen);
+  // What the guest pays for this, as chosen so far.
+  const total = (unitCents + chosen.reduce((a, m) => a + m.priceCents, 0)) * quantity;
   const toggle = (g: ModifierGroup, o: ModifierGroup['options'][number]) => setChosen((cur) => {
     const has = cur.some((x) => x.groupId === g.id && x.optionId === o.id);
     if (has) return cur.filter((x) => !(x.groupId === g.id && x.optionId === o.id));
@@ -314,19 +316,32 @@ function ModifierDialog({ entry, groups, allergy, onClose, onAdd }: { entry: Men
         {allergy && entry.allergens.length > 0 && <div className="banner bad"><strong>{t('Contains')}: {entry.allergens.join(', ')}.</strong> {t('The guest’s allergy')}: {allergy}</div>}
         {entry.dietary.length > 0 && <p className="small muted">{entry.dietary.join(' · ')}</p>}
         {groups.map((g) => (
-          <fieldset key={g.id} className="venue-group">
-            <legend>{g.name} <span className="small muted">{g.minChoices > 0 ? (g.maxChoices === 1 ? t('choose one') : t('choose {min} to {max}', { min: g.minChoices, max: g.maxChoices })) : g.maxChoices === 1 ? t('optional') : t('up to {max}', { max: g.maxChoices })}</span></legend>
-            <div className="venue-pick">
-              {g.options.map((o) => <button key={o.id} type="button" className="chip-toggle" aria-pressed={chosen.some((x) => x.groupId === g.id && x.optionId === o.id)} onClick={() => toggle(g, o)}>{o.name}{o.priceCents !== 0 && <span className="num"> {o.priceCents > 0 ? '+' : ''}{centsText(o.priceCents)}</span>}</button>)}
-            </div>
-          </fieldset>
+          (() => {
+            const picked = chosen.filter((x) => x.groupId === g.id).length;
+            const required = g.minChoices > 0;
+            const done = picked >= g.minChoices && picked > 0;
+            return (
+              <fieldset key={g.id} className={`venue-group${required ? ' is-required' : ''}${done ? ' is-done' : ''}`}>
+                <legend>
+                  <span className="group-name">{g.name}</span> <span className="small muted">{required ? (g.maxChoices === 1 ? t('choose one') : t('choose {min} to {max}', { min: g.minChoices, max: g.maxChoices })) : g.maxChoices === 1 ? t('optional') : t('up to {max}', { max: g.maxChoices })}</span>
+                  {required && <span className={`group-state ${done ? 'done' : 'needed'}`}>{done ? `✓ ${t('Done')}` : `! ${t('Required')}`}</span>}
+                </legend>
+                <div className="venue-pick">
+                  {g.options.map((o) => {
+                    const on = chosen.some((x) => x.groupId === g.id && x.optionId === o.id);
+                    return <button key={o.id} type="button" className="chip-toggle" aria-pressed={on} onClick={() => toggle(g, o)}>{on && <span className="tick" aria-hidden="true">✓</span>}{o.name}{o.priceCents !== 0 && <span className="num"> {o.priceCents > 0 ? '+' : ''}{centsText(o.priceCents)}</span>}</button>;
+                  })}
+                </div>
+              </fieldset>
+            );
+          })()
         ))}
         <Field label={t('Note for the kitchen or bar')}><input maxLength={200} value={note} onChange={(e) => setNote(e.target.value)} placeholder={t('No onions, extra ice…')} /></Field>
         <div className="row">
           <div className="qty-stepper"><button type="button" className="secondary" onClick={() => setQuantity(Math.max(1, quantity - 1))} aria-label={t('One less')}>−</button><output>{quantity}</output><button type="button" className="secondary" onClick={() => setQuantity(Math.min(99, quantity + 1))} aria-label={t('One more')}>+</button></div>
           <span className="spacer" />
           {problem && <span className="small late">{problem}</span>}
-          <button type="button" className="big" disabled={Boolean(problem)} onClick={() => onAdd(chosen, quantity, note)}>{t('Add to the order')}</button>
+          <button type="button" className="big add-to-order" disabled={Boolean(problem)} onClick={() => onAdd(chosen, quantity, note)}>{t('Add to the order')} <span className="num">{cents(total)}</span></button>
         </div>
       </div>
     </Modal>
