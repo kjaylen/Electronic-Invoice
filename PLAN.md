@@ -1,113 +1,120 @@
-# Plan: what a Belize shop, bar or restaurant still needs at the till
+# Plan: the hospitality module (restaurants, bars, hotels)
 
-Who this is for: the owner of a small Belizean business who sells over a
-counter: a grocery, a hardware or clothes shop, a bar, a restaurant, a shop
-with a second branch. The till is the product. Everything here either
-happens at the till or is what the owner does with the till's numbers at the
-end of the month.
+Started 25 Nov 2026 on branch `hospitality` (cut from `pos-platform`, not yet
+merged), in the worktree `../eInvoicing-pos`. The earlier plan is in
+`docs/plans/2026-11-pos-platform.md`. Choices are logged in DECISIONS.md;
+tax values in TAX-RULES.md; which tax document when in ETD-MAPPING.md.
 
-Payroll is out of scope, by decision: no pay runs, no Social Security
-contributions, no payslips. The time clock keeps exporting hours.
+## What was found in the code (the brief's blanks)
 
-Status marks: `[ ]` to do, `[x]` done, `[-]` skipped (the reason is in DECISIONS.md).
+- **Stack**: Fastify + PostgreSQL (`src/`, TypeScript run by Node), React +
+  Vite (`web/`). The desktop (Electron), Android and iOS (Capacitor) apps all
+  run the same web till, `web/src/pos`. One screen built in `web/` is the
+  same screen on all three.
+- **Already there** from the POS work: tables as named held sales, order
+  tickets per station by category, split by item, service charge per line,
+  tips beside the sale, US$ cash at 2:1, wallet, layaway, locations, recipes
+  in the shape of bundles (`item_components`, decimals allowed).
+- **Offline**: the till is offline-first: it issues receipts itself and
+  syncs (`web/src/pos/offline/local.ts` answers `/v1/...` calls locally).
+- **Manual**: BTS Orientation Manual v1.30; it is not in the repository
+  (the README's "Settled by the manual" is the working copy of its rules).
+- **Customers / other tenders**: taken as restaurants, bars and small hotels
+  serving tourists; the local tender is the mobile wallet.
 
-The plan before this one (email) is finished and kept in `docs/plans/2026-11-email.md`.
+## Architecture (read this first after a break)
 
-## What exists (read 24 Nov 2026)
+- **Switch**: `tenants.venue jsonb` = `{ restaurant, bar, hotel, ...settings }`
+  (`src/venue/settings.ts`). `GET /v1/me` carries `venue`. Nothing below
+  shows or runs for a business with all three off.
+- **A check is an operation log.** `src/venue/check.ts` is a pure reducer
+  shared by the server and the web app: `apply(check, op)`. Ops have a
+  client-made id; applying one twice does nothing. The server stores ops in
+  `venue_ops` (a sequence per business) and the folded check in
+  `venue_checks.state`. Devices apply ops locally at once, queue them, post
+  them (`POST /v1/venue/ops`) and read everyone else's
+  (`GET /v1/venue/changes?since=`), every two seconds.
+- **The concurrency rule**: items have their own ids, so two people adding
+  never collide; every op is per item; an item goes to the kitchen once (the
+  first `fire` that reaches the log sends it; later ones skip it); the server's
+  answer says what each op really did, and tickets print from that.
+- **Paying** hands the chosen items to the existing sale (the counter's
+  cart), so every tender, US$, tips, the receipt, BTS and the offline till
+  work as they do for a shop. When the receipt is issued an op marks the
+  items paid.
+- **Kitchen**: `venue_tickets` is the print queue and the kitchen screen's
+  source: one row per station per send, printed by the device that hosts the
+  station's printer, shown failed to the server who sent it, retried,
+  re-routed to the fallback.
+- **Hotel** is server-side and online: rooms, bookings, folios, housekeeping,
+  night audit (`src/venue/hotel.ts`).
+- **Web**: `web/src/venue/*` (Floor, Order, FloorEditor, MenuSetup, Kitchen,
+  Reservations, Tabs, Hotel*, VenueReports). Spanish in `es.ts`, Chinese for
+  the service screens in `zh.ts`.
 
-The till is already strong: one app for desktop, Android, iPhone and any
-browser, selling offline first; barcode scanners and the camera; receipt
-printers and cash drawers; shifts with X and Z reports; discounts with a
-cashier limit; split payments; US$ cash taken at 2 to 1; held sales shared
-between tills; gift cards; loyalty points; wholesale and quantity prices;
-sales on account with credit limits; bundles; items sold by weight; stock
-with a ledger, purchase orders and counts; a GST return worksheet.
+## Build order
 
-## What is missing, found by asking what a typical Belize business does
+### 0. Groundwork
+- [ ] 0.1 PLAN.md, TAX-RULES.md, ETD-MAPPING.md
+- [ ] 0.2 `tenants.venue`, the switch in Settings, roles and permissions (A4)
 
-Facts about Belize used below were looked up on 24 Nov 2026 and are written
-down in DECISIONS.md with where they came from. Rates are settings, never
-constants in the code, because they change and because sources disagree.
+### A. Venue setup
+- [ ] A1 Areas and floor plans, drag and drop, alternative layouts
+- [ ] A2 Service periods and menus (hours, prices, automatic, override)
+- [ ] A3 Stations and routing (printer, screen, fallback)
+- [ ] A4 Roles, PIN switching, sections
 
-### A. At the counter, every day
+### B. Menu
+- [ ] B5 Modifier groups and rules; combos; notes
+- [ ] B6 Allergens and dietary tags
+- [ ] B7 Sold out ("86") with a countdown
+- [ ] B8 Recipes by measure; waste and spillage
 
-- [x] A1. **Mobile wallets as a way to pay** (DigiWallet, E-Kyash by hand):
-  a "Wallet" button beside Cash, Card and Transfer, with the reference typed
-  in; counted on its own line in the shift report and the Z report.
-- [x] A2. **Prices in US dollars too.** A setting: the receipt, the customer
-  display and price labels show the total in US$ beside BZ$ (2 to 1), for
-  shops that sell to visitors.
-- [x] A3. **Service charge.** A setting (off, or a percentage, usually 10%):
-  added to a sale with one tap, on by default for sales opened on a table,
-  shown as its own line on the receipt, with GST as the business has set it.
-- [x] A4. **Tips.** When a customer adds a tip on a card or wallet payment,
-  the till records it with the sale; it is not part of the receipt or the
-  sales figures, and the shift report says how much is owed to staff.
-- [x] A5. **Layaway.** Goods put aside for a customer who pays over time: a
-  deposit now, payments later, collected when paid in full; a list of
-  layaways with what is still owed and when each runs out; cancelling gives
-  back the goods and says what to refund.
+### C. Table service
+- [ ] C9 Live floor view
+- [ ] C10 Seating, seats
+- [ ] C11 Ordering: modifiers, courses, hold and fire, repeat round
+- [ ] C12 Move, merge, split, transfer
+- [ ] C13 Voids, comps, discounts with supervisor PIN and reasons
+- [ ] C14 Pre-bill; split evenly, by seat, by item, shared items
 
-### B. Bars and restaurants
+### D. Bar
+- [ ] D15 Tabs by name, seat or room; list with age; shift-end warning
+- [ ] D16 Quick sale
+- [ ] D17 Happy hour, two-for-one, bundles
 
-- [x] B1. **Tables and tabs.** A business says it serves at tables and names
-  them (Table 1 to 12, Bar, Patio). The till shows them: free, open (for how
-  long, how much), and opens a tab with a tap. A tab is added to over the
-  evening from any till, and paid like any sale.
-- [x] B2. **Order tickets for the kitchen and the bar.** Items are marked as
-  kitchen, bar or neither. Sending a tab prints only what is new, on the
-  printer for that station, with the table, the time, who took it, and a note
-  per item ("no onions").
-- [x] B3. **Splitting a bill.** Pay part of a tab by item; each part gets
-  its own receipt and the rest stays on the table. (Equal parts are not
-  separate receipts: a tax receipt lists goods, and a third of a plate does
-  not add up to the cent. Friends who split evenly pay one receipt with the
-  Split payment.)
+### E. Kitchen and bar production
+- [ ] E18 Tickets, follow-ups for changes and voids
+- [ ] E19 Kitchen display: cards, ageing, bump, recall, all-day, expediter
+- [ ] E20 Ready back to the floor
 
-### C. More than one shop
+### F. Reservations and waitlist
+- [ ] F21 Reservations, timeline, clashes, deposit, confirmations, no-shows
+- [ ] F22 Waitlist
+- [ ] F23 Guest records
 
-- [x] C1. **Locations.** A business with a second shop adds it; stock is
-  kept per location; a till belongs to a location and sells from its stock;
-  receiving and counting are done per location; the stock report shows each
-  and the total.
-- [x] C2. **Transfers** between locations: sent from one, received at the
-  other, with what is on the way.
+### G. Payments and closing
+- [ ] G24 Tenders: US$, charge to room, house account, mixed
+- [ ] G25 Service charge rules; tips per server; pooling report
+- [ ] G26 Server checkout report
+- [ ] G27 End of day and the business date
 
-### D. Buying stock from abroad
+### H. Hotel
+- [ ] H28 Room types, rooms, rate plans
+- [ ] H29 Reservations and the availability calendar
+- [ ] H30 Front desk
+- [ ] H31 Guest folio
+- [ ] H32 Housekeeping
+- [ ] H33 Night audit
 
-- [x] D1. **Landed cost.** When stock is received, freight, duty, brokerage
-  and other costs of bringing it in are entered once and spread over the
-  items by value, so the cost per item (and the margin the till shows) is
-  what the goods really cost.
+### I. Tax
+- [ ] I34 Dated tax configuration; TAX-RULES.md
+- [ ] I35 ETD mapping implemented as written
 
-### E. The end of the month
+### J. Reports
+- [ ] J36 Hospitality reports
 
-- [x] E1. **Business tax worksheet** (Reports → Business tax): the month's
-  receipts by kind, the rate for each (the business chooses its kinds in
-  Settings; 1.75% for trade and 6% for professions are filled in), less the
-  contract tax customers withheld; CSV and PDF; in the accountant's pack.
-- [x] E2. **What is due and when.** The overview and a monthly email say what
-  is coming up: the GST return and the business tax return (the 15th), and
-  dates the owner adds (trade licence, Social Security, insurance).
-
-### F. Reaching customers and shopkeepers
-
-- [x] F1. **Reminders by WhatsApp.** Getting paid lists who to remind today;
-  each has a WhatsApp button that opens the chat with the message and the
-  pay link written, for customers who do not read email.
-- [x] F2. **The till in Chinese.** The counter, the till app and its receipts
-  screens in Simplified Chinese, chosen per person like Spanish.
-
-### G. Looked at, and not built here
-
-- [-] G1. Payroll and Social Security: out of scope by decision.
-- [-] G2. Hotel tax and room or tour bookings.
-- [-] G3. Bank reconciliation and a balance sheet.
-- [-] G4. DigiWallet and E-Kyash taking the payment themselves at the till.
-- [-] G5. WhatsApp sending by itself.
-
-### H. Proof
-
-- [x] H1. Unit tests for each item; the browser tests drive each new screen.
-- [x] H2. The offline till still passes its own tests after every change to the counter.
-- [x] H3. README, DECISIONS.md, and a summary of what changed for each kind of business.
+### Proof
+- [ ] P1 Automated tests the brief lists
+- [ ] P2 Scenario 1 (restaurant), 2 (bar), 3 (hotel), end to end
+- [ ] P3 Full unit and browser suites; README, DECISIONS, summary
