@@ -194,6 +194,67 @@ test('no connection: a table is opened, ordered and sent; the ticket prints here
   await expect(plan.getByRole('button', { name: /^Table 2: Food sent, 2/ })).toBeVisible();
 });
 
+test('the till app with no connection: a table opened, ordered, sent and paid in cash on the till; the receipt and the payment reach the server once', async ({ page, browser }) => {
+  await logIn(page);
+  await setUp(page);
+  // A till of its own (another device), paired while there is a connection, as a till always is the first time.
+  const added = await put(page, 'post', '/v1/pos/devices', { name: `Floor till ${Math.random().toString(36).slice(2, 6)}` });
+  const context = await browser.newContext();
+  const till = await context.newPage();
+  await till.goto(`/pos?pair=${added.pairing.code}`);
+  await expect(till.getByRole('heading', { name: /Who is selling\?|Rosa Owner/ })).toBeVisible({ timeout: 20_000 });
+  if (await till.getByRole('heading', { name: 'Who is selling?' }).isVisible()) await till.getByRole('button', { name: 'Rosa Owner' }).click();
+  await expect(till.getByText('Enter your PIN')).toBeVisible();
+  for (const d of '4826') await till.keyboard.press(d);
+  await till.keyboard.press('Enter');
+  // A restaurant's till opens on the floor.
+  const plan = till.getByRole('group', { name: 'Floor plan of Dining room' });
+  await expect(plan.getByRole('button', { name: /^Table 1: Free/ })).toBeVisible({ timeout: 20_000 });
+  const indicator = till.locator('.till-bar .sync-indicator').first();
+  await expect(indicator).toContainText('Online');
+
+  await context.setOffline(true);
+  await expect(indicator).toContainText('Offline');
+  await plan.getByRole('button', { name: /^Table 1/ }).click();
+  const seat = till.getByRole('dialog', { name: 'Seat a party at Table 1' });
+  await seat.getByRole('button', { name: '2', exact: true }).click();
+  await seat.getByRole('button', { name: 'Open the table for 2' }).click();
+  const menu = till.getByRole('region', { name: 'Menu' });
+  await menu.getByRole('button', { name: /^Coconut water/ }).click();
+  await menu.getByRole('button', { name: /^Coconut water/ }).click();
+  const order = till.getByRole('region', { name: 'The order' });
+  await order.getByRole('button', { name: /^Send/ }).click();
+  await expect(order.getByText('not sent')).toHaveCount(0);
+  // 2 x 3.50 = 7.00, GST 0.88: paid whole, in cash, on a receipt the till makes itself.
+  await order.getByRole('button', { name: 'Pay', exact: true }).click();
+  await till.getByRole('dialog', { name: 'Pay Table 1' }).getByRole('button', { name: 'Pay BZ$7.88' }).click();
+  const cart = till.locator('form.cart');
+  await expect(cart.locator('.grand')).toContainText('BZ$7.88');
+  await cart.getByLabel('Cash received').fill('10');
+  await cart.getByRole('button', { name: /^Issue receipt/ }).click();
+  await expect(plan.getByRole('button', { name: /^Table 1: Paid: clean it/ })).toBeVisible();
+  await expect(indicator).toContainText(/Offline · \d+ to send/);
+  // Nothing of it is on the server yet.
+  const before = await (await page.request.get('/v1/venue/changes', { headers: API })).json() as { checks: Array<{ tableName: string }> };
+  expect(before.checks.some((c) => c.tableName === 'Table 1')).toBeFalsy();
+
+  // The connection is back: the receipt goes up and is authorized, and the table is paid on the server, by that receipt.
+  await context.setOffline(false);
+  await expect(indicator).toContainText('Online · all sent', { timeout: 30_000 });
+  await expect.poll(async () => {
+    const now = await (await page.request.get('/v1/venue/changes', { headers: API })).json() as { checks: Array<{ tableName: string; status: string }> };
+    return now.checks.find((c) => c.tableName === 'Table 1')?.status;
+  }, { timeout: 20_000 }).toBe('paid');
+  const after = await (await page.request.get('/v1/venue/changes', { headers: API })).json() as { checks: Array<{ tableName: string; items: Array<{ name: string; status: string; paid: Array<{ documentId: string }> }> }> };
+  const check = after.checks.find((c) => c.tableName === 'Table 1')!;
+  expect(check.items.length).toBe(1);
+  expect(check.items[0]!.paid.length).toBe(1);
+  const doc = await (await page.request.get(`/v1/documents/${check.items[0]!.paid[0]!.documentId}`, { headers: API })).json();
+  expect([doc.type, doc.totals.payable]).toEqual(['02', '7.88']);
+  await expect.poll(async () => (await (await page.request.get(`/v1/documents/${doc.id}`, { headers: API })).json()).status, { timeout: 20_000 }).toBe('authorized');
+  await context.close();
+});
+
 test('the bar: a tab by name, a round repeated, moved to a table, split evenly in two, and a sold-out item', async ({ page }) => {
   await logIn(page);
   const { cakes } = await setUp(page);
