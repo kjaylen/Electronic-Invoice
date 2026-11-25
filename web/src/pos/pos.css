@@ -67,6 +67,13 @@ body.till-body { overflow: hidden; background: var(--paper); padding: env(safe-a
 .till-bar .sync-indicator { min-height: var(--pos-target); }
 .till-banner { padding: var(--pos-2) var(--pos-4) 0; }
 @media (max-width: 1100px) { .status-bar .pill-text { display: none; } .status-bar .sync-indicator span:not(.dot):not(.count) { display: none; } }
+.status-bar .status-clock { white-space: nowrap; }
+/* A tablet held upright: the screens keep their words, under their icons, so all of them fit. */
+@media (min-width: 721px) and (max-width: 960px) {
+  .status-bar .where { max-width: 8rem; }
+  .status-bar .status-tabs button { flex-direction: column; gap: 2px; padding: 0 var(--pos-2); min-height: var(--pos-target); font-size: var(--pos-text-xs); }
+  .status-bar .status-tabs button svg { width: 1.1rem; height: 1.1rem; }
+}
 @media (max-width: 720px) {
   .status-bar { padding-right: var(--pos-2); }
   .status-bar .status-tabs { position: fixed; z-index: 40; left: 0; right: 0; bottom: 0; justify-content: space-around; gap: 0; background: var(--pos-bar); border-top: 1px solid rgba(255, 255, 255, 0.08); padding: var(--pos-1) var(--pos-1) calc(var(--pos-1) + env(safe-area-inset-bottom)); }

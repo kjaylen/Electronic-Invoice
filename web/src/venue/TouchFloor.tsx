@@ -221,7 +221,7 @@ function TableList({ tables, empty, onTap, onActions }: { tables: FloorTable[]; 
             <ListRow
               lead={<span className="state-swatch" style={{ background: `var(--pos-t-${x.state})`, borderColor: `var(--pos-t-${x.state}-edge)`, color: `var(--pos-t-${x.state}-ink)` }}><Icon name={look.icon} /></span>}
               title={<>{x.item.name}<span className="list-state"> · {t(look.label)}</span></>}
-              meta={x.check ? <>{t('{n} guests', { n: x.check.partySize })}{x.server ? ` · ${x.server}` : ''}{x.minutes !== undefined ? ` · ${x.minutes}′` : ''}</> : x.booking ?? t('{n} seats', { n: x.item.seats })}
+              meta={x.check ? <>{t('{n} guests', { n: x.check.partySize })}{x.server ? ` · ${x.server}` : ''}{x.minutes !== undefined ? ` · ${x.minutes}′` : ''}</> : x.booking ?? (x.item.seats === 1 ? t('1 seat') : t('{n} seats', { n: x.item.seats }))}
               amount={x.total}
               end={<>{x.ready && <Badge tone="danger" icon="bell">{t('Food ready')}</Badge>}{x.idle && <Badge tone="warning" icon="clock">{t('Idle')}</Badge>}</>}
               onClick={() => onTap(x)}

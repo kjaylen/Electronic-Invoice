@@ -5019,5 +5019,6 @@ export const ES: Record<string, string> = {
   "{n} chosen": "{n} elegidos",
   "Remove them from the plan": "Quitarlos del plano",
   "Needs cleaning": "Hay que limpiarla",
-  "Keypad for the cash received": "Teclado para el efectivo recibido",
+  "Amount keypad": "Teclado del importe",
+  "1 seat": "1 asiento",
 };

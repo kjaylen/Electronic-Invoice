@@ -939,7 +939,7 @@ export function CounterPanel(props: {
               {sale.usd && tenderedBz !== null && <p className="usd-note">{t('US${usd} is {bz} (BZ$2 to US$1). Change in BZ$.', { usd: fromCents(toCents(sale.tendered)), bz: money(fromCents(tenderedBz)) })}</p>}
               {props.touch && cashPad && (
                 <div className="cash-pad">
-                  <NumPad label={t('Keypad for the cash received')} onKey={(k) => set({ tendered: typeAmount(sale.tendered, k) })} />
+                  <NumPad label={t('Amount keypad')} onKey={(k) => set({ tendered: typeAmount(sale.tendered, k) })} />
                   <button type="button" className="link on-dark" onClick={() => setCashPad(false)}>{t('Hide the keypad')}</button>
                 </div>
               )}

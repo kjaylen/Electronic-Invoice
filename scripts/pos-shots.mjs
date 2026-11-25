@@ -8,7 +8,7 @@
 //   node scripts/pos-shots.mjs --phase after --only till        (one size)
 
 import { chromium, request } from '@playwright/test';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readdirSync, unlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -29,6 +29,8 @@ const SIZES = [
 ].filter((s) => !only || s.name.startsWith(only));
 const API = { 'X-Requested-With': 'etd-web', 'X-Business': 'corner-store' };
 const PIN = '4826';
+const ORDER = ['pair', 'staff', 'pin', 'floor', 'floor-seat', 'order', 'order-choices', 'order-lines', 'order-pay-split', 'floor-busy', 'tabs', 'kitchen',
+  'sell-empty', 'sell-lines', 'sell-cash', 'sell-done', 'sales', 'sale-detail', 'refund', 'shift', 'shift-open', 'shift-running', 'shift-close', 'devices', 'sync'];
 
 const owner = await request.newContext({ baseURL: BASE, extraHTTPHeaders: API });
 const login = await owner.post('/v1/auth/login', { data: { business: 'corner-store', login: 'rosa@cornerstore.test', password: 'my brand new password' } });
@@ -87,6 +89,8 @@ let storage;
 for (const size of SIZES) {
   const dir = join(root, 'docs', 'design', phase, ...(phase === 'after' ? [theme] : []), size.name);
   mkdirSync(dir, { recursive: true });
+  // A fresh set each time: nothing left from an earlier run.
+  for (const f of readdirSync(dir)) if (f.endsWith('.jpg')) unlinkSync(join(dir, f));
   // Every size starts from the same floor: nothing open.
   await setUpVenue();
   let n = 0;
@@ -99,7 +103,9 @@ for (const size of SIZES) {
   const shot = async (name) => {
     await page.waitForTimeout(450);
     n++;
-    await page.screenshot({ path: join(dir, `${String(n).padStart(2, '0')}-${name}.jpg`), type: 'jpeg', quality: 72 });
+    // Numbered by its place in the list, so a before and its after always match, whatever was skipped.
+    const at = ORDER.indexOf(name);
+    await page.screenshot({ path: join(dir, `${String(at < 0 ? 90 + n : at).padStart(2, '0')}-${name}.jpg`), type: 'jpeg', quality: 72 });
   };
   const step = async (name, fn) => {
     try {
@@ -137,8 +143,8 @@ for (const size of SIZES) {
     await page.getByLabel('Print each receipt automatically').uncheck({ timeout: 5000 });
   } catch { /* already off */ }
 
-  await step('floor', async () => { await tab('Floor'); await page.waitForSelector('[aria-label^="Floor plan of"]'); });
-  await step('floor-seat', async () => { await page.locator('[aria-label^="Table 1"]').first().click(); await page.waitForSelector('[role="dialog"]'); });
+  await step('floor', async () => { await tab('Floor'); await page.waitForSelector('[aria-label^="Floor plan of"], .floor-list'); });
+  await step('floor-seat', async () => { await page.locator('[aria-label^="Table 1"], .floor-list .pos-row:has-text("Table 1")').first().click(); await page.waitForSelector('[role="dialog"]'); });
   await step('order', async () => { await page.getByRole('dialog').getByRole('button', { name: /^Open the table/ }).click(); await page.waitForSelector('.venue-order-head, .order-screen'); });
   await step('order-choices', async () => { await page.locator('.venue-item, .product-tile').filter({ hasText: 'Johnny cakes' }).first().click(); await page.waitForSelector('[role="dialog"]'); });
   await step('order-lines', async () => {
@@ -153,7 +159,7 @@ for (const size of SIZES) {
   await step('floor-busy', async () => {
     await page.keyboard.press('Escape').catch(() => {});
     await page.locator('.venue-order-head button, .order-back').first().click();
-    await page.waitForSelector('[aria-label^="Floor plan of"]');
+    await page.waitForSelector('[aria-label^="Floor plan of"], .floor-list');
   });
   await step('tabs', async () => { await page.getByRole('button', { name: /^Tabs/ }).click(); await page.waitForSelector('[role="dialog"]'); });
   await page.keyboard.press('Escape').catch(() => {});

@@ -51,7 +51,7 @@ body.till-body button.quick:active:not(:disabled) { transform: scale(0.97); back
 body.till-body button.quick:focus-visible { outline: none; box-shadow: var(--pos-focus); }
 body.till-body button.quick .name { overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 body.till-body button.quick .price { font-size: var(--pos-text-md); color: var(--pos-brand-text); font-weight: var(--pos-weight-bold); font-variant-numeric: tabular-nums; }
-body.till-body button.quick .stock { position: absolute; bottom: var(--pos-3); right: var(--pos-2); font-size: var(--pos-text-xs); font-weight: var(--pos-weight-bold); padding: 0 var(--pos-2); border-radius: var(--pos-radius-pill); background: var(--pos-danger-soft); color: var(--pos-danger-text); border: 1px solid var(--pos-danger-line); }
+body.till-body button.quick .stock { position: static; align-self: flex-start; font-size: var(--pos-text-xs); font-weight: var(--pos-weight-bold); padding: 0 var(--pos-2); border-radius: var(--pos-radius-pill); background: var(--pos-danger-soft); color: var(--pos-danger-text); border: 1px solid var(--pos-danger-line); }
 body.till-body button.quick .stock.low { background: var(--pos-warning-soft); color: var(--pos-warning-text); border-color: var(--pos-warning-line); }
 body.till-body button.quick.is-out { background: var(--pos-surface-2); color: var(--pos-text-muted); box-shadow: none; }
 body.till-body button.quick.is-out .name { text-decoration: line-through; }
@@ -230,14 +230,6 @@ body.till-body .last-sale .change { font-size: var(--pos-text-3xl); font-weight:
   body.till-body .counter .cart.ticket { padding-bottom: calc(var(--pos-target-lg) + var(--pos-4)); }
   body.till-body .counter-actions { overflow-x: auto; flex-wrap: nowrap; scrollbar-width: none; }
   body.till-body .counter-actions > * { flex: none; }
-  /* A line on a phone: the name and its amount, then the quantity and the line's buttons. */
-  body.till-body .counter .cart-lines li { grid-template-columns: minmax(0, 1fr) auto auto; row-gap: var(--pos-2); }
-  body.till-body .counter .cart-lines li > .name, body.till-body .counter .cart-lines li > .custom { grid-column: 1 / 3; grid-row: 1; }
-  body.till-body .counter .cart-lines li > .sum { grid-column: 3; grid-row: 1; text-align: right; }
-  body.till-body .counter .cart-lines li > .qty { grid-column: 1; grid-row: 2; justify-self: start; }
-  body.till-body .counter .cart-lines li > .disc { grid-column: 2; grid-row: 2; }
-  body.till-body .counter .cart-lines li > .remove { grid-column: 3; grid-row: 2; }
-  body.till-body .counter .cart-lines li > :nth-child(n + 6) { grid-column: 1 / -1; }
   body.till-body .quick-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -246,3 +238,16 @@ body.till-body .last-sale .change { font-size: var(--pos-text-3xl); font-weight:
 
 /* The sale just made comes first in the products column. */
 body.till-body .counter > .stack > .last-sale { order: -1; }
+
+/* A narrow order panel (a phone, a tablet held upright): each line on two rows, the name and its
+   amount, then the quantity and the line's buttons. Follows the panel's own width. */
+body.till-body .counter .cart.ticket { container: cart / inline-size; }
+@container cart (max-width: 32rem) {
+  body.till-body .counter .cart-lines li { grid-template-columns: minmax(0, 1fr) auto auto; row-gap: var(--pos-2); }
+  body.till-body .counter .cart-lines li > .name, body.till-body .counter .cart-lines li > .custom { grid-column: 1 / 3; grid-row: 1; }
+  body.till-body .counter .cart-lines li > .sum { grid-column: 3; grid-row: 1; text-align: right; }
+  body.till-body .counter .cart-lines li > .qty { grid-column: 1; grid-row: 2; justify-self: start; }
+  body.till-body .counter .cart-lines li > .disc { grid-column: 2; grid-row: 2; }
+  body.till-body .counter .cart-lines li > .remove { grid-column: 3; grid-row: 2; }
+  body.till-body .counter .cart-lines li > :nth-child(n + 6) { grid-column: 1 / -1; }
+}

@@ -27,4 +27,4 @@
 | Booth-shaped tables | The floor plan stores round, square and rectangle only. A booth needs a new shape in the API and database, which is out of scope (appearance only). |
 | The kitchen screen, tabs dialog, seat dialog, shift dialogs, printer editor | They pick up the tokens (light and dark, sizes, fonts) through the shared styles, but keep their layout. They are shared with the web app. |
 | The customer display | It is a second screen for the customer, with its own large-type look; left as it was. |
-| Chinese | The till is also in Simplified Chinese; the new strings fall back to English there until translated. |
+| Chinese | The till's new strings are in Simplified Chinese too; the layout editor (web app) falls back to English there, as the web app does. |
