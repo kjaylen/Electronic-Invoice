@@ -26,7 +26,6 @@ import { ShiftPanel } from './ShiftPanel';
 import { type DocumentView, documentTicket, type Ticket } from './ticket';
 import { ticketLogo } from './logo';
 import { CameraScanner } from './CameraScanner';
-import { withTransition } from '../motion';
 import { ConnectivityContext } from '../connectivity';
 import { offlineTill, type OfflineTill, type SignedInInfo } from './offline/till';
 import { SyncIndicator, SyncScreen, useSyncState } from './offline/status';
@@ -800,16 +799,17 @@ function SignedInTill(props: {
           <header className="till-bar">
             <div className="till-where"><strong>{till.business.name}</strong><span className="muted"> · {till.device.name}</span></div>
             <nav className="till-tabs" aria-label={t('Till')}>
-              {tabs.map(([k, label]) => <button key={k} type="button" className={tab === k ? 'active' : ''} aria-current={tab === k ? 'page' : undefined} onClick={() => k !== tab && withTransition(() => setTab(k), 'screen')}>{label}</button>)}
+              {tabs.map(([k, label]) => <button key={k} type="button" className={tab === k ? 'active' : ''} aria-current={tab === k ? 'page' : undefined} onClick={() => k !== tab && setTab(k)}>{label}</button>)}
             </nav>
             <span className="spacer" />
-            {sync && <SyncIndicator state={sync} onOpen={isManager ? () => withTransition(() => setTab('sync'), 'screen') : undefined} />}
+            {sync && <SyncIndicator state={sync} onOpen={isManager ? () => setTab('sync') : undefined} />}
             <span className="till-user"><span className="avatar" aria-hidden="true">{initials(session.user.name)}</span>{session.user.name}</span>
             <button type="button" className="secondary small-button" onClick={lock}>{t('Lock')}</button>
           </header>
           {!online && !props.offline && <div className="banner bad till-banner"><strong>{t('No connection.')}</strong> {t('Sales need the internet: every receipt is signed and sent to BTS.')}</div>}
           {me?.contingency.active && <div className="banner warn till-banner">{t('BTS cannot be reached right now. Receipts are issued and sent when it is back.')}</div>}
-          <main className="till-main">
+          {/* A tab is a whole screen: the new one replaces the old at once and fades in (keyed by tab), never two on screen together. */}
+          <main className="till-main" key={tab}>
             {/* The counter and the shift wait for the business and the person (from the till's own copy: a moment). */}
             {!me && tab !== 'devices' && tab !== 'sync' && <div className="till-loading" aria-busy="true">{t('Loading…')}</div>}
             {me && tab === 'floor' && serves && <TillFloor />}

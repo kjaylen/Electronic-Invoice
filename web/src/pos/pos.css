@@ -44,7 +44,12 @@ body.till-body { overflow: hidden; background: var(--paper); padding: env(safe-a
 .till-user { display: inline-flex; align-items: center; gap: 0.45rem; font-size: 0.9rem; }
 .till-bar .secondary { background: transparent; color: var(--sheet); border-color: rgba(251, 248, 241, 0.35); }
 .till-banner { margin: 0.75rem 1rem 0; }
-.till-main { flex: 1; overflow: auto; padding: 1rem; }
+.till-main { flex: 1; overflow: auto; padding: 1rem; view-transition-name: none; animation: till-screen-in 140ms var(--ease-out) both; }
+/* A tab's screen comes in on its own: a quick fade and a few pixels up. Nothing of the screen before it stays. */
+@keyframes till-screen-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+/* Lists on a till appear at once with their screen (no row-by-row entrance on top of the screen's own). */
+.till-main .sale-list > li, .till-main tbody tr, .till-main .product-grid > *, .till-main .empty { animation: none; }
+@media (prefers-reduced-motion: reduce) { .till-main { animation: none; } }
 .till-main > .stack { max-width: 90rem; margin: 0 auto; }
 .till-main .quick { min-height: 4.5rem; }
 .till-main .cart button.big { min-height: 3.5rem; font-size: 1.1rem; }
