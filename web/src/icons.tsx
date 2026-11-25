@@ -25,6 +25,7 @@ export const Icons = {
   logout: () => <Svg><path d="M8 3.5H5a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h3" /><path d="M12.5 6.5 16 10l-3.5 3.5M16 10H8" /></Svg>,
   swap: () => <Svg><path d="M4 7h11l-3-3M16 13H5l3 3" /></Svg>,
   menu: () => <Svg><path d="M3.5 6h13M3.5 10h13M3.5 14h13" /></Svg>,
+  dish: () => <Svg><path d="M2.5 15h15" /><path d="M4 15a6 6 0 0 1 12 0" /><path d="M10 9V7.5M8.5 7.5h3" /></Svg>,
   close: () => <Svg><path d="M5 5l10 10M15 5 5 15" /></Svg>,
   arrow: () => <Svg><path d="M4 10h12M11 5l5 5-5 5" /></Svg>,
   quote: () => <Svg><path d="M5 3.5h10a1 1 0 0 1 1 1v12l-2.5-1.5L11 16.5l-2.5-1.5L6 16.5l-2-1.2V4.5a1 1 0 0 1 1-1Z" /><path d="M7.5 7.5h5M7.5 10.5h5M7.5 13h2.5" /></Svg>,

@@ -37,6 +37,8 @@ export interface VenueData {
   taxes: { gstPercent: string; hotelTaxPercent: string; serviceChargeGst?: boolean; serviceChargeExemptionCode?: string; unverified: string[] };
   floor: FloorPlan[]; periods: Period[]; stations: Station[]; modifierGroups: ModifierGroup[]; items: MenuEntry[]; staff: Staff[];
   sections: Array<{ userId: string; tableIds: string[] }>; allergens: string[]; dietary: string[];
+  /** The menu's sections (item categories) in the business's order. */
+  menuSections?: Array<{ name: string; items: number }>;
   me: { id: string; deviceId: string | null; orders: boolean; approves: boolean; kitchen: boolean; floor: boolean };
 }
 export type NumberedCheck = Check & { number?: number };

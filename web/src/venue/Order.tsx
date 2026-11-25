@@ -70,7 +70,12 @@ export function OrderScreen({ checkId, onBack, onPay, print }: { checkId: string
   const menu = data ? currentMenu(data.periods, clock.minutes, clock.weekday, override) : null;
   const promos = data ? runningPromotions(data.periods, clock.minutes, clock.weekday) : [];
   const items = useMemo(() => (data?.items ?? []).filter((i) => onMenu(menu, { id: i.id, category: i.category, priceCents: i.priceCents })), [data, menu]);
-  const categories = useMemo(() => [...new Set(items.map((i) => i.category).filter((x): x is string => Boolean(x)))].sort(), [items]);
+  // In the menu's order (Menu → Items); any not placed there after, A to Z.
+  const categories = useMemo(() => {
+    const order = (data?.menuSections ?? []).map((s) => s.name.toLowerCase());
+    const rank = (c: string) => { const n = order.indexOf(c.toLowerCase()); return n < 0 ? order.length : n; };
+    return [...new Set(items.map((i) => i.category).filter((x): x is string => Boolean(x)))].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+  }, [items, data]);
 
   if (!data || !c) return <div className="card"><p>{t('This check is no longer open.')}</p><button type="button" onClick={onBack}>{t('Back to the floor')}</button></div>;
   const ctx = billContext(data, c);

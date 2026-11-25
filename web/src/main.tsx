@@ -73,6 +73,7 @@ const ShiftDetail = page(() => import('./pages/Shifts'), 'ShiftDetail');
 const ReceiveStock = page(() => import('./pages/Inventory'), 'ReceiveStock');
 const CustomerAccount = page(() => import('./pages/Account'), 'CustomerAccount');
 const ItemDetail = page(() => import('./pages/ItemDetail'), 'ItemDetail');
+const MenuPage = page(() => import('./venue/Menu'), 'MenuPage');
 const PurchaseOrderEditor = page(() => import('./pages/PurchaseOrders'), 'PurchaseOrderEditor');
 const PurchaseOrderDetail = page(() => import('./pages/PurchaseOrders'), 'PurchaseOrderDetail');
 const SupplierDetail = page(() => import('./pages/SupplierDetail'), 'SupplierDetail');
@@ -198,6 +199,8 @@ function Layout() {
       { to: '/expenses', label: t('Expenses'), icon: Icons.expense, permission: 'expenses.manage' },
       { to: '/customers', label: t('Customers'), icon: Icons.customers },
       sells === 'services' ? { to: '/products?tab=items', label: t('Services'), icon: Icons.products } : { to: '/products', label: t('Products'), icon: Icons.products },
+      // Restaurants and bars: how the products are offered (sections, courses, choices, stations).
+      ...(service ? [{ to: '/menu', label: t('Menu'), icon: Icons.dish, permission: 'catalog.manage' as Permission }] : []),
       ...(sells !== 'services' ? [{ to: '/inventory', label: t('Inventory'), icon: Icons.inventory, permission: 'catalog.manage' as Permission }] : []),
       { to: '/reports', label: t('Reports'), icon: Icons.reports, permission: 'reports.view' },
     ]],
@@ -436,6 +439,7 @@ function BusinessApp() {
         <Route path="/host" element={<HostPage />} />
         <Route path="/hotel" element={<HotelPage />} />
         <Route path="/venue-reports" element={<VenueReportsPage />} />
+        <Route path="/menu" element={<MenuPage />} />
         <Route path="/site" element={<Allowed permission="business.manage"><SiteEditor /></Allowed>} />
         <Route path="/shifts/:id" element={<Allowed permission="documents.issue"><ShiftDetail /></Allowed>} />
         <Route path="/inventory/receive" element={<Allowed permission="catalog.manage"><ReceiveStock /></Allowed>} />

@@ -1,8 +1,8 @@
 /**
  * Settings → Venue: switching the hospitality module on by kind of business,
- * its rules, the floor plans (drag and drop), stations and where their
- * tickets go, menus and promotions by the clock, the menu's choices and
- * tags, and the tax values in force.
+ * its rules, the floor plans (drag and drop) and the tax values in force.
+ * The menu (sections, items, menus and promotions by the clock, choices,
+ * stations) has its own page, Menu (Menu.tsx), which uses the cards below.
  */
 
 import { type FormEvent, type PointerEvent as ReactPointerEvent, useCallback, useEffect, useRef, useState } from 'react';
@@ -11,9 +11,9 @@ import { useConfirm } from '../confirm';
 import { useT } from '../i18n';
 import { useSession } from '../session';
 import { useToast } from '../toast';
+import { Link } from 'react-router';
 import { ErrorText, Field, Select } from '../ui';
 import type { ModifierGroup, Period, PromoRule } from '../../../src/venue/pricing.ts';
-import { COURSES } from '../../../src/venue/check.ts';
 import type { FloorItem, FloorPlan, MenuEntry, Station, VenueData, VenueSettings } from './store';
 import './venue.css';
 
@@ -38,11 +38,8 @@ export function VenueTab() {
       <KindsCard venue={data.venue} onSaved={() => { void load(); void refreshMe(); }} />
       {service && data.on && (
         <>
+          <MenuLinkCard />
           <FloorCard plans={data.floor} layout={data.venue.layout} onChange={load} />
-          <StationsCard stations={data.stations} categories={[...new Set(data.items.map((i) => i.category).filter((x): x is string => Boolean(x)))].sort()} onChange={load} />
-          <PeriodsCard periods={data.periods} items={data.items} onChange={load} />
-          <ModifiersCard groups={data.modifierGroups} items={data.items} onChange={load} />
-          <MenuCard data={data} onChange={load} />
         </>
       )}
       {data.on && <TaxCard />}
@@ -223,7 +220,7 @@ function FloorCard({ plans, layout, onChange }: { plans: FloorPlan[]; layout: st
 
 // ---------- stations ----------
 
-function StationsCard({ stations, categories, onChange }: { stations: Station[]; categories: string[]; onChange: () => void }) {
+export function StationsCard({ stations, categories, onChange }: { stations: Station[]; categories: string[]; onChange: () => void }) {
   const t = useT();
   const toast = useToast();
   const [tills, setTills] = useState<Array<{ id: string; name: string }>>([]);
@@ -275,7 +272,7 @@ function StationsCard({ stations, categories, onChange }: { stations: Station[];
 type PeriodForm = Omit<Period, 'id'> & { id?: string };
 const emptyPeriod = (kind: Period['kind']): PeriodForm => ({ kind, name: '', days: [0, 1, 2, 3, 4, 5, 6], startsMin: kind === 'menu' ? 11 * 60 : 16 * 60, endsMin: kind === 'menu' ? 15 * 60 : 18 * 60, categories: [], prices: {}, rules: [], active: true, position: 0 });
 
-function PeriodsCard({ periods, items, onChange }: { periods: Period[]; items: MenuEntry[]; onChange: () => void }) {
+export function PeriodsCard({ periods, items, onChange }: { periods: Period[]; items: MenuEntry[]; onChange: () => void }) {
   const t = useT();
   const toast = useToast();
   const [editing, setEditing] = useState<PeriodForm | null>(null);
@@ -367,7 +364,7 @@ function PeriodsCard({ periods, items, onChange }: { periods: Period[]; items: M
 
 type GroupForm = { id?: string; name: string; minChoices: number; maxChoices: number; options: Array<{ id?: string; name: string; priceCents: number; isDefault: boolean; itemId?: string | null }> };
 
-function ModifiersCard({ groups, items, onChange }: { groups: ModifierGroup[]; items: MenuEntry[]; onChange: () => void }) {
+export function ModifiersCard({ groups, items, onChange }: { groups: ModifierGroup[]; items: MenuEntry[]; onChange: () => void }) {
   const t = useT();
   const toast = useToast();
   const [editing, setEditing] = useState<GroupForm | null>(null);
@@ -424,44 +421,16 @@ function ModifiersCard({ groups, items, onChange }: { groups: ModifierGroup[]; i
   );
 }
 
-// ---------- each item on the menu ----------
+// ---------- the menu moved to its own page ----------
 
-function MenuCard({ data, onChange }: { data: VenueData; onChange: () => void }) {
+function MenuLinkCard() {
   const t = useT();
-  const toast = useToast();
-  const [q, setQ] = useState('');
-  const [open, setOpen] = useState<string | null>(null);
-  const [error, setError] = useState<unknown>(null);
-  const shown = data.items.filter((i) => !q.trim() || i.name.toLowerCase().includes(q.trim().toLowerCase())).slice(0, 40);
-  const put = async (id: string, body: Record<string, unknown>) => { setError(null); try { await api(`/v1/venue/items/${id}`, { method: 'PUT', body }); onChange(); } catch (e) { setError(e); } };
-  const toggle = (list: string[], c: string) => (list.includes(c) ? list.filter((x) => x !== c) : [...list, c]);
+  const { can } = useSession();
+  if (!can('catalog.manage')) return null;
   return (
-    <section className="card stack">
-      <div><h2>{t('The menu, item by item')}</h2><p className="small muted">{t('Allergens and dietary tags (shown to the server, printed on the ticket when a guest has an allergy), the course it belongs to, its choices, and which stations make it. Prices, categories and recipes are under Products.')}</p></div>
-      <input type="search" className="search-input" placeholder={t('Search the menu')} aria-label={t('Search the menu')} value={q} onChange={(e) => setQ(e.target.value)} />
-      <ul className="plain venue-setup-list">
-        {shown.map((i) => (
-          <li key={i.id} className="stack">
-            <div className="row">
-              <button type="button" className="link" aria-expanded={open === i.id} onClick={() => setOpen(open === i.id ? null : i.id)}><strong>{i.name}</strong></button>
-              <span className="small muted">{i.category ?? t('No category')}{i.allergens.length > 0 && ` · ${i.allergens.join(', ')}`}{i.modifierGroupIds.length > 0 && ` · ${t('{n} groups of choices', { n: i.modifierGroupIds.length })}`}</span>
-              <span className="spacer" />
-              <button type="button" className={`chip-toggle ${i.soldOut ? 'on' : ''}`} aria-pressed={i.soldOut} onClick={() => void api(`/v1/venue/items/${i.id}/availability`, { method: 'POST', body: { soldOut: !i.soldOut } }).then(() => { toast(i.soldOut ? t('{name} is back on', { name: i.name }) : t('{name} is sold out on every device', { name: i.name })); onChange(); }).catch(setError)}>{i.soldOut ? t('Sold out') : '86'}</button>
-            </div>
-            {open === i.id && (
-              <div className="stack">
-                <div><span className="small muted">{t('Allergens')}</span><div className="station-categories">{data.allergens.map((a) => <button key={a} type="button" className="chip-toggle" aria-pressed={i.allergens.includes(a)} onClick={() => void put(i.id, { allergens: toggle(i.allergens, a) })}>{t(a)}</button>)}</div></div>
-                <div><span className="small muted">{t('Dietary')}</span><div className="station-categories">{data.dietary.map((a) => <button key={a} type="button" className="chip-toggle" aria-pressed={i.dietary.includes(a)} onClick={() => void put(i.id, { dietary: toggle(i.dietary, a) })}>{t(a)}</button>)}</div></div>
-                <div><span className="small muted">{t('Course')}</span><div className="station-categories">{COURSES.map((name, n) => <button key={name} type="button" className="chip-toggle" aria-pressed={i.course === n} onClick={() => void put(i.id, { course: i.course === n ? null : n })}>{t(name)}</button>)}</div></div>
-                <div><span className="small muted">{t('Choices')}</span><div className="station-categories">{data.modifierGroups.map((g) => <button key={g.id} type="button" className="chip-toggle" aria-pressed={i.modifierGroupIds.includes(g.id)} onClick={() => void put(i.id, { modifierGroupIds: toggle(i.modifierGroupIds, g.id) })}>{g.name}</button>)}</div></div>
-                <div><span className="small muted">{t('Made at (when its category does not say)')}</span><div className="station-categories">{data.stations.map((s) => <button key={s.id} type="button" className="chip-toggle" aria-pressed={i.stationIds.includes(s.id)} onClick={() => void put(i.id, { stationIds: toggle(i.stationIds, s.id) })}>{s.name}</button>)}</div></div>
-                <Field label={t('How many are left')} hint={t('Counts down as they are ordered; at zero it is sold out everywhere. Empty: no count.')}><input type="number" min={0} style={{ width: '8rem' }} defaultValue={i.remaining ?? ''} onBlur={(e) => void api(`/v1/venue/items/${i.id}/availability`, { method: 'POST', body: e.target.value === '' ? { soldOut: false } : { remaining: Number(e.target.value) } }).then(onChange).catch(setError)} /></Field>
-              </div>
-            )}
-          </li>
-        ))}
-      </ul>
-      <ErrorText error={error} />
+    <section className="card row">
+      <div className="grow"><h2>{t('The menu')}</h2><p className="small muted">{t('Sections, items, menus by the clock, promotions, choices and stations are on the Menu page.')}</p></div>
+      <Link className="button secondary" to="/menu">{t('Open the menu')}</Link>
     </section>
   );
 }

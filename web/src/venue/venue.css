@@ -139,3 +139,30 @@
 /* The right edge of a stay on the hotel calendar: taken to make the stay longer or shorter. */
 .timeline-bar { position: relative; }
 .timeline-grip { position: absolute; top: 0; right: 0; bottom: 0; width: 14px; cursor: ew-resize; border-right: 3px solid color-mix(in srgb, currentColor 45%, transparent); border-radius: 0 6px 6px 0; }
+
+/* Menu: sections of items (Menu.tsx). */
+.menu-toolbar { flex-wrap: wrap; gap: 0.6rem; }
+.menu-toolbar .search-input { min-width: 14rem; }
+.menu-toolbar form input { width: 16rem; max-width: 100%; }
+.menu-bulk { position: sticky; top: 0.75rem; z-index: 5; border-color: var(--brand-line); background: var(--brand-soft); box-shadow: var(--shadow-lift); flex-wrap: wrap; gap: 0.6rem; }
+.menu-bulk select { width: auto; min-width: 12rem; }
+.menu-section-head { gap: 0.6rem; flex-wrap: wrap; }
+.menu-section-head h2 { margin: 0; }
+.menu-section-head .icon-button { width: 2rem; height: 2rem; min-height: 0; padding: 0; }
+.menu-list { display: grid; gap: 0; border-top: 1px solid var(--hairline); }
+.menu-list > li { padding: 0.55rem 0.25rem; border-bottom: 1px solid var(--hairline); }
+.menu-list > li:last-child { border-bottom: 0; }
+/* Every item the same shape, phone or desktop: tick box, its name with what to know under it, price and 86 on the right. */
+.menu-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; grid-template-areas: 'pick name price eighty' '. facts facts facts'; column-gap: 0.65rem; row-gap: 0.1rem; align-items: center; }
+.menu-row > input[type='checkbox'] { grid-area: pick; }
+.menu-row > .menu-name { grid-area: name; justify-self: start; }
+.menu-row > .menu-price { grid-area: price; }
+.menu-row > .chip-toggle { grid-area: eighty; }
+.menu-row > .menu-facts { grid-area: facts; }
+.menu-row > .menu-facts:empty { display: none; }
+.menu-section-actions { gap: 0.6rem; flex-wrap: nowrap; margin-left: auto; }
+.menu-row .menu-name { font-weight: 600; color: var(--ink); text-decoration: none; text-align: left; }
+.menu-row .menu-name:hover { color: var(--brand); }
+.menu-list > li.sold-out .menu-name, .menu-list > li.sold-out .num { color: var(--muted); }
+.menu-detail { padding: 0.75rem 0 0.35rem 1.75rem; }
+@media (max-width: 640px) { .menu-detail { padding-left: 0; } .menu-toolbar form, .menu-toolbar form input { width: 100%; } }
