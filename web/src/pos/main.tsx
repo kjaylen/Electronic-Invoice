@@ -8,6 +8,7 @@ import './pos.css';
 import './design/tokens.css';
 import './design/components.css';
 import './design/floor.css';
+import './design/sell.css';
 import { initTheme } from './design/theme';
 import { ErrorBoundary } from '../ErrorBoundary';
 import { I18nProvider } from '../i18n';

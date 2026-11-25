@@ -249,6 +249,7 @@ button.status-pill:hover { background: rgba(255, 255, 255, 0.08); }
 
 /* ---------- toasts (the shared toast system, in the till's look) ---------- */
 body.till-body .toasts { bottom: calc(var(--pos-4) + env(safe-area-inset-bottom)); }
+@media (max-width: 720px) { body.till-body .toasts { bottom: calc(56px + var(--pos-target-lg) + var(--pos-5) + env(safe-area-inset-bottom)); } }
 body.till-body .toast { min-height: var(--pos-target); font-size: var(--pos-text-md); border-radius: var(--pos-radius); }
 
 @media (prefers-reduced-motion: reduce) {
@@ -259,7 +260,8 @@ body.till-body .toast { min-height: var(--pos-target); font-size: var(--pos-text
 /* ==================================================================================================
  * The shared pieces inside the till, on the system: one size scale, the 48px target, the 14px floor.
  * ================================================================================================== */
-body.till-body button:not(.link):not(.pos-btn):not(.pos-tile):not(.pos-chip):not(.pos-row):not([class*='status-']):not(.venue-table):not(.chip-toggle):not(.icon-button) { min-height: var(--pos-target); font-size: var(--pos-text-md); border-radius: var(--pos-radius); }
+/* :where() keeps this rule weak, so a component's own size (number pad keys, tiles) always wins. */
+body.till-body button:where(:not(.link):not(.pos-btn):not(.pos-tile):not(.pos-chip):not(.pos-row):not([class*='status-']):not(.venue-table):not(.chip-toggle):not(.icon-button)) { min-height: var(--pos-target); font-size: var(--pos-text-md); border-radius: var(--pos-radius); }
 body.till-body button.big { min-height: var(--pos-target-lg); font-size: var(--pos-text-lg); }
 body.till-body button:active:not(:disabled) { transform: scale(0.97); transition-duration: var(--pos-press); }
 body.till-body button:focus-visible, body.till-body a:focus-visible { outline: none; box-shadow: var(--pos-focus); }

@@ -28,6 +28,7 @@ import { searchItems } from './NewDocument';
 import { ClockButton } from './TimeClock';
 import { printInBrowser } from '../pos/hardware';
 import { orderTicket, type Ticket, toHtml } from '../pos/ticket';
+import { NumPad, typeAmount } from '../pos/design/components';
 
 interface LineDiscount { kind: 'percent' | 'amount'; value: string }
 
@@ -185,6 +186,15 @@ export function Counter() {
   );
 }
 
+/** A stripe colour for a category, always the same one (the till's tiles). */
+const TILE_COLOURS = ['#2e9a4a', '#d9771c', '#3f7fd0', '#8b63c9', '#c99a00', '#d4382c', '#1a8a8a', '#6b6274'];
+function categoryColour(category: string | null | undefined): string {
+  if (!category) return 'var(--pos-border-strong)';
+  let h = 0;
+  for (const ch of category.toLowerCase()) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return TILE_COLOURS[h % TILE_COLOURS.length]!;
+}
+
 export function CounterPanel(props: {
   header?: ReactNode;
   shiftBar?: (refreshKey: string | null) => ReactNode;
@@ -196,6 +206,8 @@ export function CounterPanel(props: {
   extraButtons?: ReactNode;
   /** The sale as it changes (the customer display). */
   onCart?: (cart: CounterCart) => void;
+  /** A touch till: tiles with stock, a number pad for the cash received, swipe a line away. */
+  touch?: boolean;
   /** Print an order ticket for the kitchen or the bar. */
   printOrder: (ticket: Ticket, title: string) => Promise<void> | void;
 }) {
@@ -311,7 +323,47 @@ export function CounterPanel(props: {
     setLast(null);
   }, []);
   const update = (k: number, patch: Partial<CartLine>) => setSale((s) => ({ ...s, lines: s.lines.map((l) => (l.key === k ? { ...l, ...patch } : l)) }));
-  const remove = (k: number) => setSale((s) => ({ ...s, lines: s.lines.filter((l) => l.key !== k) }));
+  // A line taken away can be put back for a few seconds (by its button, or swiped away on a till).
+  const [undo, setUndo] = useState<{ line: CartLine; index: number } | null>(null);
+  useEffect(() => {
+    if (!undo) return;
+    const id = setTimeout(() => setUndo(null), 6000);
+    return () => clearTimeout(id);
+  }, [undo]);
+  const remove = (k: number) => setSale((s) => {
+    const index = s.lines.findIndex((l) => l.key === k);
+    if (index >= 0 && s.lines[index]!.name.trim()) setUndo({ line: s.lines[index]!, index });
+    return { ...s, lines: s.lines.filter((l) => l.key !== k) };
+  });
+  const putBack = () => {
+    if (!undo) return;
+    setSale((s) => ({ ...s, lines: [...s.lines.slice(0, undo.index), undo.line, ...s.lines.slice(undo.index)] }));
+    setUndo(null);
+  };
+  // Swiping a line to the left on a touch till: it follows the finger; far enough, it goes (with undo).
+  const swipe = useRef<{ key: number; x: number; dx: number } | null>(null);
+  const [swiping, setSwiping] = useState<{ key: number; dx: number } | null>(null);
+  const swipeProps = (k: number) => (!props.touch ? {} : {
+    onPointerDown: (e: React.PointerEvent) => {
+      if ((e.target as HTMLElement).closest('button, input, select, a, label')) return;
+      swipe.current = { key: k, x: e.clientX, dx: 0 };
+    },
+    onPointerMove: (e: React.PointerEvent) => {
+      const sw = swipe.current;
+      if (!sw || sw.key !== k) return;
+      sw.dx = Math.min(0, e.clientX - sw.x);
+      if (sw.dx < -8) setSwiping({ key: k, dx: sw.dx });
+    },
+    onPointerUp: () => {
+      const sw = swipe.current;
+      swipe.current = null;
+      setSwiping(null);
+      if (sw && sw.key === k && sw.dx < -110) remove(k);
+    },
+    onPointerCancel: () => { swipe.current = null; setSwiping(null); },
+  });
+  // The number pad for the cash received (touch tills): shown when the field is tapped, instead of the device's keyboard.
+  const [cashPad, setCashPad] = useState(false);
 
   // Enter with no suggestion highlighted: "3*CODE" or "CODE" -> exact barcode or code match, else the only search result.
   const enter = async (text: string) => {
@@ -707,9 +759,11 @@ export function CounterPanel(props: {
           {buttons.length > 0 && (
             <div className="quick-grid" role="group" aria-label={tab ?? t('Quick buttons')}>
               {buttons.map((it) => (
-                <button key={it.id} type="button" className="quick" onClick={() => { add(fromItem(it, '1', wholesale)); focusSearch(); }}>
+                <button key={it.id} type="button" className={`quick${props.touch && it.stock !== null && it.stock !== undefined && it.stock <= 0 ? ' is-out' : ''}`} style={props.touch ? { '--tile-colour': categoryColour(it.category) } as React.CSSProperties : undefined}
+                  onClick={() => { add(fromItem(it, '1', wholesale)); if (!props.touch) focusSearch(); }}>
                   <span className="name">{it.name}</span>
                   <span className="price num">{money(it.unitPrice)}</span>
+                  {props.touch && it.stock !== null && it.stock !== undefined && it.stock <= 5 && <span className={`stock${it.stock > 0 ? ' low' : ''}`}>{it.stock > 0 ? t('{n} left', { n: it.stock }) : t('Sold out')}</span>}
                 </button>
               ))}
             </div>
@@ -767,7 +821,8 @@ export function CounterPanel(props: {
           {sale.lines.length === 0 ? <p className="cart-empty">{t('Scan or pick items to start a sale.')}</p> : (
             <ul className="cart-lines">
               {sale.lines.map((l) => (
-                <li key={l.key} className={l.discount ? 'has-discount' : ''}>
+                <li key={l.key} className={`${l.discount ? 'has-discount' : ''}${swiping?.key === l.key ? ' is-swiping' : ''}`} {...swipeProps(l.key)}
+                  style={swiping?.key === l.key ? { transform: `translateX(${swiping.dx}px)`, opacity: Math.max(0.35, 1 + swiping.dx / 260) } : undefined}>
                   {l.custom ? (
                     <div className="custom">
                       <input aria-label={t('Description')} placeholder={t('Description')} value={l.name} onChange={(e) => update(l.key, { name: e.target.value })} />
@@ -799,6 +854,12 @@ export function CounterPanel(props: {
                 </li>
               ))}
             </ul>
+          )}
+          {undo && (
+            <div className="cart-undo" role="status">
+              <span>{t('{name} removed', { name: undo.line.name })}</span>
+              <button type="button" className="link on-dark" onClick={putBack}>{t('Undo')}</button>
+            </div>
           )}
           <div><span>{t('Subtotal')}</span><span>{money(fromCents(toCents(totals?.lineExtension ?? '0.00') - chargeCents))}</span></div>
           {chargeCents > 0n && <div className="cart-service"><span>{t('Service charge ({n}%)', { n: servicePercent ?? '' })}</span><span>{money(fromCents(chargeCents))}</span></div>}
@@ -871,11 +932,17 @@ export function CounterPanel(props: {
                       <button type="button" aria-pressed={Boolean(sale.usd)} onClick={() => set({ usd: true })}>US$</button>
                     </span>
                   </span>
-                  <input inputMode="decimal" placeholder="0.00" aria-label={t('Cash received')} value={sale.tendered} onChange={(e) => set({ tendered: e.target.value })} />
+                  <input inputMode={props.touch ? 'none' : 'decimal'} placeholder="0.00" aria-label={t('Cash received')} value={sale.tendered} onChange={(e) => set({ tendered: e.target.value })} onFocus={() => props.touch && setCashPad(true)} />
                 </div>
                 <span className={change !== null && change < 0n ? 'short' : ''}>{change === null ? '' : change < 0n ? t('Short {amount}', { amount: money(fromCents(-change)) }) : `${t('Change')} ${money(fromCents(change))}`}</span>
               </div>
               {sale.usd && tenderedBz !== null && <p className="usd-note">{t('US${usd} is {bz} (BZ$2 to US$1). Change in BZ$.', { usd: fromCents(toCents(sale.tendered)), bz: money(fromCents(tenderedBz)) })}</p>}
+              {props.touch && cashPad && (
+                <div className="cash-pad">
+                  <NumPad label={t('Cash received')} onKey={(k) => set({ tendered: typeAmount(sale.tendered, k) })} />
+                  <button type="button" className="link on-dark" onClick={() => setCashPad(false)}>{t('Hide the keypad')}</button>
+                </div>
+              )}
               {cashDue !== null && cashDue > 0n && (
                 <div className="quick-cash" role="group" aria-label={t('Quick amounts')}>
                   {quickCash(cashDue, Boolean(sale.usd)).map((a, i) => (
@@ -945,7 +1012,7 @@ export function CounterPanel(props: {
             <button type="button" className="secondary" disabled={busy} onClick={() => void issue(undefined, true)}>{t('Allow it this time')}</button>
           )}
           <button type="submit" className="big lime" disabled={!canIssue || busy}>
-            {busy ? t('Signing and sending…') : sale.venue?.room ? t('Charge to the room') : layaway ? t('Start the layaway') : means === 'account' ? t('Issue invoice') : t('Issue receipt')}<span className="chip" aria-hidden="true">F2</span>
+            {busy ? t('Signing and sending…') : sale.venue?.room ? t('Charge to the room') : layaway ? t('Start the layaway') : means === 'account' ? t('Issue invoice') : t('Issue receipt')}{props.touch && totalCents > 0n && !busy && <span className="pay-amount num">{money(total)}</span>}<span className="chip" aria-hidden="true">F2</span>
           </button>
           {sale.lines.length > 0 && <button type="button" className="link on-dark" onClick={() => { setSale(newSale()); setDiscountFor(null); focusSearch(); }}>{t('Clear sale')}</button>}
         </form>

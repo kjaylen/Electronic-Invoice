@@ -44,6 +44,7 @@ export function Sell() {
   const scanWithCamera = till.scanWithCamera;
   return (
     <CounterPanel
+      touch
       shiftBar={(refreshKey) => <TillShiftBar refreshKey={refreshKey} />}
       onIssued={(doc, sale) => {
         if (doc.status === 'rejected') return;

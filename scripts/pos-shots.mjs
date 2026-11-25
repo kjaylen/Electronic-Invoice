@@ -104,6 +104,8 @@ for (const size of SIZES) {
   const step = async (name, fn) => {
     try {
       await fn();
+      // For checking a layout: PROBE_STEP=sell-cash PROBE_JS='...' prints what the script returns.
+      if (process.env.PROBE_STEP === name) console.log(JSON.stringify(await page.evaluate(process.env.PROBE_JS), null, 1));
       await shot(name);
     } catch (e) {
       console.log(`  ${size.name} ${name}: skipped (${e.message.split('\n')[0]})`);

@@ -1,0 +1,248 @@
+/*
+ * The sale screen on a till (B2) and taking the payment (B4), on the design system.
+ *
+ * The counter is shared with the web app; on a till it gets these styles (scoped to
+ * body.till-body) instead of the web's dark ticket. Products on the left, the order
+ * on the right at full height: its lines scroll, and the totals, the payment and a
+ * dominant Pay button stay in reach. Light and dark come from the tokens.
+ */
+
+/* ---------- Layout: two columns, the order at full height ---------- */
+body.till-body .counter { gap: var(--pos-4); grid-template-columns: minmax(0, 1.35fr) minmax(24rem, 1fr); }
+/* On a tablet or a till the sale screen fits the screen: the products scroll on their own, and so does the order. */
+@media (min-width: 721px) {
+  body.till-body .till-main:has(> .stack > .counter) { display: flex; flex-direction: column; overflow: hidden; }
+  body.till-body .till-main > .stack:has(> .counter) { flex: 1 1 auto; min-height: 0; width: 100%; display: flex; flex-direction: column; }
+  body.till-body .till-main > .stack:has(> .counter) > * { flex: none; }
+  body.till-body .till-main > .stack > .counter { flex: 1 1 auto; min-height: 0; align-items: stretch; }
+  body.till-body .counter > .stack { min-height: 0; overflow-y: auto; padding: 4px; margin: -4px; overscroll-behavior: contain; }
+}
+body.till-body .counter > .stack { gap: var(--pos-3); }
+body.till-body .counter > .stack > .card { padding: var(--pos-3); }
+body.till-body .counter .keys { display: none; }
+@media (hover: hover) and (pointer: fine) { body.till-body .counter .keys { display: flex; font-size: var(--pos-text-xs); color: var(--pos-text-muted); } }
+body.till-body .counter input[role='combobox'] { min-height: var(--pos-target-lg); font-size: var(--pos-text-lg); }
+body.till-body .counter-actions { gap: var(--pos-2); }
+body.till-body .counter-actions .chip { background: var(--pos-brand); color: var(--pos-on-brand); }
+
+/* ---------- Categories: the system's tabs ---------- */
+body.till-body .quick-tabs { gap: var(--pos-2); padding-bottom: var(--pos-1); }
+body.till-body .quick-tabs button {
+  min-height: var(--pos-target); padding: 0 var(--pos-4); border-radius: var(--pos-radius-pill);
+  font-size: var(--pos-text-md); font-weight: var(--pos-weight-medium);
+  background: var(--pos-surface); color: var(--pos-text-2); border: 1px solid var(--pos-border-strong); box-shadow: none;
+}
+body.till-body .quick-tabs button:hover:not(:disabled) { background: var(--pos-surface-2); color: var(--pos-text); border-color: var(--pos-border-strong); }
+body.till-body .quick-tabs button[aria-pressed='true'],
+body.till-body .quick-tabs button[aria-pressed='true']:hover:not(:disabled) { background: var(--pos-text); color: var(--pos-surface); border-color: var(--pos-text); }
+
+/* ---------- Product tiles: name, price, a colour by category, stock ---------- */
+body.till-body .quick-grid { gap: var(--pos-gap-target); grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr)); }
+body.till-body button.quick {
+  position: relative; display: flex; flex-direction: column; align-items: flex-start; justify-content: space-between; gap: var(--pos-1);
+  min-height: 88px; padding: var(--pos-3) var(--pos-3) var(--pos-3) calc(var(--pos-3) + 4px); text-align: left;
+  background: var(--pos-surface); color: var(--pos-text); border: 1px solid var(--pos-border); border-radius: var(--pos-radius);
+  box-shadow: var(--pos-elev-1); font-size: var(--pos-text-md); font-weight: var(--pos-weight-medium); line-height: 1.25; overflow: hidden;
+  transition: transform var(--pos-press) linear, background-color var(--pos-quick) var(--pos-ease), border-color var(--pos-quick) var(--pos-ease);
+}
+body.till-body button.quick::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--tile-colour, var(--pos-border-strong)); }
+body.till-body button.quick:hover:not(:disabled) { background: var(--pos-surface); color: var(--pos-text); border-color: var(--pos-brand-line); }
+body.till-body button.quick:active:not(:disabled) { transform: scale(0.97); background: var(--pos-brand-soft); border-color: var(--pos-brand); transition-duration: 60ms; }
+body.till-body button.quick:focus-visible { outline: none; box-shadow: var(--pos-focus); }
+body.till-body button.quick .name { overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+body.till-body button.quick .price { font-size: var(--pos-text-md); color: var(--pos-brand-text); font-weight: var(--pos-weight-bold); font-variant-numeric: tabular-nums; }
+body.till-body button.quick .stock { position: absolute; bottom: var(--pos-3); right: var(--pos-2); font-size: var(--pos-text-xs); font-weight: var(--pos-weight-bold); padding: 0 var(--pos-2); border-radius: var(--pos-radius-pill); background: var(--pos-danger-soft); color: var(--pos-danger-text); border: 1px solid var(--pos-danger-line); }
+body.till-body button.quick .stock.low { background: var(--pos-warning-soft); color: var(--pos-warning-text); border-color: var(--pos-warning-line); }
+body.till-body button.quick.is-out { background: var(--pos-surface-2); color: var(--pos-text-muted); box-shadow: none; }
+body.till-body button.quick.is-out .name { text-decoration: line-through; }
+body.till-body button.quick.is-out .price { color: var(--pos-text-muted); }
+
+/* ---------- The order: a light (or dark) panel on the tokens, not the web's dark ticket ---------- */
+body.till-body .counter .cart.ticket {
+  --ticket-accent: var(--pos-brand-text);
+  display: flex; flex-direction: column; gap: var(--pos-2); position: relative; top: auto;
+  min-height: 0; max-height: 100%; overflow: auto; overscroll-behavior: contain;
+  padding: var(--pos-4) var(--pos-4) 0; margin-bottom: 0;
+  background: var(--pos-surface); color: var(--pos-text); border: 1px solid var(--pos-border); border-radius: var(--pos-radius-lg);
+  box-shadow: var(--pos-elev-2);
+}
+body.till-body .counter .cart.ticket > * { flex: none; }
+body.till-body .counter .cart.ticket > * + * { margin-top: 0; }
+body.till-body .counter .cart.ticket h2,
+body.till-body .counter .cart.ticket .kicker { color: var(--pos-text-2); }
+body.till-body .counter .cart.ticket .muted,
+body.till-body .counter .cart.ticket .small { color: var(--pos-text-muted); }
+body.till-body .counter .cart > div:not(.form-error):not(.tabs):not(.tender) { font-size: var(--pos-text-md); padding: 2px 0; }
+body.till-body .counter .cart > div span:first-child { color: var(--pos-text-2); font-family: inherit; }
+body.till-body .counter .cart > div span:last-child { font-variant-numeric: tabular-nums; }
+body.till-body .counter .cart .grand { align-items: baseline; font-family: inherit !important; font-size: var(--pos-text-3xl) !important; font-weight: var(--pos-weight-bold); color: var(--pos-text); border-top: 1px solid var(--pos-border) !important; padding-top: var(--pos-2) !important; margin-top: var(--pos-1); }
+body.till-body .counter .cart .grand span:first-child { color: var(--pos-text) !important; font-size: var(--pos-text-lg); }
+body.till-body .counter .cart .grand-usd { color: var(--pos-text-2); font-family: inherit; }
+body.till-body .counter .cart .cart-discount span:last-child { color: var(--pos-success-text); }
+body.till-body .counter .cart .cart-service span:last-child { color: var(--pos-text); }
+body.till-body .counter .cart-empty { color: var(--pos-text-muted); padding: var(--pos-6) 0; font-size: var(--pos-text-md); }
+
+/* Lines: they take the room there is and scroll; everything else stays in reach. */
+body.till-body .counter .cart.ticket > .cart-lines { flex: 1 1 auto; min-height: 12rem; max-height: none; overflow-y: auto; margin: 0 calc(-1 * var(--pos-4)); padding: 0 var(--pos-4); }
+body.till-body .counter .cart-lines li {
+  grid-template-columns: minmax(0, 1fr) auto 5.5rem auto auto; gap: var(--pos-2); min-height: 64px; padding: var(--pos-2) 0;
+  border-bottom: 1px solid var(--pos-border); background: var(--pos-surface); touch-action: pan-y;
+  transition: transform var(--pos-quick) var(--pos-ease), opacity var(--pos-quick) var(--pos-ease);
+}
+body.till-body .counter .cart-lines li.is-swiping { transition: none; background: var(--pos-danger-soft); }
+body.till-body .counter .cart-lines .name { font-size: var(--pos-text-md); font-weight: var(--pos-weight-medium); color: var(--pos-text); }
+body.till-body .counter .cart-lines .each { color: var(--pos-text-muted); font-size: var(--pos-text-sm); font-weight: var(--pos-weight-regular); }
+body.till-body .counter .cart-lines .sum { font-size: var(--pos-text-md); font-weight: var(--pos-weight-medium); font-variant-numeric: tabular-nums; }
+body.till-body .counter .cart-lines .line-note { color: var(--pos-text-2); font-size: var(--pos-text-sm); }
+body.till-body .counter .cart-lines .line-sent { color: var(--pos-info-text); font-size: var(--pos-text-xs); }
+body.till-body .counter .cart-lines .line-discount { background: var(--pos-success-soft); color: var(--pos-success-text); border: 1px solid var(--pos-success-line); font-size: var(--pos-text-xs); }
+
+/* The quantity stepper and the line's buttons: 48dp, with room between them. */
+body.till-body .counter .qty { display: inline-flex; align-items: center; border: 1px solid var(--pos-border-strong); border-radius: var(--pos-radius); overflow: hidden; }
+body.till-body .counter .qty button,
+body.till-body .counter .cart-lines .remove,
+body.till-body .counter .cart-lines .disc {
+  width: var(--pos-target); height: var(--pos-target); min-height: var(--pos-target); padding: 0; justify-content: center;
+  background: transparent; color: var(--pos-text); border: 0; border-radius: 0; box-shadow: none; font-size: var(--pos-text-xl);
+}
+body.till-body .counter .qty button:active:not(:disabled) { background: var(--pos-surface-3); }
+body.till-body .counter .qty input { width: 2.75rem; min-height: var(--pos-target); border: 0; border-left: 1px solid var(--pos-border); border-right: 1px solid var(--pos-border); border-radius: 0; text-align: center; padding: 0; background: var(--pos-surface); color: var(--pos-text); font-size: var(--pos-text-md); font-variant-numeric: tabular-nums; }
+body.till-body .counter .cart-lines .remove,
+body.till-body .counter .cart-lines .disc { border: 1px solid var(--pos-border-strong); border-radius: var(--pos-radius); font-size: var(--pos-text-lg); }
+body.till-body .counter .cart-lines .remove:hover:not(:disabled) { background: var(--pos-danger-soft); color: var(--pos-danger-text); border-color: var(--pos-danger-line); }
+body.till-body .counter .cart-lines .disc:hover:not(:disabled) { background: var(--pos-surface-2); color: var(--pos-text); border-color: var(--pos-border-strong); }
+body.till-body .counter .cart-lines .disc.on { background: var(--pos-success-soft); color: var(--pos-success-text); border-color: var(--pos-success-line); }
+body.till-body .counter .cart-lines .disc[aria-expanded='true'] { box-shadow: var(--pos-focus); }
+
+/* Taken away by mistake: put it back. */
+body.till-body .counter .cart-undo { display: flex !important; align-items: center; justify-content: space-between; gap: var(--pos-3); padding: 0 0 0 var(--pos-3) !important; min-height: var(--pos-target); border-radius: var(--pos-radius); background: var(--pos-text); color: var(--pos-surface); font-size: var(--pos-text-md) !important; animation: pos-undo-in var(--pos-quick) var(--pos-ease) both; }
+body.till-body .counter .cart-undo span:first-child { color: var(--pos-surface) !important; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+body.till-body .counter .cart-undo button.link { color: var(--pos-surface); font-weight: var(--pos-weight-bold); padding: 0 var(--pos-4); text-decoration: underline; }
+@keyframes pos-undo-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+/* Fields and links inside the order. */
+body.till-body .counter .cart input,
+body.till-body .counter .cart select,
+body.till-body .counter .ticket input,
+body.till-body .counter .ticket select { background: var(--pos-surface); color: var(--pos-text); border: 1px solid var(--pos-border-strong); box-shadow: none; }
+body.till-body .counter .cart input::placeholder { color: var(--pos-text-muted); }
+body.till-body .counter .cart input:focus,
+body.till-body .counter .ticket input:focus { background: var(--pos-surface); color: var(--pos-text); border-color: var(--pos-brand); box-shadow: var(--pos-focus); }
+body.till-body .counter .cart button.link,
+body.till-body .counter .cart button.link.on-dark { color: var(--pos-brand-text); }
+body.till-body .counter .cart-sale-discount { margin-top: 0; font-size: var(--pos-text-md); }
+body.till-body .counter .ticket button.secondary { background: var(--pos-surface); color: var(--pos-text); border: 1px solid var(--pos-border-strong); }
+body.till-body .counter .ticket button.secondary:hover:not(:disabled) { background: var(--pos-surface-2); color: var(--pos-text); }
+body.till-body .counter .ticket kbd { color: inherit; border-color: currentColor; }
+body.till-body .counter .cart details.tin summary,
+body.till-body .counter .cart details.tin label:not(.cart-tin),
+body.till-body .counter .cart .cart-tin { color: var(--pos-text-2); font-size: var(--pos-text-md); }
+body.till-body .counter .cart details.tin summary { display: list-item; padding: 12px 0; line-height: 24px; min-height: 0; cursor: pointer; }
+body.till-body .counter .cart .cart-customer,
+body.till-body .counter .cart .cart-table { background: var(--pos-surface-2) !important; border: 1px solid var(--pos-border); color: var(--pos-text); }
+body.till-body .counter .cart .cart-customer-name { color: var(--pos-text) !important; }
+body.till-body .counter .cart .cart-customer-name .kicker,
+body.till-body .counter .cart .cart-table strong { color: var(--pos-brand-text); }
+body.till-body .counter .cart .cart-customer .remove { color: var(--pos-text); border-color: var(--pos-border-strong); width: var(--pos-target); height: var(--pos-target); }
+body.till-body .counter .cart .form-error { color: var(--pos-danger-text); }
+body.till-body .counter .cart .offline-note { color: var(--pos-text-2); }
+
+/* The payment tabs (cash, card, transfer…): large, with a clear chosen one. */
+body.till-body .counter .cart .tabs,
+body.till-body .counter .ticket .tabs { background: var(--pos-surface-2); border: 1px solid var(--pos-border); padding: 4px; gap: 4px; }
+body.till-body .counter .cart .tabs::before,
+body.till-body .counter .ticket .tabs::before { background: var(--pos-brand); box-shadow: var(--pos-elev-1); }
+body.till-body .counter .cart .tabs button,
+body.till-body .counter .ticket .tabs button { min-height: var(--pos-target); color: var(--pos-text-2); font-size: var(--pos-text-md); font-weight: var(--pos-weight-medium); }
+body.till-body .counter .cart .tabs button:hover:not(:disabled),
+body.till-body .counter .ticket .tabs button:hover:not(:disabled) { background: var(--pos-surface-3); color: var(--pos-text); }
+body.till-body .counter .cart .tabs button.active,
+body.till-body .counter .cart .tabs button.active:hover:not(:disabled),
+body.till-body .counter .cart .tabs.has-ind button.active,
+body.till-body .counter .cart .tabs.has-ind button.active:hover:not(:disabled),
+body.till-body .counter .ticket .tabs.has-ind button.active,
+body.till-body .counter .ticket .tabs.has-ind button.active:hover:not(:disabled) { color: var(--pos-on-brand); }
+body.till-body .counter .cart .tabs:not(.has-ind) button.active { background: var(--pos-brand); }
+
+/* Cash: what was given, and the change in large type. */
+body.till-body .counter .tender-block { gap: var(--pos-3); padding: var(--pos-3); border-radius: var(--pos-radius); background: var(--pos-surface-2); border: 1px solid var(--pos-border); }
+body.till-body .counter .tender { align-items: center; gap: var(--pos-3); }
+body.till-body .counter .tender label,
+body.till-body .counter .tender-label { color: var(--pos-text-2); font-size: var(--pos-text-sm); letter-spacing: 0.02em; }
+body.till-body .counter .tender-field { max-width: 14rem; flex: 1; }
+body.till-body .counter .tender-field input { min-height: var(--pos-target-lg); font-size: var(--pos-text-2xl); font-variant-numeric: tabular-nums; font-weight: var(--pos-weight-medium); }
+body.till-body .counter .tender > span { color: var(--pos-success-text); font-family: inherit; font-size: var(--pos-text-2xl); font-weight: var(--pos-weight-bold); padding: 0; font-variant-numeric: tabular-nums; text-align: right; }
+body.till-body .counter .tender > span.short { color: var(--pos-danger-text); }
+body.till-body .counter .tender.split > span,
+body.till-body .counter .tender.gift > span,
+body.till-body .counter .tender.wallet > span,
+body.till-body .counter .tender.account > span { color: var(--pos-text-2); font-size: var(--pos-text-md); font-weight: var(--pos-weight-regular); text-align: left; }
+body.till-body .counter .tender.account { color: var(--pos-text-2); font-size: var(--pos-text-md); }
+body.till-body .counter .tender.split select { background-color: var(--pos-surface); color: var(--pos-text); border-color: var(--pos-border-strong); min-height: var(--pos-target); }
+body.till-body .counter .usd-note { color: var(--pos-text-2); font-size: var(--pos-text-sm); margin: 0; }
+body.till-body .counter .currency-switch button { min-height: 36px; color: var(--pos-text-2); }
+body.till-body .counter .ticket .currency-switch button[aria-pressed='true'],
+body.till-body .counter .ticket .currency-switch button[aria-pressed='true']:hover:not(:disabled) { background: var(--pos-text); color: var(--pos-surface); }
+body.till-body .counter .quick-cash { display: grid; grid-template-columns: repeat(auto-fit, minmax(5.5rem, 1fr)); gap: var(--pos-gap-target); }
+body.till-body .counter .quick-cash button { min-height: var(--pos-target); justify-content: center; padding: 0 var(--pos-3); background: var(--pos-surface); color: var(--pos-text); border: 1px solid var(--pos-border-strong); border-radius: var(--pos-radius); font-size: var(--pos-text-md); font-weight: var(--pos-weight-bold); font-variant-numeric: tabular-nums; }
+body.till-body .counter .quick-cash button:hover:not(:disabled) { background: var(--pos-surface-2); color: var(--pos-text); border-color: var(--pos-brand-line); }
+body.till-body .counter .quick-cash button:active:not(:disabled) { background: var(--pos-brand-soft); border-color: var(--pos-brand); transform: scale(0.97); }
+body.till-body .counter .cash-pad { display: grid; gap: var(--pos-2); }
+body.till-body .counter .cash-pad .pos-numpad > button { min-height: 56px; }
+body.till-body .counter .cash-pad button.link { justify-self: center; }
+
+/* Pay: always in reach at the bottom of the order, the largest thing on the screen. */
+body.till-body .counter .cart button.big.lime {
+  position: sticky; bottom: 0; z-index: 2; width: 100%; justify-content: center; gap: var(--pos-3);
+  height: 72px; margin: var(--pos-1) calc(-1 * var(--pos-4)) 0; width: calc(100% + 2 * var(--pos-4)); border-radius: 0 0 var(--pos-radius-lg) var(--pos-radius-lg);
+  background: var(--pos-brand); border: 0; color: var(--pos-on-brand); font-size: var(--pos-text-xl); font-weight: var(--pos-weight-bold);
+  box-shadow: 0 -8px 16px -12px rgba(0, 0, 0, 0.35);
+}
+body.till-body .counter .cart button.big.lime:hover:not(:disabled) { background: var(--pos-brand-pressed); color: var(--pos-on-brand); border: 0; }
+body.till-body .counter .cart button.big.lime:active:not(:disabled) { transform: none; background: var(--pos-brand-pressed); }
+body.till-body .counter .cart button.big.lime:focus-visible { outline: none; box-shadow: inset 0 0 0 3px var(--pos-on-brand), inset 0 0 0 5px var(--pos-brand); }
+body.till-body .counter .cart button.big.lime:disabled { background: var(--pos-surface-3); color: var(--pos-text-muted); opacity: 1; box-shadow: none; }
+body.till-body .counter .cart button.big.lime .chip { display: none; }
+body.till-body .counter .cart button.big.lime .pay-amount { font-variant-numeric: tabular-nums; padding: var(--pos-1) var(--pos-3); border-radius: var(--pos-radius-sm); background: rgba(0, 0, 0, 0.22); color: var(--pos-on-brand); }
+@media (hover: hover) and (pointer: fine) { body.till-body .counter .cart button.big.lime .chip { display: inline-flex; background: rgba(255, 255, 255, 0.2); color: inherit; } }
+/* Clear the sale sits at the top of the order, on the heading's line, away from Pay. */
+body.till-body .counter .cart button.big.lime + button.link { order: -1; align-self: flex-end; color: var(--pos-danger-text); margin: calc(-1 * var(--pos-2)) 0 calc(-1 * var(--pos-target)); position: relative; z-index: 1; }
+body.till-body .counter .cart.ticket > .kicker { min-height: 32px; display: flex; align-items: center; }
+
+/* ---------- After the sale: a clear success panel, first thing on the screen ---------- */
+body.till-body .last-sale { border: 1px solid var(--pos-success-line); border-left: 6px solid var(--pos-success); background: var(--pos-success-soft); color: var(--pos-text); padding: var(--pos-4); }
+body.till-body .last-sale.rejected { border-color: var(--pos-danger-line); border-left-color: var(--pos-danger); background: var(--pos-danger-soft); }
+body.till-body .last-sale.contingency_pending { border-color: var(--pos-warning-line); border-left-color: var(--pos-warning); background: var(--pos-warning-soft); }
+body.till-body .last-sale h2 { font-size: var(--pos-text-xl); }
+body.till-body .last-sale .change { font-size: var(--pos-text-3xl); font-weight: var(--pos-weight-bold); font-variant-numeric: tabular-nums; color: var(--pos-text); margin: var(--pos-1) 0 var(--pos-3); }
+
+/* ---------- Narrower screens ---------- */
+@media (max-width: 1100px) {
+  body.till-body .counter { grid-template-columns: minmax(0, 1fr) minmax(20rem, 0.9fr); }
+  body.till-body .quick-grid { grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr)); }
+}
+/* A phone or a small tablet held upright: products, then the order; Pay stays at the bottom of the screen. */
+@media (max-width: 720px) {
+  body.till-body .counter { grid-template-columns: minmax(0, 1fr); }
+  body.till-body .counter .cart.ticket { position: static; max-height: none; overflow: visible; }
+  body.till-body .counter .cart.ticket > .cart-lines { max-height: none; overflow: visible; }
+  body.till-body .counter .cart button.big.lime { position: fixed; left: var(--pos-2); right: var(--pos-2); bottom: calc(56px + var(--pos-2) + env(safe-area-inset-bottom, 0px)); width: auto; margin: 0; border-radius: var(--pos-radius); min-height: var(--pos-target-lg); z-index: 30; box-shadow: var(--pos-elev-3); }
+  body.till-body .counter .cart.ticket { padding-bottom: calc(var(--pos-target-lg) + var(--pos-4)); }
+  body.till-body .counter-actions { overflow-x: auto; flex-wrap: nowrap; scrollbar-width: none; }
+  body.till-body .counter-actions > * { flex: none; }
+  /* A line on a phone: the name and its amount, then the quantity and the line's buttons. */
+  body.till-body .counter .cart-lines li { grid-template-columns: minmax(0, 1fr) auto auto; row-gap: var(--pos-2); }
+  body.till-body .counter .cart-lines li > .name, body.till-body .counter .cart-lines li > .custom { grid-column: 1 / 3; grid-row: 1; }
+  body.till-body .counter .cart-lines li > .sum { grid-column: 3; grid-row: 1; text-align: right; }
+  body.till-body .counter .cart-lines li > .qty { grid-column: 1; grid-row: 2; justify-self: start; }
+  body.till-body .counter .cart-lines li > .disc { grid-column: 2; grid-row: 2; }
+  body.till-body .counter .cart-lines li > .remove { grid-column: 3; grid-row: 2; }
+  body.till-body .counter .cart-lines li > :nth-child(n + 6) { grid-column: 1 / -1; }
+  body.till-body .quick-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  body.till-body button.quick, body.till-body .counter .cart-lines li, body.till-body .counter .cart-undo { transition: none; animation: none; }
+}
+
+/* The sale just made comes first in the products column. */
+body.till-body .counter > .stack > .last-sale { order: -1; }
