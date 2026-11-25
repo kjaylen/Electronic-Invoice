@@ -578,3 +578,305 @@ system). The parts above this line are the earlier jobs' and are unchanged.
 
 None that stopped an item. Nothing was pushed, and GitHub Actions has not run
 on this branch.
+
+---
+
+# A POS platform for Belize: the gaps (24 Nov 2026)
+
+Judgment calls made while working through the fourth PLAN.md: what a typical
+Belizean business needs at the counter that was missing. The owner's
+direction was "the main focus is a POS platform" and "no payroll". The parts
+above this line are the earlier jobs' and are unchanged.
+
+## How the work was done
+
+- **A folder of its own**: the git worktree `../eInvoicing-pos`, branch
+  `pos-platform`, cut from `main` after the email and offline-till work was
+  merged. Its own browser-test database (`einvoicing_e2e_pos`) and ports.
+  Nothing was pushed or merged.
+- **Migrations 058 to 062**: counter settings, charges and tips (058),
+  layaways (059), table tabs (060), locations, transfers and landed cost
+  (061), tax settings (062). All add tables or columns; none changes a row.
+- **One commit per item**, server first where the screens could not compile
+  without it, each after its unit tests and its browser test passed.
+- **What was looked up**, on 24 Nov 2026, and where:
+  - Business tax is paid monthly on gross receipts, by the 15th of the next
+    month; 1.75% for a trade or business, 6% for a profession, 3% for rents
+    (Belize Tax Service, bts.gov.bz, FAQ pages; belize.org's summary of the
+    tax regime; BELTRAIDE, beltraide.bz).
+  - GST is 12.5%; a business registers above BZ$75,000 a year; the return is
+    due by the 15th (bts.gov.bz).
+  - Hotel and tourist accommodation tax is 9%; a rise has been discussed
+    (Belize Tourism Board, belizetourismboard.org).
+  - A service charge of about 10% is common in restaurants and hotels. No
+    source said plainly how GST applies to it.
+
+## Choices that could have gone another way
+
+- **A mobile wallet is payment means code 68** (online payment service), the
+  code online-store receipts already send. BTS has accepted it from the store;
+  it has not been tried from the counter on the real test server.
+- **The US-dollar total is information, not a second currency.** Documents
+  stay in BZD. The US$ line is in the receipt's message space, at the fixed
+  BZ$2 to US$1, rounded up to the cent.
+- **The service charge is a charge on each line, with GST.** That is the
+  cautious reading (it is part of what the customer pays for the supply) and
+  it keeps every line's tax right when a sale mixes rates. If an accountant
+  says a business's service charge is outside GST, that business should not
+  use this switch yet. Flagged for the owner.
+- **Tips are never on the tax document.** They are the staff's money, taken
+  with a card or wallet payment and paid out of the drawer; putting them on a
+  receipt would make them a sale. They are kept beside the sale and reported.
+- **A layaway is a tax invoice on account, issued at the start.** The goods
+  are taken off the shelf then, GST falls due then, and payments are ordinary
+  invoice payments. The other way (a receipt only when fully paid) would have
+  needed a new kind of non-tax document for deposits. Whether GST on a
+  layaway is due at the start or at collection is a question for the
+  business's accountant. No cancellation fee; the customer's credit limit is
+  not applied to a layaway.
+- **A table's tab is a held sale with a table's name.** Held sales were
+  already shared by every till and worked offline; a second mechanism would
+  have had to be kept in step with it.
+- **Stations by item category; tickets on the till's own printer.** A
+  separate kitchen printer per station needs printer routing on each device,
+  which belongs with the till app's device settings. Left for later.
+- **A bill is split by item only.** A tax receipt lists goods, and a third of
+  a plate does not add up to the cent. Friends who split evenly pay one
+  receipt with the Split payment.
+- **The item's stock stays the total; other locations hold their share; the
+  main one has the rest.** Storing a level for every location including the
+  main one would have needed every path that touches stock to keep two
+  numbers in step, and any path that missed would drift silently. This way
+  the main shop's level cannot be wrong by construction, and nothing that
+  reads the total had to change.
+- **The online store sells the total**, wherever the stock is. A business
+  that ships from one shop moves stock there with a transfer.
+- **A transfer is received whole.** What went missing on the way is
+  adjusted afterwards as lost, so the history says so.
+- **Landed cost changes the cost on the shelf, not the supplier's bill.**
+  The freight and duty bills are recorded as expenses by whoever pays them;
+  profit and loss counts expenses, so nothing is counted twice.
+- **Business tax counts a sale when its document is issued**, like every
+  other report here. The law taxes receipts; for a shop the two are the same
+  day. A business that sells a lot on account should ask its accountant, and
+  the worksheet says so.
+- **The rates are settings.** Three are offered because three were
+  confirmed. Nothing stops a business typing another kind and rate.
+- **The monthly reminder is on unless turned off.** It is one email a month
+  about a legal deadline, with how to stop it in its footer. A business that
+  has issued nothing and added no dates gets nothing.
+- **WhatsApp reminders are a link, not an integration.** The WhatsApp
+  Business API needs an approved account and template messages per business.
+  A wa.me link works today on any phone, costs nothing, and the message goes
+  from the business's own number, which is what its customers trust.
+- **Chinese is a third language for the till's screens only** (about 470
+  strings): the counter, the till app, shifts and devices. The top bar's
+  switch stays English and Spanish; all three are under My account and on
+  the till's sign-in screen. Translated by the assistant, not by a native
+  speaker: have a Chinese-speaking shopkeeper read it before it is announced.
+
+## Worth doing, deliberately not done
+
+- **Payroll and Social Security.** Out of scope by the owner's decision.
+  The time clock's hours export stays; Social Security's dates can be added
+  to "Dates of your own".
+- **Hotel tax and room or tour bookings.** The BTS document carries GST and
+  the environmental and excise schemes only; there is nowhere on it for a 9%
+  accommodation tax. A hotel can charge it as a line of its own today, but
+  reporting it properly, and bookings with deposits and check-in dates, is a
+  product of its own.
+- **Bank reconciliation and a balance sheet.** That makes this an accounting
+  system. The accountant's pack exists so a real one can be used.
+- **DigiWallet and E-Kyash taking the payment at the till themselves** (a QR
+  the customer scans, confirmed by the provider). E-Kyash exists for online
+  invoices; at a till it needs the provider's merchant agreement and test
+  credentials per business. Until then the wallet is a way to pay recorded by
+  hand, with the reference.
+- **WhatsApp sent by the server.** See above.
+- **A cancellation fee on a layaway, and a kitchen printer per station.**
+- **Low-stock warnings per location.** They are on the total.
+- **Receiving a transfer short.**
+
+## How it was proved
+
+- **Unit tests** (PGlite, a real HTTP app): `test/shifts.test.ts` (wallet,
+  counter settings, service charge and tips, tables and stations),
+  `test/pos-sync.test.ts` (an offline sale with a service charge, a wallet
+  payment and a tip), `test/layaways.test.ts`, `test/held.test.ts` (table
+  tabs), `test/till-print.test.ts` (the order ticket), `test/locations.test.ts`
+  (one shop sees nothing; stock by location; a till that sells from its shop;
+  transfers; landed cost), `test/business-tax.test.ts` (the worksheet, CSV,
+  PDF, the accountant's pack, due dates, the monthly email),
+  `test/receivables.test.ts` (the WhatsApp reminder).
+- **Browser tests** (Edge, a real server and database):
+  `e2e/counter-extras.spec.ts` (US$, service charge, wallet with a tip, the
+  shift report; a layaway; tables, order tickets and a split bill),
+  `e2e/locations.spec.ts`, `e2e/business-tax.spec.ts`, `e2e/reach.spec.ts`
+  (WhatsApp; the counter in Chinese).
+- **The offline till's own tests** were run after the counter changed.
+- **Everything together, at the end**: `npm run check` (the typecheck and 446
+  unit tests: 445 passed, 1 skipped as before) and every browser test on a
+  fresh database (63 passed, the phone layout among them).
+
+## Found, not fixed
+
+- **F2 at the counter does nothing while the total is being worked out**
+  (a fraction of a second after a sale is recalled). A cashier who presses it
+  at once has to press again. It was like this before; the browser test waits
+  for the total.
+
+## Blockers
+
+None that stopped an item. Not checked anywhere real: BTS's test server with
+a wallet payment from the counter; a real receipt printer with an order
+ticket; a real phone opening the WhatsApp link; GitHub Actions on this branch.
+
+---
+
+# Restaurants, bars and hotels (25 Nov 2026)
+
+Judgment calls made while building the hospitality module from the fifth
+PLAN.md. The brief said to work without stopping to ask, to note each call,
+and to log what could not be done. The parts above this line are the earlier
+jobs' and are unchanged. Rates and their sources are in TAX-RULES.md; which
+tax document is issued when is in ETD-MAPPING.md.
+
+## How the work was done
+
+- **Where**: the worktree `../eInvoicing-pos`, branch `hospitality`, cut from
+  `pos-platform` (itself not yet merged into `main`). Nothing was pushed or
+  merged.
+- **Migrations 063 to 066**: venue setup (063), checks, operations and
+  tickets (064), guests, reservations, waitlist, deposits and closed days
+  (065), the hotel (066). All add tables or columns. 063 widens the list of
+  allowed roles; no existing row changes.
+- **The switch**: `tenants.venue`. With restaurant, bar and hotel all off
+  (the default) the menu entries, the till tabs, the routes' data and the
+  background jobs do nothing, and the counter is unchanged. The browser tests
+  turn it on for their own tests and off again, and the shop's tests run
+  after them.
+- **Left alone**, as the brief asked: pricing and plans, the sign-in flow,
+  the payment provider setup. Venue staff sign in the way till staff already
+  did (a PIN at an enrolled till); the only change near sign-in is the list
+  of roles a till accepts.
+- **No new dependency.**
+
+## Choices that could have gone another way
+
+- **A check is a log of operations, not a row that is edited.** Each device
+  applies an operation locally and sends it; the server folds them in the
+  order they arrive. This is what makes "no tap waits on the network", work
+  with no connection, and two servers on one table possible with one
+  mechanism. The cost: a device can show, for up to two seconds, something
+  the server then refuses (it is listed as a problem on the floor screen).
+- **The concurrency rule**: items have their own ids; operations name items;
+  an item is sent to the kitchen once, by the first `fire` the server
+  receives; the server's answer says what each operation really sent and
+  tickets are made from that. Two servers adding to a table both keep their
+  items; two servers pressing Send print one ticket. Tested in
+  `test/venue-check.test.ts` and `test/venue-api.test.ts`.
+- **One edge left open**: if the connection drops after the server has taken
+  an order but before the device hears so, the device prints the ticket
+  itself and the server's copy prints too when the connection returns. A
+  duplicate ticket was judged better than a missing one.
+- **Paying goes through the existing counter.** The chosen part of the bill
+  becomes a sale in the counter's cart with fixed amounts, so US dollars,
+  mixed tenders, tips, receipts, BTS and offline issue are the code a shop
+  already uses. A hospitality payment screen of its own would have meant a
+  second copy of all of it.
+- **Split bills add up exactly by construction.** What each payment took is
+  recorded per item in cents; the last payer of an item, and of the bill,
+  takes what is left. For an even split every part but the last is set to an
+  amount whose GST has nothing to round (a multiple of 8 cents at 12.5%), so
+  the parts can differ by a few cents and the receipts add up to the unsplit
+  bill. One receipt per payer, not one receipt with several tenders (the
+  counter's Split tender still does that).
+- **A void of an item that is partly paid** writes off the unpaid remainder
+  and keeps what was paid; the paid part is refunded, if at all, by a credit
+  note from the receipt.
+- **A table deposit** is a tax receipt when taken (GST inside the amount) and
+  comes off the bill as an allowance of its amount before GST. **A hotel
+  deposit** is a receipt when taken, credited at check-out and counted as a
+  payment on the stay's invoices. Two ways, because a table bill is a receipt
+  paid at once and a stay is invoices on account.
+- **A charge to a room is a tax invoice on the guest's account**, issued when
+  the meal is served, and a line on the folio. The folio's final bill is a
+  statement listing the tax documents, not a document of its own.
+- **Room nights**: one invoice per stay at check-out, with a cut at the last
+  night of each month. The room line is GST-exempt with the exemption code in
+  the tax rules; the hotel tax is a named charge on the line, because the
+  document has no tax scheme for it.
+- **Tax values are dated rows an admin can change** (`venue_tax_rules`),
+  each with a source and a "verified" mark. Changing one never touches an
+  issued document.
+- **Two of those rows are recorded but not yet acted on**:
+  "GST charged on the service charge" and "Hotel tax charged on the service
+  charge". The calculation today always charges GST on the service charge and
+  never hotel tax (the cautious reading). Setting either the other way
+  changes nothing until that path is built; both are marked unverified.
+- **The business day** ends at an hour the owner sets (default 4 a.m.,
+  Belize time). The day close moves the date on even if it is before that
+  hour, and carries open tables over.
+- **Tip pooling is a report**: by hours, by role in percent, or by points per
+  hour, from the time clock. It says who gets what; it pays nobody.
+- **Stations that are only a screen do not print.** A station with no till
+  chosen prints where the order is sent from.
+- **Messages by SMS or WhatsApp**: no provider is set up, so the host gets
+  the message written and opens it in WhatsApp or their messages to send it
+  themselves. Email confirmations and reminders go through the mail service.
+- **The hotel calendar**: sweep across empty nights to book, drag a booking
+  to another room or date. A stay is made longer or shorter by opening it and
+  changing the date, not by dragging its edge.
+- **Service staff see the floor in English, Spanish or Chinese**; the host
+  stand, the hotel, the reports and the setup are in English and Spanish.
+
+## Skipped, and why
+
+- **Devices talking to each other with no server** (a kitchen screen fed by
+  a tablet on the same Wi-Fi while the internet is down). The apps reach one
+  server; there is no device-to-device channel in this architecture. With no
+  connection each device works alone and prints its own tickets; the kitchen
+  screen shows what it last had.
+- **The hotel, the host stand, the kitchen screen and the reports with no
+  connection.** They read and write on the server. Only table service, the
+  bar and payment at the till work offline.
+- **Paying a check on a till with no connection** was not run end to end in
+  a browser. Ordering and sending with no connection was
+  (`e2e/venue.spec.ts`). Payment uses the till's own offline receipts, which
+  have their own tests.
+- **A service charge without GST, or with hotel tax** (see above).
+- **Channel managers and online booking for rooms**; **key cards**;
+  **payment-terminal pre-authorisation for bar tabs**. Outside the brief, and
+  the last would have touched the payment provider setup.
+- **Payroll**: by the owner's earlier decision and the brief.
+
+## Blockers
+
+- **The BTS public ruling on service charges** could not be read: the page is
+  a script shell that neither a fetch nor a browser would render. GST on the
+  service charge is therefore unverified.
+- **GST on accommodation** (exempt) rests on a secondary source, not the Act;
+  the exemption reason code on the document (`HOTEL`) is a placeholder until
+  BTS gives the code. Both are marked unverified in the app.
+- **Not run anywhere real**: the BTS tests environment with a hospitality
+  document, a kitchen printer, a second device on the same table (two
+  servers were tested at the API and with two operation streams, not with
+  two physical tablets), the Android and desktop builds of the new screens
+  (they are the same web screens, checked in a browser).
+
+## How it was proved
+
+- **Unit tests** (`npm test`, 465 tests): 463 passed, 1 skipped as before,
+  1 failed: a shop's cashier was being told of table-service permissions.
+  That was fixed (a till reports them only for a business with the module
+  on) and the till, sync and venue tests were run again and pass. The whole
+  suite was not run a third time after that fix.
+- **Browser tests** on a fresh database (Edge, a real server): 68 passed,
+  the shop's own tests and the phone layout among them. Five are this
+  module's: table service, no connection, the bar, the hotel stay, the host
+  stand.
+- **The three scenarios** run in `test/venue-floor.test.ts` (restaurant,
+  bar) and `test/hotel.test.ts` (hotel) against the API with stock, reports
+  and documents checked at the end, and in shorter form in the browser
+  tests. Documents go to the local stand-in for BTS's tests environment;
+  nothing was sent to BTS itself.

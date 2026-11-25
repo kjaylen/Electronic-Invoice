@@ -89,6 +89,12 @@ import { plansJson } from './billing.ts';
 import { TRIAL_DAYS } from '../billing/plans.ts';
 import { type HtmlPdfRenderer, setPdfRenderer } from '../render/browser-pdf.ts';
 import { namesOneThing, storePageMeta, storeRobots, storeSitemap, withMeta, withoutMeta } from '../commerce/seo.ts';
+import { registerLayawayRoutes } from './layaways.ts';
+import { registerLocationRoutes } from './locations.ts';
+import { registerBusinessTaxRoutes } from './business-tax.ts';
+import { registerVenueRoutes } from './venue.ts';
+import { registerHotelRoutes } from './hotel.ts';
+import { registerVenueFloorRoutes } from './venue-floor.ts';
 
 export type Principal = 'api' | Role;
 
@@ -428,6 +434,12 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     registerItemSummaryRoutes(tenant, deps);
     registerLoyaltyRoutes(tenant, deps);
     registerGiftCardRoutes(tenant, deps, ctx);
+    registerLayawayRoutes(tenant, deps);
+    registerLocationRoutes(tenant, deps);
+    registerBusinessTaxRoutes(tenant, deps);
+    registerVenueRoutes(tenant, deps);
+    registerHotelRoutes(tenant, deps);
+    registerVenueFloorRoutes(tenant, deps, ctx);
     registerSiteRoutes(tenant, deps);
     registerConnectRoutes(tenant, deps, ctx);
     registerDeveloperRoutes(tenant, deps, devlog);

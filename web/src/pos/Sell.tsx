@@ -37,6 +37,7 @@ export function Sell() {
       lines: cart.lines.map((l) => ({ name: l.name, quantity: l.quantity, amount: lineAmount(l.quantity, l.unitPrice) })),
       total: cart.total,
       change: cart.change,
+      ...(cart.usd && { usd: cart.usd }),
     });
   }, [display, business]);
 
@@ -52,6 +53,7 @@ export function Sell() {
         display?.update({ business, lines: [], total: doc.totals.payable, change: sale.change, message: t('Thank you!') });
       }}
       print={(doc) => void till.printDocument(doc.id).catch(problem)}
+      printOrder={(ticket, title) => till.printTicket(ticket, { title })}
       extraButtons={<>{scanWithCamera && (
         <button
           type="button"

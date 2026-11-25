@@ -83,7 +83,7 @@ function shape(r: ReceivableRow) {
     issueDate: r.issue_date,
     dueDate: r.due_date,
     daysOverdue: balance > 0n ? Math.max(0, r.days_overdue) : 0,
-    customer: { id: r.customer_id, key: r.customer_key, name: r.customer_snapshot?.name ?? 'Walk-in customer', tin: r.customer_snapshot?.tin ?? null, email: r.customer_snapshot?.contact?.email ?? null },
+    customer: { id: r.customer_id, key: r.customer_key, name: r.customer_snapshot?.name ?? 'Walk-in customer', tin: r.customer_snapshot?.tin ?? null, email: r.customer_snapshot?.contact?.email ?? null, telephone: r.customer_snapshot?.contact?.telephone ?? null },
     total: formatCents(total),
     paid: formatCents(paid),
     credited: formatCents(credited),
@@ -171,10 +171,12 @@ export interface NewPayment {
  * Record money received against an invoice (or debit note). Never more than
  * the balance. When it settles the invoice, an "invoice.paid" event goes out.
  */
-export async function recordPayment(db: Queryable, tenantId: string, documentId: string, p: NewPayment, userId: string | null, options: { allowOverpay?: boolean; deviceId?: string | null } = {}): Promise<{ payment: PaymentRow; receivable: Receivable }> {
+export async function recordPayment(db: Queryable, tenantId: string, documentId: string, p: NewPayment, userId: string | null, options: { allowOverpay?: boolean; deviceId?: string | null; /** Money given back (a negative amount), by the way it is given back. */ refund?: boolean } = {}): Promise<{ payment: PaymentRow; receivable: Receivable }> {
   const before = await receivable(db, tenantId, documentId);
   if (!before) throw new ReceivableError('Only an authorized tax invoice or debit note takes payments');
-  if (p.method !== 'refund') {
+  if (options.refund) {
+    if (p.amountCents >= 0n) throw new ReceivableError('A refund is an amount given back');
+  } else if (p.method !== 'refund') {
     if (p.amountCents <= 0n) throw new ReceivableError('The amount must be more than zero');
     if (!options.allowOverpay && p.amountCents > before.balanceCents) {
       throw new ReceivableError(before.balanceCents <= 0n ? 'This invoice is already paid' : `That is more than the balance of BZ$${before.balance}`);

@@ -1,0 +1,257 @@
+/**
+ * Table service in a real browser: the floor plan, seating a party, ordering
+ * with a required choice, sending to the kitchen (a ticket prints once),
+ * the kitchen screen, paying at the counter, and the table free again; then
+ * a bar tab moved to a table and split evenly.
+ *
+ * Runs after app.spec.ts, on the business it sets up. It turns the module on
+ * for the test and off again, so the specs after it see a shop.
+ */
+
+import { expect, type Page, test } from '@playwright/test';
+
+const SLUG = 'corner-store';
+const OWNER = { email: 'rosa@cornerstore.test', password: 'my brand new password' };
+const API = { 'X-Requested-With': 'etd-web', 'X-Business': SLUG };
+
+async function logIn(page: Page) {
+  await page.goto(`/${SLUG}/login`);
+  await page.getByLabel('Email or username').fill(OWNER.email);
+  await page.getByLabel(/^Password/).fill(OWNER.password);
+  await page.getByRole('button', { name: /^Log in/ }).click();
+  await expect(page.locator('.biz-card')).toContainText('Corner Store');
+}
+
+const put = async (page: Page, method: 'post' | 'put' | 'delete', url: string, data?: unknown) => {
+  const r = await page.request[method](url, { headers: API, ...(data !== undefined && { data }) });
+  expect(r.status(), `${method} ${url}: ${await r.text()}`).toBeLessThan(300);
+  return r.json();
+};
+
+/** A small restaurant on the test business: two tables and a bar stool, a kitchen, a choice on the Johnny cakes. */
+async function setUp(page: Page) {
+  await put(page, 'put', '/v1/venue/settings', { restaurant: true, bar: true, hotel: false, serviceCharge: 'off' });
+  // From nothing, whatever an earlier run left.
+  for (const c of (await (await page.request.get('/v1/venue/changes', { headers: API })).json()).checks as Array<{ id: string; status: string; items: Array<{ id: string; status: string; shares: number; paid: Array<{ shares: number }> }> }>) {
+    const owing = c.items.filter((i) => i.status !== 'void' && i.paid.reduce((a, p) => a + p.shares, 0) < i.shares).map((i) => i.id);
+    const op = (type: string, payload: Record<string, unknown> = {}) => ({ id: crypto.randomUUID(), checkId: c.id, type, at: new Date().toISOString(), payload });
+    if (owing.length) await put(page, 'post', '/v1/venue/ops', { ops: [op('void', { itemIds: owing, reason: 'Browser test tidy-up' })] });
+    const now = ((await (await page.request.get(`/v1/venue/checks/${c.id}`, { headers: API })).json()) as { status: string }).status;
+    if (now === 'open' || now === 'paid') await put(page, 'post', '/v1/venue/ops', { ops: [op(now === 'paid' ? 'clean' : 'close')] });
+  }
+  const venue = await (await page.request.get('/v1/venue', { headers: API })).json();
+  for (const p of venue.floor) await put(page, 'delete', `/v1/venue/floor/${p.id}`);
+  for (const s of venue.stations) await put(page, 'delete', `/v1/venue/stations/${s.id}`);
+  for (const g of venue.modifierGroups) await put(page, 'delete', `/v1/venue/modifier-groups/${g.id}`);
+  await put(page, 'post', '/v1/venue/floor', { area: 'Dining room', items: [
+    { id: 't1', type: 'table', name: 'Table 1', shape: 'round', seats: 4, x: 80, y: 120, w: 180, h: 280 },
+    { id: 't2', type: 'table', name: 'Table 2', shape: 'rect', seats: 6, x: 340, y: 120, w: 260, h: 280 },
+    { id: 'b1', type: 'stool', name: 'Bar 1', shape: 'round', seats: 1, x: 700, y: 120, w: 120, h: 200 },
+    { id: 'w1', type: 'wall', name: '', x: 0, y: 0, w: 1000, h: 20 },
+  ] });
+  const find = async (q: string) => (await (await page.request.get(`/v1/items?q=${encodeURIComponent(q)}&limit=1`, { headers: API })).json()).data[0];
+  const cakes = await find('Johnny cakes');
+  const water = await find('Coconut water');
+  for (const [item, category] of [[cakes, 'Food'], [water, 'Drinks']] as const) {
+    await put(page, 'put', `/v1/items/${item.id}`, { name: item.name, unitCode: item.unitCode, unitPrice: item.unitPrice, gstCategory: item.gstCategory, ...(item.sellerCode && { sellerCode: item.sellerCode }), ...(item.barcode && { barcode: item.barcode }), favorite: true, category });
+  }
+  // The kitchen has no till of its own: its tickets print where the order is sent from, and show on the kitchen screen.
+  await put(page, 'post', '/v1/venue/stations', { name: 'Kitchen', categories: ['Food'] });
+  const group = (await put(page, 'post', '/v1/venue/modifier-groups', { name: 'Butter', minChoices: 1, maxChoices: 1, options: [{ name: 'With butter' }, { name: 'No butter' }] })).data.find((g: { name: string }) => g.name === 'Butter');
+  await put(page, 'put', `/v1/venue/items/${cakes.id}`, { modifierGroupIds: [group.id], course: 2, allergens: ['gluten', 'milk'] });
+  await put(page, 'put', `/v1/venue/items/${water.id}`, { modifierGroupIds: [], course: 0 });
+  await put(page, 'post', `/v1/venue/items/${cakes.id}/availability`, { soldOut: false });
+  return { cakes, water };
+}
+
+test('table service: seat a party, order with a choice, send to the kitchen, the kitchen screen, pay at the counter, the table is free again', async ({ page }) => {
+  await logIn(page);
+  await setUp(page);
+
+  // The floor is in the menu for a restaurant, and is the home of table service.
+  await page.goto(`/${SLUG}/`);
+  await page.getByRole('navigation').getByRole('link', { name: 'Floor' }).click();
+  const plan = page.getByRole('group', { name: 'Floor plan of Dining room' });
+  await expect(plan.getByRole('button', { name: /^Table 1: Free/ })).toBeVisible();
+  await expect(plan.getByRole('button')).toHaveCount(3);
+
+  // Seat three at table 1.
+  await plan.getByRole('button', { name: /^Table 1/ }).click();
+  const seat = page.getByRole('dialog', { name: 'Seat a party at Table 1' });
+  await seat.getByRole('button', { name: '3', exact: true }).click();
+  await seat.getByRole('button', { name: 'Open the table for 3' }).click();
+  await expect(page.getByRole('heading', { level: 1, name: /Table 1/ })).toBeVisible();
+
+  // Two coconut waters for seat 1 (one tap each), a Johnny cake for seat 2: it needs its choice first.
+  const menu = page.getByRole('region', { name: 'Menu' });
+  await menu.getByRole('button', { name: /^Coconut water/ }).click();
+  await menu.getByRole('button', { name: /^Coconut water/ }).click();
+  await page.getByRole('group', { name: 'Seat' }).getByRole('button', { name: '2', exact: true }).click();
+  await menu.getByRole('button', { name: /^Johnny cakes/ }).click();
+  const choose = page.getByRole('dialog', { name: 'Johnny cakes' });
+  await expect(choose.getByRole('button', { name: 'Add to the order' })).toBeDisabled();
+  await expect(choose.getByText('Butter: choose one')).toBeVisible();
+  await choose.getByRole('button', { name: 'No butter' }).click();
+  await choose.getByLabel('Note for the kitchen or bar').fill('well done');
+  await choose.getByRole('button', { name: 'Add to the order' }).click();
+  const order = page.getByRole('region', { name: 'The order' });
+  // The second tap made the first line two.
+  await expect(order.locator('.venue-course li')).toHaveCount(2);
+  await expect(order.locator('.venue-course li').first()).toContainText('2');
+  await expect(order.getByText('not sent')).toHaveCount(2);
+  // 2 x 3.50 + 1.50 = 8.50; GST 1.06.
+  await expect(order.locator('.grand')).toContainText('BZ$9.56');
+  await expect(order.locator('.grand-usd')).toContainText('US$4.78');
+
+  // Send: the kitchen's ticket prints here (this browser sent it), with the table, the choice and the note; the drinks have no station.
+  await order.getByRole('button', { name: /^Send/ }).click();
+  await expect(page.getByText('Sent: 2 items')).toBeVisible();
+  await expect(order.getByText('not sent')).toHaveCount(0);
+  await expect.poll(async () => page.locator('iframe.print-frame').evaluate((f) => (f as HTMLIFrameElement).srcdoc).catch(() => '')).toContain('KITCHEN');
+  const ticket = await page.locator('iframe.print-frame').evaluate((f) => (f as HTMLIFrameElement).srcdoc);
+  for (const text of ['Table 1', '1 x Johnny cakes', 'No butter', 'well done', 'MAINS']) expect(ticket).toContain(text);
+  expect(ticket).not.toContain('Coconut water');
+  // Sending again sends nothing new.
+  await expect(order.getByRole('button', { name: /^Send/ })).toBeDisabled();
+
+  // The floor shows the stage; the kitchen screen has the card, and bumping it tells the floor.
+  await page.getByRole('button', { name: /Floor$/ }).click();
+  await expect(plan.getByRole('button', { name: /^Table 1: Food sent, 3/ })).toBeVisible();
+  await page.goto(`/${SLUG}/kitchen`);
+  const card = page.locator('.kds-card', { hasText: 'Table 1' });
+  await expect(card).toContainText('1 × Johnny cakes');
+  await expect(card).toContainText('No butter');
+  await expect(page.getByLabel('All day')).toContainText('1 × Johnny cakes');
+  await card.getByRole('button', { name: 'Done' }).click();
+  await expect(card).toHaveCount(0);
+  await page.goto(`/${SLUG}/floor`);
+  await expect(plan.getByRole('button', { name: /^Table 1/ }).locator('.venue-bell')).toBeVisible();
+
+  // The bill: paid whole, at the counter, in cash.
+  await plan.getByRole('button', { name: /^Table 1/ }).click();
+  await expect(page.getByRole('region', { name: 'The order' }).locator('.state-ready')).toHaveCount(1);
+  await page.getByRole('region', { name: 'The order' }).getByRole('button', { name: 'Pay', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Pay Table 1' }).getByRole('button', { name: 'Pay BZ$9.56' }).click();
+  const cart = page.locator('form.cart');
+  await expect(cart.locator('.cart-table')).toContainText('Table 1');
+  await expect(cart.locator('.cart-lines li')).toHaveCount(2);
+  await expect(cart.locator('.grand')).toContainText('BZ$9.56');
+  await cart.getByRole('button', { name: /^Issue receipt/ }).click();
+  // Back on the floor: the table is paid and waits to be cleaned; then it is free.
+  await expect(plan.getByRole('button', { name: /^Table 1: Paid: clean it/ })).toBeVisible();
+  await plan.getByRole('button', { name: /^Table 1/ }).click();
+  await page.getByRole('button', { name: 'Table is clean' }).click();
+  await expect(plan.getByRole('button', { name: /^Table 1: Free/ })).toBeVisible();
+
+  // The receipt is a real tax document for BZ$9.56, and the report has the three covers.
+  const docs = (await (await page.request.get('/v1/documents?limit=1', { headers: API })).json()).data;
+  expect([docs[0].type, docs[0].totals.payable, docs[0].status]).toEqual(['02', '9.56', 'authorized']);
+  const day = (await (await page.request.get('/v1/venue', { headers: API })).json()).businessDate;
+  const report = await (await page.request.get(`/v1/venue/reports?from=${day}&to=${day}`, { headers: API })).json();
+  expect(report.covers.covers).toBeGreaterThanOrEqual(3);
+  expect(report.byItem.find((i: { name: string }) => i.name === 'Johnny cakes').quantity).toBeGreaterThanOrEqual(1);
+});
+
+test('no connection: a table is opened, ordered and sent; the ticket prints here once; it all goes up when the connection is back', async ({ page }) => {
+  await logIn(page);
+  await setUp(page);
+  await page.goto(`/${SLUG}/floor`);
+  const plan = page.getByRole('group', { name: 'Floor plan of Dining room' });
+  await expect(plan.getByRole('button', { name: /^Table 2: Free/ })).toBeVisible();
+  await expect(page.getByRole('status').filter({ hasText: 'In step' })).toBeVisible();
+
+  // The connection goes: every call to the server fails from here.
+  await page.route('**/v1/**', (r) => r.abort('internetdisconnected'));
+  await plan.getByRole('button', { name: /^Table 2/ }).click();
+  const seat = page.getByRole('dialog', { name: 'Seat a party at Table 2' });
+  await seat.getByRole('button', { name: '2', exact: true }).click();
+  await seat.getByRole('button', { name: 'Open the table for 2' }).click();
+  await expect(page.getByRole('heading', { level: 1, name: /Table 2/ })).toBeVisible();
+  const menu = page.getByRole('region', { name: 'Menu' });
+  await menu.getByRole('button', { name: /^Johnny cakes/ }).click();
+  const choose = page.getByRole('dialog', { name: 'Johnny cakes' });
+  await choose.getByRole('button', { name: 'With butter' }).click();
+  await choose.getByRole('button', { name: 'Add to the order' }).click();
+  const order = page.getByRole('region', { name: 'The order' });
+  await order.getByRole('button', { name: /^Send/ }).click();
+  await expect(order.getByText('not sent')).toHaveCount(0);
+  // The kitchen's ticket is made and printed by this device.
+  await expect.poll(async () => page.locator('iframe.print-frame').evaluate((f) => (f as HTMLIFrameElement).srcdoc).catch(() => ''), { timeout: 15_000 }).toContain('KITCHEN');
+  const ticket = await page.locator('iframe.print-frame').evaluate((f) => (f as HTMLIFrameElement).srcdoc);
+  for (const text of ['Table 2', '1 x Johnny cakes', 'With butter']) expect(ticket).toContain(text);
+  await page.getByRole('button', { name: /Floor$/ }).click();
+  await expect(page.getByRole('status').filter({ hasText: /No connection: \d+ to send/ })).toBeVisible();
+  await expect(plan.getByRole('button', { name: /^Table 2: Food sent, 2/ })).toBeVisible();
+
+  // The connection is back: the order goes up by itself, and the server does not print the ticket a second time.
+  await page.unroute('**/v1/**');
+  await expect(page.getByRole('status').filter({ hasText: 'In step' })).toBeVisible({ timeout: 20_000 });
+  const changes = await (await page.request.get('/v1/venue/changes', { headers: API })).json() as { checks: Array<{ id: string; tableName: string; items: Array<{ name: string; status: string }> }>; tickets: Array<{ checkId: string; kind: string; status: string; attempts: number }> };
+  const check = changes.checks.find((c) => c.tableName === 'Table 2')!;
+  expect(check.items.map((i) => [i.name, i.status])).toEqual([['Johnny cakes', 'sent']]);
+  const tickets = changes.tickets.filter((k) => k.checkId === check.id);
+  expect(tickets.map((k) => [k.kind, k.status, k.attempts])).toEqual([['order', 'printed', 0]]);
+  await expect(plan.getByRole('button', { name: /^Table 2: Food sent, 2/ })).toBeVisible();
+});
+
+test('the bar: a tab by name, a round repeated, moved to a table, split evenly in two, and a sold-out item', async ({ page }) => {
+  await logIn(page);
+  const { cakes } = await setUp(page);
+  await page.goto(`/${SLUG}/floor`);
+  // A tab for Maria: two coconut waters, sent; the same round again in one tap.
+  await page.getByRole('button', { name: /^Tabs/ }).click();
+  const tabs = page.getByRole('dialog', { name: 'Open tabs' });
+  await tabs.getByLabel('New tab: a name, or a seat at the bar').fill('Maria');
+  await tabs.getByRole('button', { name: 'Open the tab' }).click();
+  await expect(page.getByRole('heading', { level: 1, name: /Maria/ })).toBeVisible();
+  const menu = page.getByRole('region', { name: 'Menu' });
+  const order = page.getByRole('region', { name: 'The order' });
+  await menu.getByRole('button', { name: /^Coconut water/ }).click();
+  await menu.getByRole('button', { name: /^Coconut water/ }).click();
+  await order.getByRole('button', { name: /^Send/ }).click();
+  await order.getByRole('button', { name: 'Repeat round' }).click();
+  await expect(order.locator('.venue-course li')).toHaveCount(2);
+  await order.getByRole('button', { name: /^Send/ }).click();
+  // The kitchen runs out of Johnny cakes: one tap, and they cannot be ordered here.
+  await page.request.post(`/v1/venue/items/${cakes.id}/availability`, { headers: API, data: { soldOut: true } });
+  await expect(menu.getByRole('button', { name: /^Johnny cakes/ })).toContainText('Sold out');
+  await menu.getByRole('button', { name: /^Johnny cakes/ }).click({ force: true });
+  await expect(page.getByRole('dialog', { name: 'Johnny cakes' })).toHaveCount(0);
+  // She takes table 2: the tab goes with her.
+  await page.getByRole('button', { name: 'More', exact: true }).click();
+  await page.getByRole('dialog', { name: 'This check' }).getByRole('button', { name: 'Move to a table' }).click();
+  await page.getByRole('dialog', { name: 'Move to a table' }).getByRole('button', { name: /^Table 2/ }).click();
+  await expect(page.getByRole('heading', { level: 1, name: /Table 2/ })).toBeVisible();
+  // 4 x 3.50 = 14.00 + GST 1.75 = 15.75, split evenly in two, each a receipt of its own; together exactly 15.75.
+  await order.getByRole('button', { name: 'Pay', exact: true }).click();
+  let pay = page.getByRole('dialog', { name: 'Pay Table 2' });
+  await pay.getByRole('button', { name: 'Evenly' }).click();
+  await pay.getByRole('button', { name: /^Split in 2/ }).click();
+  const paid: number[] = [];
+  for (const left of [2, 1]) {
+    await order.getByRole('button', { name: 'Pay', exact: true }).click();
+    pay = page.getByRole('dialog', { name: 'Pay Table 2' });
+    await expect(pay.getByText(`This bill is being paid in equal parts: ${left} left.`)).toBeVisible();
+    await pay.getByRole('button', { name: /^Pay the next part/ }).click();
+    const cart = page.locator('form.cart');
+    await expect(cart.locator('.cart-table')).toContainText(`1 of ${left} left`);
+    // The part that is not the last is made to carry GST with nothing to round (7.83); the last takes what is left (7.92).
+    await expect(cart.locator('.grand')).toContainText(left === 2 ? 'BZ$7.83' : 'BZ$7.92');
+    const total = /BZ\$(\d+\.\d\d)/.exec(await cart.locator('.grand').innerText())![1]!;
+    paid.push(Math.round(Number(total) * 100));
+    await cart.getByRole('group', { name: 'Payment' }).getByRole('button', { name: left === 2 ? 'Card' : 'Cash' }).click();
+    await cart.getByRole('button', { name: /^Issue receipt/ }).click();
+    // With a part still to pay, the check comes back; when it is all paid, the floor.
+    if (left === 2) await expect(page.getByRole('heading', { level: 1, name: /Table 2/ })).toBeVisible();
+    else await expect(page.getByRole('group', { name: 'Floor plan of Dining room' })).toBeVisible();
+  }
+  expect(paid.reduce((a, b) => a + b, 0)).toBe(1575);
+  expect(Math.abs(paid[0]! - paid[1]!)).toBeLessThanOrEqual(9);
+  await expect(page.getByRole('group', { name: 'Floor plan of Dining room' }).getByRole('button', { name: /^Table 2: Paid/ })).toBeVisible();
+
+  // Back to a shop for the tests that follow.
+  await setUp(page);
+  await put(page, 'put', '/v1/venue/settings', { restaurant: false, bar: false, hotel: false });
+  await page.goto(`/${SLUG}/`);
+  await expect(page.getByRole('navigation').getByRole('link', { name: 'Floor' })).toHaveCount(0);
+});

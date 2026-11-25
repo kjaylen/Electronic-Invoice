@@ -47,6 +47,7 @@ import { can, requirePermission } from './permissions.ts';
 import { csvCell } from './reports.ts';
 import { date as dateSchema, money, uuid } from './schemas.ts';
 import { createAccountLink } from './account-links.ts';
+import { reminderMessage, whatsappLink, whatsappNumber } from '../receivables/whatsapp.ts';
 
 // ---------- settings ----------
 
@@ -407,6 +408,37 @@ export function registerReceivableRoutes(app: FastifyInstance, deps: PipelineDep
       await sendReminder(deps, ctx, request.tenantId, r, to, request.userId || null, await receivableSettings(db, request.tenantId), extras);
       await audit(db, { tenantId: request.tenantId, userId: request.userId || null, action: 'invoice.reminded', target: r.number, details: { to }, ip: request.ip });
       return { sent: true, to };
+    },
+  );
+
+  // A reminder for WhatsApp: the message written, and a link that opens the chat with it. Whoever is collecting presses send.
+  app.post<{ Params: { id: string }; Body: { phone?: string } | undefined }>(
+    '/documents/:id/whatsapp-reminder',
+    { schema: { params: idParams, body: { type: ['object', 'null'], additionalProperties: false, properties: { phone: { type: 'string', maxLength: 40 } } } } },
+    async (request) => {
+      if (!can(request.principal, 'payments.record')) requirePermission(request, 'documents.send');
+      const r = await receivable(db, request.tenantId, request.params.id);
+      if (!r) throw new ApiError(409, 'not_receivable', 'Only an authorized tax invoice or debit note can be reminded');
+      if (r.balanceCents <= 0n) throw new ApiError(409, 'already_paid', 'This invoice is already paid');
+      // The number typed now, the one on the invoice, or the one the customer has today.
+      const onFile = r.customer.id ? (await db.query<{ telephone: string | null }>('select telephone from customers where id = $1 and tenant_id = $2', [r.customer.id, request.tenantId])).rows[0]?.telephone ?? null : null;
+      const given = request.body?.phone?.trim();
+      const number = whatsappNumber(given || r.customer.telephone || onFile);
+      if (!number) throw new ApiError(422, 'no_phone', given ? 'That does not look like a phone number. Use the full number, with the country code for numbers outside Belize.' : 'This customer has no phone number; enter one');
+      if (await overLimit(db, `remind-wa|${request.params.id}`, 20, 24 * 3600_000)) throw new ApiError(429, 'too_many_reminders', 'Enough reminders for this invoice today');
+      const settings = await receivableSettings(db, request.tenantId);
+      const lang = await emailLanguage(db, request.tenantId);
+      const online = ctx.publicUrl ? Boolean(await invoiceProvider(db, request.tenantId, settings, extras)) : false;
+      const share = ctx.publicUrl ? await createShareLink(db, ctx, request.tenantId, r.documentId, request.userId || null) : null;
+      const biz = await business(db, request.tenantId);
+      const text = reminderMessage({
+        customer: r.customer.name, business: biz.name, what: `${PHRASES[lang].receivable(r.type).toLowerCase()} ${r.number}`, balance: money2(r.balance),
+        dueDate: shortDate(r.dueDate, lang), daysLate: daysPastDue(r.dueDate),
+        ...(share && { link: online ? share.payUrl : share.url, canPayOnline: online }),
+        ...(settings.instructions.trim() && { instructions: settings.instructions.trim() }),
+      }, lang);
+      await audit(db, { tenantId: request.tenantId, userId: request.userId || null, action: 'invoice.reminded', target: r.number, details: { by: 'whatsapp', to: `+${number}` }, ip: request.ip });
+      return { phone: `+${number}`, text, url: whatsappLink(number, text) };
     },
   );
 

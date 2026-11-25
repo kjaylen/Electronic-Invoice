@@ -1,149 +1,143 @@
-# Plan: email (SMTP settings, one mail service, a queue, a log)
+# Plan: the hospitality module (restaurants, bars, hotels)
 
-Who this is for: small businesses in Belize and the people who buy from them.
-A business's customers get its invoices, receipts, order confirmations and
-reminders by email, so these must look like they come from the business and
-must arrive. The platform's own staff set up the server everything goes
-through; a business can add its own.
+Started 25 Nov 2026 on branch `hospitality` (cut from `pos-platform`, not yet
+merged), in the worktree `../eInvoicing-pos`. The earlier plan is in
+`docs/plans/2026-11-pos-platform.md`. Choices are logged in DECISIONS.md;
+tax values in TAX-RULES.md; which tax document when in ETD-MAPPING.md.
 
-Status marks: `[ ]` to do, `[x]` done, `[-]` skipped (the reason is in DECISIONS.md).
+## What was found in the code (the brief's blanks)
 
-The plan before this one (connecting a site built elsewhere) is finished and
-kept in `docs/plans/2026-11-connect-your-site.md`.
+- **Stack**: Fastify + PostgreSQL (`src/`, TypeScript run by Node), React +
+  Vite (`web/`). The desktop (Electron), Android and iOS (Capacitor) apps all
+  run the same web till, `web/src/pos`. One screen built in `web/` is the
+  same screen on all three.
+- **Already there** from the POS work: tables as named held sales, order
+  tickets per station by category, split by item, service charge per line,
+  tips beside the sale, US$ cash at 2:1, wallet, layaway, locations, recipes
+  in the shape of bundles (`item_components`, decimals allowed).
+- **Offline**: the till is offline-first: it issues receipts itself and
+  syncs (`web/src/pos/offline/local.ts` answers `/v1/...` calls locally).
+- **Manual**: BTS Orientation Manual v1.30; it is not in the repository
+  (the README's "Settled by the manual" is the working copy of its rules).
+- **Customers / other tenders**: taken as restaurants, bars and small hotels
+  serving tourists; the local tender is the mobile wallet.
 
-## What exists (read end to end, 24 Nov 2026)
+## Architecture (read this first after a break)
 
-- **One small module** (`src/mail/mailer.ts`): `smtpMailer(SMTP_URL, MAIL_FROM)`
-  with nodemailer, an outbox of `.eml` files for development, and a memory
-  mailer for tests. Everything goes from one address set in the environment;
-  the business's address is only the reply-to.
-- **No queue.** Every email is sent inside the request that causes it (or the
-  housekeeping run). A slow mail server holds up checkout; a dead one loses
-  the order confirmation, or fails the request.
-- **No settings screens, no log, no test button.** A failure is a line in the
-  server log, or a row in `document_messages` for emailed documents.
-- **Templates** (`src/templates/`, Liquid): eleven customer-facing emails a
-  business can edit, with a live preview, versions and a Spanish default. The
-  other emails are built in code with `simpleHtml`, which looks different.
-- **Opt-outs** only for checkout reminders (`store_email_optouts`).
-- **No sign-up verification email.** A new business's owner signs in at once.
+- **Switch**: `tenants.venue jsonb` = `{ restaurant, bar, hotel, ...settings }`
+  (`src/venue/settings.ts`). `GET /v1/me` carries `venue`. Nothing below
+  shows or runs for a business with all three off.
+- **A check is an operation log.** `src/venue/check.ts` is a pure reducer
+  shared by the server and the web app: `apply(check, op)`. Ops have a
+  client-made id; applying one twice does nothing. The server stores ops in
+  `venue_ops` (a sequence per business) and the folded check in
+  `venue_checks.state`. Devices apply ops locally at once, queue them, post
+  them (`POST /v1/venue/ops`) and read everyone else's
+  (`GET /v1/venue/changes?since=`), every two seconds.
+- **The concurrency rule**: items have their own ids, so two people adding
+  never collide; every op is per item; an item goes to the kitchen once (the
+  first `fire` that reaches the log sends it; later ones skip it); the server's
+  answer says what each op really did, and tickets print from that.
+- **Paying** hands the chosen items to the existing sale (the counter's
+  cart), so every tender, US$, tips, the receipt, BTS and the offline till
+  work as they do for a shop. When the receipt is issued an op marks the
+  items paid.
+- **Kitchen**: `venue_tickets` is the print queue and the kitchen screen's
+  source: one row per station per send, printed by the device that hosts the
+  station's printer, shown failed to the server who sent it, retried,
+  re-routed to the fallback.
+- **Hotel** is server-side and online: rooms, bookings, folios, housekeeping,
+  night audit (`src/venue/hotel.ts`).
+- **Web**: `web/src/venue/*` (Floor, Order, FloorEditor, MenuSetup, Kitchen,
+  Reservations, Tabs, Hotel*, VenueReports). Spanish in `es.ts`, Chinese for
+  the service screens in `zh.ts`.
 
-## Every email the platform sends (27, from 25 places in the code)
+## Where it stands
 
-From a business, to its customers and suppliers (its own server when it has one):
+Every item below is done. What was left out, and why, is in DECISIONS.md
+("Restaurants, bars and hotels": Skipped, Blockers).
 
-| Type | Where | Template |
-|---|---|---|
-| `document` | `sendDocumentEmail` in `src/api/documents.ts`: invoices, receipts, credit notes, with PDF and XML | `email.document` |
-| `reminder` | the same function, for invoices coming due and overdue | `email.reminder` |
-| `statement` | `src/api/receivables.ts` | `email.statement` |
-| `quote` | `src/api/quotes.ts` | `email.quote` |
-| `purchase-order` | `src/api/purchasing.ts` | `email.purchase-order` |
-| `order` | `src/api/storefront.ts` (order confirmation) | `email.order` |
-| `order-ready` | `src/api/orders.ts` | `email.order-ready` |
-| `back-in-stock` | `src/commerce/stock-alerts.ts` | `email.back-in-stock` |
-| `checkout-reminder` | `src/commerce/checkouts.ts` (not transactional: unsubscribe link) | `email.checkout-reminder` |
-| `gift-card` | `src/api/giftcards.ts` | `email.gift-card` |
-| `sign-in-code` | `src/api/store-accounts.ts` | `email.sign-in-code` |
-| `account-link` | `src/api/accounts.ts` (built in code today) | new: `email.account-link` |
+- **Server**: `src/venue/` (`check.ts` reducer, `bill.ts` splits,
+  `pricing.ts`, `settings.ts`, `service.ts` operations and tickets,
+  `station-tickets.ts`, `tax-rules.ts`, `room-charge.ts`), `src/api/`
+  (`venue.ts` setup and operations; `venue-floor.ts` reservations, waitlist,
+  guests, day close, checkout, tips, reports, tax rules; `hotel.ts`).
+  Migrations 063 to 066.
+- **Screens**: `web/src/venue/` (`store.ts` the device's queue of operations,
+  `Floor.tsx`, `Order.tsx`, `Kitchen.tsx`, `Host.tsx`, `Hotel.tsx`,
+  `Reports.tsx`, `Setup.tsx` under Settings → Venue, `handoff.ts` to the
+  counter, `tickets.ts`). The till app has Floor and Kitchen tabs. Spanish
+  for all of it; Chinese for the floor, the order and the kitchen.
+- **Tests**: `test/venue-check.test.ts` (the reducer, splits, concurrency),
+  `venue-api.test.ts`, `venue-floor.test.ts` (scenarios 1 and 2),
+  `hotel.test.ts` (scenario 3); in a browser `e2e/venue.spec.ts` (table
+  service, no connection, the bar) and `e2e/hotel.spec.ts` (the stay, the
+  host stand).
+- **Not merged, not pushed.** The branch sits on top of `pos-platform`.
 
-From the platform, to a business and its people:
+## Build order
 
-| Type | Where |
-|---|---|
-| `password-reset` | `src/api/auth.ts` |
-| `staff-invitation`, `staff-password` | `src/api/users.ts` |
-| `support-password-reset`, `two-factor-off`, `support-notice`, `business-live` | `src/api/platform.ts` |
-| `business-closed` | `src/api/business.ts` |
-| `service-invoice` | `src/api/billing.ts` (when there is no e-invoice to send) |
-| `store-message` | `src/api/storefront.ts` (the store's contact form, to the business) |
-| `new-order` | `src/api/storefront.ts` (to the business) |
-| `quote-answer` | `src/api/quotes.ts` (accepted or declined, to the business) |
-| `notice` | `src/notify/notifications.ts` (rejections, outages, certificates, plan, low stock) |
-| `daily-summary` | `src/notify/daily.ts` (not transactional: unsubscribe link) |
-| `test` | new: the "Send test email" button |
+### 0. Groundwork
+- [x] 0.1 PLAN.md, TAX-RULES.md, ETD-MAPPING.md
+- [x] 0.2 `tenants.venue`, the switch in Settings, roles and permissions (A4)
 
-## A. Foundations
+### A. Venue setup
+- [x] A1 Areas and floor plans, drag and drop, alternative layouts
+- [x] A2 Service periods and menus (hours, prices, automatic, override)
+- [x] A3 Stations and routing (printer, screen, fallback)
+- [x] A4 Roles, PIN switching, sections
 
-- [x] A1. Migration `057_mail.sql`: `mail_settings` (the platform's row and one
-  per business), `mail_messages` (the queue and the log in one table),
-  `mail_suppressions`. New tables only. (054 to 056 are taken by branches not
-  merged yet.)
-- [x] A2. `src/mail/types.ts`: the catalogue of every email type above: who
-  sends it, who gets it, transactional or not, whether its text holds a secret.
-- [x] A3. `src/mail/address.ts`: one check for recipient addresses; subjects,
-  names and headers that cannot carry a line break (header injection).
-- [x] A4. `src/mail/settings.ts`: the settings themselves: validation in plain
-  words, presets, the password encrypted with the server's key and bound to
-  its row, never returned.
-- [x] A5. `src/mail/smtp.ts`: the only file that talks SMTP (nodemailer): the
-  three encryption modes, time limits, what a server's refusal means (retry,
-  give up, the address is dead, the settings are wrong) and a hint for a person.
-- [x] A6. `src/mail/service.ts`: the one mail service. `send()` checks, writes
-  the message to the queue and returns; delivery happens in the background.
+### B. Menu
+- [x] B5 Modifier groups and rules; combos; notes
+- [x] B6 Allergens and dietary tags
+- [x] B7 Sold out ("86") with a countdown
+- [x] B8 Recipes by measure; waste and spillage
 
-## B. The queue
+### C. Table service
+- [x] C9 Live floor view
+- [x] C10 Seating, seats
+- [x] C11 Ordering: modifiers, courses, hold and fire, repeat round
+- [x] C12 Move, merge, split, transfer
+- [x] C13 Voids, comps, discounts with supervisor PIN and reasons
+- [x] C14 Pre-bill; split evenly, by seat, by item, shared items
 
-- [x] B1. Background delivery: claimed rows (safe with several servers), a
-  time limit per attempt, a message left "sending" by a crash goes back.
-- [x] B2. Retry with backoff on temporary failures (1 min, 5 min, 30 min,
-  2 h), failed after 5 attempts (`MAIL_MAX_ATTEMPTS`); permanent refusals fail at once.
-- [x] B3. A business's own server first; if it has none, or its server fails
-  for a reason that is the server's, the platform's sender with the business's
-  name as the from name, and the business told on its settings page.
-- [x] B4. Messages that hold a secret (reset links, codes) are scrubbed once
-  delivered, are never resent, and are not sent after they stop working.
-- [x] B5. Rate limit per business (per hour and per day); mail over the limit waits, it is not lost.
-- [x] B6. Housekeeping: the log is kept 90 days (`MAIL_LOG_DAYS`), message
-  bodies and attachments 30 (`MAIL_CONTENT_DAYS`).
+### D. Bar
+- [x] D15 Tabs by name, seat or room; list with age; shift-end warning
+- [x] D16 Quick sale
+- [x] D17 Happy hour, two-for-one, bundles
 
-## C. Every email moved onto the service, one at a time
+### E. Kitchen and bar production
+- [x] E18 Tickets, follow-ups for changes and voids
+- [x] E19 Kitchen display: cards, ageing, bump, recall, all-day, expediter
+- [x] E20 Ready back to the floor
 
-- [x] C1. `document`, `reminder`, `statement`
-- [x] C2. `quote`, `quote-answer`, `purchase-order`
-- [x] C3. `order`, `new-order`, `order-ready`, `store-message`
-- [x] C4. `back-in-stock`, `checkout-reminder`, `gift-card`, `sign-in-code`
-- [x] C5. `account-link` (now a template a business can edit)
-- [x] C6. `password-reset`, `staff-invitation`, `staff-password`
-- [x] C7. `support-password-reset`, `two-factor-off`, `support-notice`, `business-live`, `business-closed`, `service-invoice`
-- [x] C8. `notice`, `daily-summary`
-- [x] C9. Nothing but `src/mail/smtp.ts` imports nodemailer; a test keeps it so.
+### F. Reservations and waitlist
+- [x] F21 Reservations, timeline, clashes, deposit, confirmations, no-shows
+- [x] F22 Waitlist
+- [x] F23 Guest records
 
-## D. Settings
+### G. Payments and closing
+- [x] G24 Tenders: US$, charge to room, house account, mixed
+- [x] G25 Service charge rules; tips per server; pooling report
+- [x] G26 Server checkout report
+- [x] G27 End of day and the business date
 
-- [x] D1. Platform console → Email: host, port, encryption, username,
-  password, from name, from address, reply-to; presets; the password shown as
-  set with "Replace".
-- [x] D2. Settings → Email for a business (optional), the same fields.
-- [x] D3. "Send test email" on both: a real message, the server's own answer,
-  and the likely cause in plain words.
-- [x] D4. Presets: Gmail / Google Workspace, Outlook / Microsoft 365, Zoho,
-  Amazon SES, with the note where an app password is needed.
-- [x] D5. A business's server may not be an address inside the platform's own network.
+### H. Hotel
+- [x] H28 Room types, rooms, rate plans
+- [x] H29 Reservations and the availability calendar
+- [x] H30 Front desk
+- [x] H31 Guest folio
+- [x] H32 Housekeeping
+- [x] H33 Night audit
 
-## E. Templates
+### I. Tax
+- [x] I34 Dated tax configuration; TAX-RULES.md
+- [x] I35 ETD mapping implemented as written
 
-- [x] E1. One layout (`src/mail/layout.ts`) for every email built in code:
-  the business's logo or name, a heading, text, a button, a footer; phone-friendly; HTML and plain text.
-- [x] E2. The eleven Liquid templates keep working as they are; `account-link` joins them.
-- [x] E3. Everything put into an email is escaped; tests with hostile values.
+### J. Reports
+- [x] J36 Hospitality reports
 
-## F. Log, safeguards, deliverability
-
-- [x] F1. The email log: recipient, subject, type, status, error, times. Staff
-  see all; a business sees its own. Resend.
-- [x] F2. Suppression list: an address a server says does not exist, and
-  people who opt out. Shown and removable on the settings page.
-- [x] F3. An unsubscribe link (and one-click header) on every email that is not transactional.
-- [x] F4. Deliverability guide: SPF, DKIM, DMARC in plain language, and a
-  check of the sending domain's DNS.
-
-## G. Proof
-
-- [x] G1. Tests: valid and invalid settings, each encryption mode, wrong
-  password, server unreachable, retry then success, retry then failure,
-  fallback to the platform, templates with missing and hostile values.
-- [x] G2. A local mail catcher (`npm run mail:catch`); the demo and the
-  browser tests send through it by SMTP.
-- [x] G3. Every type triggered end to end and looked at in the catcher.
-- [x] G4. README, `deploy/env.example`, DECISIONS.md, and the steps to go live.
+### Proof
+- [x] P1 Automated tests the brief lists
+- [x] P2 Scenario 1 (restaurant), 2 (bar), 3 (hotel), end to end
+- [x] P3 Full unit and browser suites; README, DECISIONS, summary

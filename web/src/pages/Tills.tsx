@@ -11,6 +11,7 @@ import { useT } from '../i18n';
 import { qrSvg } from '../pos/ticket';
 import { useToast } from '../toast';
 import { ErrorText, Field, Modal, Select } from '../ui';
+import { LocationsCard } from './Locations';
 
 interface TillHardware {
   device?: string;
@@ -49,7 +50,7 @@ function ago(t: (s: string, v?: Record<string, string | number>) => string, iso:
   return new Date(iso).toLocaleDateString();
 }
 
-/** How selling at the counter and on tills works: for now, how much a cashier may take off. */
+/** How selling at the counter and on tills works: a cashier's discount limit, US$ totals, a service charge, tips. */
 function CounterSettingsCard() {
   const t = useT();
   const toast = useToast();
@@ -60,6 +61,33 @@ function CounterSettingsCard() {
   const [error, setError] = useState<unknown>(null);
   useEffect(() => setLimit(current ?? ''), [current]);
   const valid = limit === '' || (/^\d{1,3}(\.\d{1,2})?$/.test(limit) && Number(limit) <= 100);
+  // For shops that sell to visitors, and for bars and restaurants.
+  const saved = { showUsd: Boolean(me?.counter?.showUsd), service: me?.counter?.serviceChargePercent ?? '', tips: Boolean(me?.counter?.tips) };
+  const [showUsd, setShowUsd] = useState(saved.showUsd);
+  const [service, setService] = useState(saved.service);
+  const [tips, setTips] = useState(saved.tips);
+  useEffect(() => {
+    setShowUsd(saved.showUsd);
+    setService(saved.service);
+    setTips(saved.tips);
+  }, [saved.showUsd, saved.service, saved.tips]);
+  const serviceValid = service === '' || (/^\d{1,2}(\.\d{1,2})?$/.test(service) && Number(service) > 0 && Number(service) <= 30);
+  const extrasChanged = showUsd !== saved.showUsd || service !== saved.service || tips !== saved.tips;
+  const saveExtras = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!serviceValid) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api('/v1/counter-settings', { method: 'PUT', body: { showUsd, serviceChargePercent: service === '' ? null : service, tips } });
+      await refreshMe();
+      toast(t('Counter settings saved. Tills pick them up within a few minutes.'));
+    } catch (err) {
+      setError(err);
+    } finally {
+      setBusy(false);
+    }
+  };
   const save = async (e: FormEvent) => {
     e.preventDefault();
     if (!valid) return;
@@ -88,7 +116,107 @@ function CounterSettingsCard() {
         <button type="submit" disabled={!valid || busy || limit === (current ?? '')}>{busy ? t('Saving…') : t('Save')}</button>
       </form>
       {!valid && <p className="form-error">{t('0 to 100, or empty')}</p>}
+      <form className="stack counter-extras" onSubmit={saveExtras}>
+        <label className="check">
+          <input type="checkbox" checked={showUsd} onChange={(e) => setShowUsd(e.target.checked)} />
+          <span>
+            <strong>{t('Show totals in US dollars too')}</strong>
+            <span className="small muted">{t('For shops that sell to visitors: the total in US$ (BZ$2 to US$1) on the till, the customer display and the printed receipt.')}</span>
+          </span>
+        </label>
+        <Field label={t('Service charge (%)')} hint={t('For bars and restaurants, usually 10. A cashier adds it to a sale with one tap; it is on the receipt, and GST applies to it. Empty: none.')}>
+          <input inputMode="decimal" placeholder={t('None')} value={service} onChange={(e) => setService(e.target.value)} className="narrow-input" />
+        </Field>
+        {!serviceValid && <p className="form-error">{t('Up to 30, or empty')}</p>}
+        <label className="check">
+          <input type="checkbox" checked={tips} onChange={(e) => setTips(e.target.checked)} />
+          <span>
+            <strong>{t('Take tips with card and wallet payments')}</strong>
+            <span className="small muted">{t('The cashier types the tip the customer adds. It is never on the receipt or in your sales; the shift report says how much to pay out to staff.')}</span>
+          </span>
+        </label>
+        <div><button type="submit" disabled={!serviceValid || busy || !extrasChanged}>{busy ? t('Saving…') : t('Save')}</button></div>
+      </form>
       <ErrorText error={error} />
+    </section>
+  );
+}
+
+/** For bars and restaurants: the tables (each can hold an open tab), and where order tickets print. */
+function TablesCard() {
+  const t = useT();
+  const toast = useToast();
+  const { me, refreshMe } = useSession();
+  const savedTables = (me?.counter?.tables ?? []).join('\n');
+  const savedStations = JSON.stringify(me?.counter?.stations ?? []);
+  const [tables, setTables] = useState(savedTables);
+  const [stations, setStations] = useState<Array<{ name: string; categories: string[] }>>(() => JSON.parse(savedStations));
+  const [categories, setCategories] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  useEffect(() => setTables(savedTables), [savedTables]);
+  useEffect(() => setStations(JSON.parse(savedStations)), [savedStations]);
+  useEffect(() => void api<{ data: Array<{ name: string }> }>('/v1/items/categories').then((r) => setCategories(r.data.map((c) => c.name))).catch(() => {}), []);
+  const list = tables.split(/[\n,]/).map((x) => x.trim()).filter(Boolean);
+  const tooLong = list.find((x) => x.length > 30);
+  const named = stations.filter((s) => s.name.trim());
+  const changed = list.join('\n') !== savedTables || JSON.stringify(named.map((s) => ({ name: s.name.trim(), categories: s.categories }))) !== savedStations;
+  const number = () => {
+    const n = Math.max(0, ...list.map((x) => Number(/^Table (\d+)$/i.exec(x)?.[1] ?? 0)));
+    setTables([...list, ...Array.from({ length: 5 }, (_, i) => `Table ${n + i + 1}`)].join('\n'));
+  };
+  const toggle = (i: number, category: string) => setStations((all) => all.map((s, j) => (j !== i ? s : { ...s, categories: s.categories.some((c) => c.toLowerCase() === category.toLowerCase()) ? s.categories.filter((c) => c.toLowerCase() !== category.toLowerCase()) : [...s.categories, category] })));
+  const save = async (e: FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      await api('/v1/counter-settings', { method: 'PUT', body: { tables: list, stations: named.map((s) => ({ name: s.name.trim(), categories: s.categories })) } });
+      await refreshMe();
+      toast(list.length ? t('Tables saved. The counter and the tills now have a Tables button.') : t('Saved.'));
+    } catch (err) {
+      setError(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <section className="card stack">
+      <div>
+        <h2>{t('Tables and order tickets')}</h2>
+        <p className="small muted">{t('For bars and restaurants. A table holds an open tab: started at one till, added to from any, paid at the end. Leave the list empty if you do not serve at tables.')}</p>
+      </div>
+      <form className="stack tables-settings" onSubmit={save}>
+        <Field label={t('Tables')} hint={t('One name on each line: Table 1, Bar, Patio. Up to 80.')}>
+          <textarea rows={Math.min(10, Math.max(4, list.length + 1))} value={tables} onChange={(e) => setTables(e.target.value)} spellCheck={false} />
+        </Field>
+        <div><button type="button" className="secondary small-button" onClick={number}>{t('Add five numbered tables')}</button></div>
+        {tooLong && <p className="form-error">{t('“{name}” is too long: 30 characters at most.', { name: tooLong })}</p>}
+        <div>
+          <strong>{t('Order tickets')}</strong>
+          <p className="small muted" style={{ margin: '0.2rem 0 0' }}>{t('When a table is kept open, what is new prints as an order ticket for whoever makes it. Choose which item categories each station makes; items in no station print no ticket.')}</p>
+        </div>
+        {stations.map((s, i) => (
+          <div key={i} className="station">
+            <div className="row">
+              <Field label={t('Station')}><input value={s.name} maxLength={30} placeholder={t('Kitchen')} onChange={(e) => setStations((all) => all.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} /></Field>
+              <button type="button" className="link" onClick={() => setStations((all) => all.filter((_, j) => j !== i))}>{t('Remove')}</button>
+            </div>
+            {categories.length === 0 ? <p className="small muted">{t('Give your items categories (Food, Drinks) under Items first.')}</p> : (
+              <div className="station-categories" role="group" aria-label={t('What {station} makes', { station: s.name || t('this station') })}>
+                {categories.map((c) => (
+                  <button key={c} type="button" className="chip-toggle" aria-pressed={s.categories.some((x) => x.toLowerCase() === c.toLowerCase())} onClick={() => toggle(i, c)}>{c}</button>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+        {stations.length < 4 && (
+          <div><button type="button" className="secondary small-button" onClick={() => setStations((all) => [...all, { name: all.length === 0 ? 'Kitchen' : all.length === 1 ? 'Bar' : '', categories: [] }])}>{t('Add a station')}</button></div>
+        )}
+        <ErrorText error={error} />
+        <div><button type="submit" disabled={busy || !changed || Boolean(tooLong) || list.length > 80}>{busy ? t('Saving…') : t('Save')}</button></div>
+      </form>
     </section>
   );
 }
@@ -97,7 +225,9 @@ export function TillsTab() {
   return (
     <div className="stack">
       <CounterSettingsCard />
+      <TablesCard />
       <TillsCard />
+      <LocationsCard />
     </div>
   );
 }

@@ -130,8 +130,8 @@ export function documentTicket(d: DocumentView, options: { message?: string; cop
   return t;
 }
 
-type Means = 'cash' | 'card' | 'bank_transfer' | 'cheque' | 'other';
-const MEANS_NAME: Record<Means, string> = { cash: 'Cash', card: 'Card', bank_transfer: 'Bank transfer', cheque: 'Cheque', other: 'Other' };
+type Means = 'cash' | 'card' | 'bank_transfer' | 'wallet' | 'cheque' | 'other';
+const MEANS_NAME: Record<Means, string> = { cash: 'Cash', card: 'Card', bank_transfer: 'Bank transfer', wallet: 'Mobile wallet', cheque: 'Cheque', other: 'Other' };
 
 export interface ZReportData {
   business: { name: string; tin: string };
@@ -148,6 +148,8 @@ export interface ZReportData {
     refundCount: number;
     voided: { count: number; total: string };
     discounts?: { count: number; total: string };
+    serviceCharge?: { count: number; total: string };
+    tips?: { count: number; total: string };
     cash: { float: string; in: string; payIn: string; payOut: string; expected: string; counted: string | null; difference: string | null };
     movements: Array<{ kind: 'pay_in' | 'pay_out'; amount: string; reason: string; at: string }>;
   };
@@ -156,6 +158,30 @@ export interface ZReportData {
 const belize = (iso: string) => new Date(new Date(iso).getTime() - 6 * 3600_000).toISOString().slice(0, 16).replace('T', ' ');
 
 /** The end-of-day (Z) report, or the running (X) report of an open shift. */
+/** What a kitchen or a bar is asked to make: only what is new since the last ticket for that table. */
+export interface OrderTicketData {
+  station: string;
+  table: string;
+  by: string | null;
+  at: Date;
+  lines: Array<{ quantity: string; name: string; note?: string | undefined }>;
+}
+
+/** An order ticket: the station and the table in large letters, then each thing to make with its note. Not a tax document. */
+export function orderTicket(o: OrderTicketData): Ticket {
+  const t: Ticket = [];
+  t.push({ kind: 'text', text: o.station.toUpperCase(), align: 'center', bold: true, size: 'large' });
+  t.push({ kind: 'text', text: o.table, align: 'center', bold: true, size: 'large' });
+  t.push({ kind: 'text', text: `${o.at.toLocaleTimeString('en-BZ', { hour: '2-digit', minute: '2-digit' })}${o.by ? ` · ${o.by}` : ''}`, align: 'center' });
+  t.push({ kind: 'rule' });
+  for (const l of o.lines) {
+    t.push({ kind: 'text', text: `${l.quantity} x ${l.name}`, bold: true, size: 'large' });
+    if (l.note?.trim()) t.push({ kind: 'text', text: `   ** ${l.note.trim()}` });
+  }
+  t.push({ kind: 'rule' }, { kind: 'feed', lines: 2 });
+  return t;
+}
+
 export function zReportTicket(z: ZReportData, now = new Date()): Ticket {
   const t: Ticket = [];
   const text = (s: string, o: Omit<Extract<TicketLine, { kind: 'text' }>, 'kind' | 'text'> = {}) => t.push({ kind: 'text', text: s, ...o });
@@ -178,6 +204,8 @@ export function zReportTicket(z: ZReportData, now = new Date()): Ticket {
   pair('GST', formatAmount(r.gst));
   if (r.voided.count) pair(`Cancelled (${r.voided.count})`, formatAmount(r.voided.total));
   if (r.discounts?.count) pair(`Discounts given (${r.discounts.count})`, `-${formatAmount(r.discounts.total)}`);
+  if (r.serviceCharge?.count) pair(`Service charge (${r.serviceCharge.count}, before GST)`, formatAmount(r.serviceCharge.total));
+  if (r.tips?.count) pair(`Tips for the staff (${r.tips.count})`, formatAmount(r.tips.total));
   rule();
   text('TAKINGS BY PAYMENT', { bold: true });
   for (const m of means) if (r.takings[m] !== '0.00') pair(MEANS_NAME[m], formatAmount(r.takings[m]));

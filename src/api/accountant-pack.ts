@@ -6,6 +6,7 @@
  *
  *   README.txt              what is in it, and what to check (the GST return's warnings)
  *   gst-return.pdf, .csv    the GST return worksheet for the period
+ *   business-tax.pdf, .csv  the business tax worksheet for the period
  *   profit-and-loss.csv     income and costs by month, costs by category
  *   sales-register.csv      every tax document of the period, any status
  *   payments-received.csv   payments recorded against invoices in the period (voided ones marked)
@@ -24,7 +25,9 @@ import { formatCents } from '../engine/decimal.ts';
 import type { PipelineDeps } from '../pipeline/issue.ts';
 import { renderGstReturn } from '../render/gst-return.ts';
 import { ZipWriter } from '../render/zip.ts';
+import { renderBusinessTax } from '../render/business-tax.ts';
 import { gstReturn, gstReturnCsv, profitAndLoss } from './accounting.ts';
+import { businessTax, businessTaxCsv } from './business-tax.ts';
 import type { ServerContext } from './context.ts';
 import { ApiError } from './errors.ts';
 import { EXPENSE_COLUMNS, expenseJson, expensesCsvText, type ExpenseRow } from './expenses.ts';
@@ -98,6 +101,7 @@ function readme(biz: { name: string; tin: string; environment: string }, from: s
     `Created ${new Date().toISOString()}. Amounts are in Belize dollars (BZD).`,
     '',
     'gst-return.pdf, .csv   The GST return worksheet: sales and purchases by GST treatment, and the GST to pay or the credit.',
+    'business-tax.pdf, .csv The business tax worksheet: receipts by kind, the rate for each, less contract tax withheld by customers.',
     'profit-and-loss.csv    Income (before GST) and costs by month, and costs by category.',
     'sales-register.csv     Every tax document of the period, any status, with its BTS authorization.',
     'payments-received.csv  Payments recorded against invoices in the period. Voided payments are listed and marked.',
@@ -140,6 +144,9 @@ export function registerAccountantPackRoutes(app: FastifyInstance, deps: Pipelin
         await zip.add('README.txt', readme(biz, from, to, gst.warnings, { included: Math.min(withReceipt.length, MAX_PACK_RECEIPTS), total: withReceipt.length }));
         await zip.add('gst-return.pdf', await renderGstReturn(gst));
         await zip.add('gst-return.csv', gstReturnCsv(gst));
+        const tax = await businessTax(db, tenantId, from, to);
+        await zip.add('business-tax.pdf', await renderBusinessTax(tax));
+        await zip.add('business-tax.csv', businessTaxCsv(tax));
         await zip.add('profit-and-loss.csv', profitCsv(await profitAndLoss(db, tenantId, from, to)));
         await zip.add('sales-register.csv', await documentRegisterCsv(db, tenantId, { from, to }));
         await zip.add('payments-received.csv', await paymentsCsv(db, tenantId, from, to));

@@ -166,6 +166,19 @@ export const issueSchema = {
       type: 'object', required: ['code', 'amount'], additionalProperties: false,
       properties: { code: { type: 'string', minLength: 16, maxLength: 40 }, amount: money },
     },
+    // Charged to a hotel room (the guest's stay, and which of its folios).
+    room: { type: 'object', required: ['bookingId'], additionalProperties: false, properties: { bookingId: uuid, folioId: uuid } },
+    // A layaway (tax invoices on a saved customer's account): until when the goods are kept, and the deposit paid now.
+    layaway: {
+      type: 'object', required: ['holdUntil'], additionalProperties: false,
+      properties: {
+        holdUntil: date,
+        deposit: { type: 'object', required: ['amount', 'method'], additionalProperties: false, properties: { amount: money, method: { type: 'string', enum: ['cash', 'cheque', 'bank_transfer', 'card', 'online', 'other'] }, reference: text(100) } },
+        note: text(300),
+      },
+    },
+    // A tip added to a card or wallet payment of a receipt: kept for the staff, not on the document.
+    tip: { type: 'object', required: ['amount', 'meansCode'], additionalProperties: false, properties: { amount: money, meansCode: { type: 'string', pattern: '^\\d{1,3}$' } } },
     tenders: {
       type: 'array',
       minItems: 2,

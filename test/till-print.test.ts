@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { buildApp } from '../src/api/app.ts';
 import { createUser } from '../src/db/users.ts';
 import { SUBMIT_PATHS } from '../src/engine/transport.ts';
-import { columns, type DocumentView, documentTicket, DRAWER_KICK, pairLines, testTicket, toEscPos, toHtml, wrap, zReportTicket } from '../web/src/pos/ticket.ts';
+import { columns, type DocumentView, documentTicket, DRAWER_KICK, orderTicket, pairLines, testTicket, toEscPos, toHtml, wrap, zReportTicket } from '../web/src/pos/ticket.ts';
 import { AUTHORIZED, setupPipeline } from './pipeline-setup.ts';
 
 const CSRF = { 'x-requested-with': 'etd-web' };
@@ -98,9 +98,9 @@ test('the Z report and the test page', () => {
     shift: { number: 4, register: { name: 'Front till' }, openedBy: { name: 'Cash' }, openedAt: '2026-11-22T14:00:00Z', closedAt: '2026-11-22T23:00:00Z', closedBy: 'Manny', status: 'closed', note: null },
     report: {
       documents: [{ name: 'Tax receipts', count: 3, total: '67.50' }], gst: '7.50',
-      takings: { cash: '45.00', card: '22.50', bank_transfer: '0.00', cheque: '0.00', other: '0.00' }, totalTakings: '67.50',
-      invoicePayments: { cash: '0.00', card: '0.00', bank_transfer: '0.00', cheque: '0.00', other: '0.00' },
-      refunds: { cash: '0.00', card: '0.00', bank_transfer: '0.00', cheque: '0.00', other: '0.00' }, refundCount: 0,
+      takings: { cash: '45.00', card: '22.50', bank_transfer: '0.00', wallet: '0.00', cheque: '0.00', other: '0.00' }, totalTakings: '67.50',
+      invoicePayments: { cash: '0.00', card: '0.00', bank_transfer: '0.00', wallet: '0.00', cheque: '0.00', other: '0.00' },
+      refunds: { cash: '0.00', card: '0.00', bank_transfer: '0.00', wallet: '0.00', cheque: '0.00', other: '0.00' }, refundCount: 0,
       voided: { count: 0, total: '0.00' },
       cash: { float: '50.00', in: '45.00', payIn: '0.00', payOut: '5.00', expected: '90.00', counted: '89.00', difference: '-1.00' },
       movements: [{ kind: 'pay_out', amount: '5.00', reason: 'Ice', at: '2026-11-22T16:00:00Z' }],
@@ -113,4 +113,18 @@ test('the Z report and the test page', () => {
   assert.ok(texts.includes('10:00 Ice|-5.00'), 'Belize time');
   const page = toEscPos(testTicket({ printer: 'Bar', till: 'Front till', business: 'Cayo Coffee', options: { paperWidth: 80, codepage: 'cp1252', qr: 'native', cut: true } }), { paperWidth: 80, codepage: 'cp1252', qr: 'native', cut: true });
   assert.ok(includes(page, [0x1b, 0x74, 16]) && includes(page, [0xf1]), 'ñ in Windows-1252');
+});
+
+test('an order ticket for the kitchen: the station and the table in large type, each item with its note, no prices', () => {
+  const ticket = orderTicket({ station: 'Kitchen', table: 'Table 4', at: new Date('2026-11-24T19:05:00-06:00'), by: 'Rosa', lines: [{ quantity: '2', name: 'Rice and beans' }, { quantity: '1', name: 'Fried fish', note: ' no onions ' }] });
+  const text = ticket.filter((l) => l.kind === 'text').map((l) => (l as { text: string }).text);
+  assert.deepEqual(text.slice(0, 2), ['KITCHEN', 'Table 4']);
+  assert.match(text[2]!, /Rosa$/);
+  assert.deepEqual(text.slice(3), ['2 x Rice and beans', '1 x Fried fish', '   ** no onions']);
+  assert.ok(!text.join(' ').includes('$'), 'no money on an order ticket');
+  // It prints on the same printers as a receipt, and on paper from a browser.
+  const bytes = toEscPos(ticket, { paperWidth: 80, codepage: 'cp850', qr: 'native', cut: true });
+  assert.ok(includes(bytes, ascii('KITCHEN')));
+  assert.ok(includes(bytes, ascii('** no onions')));
+  assert.match(toHtml(ticket, { paperWidth: 80 }, 'Order'), /Fried fish/);
 });

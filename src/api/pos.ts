@@ -27,6 +27,7 @@
  * till lock that person out of that till for 15 minutes.
  */
 
+import { loadVenue } from '../venue/settings.ts';
 import { createHash, randomBytes, randomInt, randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { audit } from '../db/audit.ts';
@@ -49,10 +50,20 @@ const CODE_ALPHABET = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
 /** What a person can do on a till: their role's permissions, within these. */
 export const TILL_PERMISSIONS: ReadonlySet<Permission> = new Set([
   'documents.issue', 'documents.adjust', 'documents.cancel', 'documents.send', 'orders.manage', 'payments.record', 'reports.view',
+  'venue.orders', 'venue.approve', 'venue.floor', 'venue.kitchen', 'hotel.frontdesk', 'hotel.housekeeping',
 ]);
 
 /** The API routes a till session may use (method and route pattern). */
 export const TILL_ROUTES: ReadonlySet<string> = new Set([
+  // Table service, the bar and the kitchen screen (the hospitality module).
+  'GET /v1/venue', 'POST /v1/venue/ops', 'GET /v1/venue/changes', 'GET /v1/venue/checks/:id', 'POST /v1/venue/tickets/:id/:what', 'POST /v1/venue/approve',
+  'POST /v1/venue/items/:id/availability', 'POST /v1/venue/waste', 'PUT /v1/venue/sections', 'POST /v1/venue/menu-override',
+  // The host stand, a server's checkout and the day's close.
+  'GET /v1/venue/reservations', 'POST /v1/venue/reservations', 'PUT /v1/venue/reservations/:id', 'POST /v1/venue/reservations/:id/seat', 'POST /v1/venue/reservations/:id/cancel', 'POST /v1/venue/reservations/:id/no-show',
+  'POST /v1/venue/reservations/:id/apply-deposit', 'POST /v1/venue/reservations/:id/message', 'POST /v1/venue/waitlist', 'POST /v1/venue/waitlist/:id/notify', 'POST /v1/venue/waitlist/:id/seat', 'POST /v1/venue/waitlist/:id/left',
+  'GET /v1/venue/guests', 'GET /v1/venue/guests/:id', 'PUT /v1/venue/guests/:id', 'GET /v1/venue/checkout', 'GET /v1/venue/day', 'POST /v1/venue/day/close',
+  // Charging to a room, and a housekeeper's phone.
+  'GET /v1/hotel/in-house', 'GET /v1/hotel/housekeeping', 'POST /v1/hotel/rooms/:id/status',
   'GET /v1/me',
   'GET /v1/business',
   'GET /v1/items',
@@ -94,8 +105,10 @@ function newPairingCode(): string {
 }
 
 /** The permissions a person has on a till. */
-export function tillPermissions(role: Role): Permission[] {
-  return [...ROLE_PERMISSIONS[role]].filter((p) => TILL_PERMISSIONS.has(p));
+export function tillPermissions(role: Role, venue?: { restaurant: boolean; bar: boolean; hotel: boolean }): Permission[] {
+  // Table service and the hotel exist on a till only for a business that has turned them on: a shop's till is as it was.
+  const on = (p: Permission) => (p.startsWith('venue.') ? !!venue && (venue.restaurant || venue.bar) : p.startsWith('hotel.') ? !!venue?.hotel : true);
+  return [...ROLE_PERMISSIONS[role]].filter((p) => TILL_PERMISSIONS.has(p) && on(p));
 }
 
 interface DeviceRow {
@@ -188,7 +201,7 @@ export async function deviceFromToken(db: Queryable, request: FastifyRequest): P
 }
 
 const tillUsersSql = `select u.id, u.name, u.role, u.pos_pin_set_at is not null as has_pin from users u
-  where u.tenant_id = $1 and u.status = 'active' and u.role in ('owner', 'admin', 'manager', 'cashier') order by lower(u.name)`;
+  where u.tenant_id = $1 and u.status = 'active' and u.role not in ('accountant') order by lower(u.name)`;
 
 // ---------- web app: managing tills ----------
 
@@ -335,7 +348,9 @@ export function registerPosDeviceRoutes(app: FastifyInstance, deps: PipelineDeps
       const limitKey = `pospin|${d.id}|${request.body.userId}`;
       if (await atLimit(db, limitKey, PIN_FAILURES)) throw new ApiError(429, 'too_many_attempts', 'Too many wrong PINs. Try again in 15 minutes, or ask a manager to reset your PIN.');
       const user = await checkPin(db, d.tenant_id, request.body.userId, request.body.pin);
-      if (!user || !tillPermissions(user.role).includes('documents.issue')) {
+      const venue = await loadVenue(db, d.tenant_id);
+      // Anyone with something to do on a till: selling, or the floor, the kitchen screen, the rooms.
+      if (!user || !tillPermissions(user.role, venue).some((p) => p === 'documents.issue' || p.startsWith('venue.') || p.startsWith('hotel.'))) {
         const failures = await countHit(db, limitKey, PIN_WINDOW_MS);
         const left = PIN_FAILURES - failures;
         throw new ApiError(401, 'wrong_pin', left > 0 ? `Wrong PIN. ${left} ${left === 1 ? 'try' : 'tries'} left.` : 'Too many wrong PINs. Try again in 15 minutes.');
@@ -348,7 +363,7 @@ export function registerPosDeviceRoutes(app: FastifyInstance, deps: PipelineDeps
         token: `${SESSION_TOKEN_PREFIX}${session.token}`,
         expiresAt: session.expiresAt.toISOString(),
         user: { id: user.id, name: user.name, role: user.role },
-        permissions: tillPermissions(user.role),
+        permissions: tillPermissions(user.role, venue),
       };
     },
   );

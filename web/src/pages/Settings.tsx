@@ -6,7 +6,7 @@
 import { type FormEvent, useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { api, type Account, type AuditEvent, type BusinessProfile, type ManagedAccount, type Role } from '../api';
-import { type T, useI18n, useT } from '../i18n';
+import { LanguagePicker, type T, useI18n, useT } from '../i18n';
 import { assignableRoles, ROLE_DESCRIPTION, ROLE_LABEL } from '../permissions';
 import { useSession } from '../session';
 import { useToast } from '../toast';
@@ -18,6 +18,8 @@ import { DevelopersTab } from './Developers';
 import { EmailTab } from './Email';
 import { IntegrationsTab } from './Integrations';
 import { StoreSettingsTab } from './StoreSettings';
+import { TaxSettingsCard } from './BusinessTax';
+import { VenueTab } from '../venue/Setup';
 import { PinCard, TillsTab, UserPinDialog } from './Tills';
 
 function readAsBase64(file: File): Promise<string> {
@@ -147,6 +149,13 @@ function AccountTab() {
         <ErrorText error={signOutAll.error} />
       </section>
       <TwoFactorCard />
+      <section className="card stack">
+        <div>
+          <h2>{t('Language')}</h2>
+          <p className="small muted">{t('For you, on this device. Chinese covers the counter, the till, shifts and devices; the rest stays in English.')}</p>
+        </div>
+        <LanguagePicker />
+      </section>
       {can('documents.issue') && <PinCard hasPin={Boolean(user.hasPin)} onChanged={() => void refresh()} />}
     </div>
   );
@@ -435,6 +444,7 @@ function BusinessTab() {
       </section>
       {editable && <SellsCard profile={profile} onSaved={() => void load()} />}
       {editable && <DailySummaryCard profile={profile} onSaved={() => void load()} />}
+      {editable && <TaxSettingsCard />}
       {editable && <LoyaltyCard />}
       {editable && <SecurityRules profile={profile} onSaved={() => void load()} />}
       {role === 'owner' && <DeleteBusinessCard profile={profile} />}
@@ -448,7 +458,9 @@ const signIn = (u: Account) => u.email ?? u.username ?? '';
 
 function RoleSelect({ value, onChange, actor, label }: { value: Role; onChange: (r: Role) => void; actor: Role; label: string }) {
   const t = useT();
-  const roles = assignableRoles(actor);
+  // A restaurant, bar or hotel also has servers, bartenders, hosts, kitchen staff and housekeepers.
+  const { me } = useSession();
+  const roles = assignableRoles(actor, Boolean(me?.venue?.restaurant || me?.venue?.bar || me?.venue?.hotel));
   return (
     <Field label={label} hint={t(ROLE_DESCRIPTION[value])}>
       <Select value={value} onChange={(e) => onChange(e.target.value as Role)}>
@@ -948,7 +960,7 @@ function ActivityTab() {
 
 // ---------- the page ----------
 
-type Tab = 'account' | 'business' | 'plan' | 'store' | 'tills' | 'users' | 'activity' | 'keys' | 'integrations' | 'email';
+type Tab = 'account' | 'business' | 'plan' | 'store' | 'tills' | 'venue' | 'users' | 'activity' | 'keys' | 'integrations' | 'email';
 
 export function Settings() {
   const t = useT();
@@ -960,7 +972,7 @@ export function Settings() {
     ['business', t('Business')],
     ...(can('business.manage') ? [['plan', t('Plan')] as [Tab, string]] : []),
     ...(can('business.manage') ? [['store', t('Online store')] as [Tab, string]] : []),
-    ...(can('business.manage') ? [['tills', t('Tills')] as [Tab, string]] : []),
+    ...(can('business.manage') ? [['tills', t('Tills')] as [Tab, string], ['venue', t('Venue')] as [Tab, string]] : []),
     ...(can('users.manage') ? [['users', t('Users')] as [Tab, string]] : []),
     ...(can('audit.view') ? [['activity', t('Activity')] as [Tab, string]] : []),
     ...(can('business.manage') ? [['email', t('Email')] as [Tab, string]] : []),
@@ -985,6 +997,7 @@ export function Settings() {
       {tab === 'email' && <EmailTab defaultTo={session.user.email ?? ''} />}
       {tab === 'store' && (me?.billing && !me.billing.features.includes('store') ? <UpgradeNotice feature="store" /> : <StoreSettingsTab />)}
       {tab === 'tills' && <TillsTab />}
+      {tab === 'venue' && <VenueTab />}
       {tab === 'users' && <UsersTab />}
       {tab === 'activity' && <ActivityTab />}
       {tab === 'keys' && (me?.billing && !me.billing.features.includes('api') ? <UpgradeNotice feature="api" /> : <DevelopersTab />)}

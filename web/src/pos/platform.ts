@@ -27,6 +27,8 @@ export interface DisplayState {
   total: string;
   change: string | null;
   message?: string;
+  /** The total in US dollars, when the business shows it. */
+  usd?: string;
 }
 
 export interface Platform {

@@ -39,6 +39,8 @@ import { logoForPdf, logoPath } from '../templates/assets.ts';
 import { documentTypeName, emailLanguage } from '../templates/lang.ts';
 import { applyReward, checkRedeem, loyaltyBalance, recordLoyalty, REWARD_REASON, reverseVoidedLoyalty, rewardCents } from './loyalty.ts';
 import { GIFT_CARD_MEANS, payingCard, returnToCard, reverseVoidedGiftCards, useGiftCard } from '../commerce/giftcards.ts';
+import { checkLayaway, type LayawayInput, startLayaway } from './layaways.ts';
+import { postRoomCharge, roomChargeTerms } from '../venue/room-charge.ts';
 
 const PRINTABLE = ['authorized', 'authorized_with_alert', 'contingency_pending'];
 // Emails per business per hour (shared by every server process), so a compromised account cannot send spam at volume.
@@ -65,6 +67,12 @@ export interface IssueBody {
   payableRoundingAmount?: string;
   paid?: { method: PaymentMethod; reference?: string };
   tenders?: Array<{ meansCode: string; amount: string }>;
+  /** A tip the customer added when paying a receipt by card or wallet: recorded for the staff, never part of the tax document. */
+  tip?: { amount: string; meansCode: string };
+  /** A layaway: this invoice's goods stay in the shop until it is paid (layaways.ts). */
+  layaway?: LayawayInput;
+  /** Charged to a hotel room: an invoice on the guest's account, posted to their folio and paid at check-out (hotel.ts). */
+  room?: { bookingId: string; folioId?: string };
   /** Paid (partly) with a gift card: its code and how much it pays; `tenders` then has a part with means code 1 for that amount (or the card pays it all). */
   giftCard?: { code: string; amount: string };
   /** Issue an invoice on account even if it takes the customer over their credit limit (owners, admins, managers). */
@@ -362,12 +370,21 @@ export async function issueFromBody(deps: PipelineDeps, tenantId: string, body: 
   if (split) {
     await deps.db.query('update documents set tenders = $3 where tenant_id = $1 and (id = $2 or supersedes_document_id = $2)', [tenantId, result.documentId, JSON.stringify(split.parts)]);
   }
+  const tip = body.tip && issueRequest.etdType === '02' && result.status !== 'rejected' ? { cents: parseDecimalCents(body.tip.amount), means: body.tip.meansCode } : null;
   // Who issued it, on which till and in which shift (not part of the signed record). Also on the contingency reissue, if there was one.
   if (userId) {
     await deps.db.query(
       `update documents set issued_by = $3, device_id = $4, shift_id = ${openShiftSql('$1', '$3', '$4')}
        where tenant_id = $1 and (id = $2 or supersedes_document_id = $2)`,
       [tenantId, result.documentId, userId, options.deviceId ?? null],
+    );
+  }
+  // The tip belongs to the shift the sale went into.
+  if (tip && tip.cents > 0n) {
+    await deps.db.query(
+      `insert into sale_tips (document_id, tenant_id, shift_id, user_id, means, amount_cents)
+       select id, tenant_id, shift_id, $3, $4, $5 from documents where tenant_id = $1 and id = $2 on conflict do nothing`,
+      [tenantId, result.documentId, userId || null, tip.means, String(tip.cents)],
     );
   }
   // A sale takes the items off the shelf (tracked ones), once it has legal value or is on its way to BTS.
@@ -670,10 +687,20 @@ export function registerDocumentRoutes(app: FastifyInstance, deps: PipelineDeps,
     let documentId: string | undefined;
     try {
       if (request.body.overrideCreditLimit && !can(request.principal, 'documents.adjust')) throw new ApiError(403, 'forbidden', 'Only an owner, admin or manager can go over a customer\'s credit limit');
-      const result = await issueFromBody(deps, tenantId, request.body, request.userId || null, {
-        deviceId: request.posDevice?.id ?? null, limitDiscounts: request.principal === 'cashier', accountLimit: request.body.overrideCreditLimit ? 'override' : 'check',
+      // A layaway: an invoice due the day the goods are kept until. The goods stay in the shop, so the customer's credit limit does not come into it.
+      const layaway = request.body.layaway;
+      if (layaway) checkLayaway(request.body, layaway);
+      // Charged to a room: an invoice to the guest in that room, due at check-out. The stay decides who it is to.
+      const room = request.body.room ? await roomChargeTerms(db, tenantId, request.body) : null;
+      const issueBody: IssueBody = layaway
+        ? { ...request.body, payment: { meansCode: '30', dueDate: layaway.holdUntil, terms: `Layaway: the goods are kept until paid in full, by ${layaway.holdUntil}` } }
+        : room ? { ...request.body, type: '01', customerId: room.customerId, customer: undefined, tenders: undefined, payment: room.payment } : request.body;
+      const result = await issueFromBody(deps, tenantId, issueBody, request.userId || null, {
+        deviceId: request.posDevice?.id ?? null, limitDiscounts: request.principal === 'cashier', accountLimit: layaway || room ? 'skip' : request.body.overrideCreditLimit ? 'override' : 'check',
       });
       documentId = result.documentId;
+      if (layaway && result.status !== 'rejected') await startLayaway(deps, tenantId, result.documentId, issueBody, layaway, request.userId || null, request.posDevice?.id ?? null);
+      if (room && result.status !== 'rejected') await postRoomCharge(db, tenantId, room, result.documentId, request.userId || null);
       // Paid on the spot: record it, once the invoice has legal value (a rejected one is never owed).
       const paid = request.body.paid;
       if (paid && (request.body.type === '01' || request.body.type === '03') && can(request.principal, 'payments.record')) {
@@ -718,6 +745,8 @@ export function registerDocumentRoutes(app: FastifyInstance, deps: PipelineDeps,
         tax: formatCents(t.taxAmount),
         taxInclusive: formatCents(t.taxInclusiveAmount),
         payable: formatCents(t.payableAmount),
+        // Added on top of the prices, before GST (a service charge), inside lineExtension.
+        charges: formatCents(t.lines.reduce((n, l) => n + l.allowanceCharges.filter((a) => a.isCharge).reduce((m, a) => m + a.amount, 0n), 0n)),
       },
     };
   });

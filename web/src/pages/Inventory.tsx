@@ -6,6 +6,7 @@ import { api, type Item, link, type Page } from '../api';
 import { type T, useT } from '../i18n';
 import { useSession } from '../session';
 import { useToast } from '../toast';
+import { type Place, Transfers, useLocations } from './Locations';
 import { type PurchaseOrder, PurchaseOrderList } from './PurchaseOrders';
 import { belizeDate, belizeToday, Combobox, ErrorText, Field, fromCents, Modal, money, PAYMENT_METHOD_TEXT, Segmented, Select, toCents, unitName, useDebounced, usePageTitle } from '../ui';
 
@@ -25,6 +26,9 @@ interface StockItem {
   lastMovement: string | null;
   lastSold?: string | null;
   waiting?: number;
+  /** With more than one shop: what is at each location, and on the way between two. */
+  at?: Record<string, number>;
+  onTheWay?: number;
 }
 
 interface StockTotals { tracked: number; untracked: number; low: number; out: number; value: string }
@@ -41,12 +45,16 @@ interface MovementInfo {
   document: { id: string; type: string; number: string } | null;
   order: { id: string; number: number } | null;
   receipt: { id: string; reference: string | null; supplier: string | null } | null;
+  location?: string;
 }
 
 const REASON: Record<string, string> = {
   initial: 'Opening stock', sale: 'Sold', sale_reversed: 'Sale undone', order: 'Online order', order_cancelled: 'Order cancelled', refund: 'Refund, back in stock',
   receive: 'Received', count: 'Counted', damaged: 'Damaged', lost: 'Lost or stolen', returned: 'Returned by a customer', other: 'Other',
+  transfer_out: 'Sent to another location', transfer_in: 'Arrived at this location',
 };
+/** What is at one location ('' for all of them together). */
+const levelAt = (s: StockItem, place: string) => (!place ? s.stock : !s.tracked ? null : s.at?.[place] ?? 0);
 const ADJUST: Array<[string, string]> = [['count', 'Counted'], ['damaged', 'Damaged'], ['lost', 'Lost or stolen'], ['returned', 'Returned by a customer'], ['other', 'Other']];
 const qtyText = (n: number | null) => (n === null ? '—' : Number.isInteger(n) ? String(n) : n.toFixed(3).replace(/0+$/, ''));
 const STATE: Record<StockItem['state'], [string, string]> = { ok: ['In stock', 'pay-paid'], low: ['Low', 'pay-credit'], out: ['Out', 'pay-overdue'], untracked: ['Not tracked', 'pay-unpaid'] };
@@ -63,18 +71,27 @@ export function Inventory() {
   usePageTitle(t('Inventory'));
   const { can } = useSession();
   const [params, setParams] = useSearchParams();
-  const filter = (params.get('filter') as 'tracked' | 'low' | 'untracked' | 'slow' | 'deliveries' | 'orders' | null) ?? 'tracked';
+  const filter = (params.get('filter') as 'tracked' | 'low' | 'untracked' | 'slow' | 'deliveries' | 'orders' | 'transfers' | null) ?? 'tracked';
+  const lists = filter !== 'deliveries' && filter !== 'orders' && filter !== 'transfers';
+  // More than one shop: look at one location, or all of them together.
+  const [places, setPlaces] = useState<Place[]>([]);
+  const [place, setPlace] = useState('');
   const [q, setQ] = useState('');
   const search = useDebounced(q, 250);
-  const [data, setData] = useState<{ data: StockItem[]; totals: StockTotals } | null>(null);
+  const [data, setData] = useState<{ data: StockItem[]; totals: StockTotals; locations?: Place[] } | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [open, setOpen] = useState<string | null>(null);
   const [counting, setCounting] = useState(false);
   const load = useCallback(() => {
     // The deliveries and orders tabs still show the stock figures above them.
-    const list = filter === 'deliveries' || filter === 'orders' ? 'tracked' : filter;
-    api<{ data: StockItem[]; totals: StockTotals }>(`/v1/inventory?filter=${list}${search.trim() && list === filter ? `&q=${encodeURIComponent(search.trim())}` : ''}`).then(setData).catch(setError);
+    const list = filter === 'deliveries' || filter === 'orders' || filter === 'transfers' ? 'tracked' : filter;
+    api<{ data: StockItem[]; totals: StockTotals; locations?: Place[] }>(`/v1/inventory?filter=${list}${search.trim() && list === filter ? `&q=${encodeURIComponent(search.trim())}` : ''}`).then((r) => {
+      setData(r);
+      setPlaces(r.locations ?? []);
+    }).catch(setError);
   }, [filter, search]);
+  const several = places.length > 1;
+  const here = several && places.some((p) => p.id === place) ? place : '';
   useEffect(() => {
     setData(null);
     load();
@@ -98,13 +115,19 @@ export function Inventory() {
         <div className="card kpi"><span className="kpi-head">{t('Items tracked')}</span><span className="kpi-value">{tt ? tt.tracked : '—'}</span><span className="kpi-note">{tt ? t('{n} not tracked', { n: tt.untracked }) : ' '}</span></div>
       </div>
       <div className="row">
-        <Segmented switches label={t('Show')} value={filter} onChange={(v) => setParams({ filter: v }, { replace: true })} options={[['tracked', t('Tracked')], ['low', t('Low or out')], ['untracked', t('Not tracked')], ['slow', t('Not selling')], ['deliveries', t('Deliveries')], ['orders', t('Orders')]]} />
+        <Segmented switches label={t('Show')} value={filter} onChange={(v) => setParams({ filter: v }, { replace: true })} options={[['tracked', t('Tracked')], ['low', t('Low or out')], ['untracked', t('Not tracked')], ['slow', t('Not selling')], ['deliveries', t('Deliveries')], ['orders', t('Orders')], ...(several ? [['transfers', t('Transfers')] as ['transfers', string]] : [])]} />
         <span className="spacer" />
+        {several && lists && (
+          <Select value={here} onChange={(e) => setPlace(e.target.value)} aria-label={t('Location')} className="location-select">
+            <option value="">{t('All locations')}</option>
+            {places.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </Select>
+        )}
         {filter === 'low' && manage && data && data.data.length > 0 && <Link className="button secondary" to="/inventory/orders/new?suggest=1" viewTransition>{t('Order what is running low')}</Link>}
-        {filter !== 'deliveries' && filter !== 'orders' && <input type="search" className="search-input" placeholder={t('Name, code or barcode')} value={q} onChange={(e) => setQ(e.target.value)} aria-label={t('Search items')} />}
+        {lists && <input type="search" className="search-input" placeholder={t('Name, code or barcode')} value={q} onChange={(e) => setQ(e.target.value)} aria-label={t('Search items')} />}
       </div>
       <ErrorText error={error} />
-      {filter === 'orders' ? <PurchaseOrderList /> : filter === 'deliveries' ? <Deliveries /> : (
+      {filter === 'orders' ? <PurchaseOrderList /> : filter === 'deliveries' ? <Deliveries /> : filter === 'transfers' ? <Transfers places={places} onChange={load} /> : (
         <section className="card">
           {!data ? <div className="skeleton" style={{ height: '10rem' }} /> : data.data.length === 0 ? (
             <div className="empty">{filter === 'tracked' ? t('No stock tracked yet. Receive a delivery, or open an item and track its stock: every sale then takes it off.') : filter === 'low' ? t('Nothing is running low.') : filter === 'slow' ? t('Everything in stock has sold in the last 60 days.') : t('Every item is tracked.')}</div>
@@ -112,12 +135,15 @@ export function Inventory() {
             <div className="table-wrap">
               {filter === 'slow' && <p className="small muted slow-note">{t('{amount} at cost is tied up in stock that has not sold in 60 days. Think about a discount, a bundle, or not reordering.', { amount: money(fromCents(data.data.reduce((a, s) => a + toCents(s.value), 0n))) })}</p>}
               <table className="responsive">
-                <thead><tr><th scope="col">{t('Item')}</th><th scope="col" className="right">{t('In stock')}</th><th scope="col" className="right">{filter === 'slow' ? t('Last sold') : t('Low at')}</th><th scope="col" className="right">{t('Average cost')}</th><th scope="col" className="right">{t('Value')}</th><th scope="col">{t('Status')}</th></tr></thead>
+                <thead><tr><th scope="col">{t('Item')}</th><th scope="col" className="right">{here ? t('At {name}', { name: places.find((p) => p.id === here)?.name ?? '' }) : t('In stock')}</th><th scope="col" className="right">{filter === 'slow' ? t('Last sold') : t('Low at')}</th><th scope="col" className="right">{t('Average cost')}</th><th scope="col" className="right">{t('Value')}</th><th scope="col">{t('Status')}</th></tr></thead>
                 <tbody>
                   {data.data.map((s) => (
                     <tr key={s.itemId} className="clickable" onClick={() => setOpen(s.itemId)}>
-                      <td data-label={t('Item')}><strong>{s.name}</strong>{s.sellerCode && <span className="small muted mono"> · {s.sellerCode}</span>}</td>
-                      <td data-label={t('In stock')} className={`right strong ${s.state === 'out' ? 'late' : ''}`}>{qtyText(s.stock)} <span className="small muted">{s.tracked ? unitName(t, s.unitCode).toLowerCase() : ''}</span></td>
+                      <td data-label={t('Item')}>
+                        <strong>{s.name}</strong>{s.sellerCode && <span className="small muted mono"> · {s.sellerCode}</span>}
+                        {several && !here && s.at && <div className="small muted stock-places">{places.map((p) => `${p.name} ${qtyText(s.at?.[p.id] ?? 0)}`).join(' · ')}{(s.onTheWay ?? 0) > 0 ? ` · ${t('{n} on the way', { n: qtyText(s.onTheWay ?? 0) })}` : ''}</div>}
+                      </td>
+                      <td data-label={t('In stock')} className={`right strong ${(here ? (levelAt(s, here) ?? 1) <= 0 : s.state === 'out') ? 'late' : ''}`}>{qtyText(levelAt(s, here))} <span className="small muted">{s.tracked ? unitName(t, s.unitCode).toLowerCase() : ''}</span>{here && s.tracked && <div className="small muted">{t('{n} in all', { n: qtyText(s.stock) })}</div>}</td>
                       {filter === 'slow'
                         ? <td data-label={t('Last sold')} className="right">{s.lastSold ? s.lastSold.slice(0, 10) : t('Never')}</td>
                         : <td data-label={t('Low at')} className="right">{qtyText(s.lowStock)}</td>}
@@ -132,8 +158,8 @@ export function Inventory() {
           )}
         </section>
       )}
-      {open && <ItemStockModal itemId={open} onClose={() => setOpen(null)} onChange={load} />}
-      {counting && <StockCountModal onClose={() => setCounting(false)} onDone={() => { setCounting(false); load(); }} />}
+      {open && <ItemStockModal itemId={open} places={several ? places : []} place={here} onClose={() => setOpen(null)} onChange={load} />}
+      {counting && <StockCountModal places={several ? places : []} place={here} onClose={() => setCounting(false)} onDone={() => { setCounting(false); load(); }} />}
       {!manage && <p className="small muted">{t('Ask a manager to change stock.')}</p>}
     </div>
   );
@@ -146,7 +172,7 @@ function movementSource(t: T, m: MovementInfo) {
   return null;
 }
 
-function ItemStockModal({ itemId, onClose, onChange }: { itemId: string; onClose: () => void; onChange: () => void }) {
+function ItemStockModal({ itemId, places, place, onClose, onChange }: { itemId: string; places: Place[]; place: string; onClose: () => void; onChange: () => void }) {
   const t = useT();
   const toast = useToast();
   const { can } = useSession();
@@ -157,6 +183,8 @@ function ItemStockModal({ itemId, onClose, onChange }: { itemId: string; onClose
   const [note, setNote] = useState('');
   const [low, setLow] = useState('');
   const [start, setStart] = useState('0');
+  // With more than one shop: where the adjustment happens.
+  const [where, setWhere] = useState(place || places.find((p) => p.main)?.id || '');
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   const load = useCallback(() => api<StockItem & { movements: MovementInfo[] }>(`/v1/inventory/${itemId}`).then((r) => {
@@ -182,7 +210,7 @@ function ItemStockModal({ itemId, onClose, onChange }: { itemId: string; onClose
   };
   const adjust = (e: FormEvent) => {
     e.preventDefault();
-    void run(() => api(`/v1/inventory/${itemId}/adjust`, { method: 'POST', body: { mode, quantity: quantity.trim(), reason, ...(note.trim() && { note: note.trim() }) } }), t('Stock updated'));
+    void run(() => api(`/v1/inventory/${itemId}/adjust`, { method: 'POST', body: { mode, quantity: quantity.trim(), reason, ...(note.trim() && { note: note.trim() }), ...(places.length > 0 && where && { locationId: where }) } }), t('Stock updated'));
   };
   const manage = can('catalog.manage');
   return (
@@ -195,6 +223,12 @@ function ItemStockModal({ itemId, onClose, onChange }: { itemId: string; onClose
             <span className="spacer" />
             {s.averageCost && <div className="right"><span className="kicker">{t('Average cost')}</span><div>{money(s.averageCost)} · {t('value')} {money(s.value)}</div></div>}
           </div>
+          {places.length > 0 && s.tracked && s.at && (
+            <div className="stock-at" role="group" aria-label={t('By location')}>
+              {places.map((p) => <span key={p.id} className="stock-at-place"><span className="small muted">{p.name}</span><strong>{qtyText(s.at?.[p.id] ?? 0)}</strong></span>)}
+              {(s.onTheWay ?? 0) > 0 && <span className="stock-at-place"><span className="small muted">{t('On the way')}</span><strong>{qtyText(s.onTheWay ?? 0)}</strong></span>}
+            </div>
+          )}
           <ErrorText error={error} />
           {!s.tracked && manage && (
             <form className="row" onSubmit={(e) => { e.preventDefault(); void run(() => api(`/v1/inventory/${itemId}/settings`, { method: 'PUT', body: { track: true, quantity: start.trim() || '0', ...(low.trim() && { lowStock: low.trim() }) } }), t('Tracking stock')); }}>
@@ -208,6 +242,7 @@ function ItemStockModal({ itemId, onClose, onChange }: { itemId: string; onClose
               <form className="adjust-form" onSubmit={adjust}>
                 <Segmented label={t('Adjust')} value={mode} onChange={setMode} options={[['change', t('Add or take off')], ['set', t('Set to a count')]]} />
                 <div className="form-grid">
+                  {places.length > 0 && <Field label={t('Location')}><Select value={where} onChange={(e) => setWhere(e.target.value)}>{places.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</Select></Field>}
                   <Field label={mode === 'change' ? t('Change (e.g. -2 or 5)') : t('Counted')}><input inputMode="decimal" required value={quantity} onChange={(e) => setQuantity(e.target.value)} /></Field>
                   <Field label={t('Reason')}><Select value={reason} onChange={(e) => setReason(e.target.value)}>{ADJUST.map(([k, v]) => <option key={k} value={k}>{t(v)}</option>)}</Select></Field>
                   <Field label={t('Note')} hint={t('Optional.')}><input maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} /></Field>
@@ -231,7 +266,7 @@ function ItemStockModal({ itemId, onClose, onChange }: { itemId: string; onClose
                   {s.movements.map((m) => (
                     <tr key={m.id}>
                       <td data-label={t('When')} className="small">{new Date(m.at).toLocaleString()}</td>
-                      <td data-label={t('What')}>{t(REASON[m.reason] ?? m.reason)}{m.note && <span className="small muted"> · {m.note}</span>}{m.by && <span className="small muted"> · {m.by}</span>}</td>
+                      <td data-label={t('What')}>{t(REASON[m.reason] ?? m.reason)}{m.location && <span className="small muted"> · {m.location}</span>}{m.note && <span className="small muted"> · {m.note}</span>}{m.by && <span className="small muted"> · {m.by}</span>}</td>
                       <td data-label={t('Change')} className={`right mono ${m.change < 0 ? 'late' : 'gain-text'}`}>{m.change > 0 ? '+' : ''}{qtyText(m.change)}</td>
                       <td data-label={t('Balance')} className="right mono">{qtyText(m.balance)}</td>
                       <td data-label={t('From')} className="small">{movementSource(t, m)}{m.unitCost && <span className="muted"> @ {money(m.unitCost)}</span>}</td>
@@ -247,9 +282,11 @@ function ItemStockModal({ itemId, onClose, onChange }: { itemId: string; onClose
   );
 }
 
-function StockCountModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+function StockCountModal({ places, place, onClose, onDone }: { places: Place[]; place: string; onClose: () => void; onDone: () => void }) {
   const t = useT();
   const toast = useToast();
+  // With more than one shop: a count is of one shop's shelves.
+  const [where, setWhere] = useState(place || places.find((p) => p.main)?.id || '');
   const [items, setItems] = useState<StockItem[] | null>(null);
   // One shelf at a time: the items of a category.
   const [categories, setCategories] = useState<string[]>([]);
@@ -267,7 +304,7 @@ function StockCountModal({ onClose, onDone }: { onClose: () => void; onDone: () 
   const submit = async () => {
     setBusy(true);
     try {
-      const r = await api<{ changed: number }>('/v1/inventory/count', { method: 'POST', body: { counts: filled.map(([itemId, quantity]) => ({ itemId, quantity: quantity.trim() })), note } });
+      const r = await api<{ changed: number }>('/v1/inventory/count', { method: 'POST', body: { counts: filled.map(([itemId, quantity]) => ({ itemId, quantity: quantity.trim() })), note, ...(places.length > 0 && where && { locationId: where }) } });
       toast(t('{n} counts saved, {c} changed', { n: filled.length, c: r.changed }));
       onDone();
     } catch (e) {
@@ -279,6 +316,11 @@ function StockCountModal({ onClose, onDone }: { onClose: () => void; onDone: () 
     <Modal title={t('Stock count')} onClose={onClose} wide>
       <div className="stack">
         <p className="small muted">{t('Type what you counted on the shelf; leave the rest empty. Only what differs is recorded, as a count in each item’s history.')}</p>
+        {places.length > 0 && (
+          <Field label={t('Counting at')}>
+            <Select value={where} onChange={(e) => { setWhere(e.target.value); setCounts({}); }}>{places.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</Select>
+          </Field>
+        )}
         {categories.length > 0 && (
           <Field label={t('Category')}>
             <Select value={category} onChange={(e) => setCategory(e.target.value)}>
@@ -294,11 +336,12 @@ function StockCountModal({ onClose, onDone }: { onClose: () => void; onDone: () 
               <tbody>
                 {items.map((s) => {
                   const v = counts[s.itemId] ?? '';
-                  const diff = v.trim() && s.stock !== null ? Number(v) - s.stock : null;
+                  const expected = levelAt(s, places.length > 0 ? where : '');
+                  const diff = v.trim() && expected !== null ? Number(v) - expected : null;
                   return (
                     <tr key={s.itemId}>
                       <td>{s.name}</td>
-                      <td className="right mono">{qtyText(s.stock)}</td>
+                      <td className="right mono">{qtyText(expected)}</td>
                       <td className="right">
                         <input className="count-input" inputMode="decimal" value={v} onChange={(e) => setCounts({ ...counts, [s.itemId]: e.target.value })} aria-label={t('Counted for {item}', { item: s.name })} />
                         {diff !== null && !Number.isNaN(diff) && diff !== 0 && <span className={`small ${diff < 0 ? 'late' : 'gain-text'}`}> {diff > 0 ? '+' : ''}{qtyText(diff)}</span>}
@@ -320,7 +363,7 @@ function StockCountModal({ onClose, onDone }: { onClose: () => void; onDone: () 
 
 function Deliveries() {
   const t = useT();
-  const [rows, setRows] = useState<Array<{ id: string; supplier: string | null; reference: string | null; receivedOn: string; totalCost: string; expenseId: string | null; lines: number; receivedBy: string | null }> | null>(null);
+  const [rows, setRows] = useState<Array<{ id: string; supplier: string | null; reference: string | null; receivedOn: string; totalCost: string; landedCost?: string; location?: string; expenseId: string | null; lines: number; receivedBy: string | null }> | null>(null);
   const [error, setError] = useState<unknown>(null);
   useEffect(() => void api<{ data: NonNullable<typeof rows> }>('/v1/inventory/receipts').then((r) => setRows(r.data)).catch(setError), []);
   return (
@@ -334,10 +377,10 @@ function Deliveries() {
               {rows.map((r) => (
                 <tr key={r.id}>
                   <td data-label={t('Date')}>{r.receivedOn}</td>
-                  <td data-label={t('Supplier')}>{r.supplier ?? '—'}</td>
+                  <td data-label={t('Supplier')}>{r.supplier ?? '—'}{r.location && <div className="small muted">{t('At {name}', { name: r.location })}</div>}</td>
                   <td data-label={t('Reference')}>{r.reference ?? '—'}</td>
                   <td data-label={t('Items')} className="right">{r.lines}</td>
-                  <td data-label={t('Cost')} className="right">{money(r.totalCost)}</td>
+                  <td data-label={t('Cost')} className="right">{money(r.totalCost)}{r.landedCost && toCents(r.landedCost) > 0n && <div className="small muted">+ {money(r.landedCost)} {t('to bring it in')}</div>}</td>
                   <td data-label={t('Bill')}>{r.expenseId ? <Link to={`/expenses/${r.expenseId}`}>{t('Open')}</Link> : '—'}</td>
                 </tr>
               ))}
@@ -355,6 +398,10 @@ interface SupplierLite { id: string; name: string; tin: string | null }
 interface ReceiveLine { key: number; item: Item | null; quantity: string; unitCost: string }
 let lineKey = 0;
 const DEC = /^\d{1,12}(\.\d{1,6})?$/;
+/** What it costs to bring a delivery in, on top of the supplier's prices. */
+const LANDED = ['Freight', 'Import duty', 'Customs broker', 'Insurance', 'Other costs'] as const;
+interface LandedCost { key: number; label: string; amount: string }
+const AMOUNT = /^\d{1,12}(\.\d{1,2})?$/;
 
 export function ReceiveStock() {
   const t = useT();
@@ -374,6 +421,13 @@ export function ReceiveStock() {
   const [dueDate, setDueDate] = useState(belizeDate(30));
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
+  // More than one shop: which one the delivery came to.
+  const [places] = useLocations();
+  const [receiveAt, setReceiveAt] = useState('');
+  // Landed cost: freight, duty and the like, spread over the items by value.
+  const [landed, setLanded] = useState<LandedCost[]>([]);
+  const landedCents = landed.reduce((a, c) => a + (AMOUNT.test(c.amount) ? toCents(c.amount) : 0n), 0n);
+  const landedOk = landed.every((c) => !c.amount || AMOUNT.test(c.amount));
   // ?order=<id>: what is still to come on that purchase order, ready to tick off.
   const [params] = useSearchParams();
   const orderId = params.get('order');
@@ -408,6 +462,8 @@ export function ReceiveStock() {
           receivedOn,
           ...(order && { purchaseOrderId: order.id }),
           lines: ready.map((l) => ({ itemId: l.item!.id, quantity: l.quantity, unitCost: l.unitCost })),
+          ...(places.length > 1 && receiveAt && { locationId: receiveAt }),
+          ...(landedCents > 0n && { landed: landed.filter((c) => AMOUNT.test(c.amount) && toCents(c.amount) > 0n).map((c) => ({ label: c.label, amount: c.amount })) }),
           ...(recordBill && { expense: { gstTreatment: treatment, ...(paidNow ? { paid: { on: receivedOn, method } } : { paid: null, dueDate }) } }),
         },
       });
@@ -439,6 +495,11 @@ export function ReceiveStock() {
             <div className="form-grid">
               <Field label={t('Their delivery note or invoice number')}><input maxLength={100} placeholder={order?.number} value={reference} onChange={(e) => setReference(e.target.value)} /></Field>
               <Field label={t('Received on')}><input type="date" required max={belizeToday()} value={receivedOn} onChange={(e) => setReceivedOn(e.target.value)} /></Field>
+              {places.length > 1 && (
+                <Field label={t('Received at')}>
+                  <Select value={receiveAt || places.find((p) => p.main)?.id || ''} onChange={(e) => setReceiveAt(e.target.value)}>{places.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</Select>
+                </Field>
+              )}
             </div>
           </fieldset>
           <fieldset>
@@ -462,6 +523,21 @@ export function ReceiveStock() {
               </div>
             ))}
             <button type="button" className="secondary" style={{ marginTop: '0.75rem' }} onClick={() => setLines([...lines, { key: ++lineKey, item: null, quantity: '', unitCost: '' }])}>+ {t('Add item')}</button>
+          </fieldset>
+          <fieldset className="stack landed">
+            <legend>{t('Bringing it in')}</legend>
+            <p className="small muted" style={{ margin: 0 }}>{t('Freight, import duty, the customs broker: what it cost to get this delivery to your shelf, on top of the supplier’s prices. It is spread over the items by value, so each item’s cost, and the margin you see, is what it really cost you. Leave empty for local deliveries.')}</p>
+            {landed.map((c) => (
+              <div key={c.key} className="receive-line">
+                <Field label={t('Cost')} className="grow">
+                  <Select value={c.label} onChange={(e) => setLanded(landed.map((x) => (x.key === c.key ? { ...x, label: e.target.value } : x)))}>{LANDED.map((k) => <option key={k} value={k}>{t(k)}</option>)}</Select>
+                </Field>
+                <Field label={t('Amount before GST (BZ$)')}><input inputMode="decimal" placeholder="0.00" value={c.amount} aria-invalid={(c.amount !== '' && !AMOUNT.test(c.amount)) || undefined} onChange={(e) => setLanded(landed.map((x) => (x.key === c.key ? { ...x, amount: e.target.value.trim() } : x)))} /></Field>
+                <button type="button" className="link" onClick={() => setLanded(landed.filter((x) => x.key !== c.key))}>{t('Remove')}</button>
+              </div>
+            ))}
+            {landed.length < 8 && <div><button type="button" className="secondary" onClick={() => setLanded([...landed, { key: ++lineKey, label: LANDED.find((k) => !landed.some((c) => c.label === k)) ?? 'Other costs', amount: '' }])}>+ {landed.length ? t('Add another cost') : t('Add freight, duty or other costs')}</button></div>}
+            {landedCents > 0n && <p className="small muted" style={{ margin: 0 }}>{t('The bills for these (the shipper, Customs, the broker) are recorded under Expenses as usual. Here they only make the cost per item right.')}</p>}
           </fieldset>
           {can('expenses.manage') && (
             <fieldset className="stack">
@@ -497,8 +573,10 @@ export function ReceiveStock() {
             <div><span>{t('Cost before GST')}</span><span>{money(fromCents(net))}</span></div>
             {recordBill && <div><span>GST</span><span>{money(fromCents(gst))}</span></div>}
             {recordBill && <div className="grand"><span>{t('Bill total')}</span><span>{money(fromCents(net + gst))}</span></div>}
+            {landedCents > 0n && <div><span>{t('Freight, duty, other costs')}</span><span>{money(fromCents(landedCents))}</span></div>}
+            {landedCents > 0n && <div className="landed-total"><span>{t('Cost on your shelf')}</span><span>{money(fromCents(net + landedCents))}</span></div>}
             <ErrorText error={error} />
-            <button type="submit" className="big lime" disabled={busy || ready.length === 0 || ready.length !== lines.filter((l) => l.item || l.quantity || l.unitCost).length || (recordBill && !supplier && !supplierName.trim())}>{busy ? t('Saving…') : t('Receive {n} items', { n: ready.length })}<span className="chip" aria-hidden="true">→</span></button>
+            <button type="submit" className="big lime" disabled={busy || !landedOk || (landedCents > 0n && net === 0n) || ready.length === 0 || ready.length !== lines.filter((l) => l.item || l.quantity || l.unitCost).length || (recordBill && !supplier && !supplierName.trim())}>{busy ? t('Saving…') : t('Receive {n} items', { n: ready.length })}<span className="chip" aria-hidden="true">→</span></button>
             <p className="small muted">{t('The stock goes up now and each item’s average cost is updated.')}</p>
           </section>
         </aside>

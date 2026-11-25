@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
 import { buildApp } from '../src/api/app.ts';
 import { reminderStep, runReminders } from '../src/api/receivables.ts';
+import { reminderMessage, whatsappNumber } from '../src/receivables/whatsapp.ts';
 import { createUser } from '../src/db/users.ts';
 import { SUBMIT_PATHS } from '../src/engine/transport.ts';
 import { memoryMailer } from '../src/mail/mailer.ts';
@@ -272,4 +273,60 @@ test('paying an invoice from its link: the page, a test payment, recorded once, 
     assert.equal((await c.app.inject({ method: 'GET', url: `/v1/pay/${'x'.repeat(43)}` })).statusCode, 404);
     await c.f.db.query("update share_links set expires_at = now() - interval '1 day'");
     assert.equal((await c.app.inject({ method: 'GET', url: `/v1/pay/${token}` })).statusCode, 404);
+  }));
+
+test('a reminder for WhatsApp: the number made whole, the message written with a link to the invoice, and a wa.me link that opens the chat', () =>
+  withBusiness(async (c) => {
+    // Belize numbers are seven digits; WhatsApp wants the country code and digits only.
+    assert.equal(whatsappNumber('610-1234'), '5016101234');
+    assert.equal(whatsappNumber('+501 610 1234'), '5016101234');
+    assert.equal(whatsappNumber('00 1 (305) 555-0100'), '13055550100');
+    assert.equal(whatsappNumber('223-4567 / 610-9999'), '5012234567');
+    assert.equal(whatsappNumber('12345'), null);
+    assert.equal(whatsappNumber(''), null);
+    const words = reminderMessage({ customer: 'Ana Pop', business: 'Corner Store', what: 'invoice 001-000000007', balance: 'BZ$112.50', dueDate: '1 Nov 2026', daysLate: 0 });
+    assert.equal(words, 'Hello Ana Pop, this is Corner Store.\n\nA friendly reminder that invoice 001-000000007 for BZ$112.50 is due today.\n\nIf you have already paid, please ignore this message. Thank you!');
+    assert.match(reminderMessage({ customer: 'Ana Pop', business: 'La Tienda', what: 'factura 001-000000007', balance: 'BZ$112.50', dueDate: '1 nov 2026', daysLate: 3, link: 'https://x.test/d/abc' }, 'es'), /^Hola Ana Pop, le saluda La Tienda\.\n\nLe recordamos que la factura 001-000000007 por BZ\$112\.50 venció el 1 nov 2026\.\n\nPuede verla aquí: https:\/\/x\.test\/d\/abc/);
+
+    await c.app.inject({ method: 'PUT', url: '/v1/receivable-settings', headers: c.owner, payload: { reminders: { enabled: false, offsets: [7] }, payOnline: false, instructions: 'Belize Bank 123-456, or cash at the shop.' } });
+    const inv = await issueInvoice(c, { name: 'Ana Pop', tin: '555666' });
+    await backdate(c, inv.id, daysAgo(40), daysAgo(10));
+    const remind = (id: string, payload?: object, headers = c.owner) => c.app.inject({ method: 'POST', url: `/v1/documents/${id}/whatsapp-reminder`, headers, ...(payload && { payload }) });
+
+    // The invoice has no phone: one must be typed, and a wrong one is refused.
+    assert.equal((await remind(inv.id)).json().error.code, 'no_phone');
+    assert.equal((await remind(inv.id, { phone: '12' })).json().error.code, 'no_phone');
+    const r = await remind(inv.id, { phone: '610-1234' });
+    assert.equal(r.statusCode, 200, r.body);
+    const { phone, text, url } = r.json() as { phone: string; text: string; url: string };
+    assert.equal(phone, '+5016101234');
+    assert.match(text, /^Hello Ana Pop, this is /);
+    assert.match(text, /A friendly reminder that invoice \d{3}-\d{9} for BZ\$112\.50 was due on /);
+    // No online payments set up: the link shows the invoice. The business's own words on how to pay follow.
+    const link = /You can see it here: (https:\/\/app\.example\.test\/d\/[A-Za-z0-9_-]{43})/.exec(text);
+    assert.ok(link, text);
+    assert.match(text, /Belize Bank 123-456, or cash at the shop\./);
+    assert.equal(url, `https://wa.me/5016101234?text=${encodeURIComponent(text)}`);
+    // The link works for the customer without signing in.
+    assert.equal((await c.app.inject({ method: 'GET', url: new URL(link[1]!).pathname })).statusCode, 200);
+    // It is in the business's log, and no email went anywhere.
+    const logged = (await c.f.db.query<{ details: { by: string; to: string } }>("select details from audit_events where tenant_id = $1 and action = 'invoice.reminded'", [c.f.tenantA])).rows;
+    assert.deepEqual(logged.map((l) => l.details), [{ by: 'whatsapp', to: '+5016101234' }]);
+    assert.equal(c.mail.sent.length, 0);
+
+    // A customer saved with a phone: nothing to type. A paid invoice is not reminded.
+    const saved = await c.app.inject({ method: 'POST', url: '/v1/customers', headers: c.owner, payload: { ...customer('444333', 'Benque Hardware'), contact: { telephone: '823-0001' } } });
+    assert.equal(saved.statusCode, 201, saved.body);
+    const second = await c.app.inject({ method: 'POST', url: '/v1/documents', headers: c.owner, payload: { type: '01', customerId: saved.json().id, lines: [{ description: 'Nails', quantity: '1', unitCode: 'H87', unitPrice: '10.00', gstCategory: 'S' }], payment: { meansCode: '30', dueDate: '2099-12-31' } } });
+    assert.equal(second.statusCode, 201, second.body);
+    const auto = await remind(second.json().id);
+    assert.equal(auto.json().phone, '+5018230001');
+    assert.match(auto.json().text, /is due on /);
+    const listed = (await c.app.inject({ method: 'GET', url: '/v1/receivables/invoices', headers: c.owner })).json().data as Array<{ documentId: string; customer: { telephone: string | null } }>;
+    assert.equal(listed.find((x) => x.documentId === second.json().id)!.customer.telephone, '823-0001');
+    await c.app.inject({ method: 'POST', url: `/v1/documents/${second.json().id}/payments`, headers: c.owner, payload: { amount: '11.25', method: 'cash' } });
+    assert.equal((await remind(second.json().id)).json().error.code, 'already_paid');
+
+    // Not without signing in.
+    assert.equal((await c.app.inject({ method: 'POST', url: `/v1/documents/${inv.id}/whatsapp-reminder`, headers: CSRF, payload: { phone: '610-1234' } })).statusCode, 401);
   }));

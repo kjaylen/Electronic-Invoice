@@ -22,6 +22,7 @@
  *    (a receipt that does not match its number) is reported and the batch goes on.
  */
 
+import { loadVenue } from '../venue/settings.ts';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { audit } from '../db/audit.ts';
 import type { Queryable } from '../db/database.ts';
@@ -102,6 +103,8 @@ interface SaleEvent {
   etdui: string;
   request: { lines: LineInput[]; customer?: Customer; customerId?: string | null; payment?: { meansCode?: string; terms?: string }; note?: string; lineItemIds?: Array<string | null> };
   tenders?: Array<{ means: string; cents: string }>;
+  /** A tip added to the payment: for the staff, not on the receipt. */
+  tip?: { means: string; cents: string };
 }
 interface ShiftOpenEvent { id: string; kind: 'shift_open'; at: string; userId: string; shiftId: string; openingFloat: string }
 interface CashEvent { id: string; kind: 'cash'; at: string; userId?: string | null; shiftId: string; type: 'pay_in' | 'pay_out'; amount: string; reason: string }
@@ -148,6 +151,7 @@ const eventSchema = {
           etdui: { type: 'string', pattern: '^\\d{44}$' },
           request: { type: 'object' },
           tenders: { type: 'array', maxItems: 6, items: { type: 'object', required: ['means', 'cents'], additionalProperties: false, properties: { means: { type: 'string', pattern: '^\\d{1,3}$' }, cents: { type: 'string', pattern: '^\\d{1,15}$' } } } },
+          tip: { type: 'object', required: ['means', 'cents'], additionalProperties: false, properties: { means: { type: 'string', pattern: '^\\d{1,3}$' }, cents: { type: 'string', pattern: '^[1-9]\\d{0,14}$' } } },
           openingFloat: money,
           type: { type: 'string', enum: ['pay_in', 'pay_out'] },
           amount: money,
@@ -192,7 +196,7 @@ export function registerPosSyncRoutes(app: FastifyInstance, deps: PipelineDeps) 
       )).rows[0]!;
       const users = (await db.query<{ id: string; name: string; role: Role; has_pin: boolean; pin_set_at: Date | null }>(
         `select u.id, u.name, u.role, u.pos_pin_set_at is not null as has_pin, u.pos_pin_set_at as pin_set_at from users u
-         where u.tenant_id = $1 and u.status = 'active' and u.role in ('owner', 'admin', 'manager', 'cashier') order by lower(u.name)`, [d.tenant_id],
+         where u.tenant_id = $1 and u.status = 'active' and u.role not in ('accountant') order by lower(u.name)`, [d.tenant_id],
       )).rows;
       const logo = (await db.query<{ id: string; name: string; content_type: string; bytes: number; data: Buffer | Uint8Array }>(
         'select a.id, a.name, a.content_type, a.bytes, a.data from tenants t join template_assets a on a.id = t.logo_asset_id where t.id = $1', [d.tenant_id],
@@ -200,6 +204,7 @@ export function registerPosSyncRoutes(app: FastifyInstance, deps: PipelineDeps) 
       const categories = (await db.query<{ name: string }>(
         `select distinct category as name from items where tenant_id = $1 and archived_at is null and category is not null order by 1`, [d.tenant_id],
       )).rows;
+      const venue = await loadVenue(db, d.tenant_id);
       const series = await offlineSeries(db, d.tenant_id, t.environment, d.id, request.query.install);
       reply.header('Cache-Control', 'no-store');
       return {
@@ -207,7 +212,7 @@ export function registerPosSyncRoutes(app: FastifyInstance, deps: PipelineDeps) 
         business: { id: d.tenant_id, slug: t.slug, name: t.trade_name ?? t.legal_name, legalName: t.legal_name, tradeName: t.trade_name, tin: t.tin, environment: t.environment },
         device: { id: d.id, name: d.name, register: { id: d.register_id, name: d.register_name } },
         // pinSetAt: a PIN changed since the till remembered it is forgotten there (offline sign-in).
-        users: users.map((u) => ({ id: u.id, name: u.name, role: u.role, hasPin: u.has_pin, pinSetAt: u.pin_set_at ? new Date(u.pin_set_at).toISOString() : null, permissions: tillPermissions(u.role) })),
+        users: users.map((u) => ({ id: u.id, name: u.name, role: u.role, hasPin: u.has_pin, pinSetAt: u.pin_set_at ? new Date(u.pin_set_at).toISOString() : null, permissions: tillPermissions(u.role, venue) })),
         // A shift open on this till's drawer (opened before the till sold offline): the till carries on with it.
         openShift: await openShiftOf(db, d.tenant_id, d.register_id),
         me: await meJson(deps, d.tenant_id),
@@ -340,6 +345,10 @@ export function registerPosSyncRoutes(app: FastifyInstance, deps: PipelineDeps) 
       // Who sold, on which till and shift, and how it was paid, written with the document.
       await tx.query('update documents set issued_by = $3, device_id = $4, shift_id = $5, tenders = $6 where tenant_id = $1 and id = $2',
         [d.tenant_id, documentId, userId, d.id, shiftId, ev.tenders && ev.tenders.length > 1 ? JSON.stringify(ev.tenders) : null]);
+      if (ev.tip) {
+        await tx.query('insert into sale_tips (document_id, tenant_id, shift_id, user_id, means, amount_cents) values ($1, $2, $3, $4, $5, $6) on conflict do nothing',
+          [documentId, d.tenant_id, shiftId, userId, ev.tip.means, ev.tip.cents]);
+      }
     });
 
     // 2. Its stock and points, once, with the event's row. If this fails the sale is kept and the till sends it again:

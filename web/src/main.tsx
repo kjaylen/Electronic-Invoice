@@ -10,6 +10,7 @@ import { Brand } from './art';
 import { BUSINESS, STORE_DOMAIN } from './business';
 import { ErrorBoundary } from './ErrorBoundary';
 import { Icons } from './icons';
+import { FloorPage, HostPage, HotelPage, KitchenPage, VenueReportsPage } from './venue/pages';
 import { I18nProvider, LanguageToggle, useI18n } from './i18n';
 import { ROLE_LABEL } from './permissions';
 import { SessionProvider, useSession } from './session';
@@ -66,6 +67,7 @@ const Expenses = page(() => import('./pages/Expenses'), 'Expenses');
 const Inventory = page(() => import('./pages/Inventory'), 'Inventory');
 const Shifts = page(() => import('./pages/Shifts'), 'Shifts');
 const GiftCards = page(() => import('./pages/GiftCards'), 'GiftCards');
+const Layaways = page(() => import('./pages/Layaways'), 'Layaways');
 const SiteEditor = page(() => import('./pages/SiteEditor'), 'SiteEditor');
 const ShiftDetail = page(() => import('./pages/Shifts'), 'ShiftDetail');
 const ReceiveStock = page(() => import('./pages/Inventory'), 'ReceiveStock');
@@ -166,12 +168,24 @@ function Layout() {
 
   // What the business sells: services-only businesses do without stock and the store's products.
   const sells = me?.sells ?? 'both';
+  // Restaurants, bars and hotels: their own screens, first. A shop has none of this.
+  const venue = me?.venue;
+  const service = Boolean(venue?.restaurant || venue?.bar);
+  const venueItems: NavItem[] = [
+    ...(service && (can('venue.orders') || can('venue.floor')) ? [{ to: '/floor', label: t('Floor'), icon: Icons.counter }] : []),
+    ...(service && can('venue.kitchen') ? [{ to: '/kitchen', label: t('Kitchen'), icon: Icons.orders }] : []),
+    ...(service && can('venue.floor') ? [{ to: '/host', label: t('Reservations'), icon: Icons.clock }] : []),
+    ...(venue?.hotel && (can('hotel.frontdesk') || can('hotel.housekeeping')) ? [{ to: '/hotel', label: t('Hotel'), icon: Icons.store }] : []),
+    ...((service || venue?.hotel) && can('reports.view') ? [{ to: '/venue-reports', label: t('Service reports'), icon: Icons.reports }] : []),
+  ];
   const groups: Array<[string, NavItem[]]> = [
+    ...(venueItems.length ? [[t('Service'), venueItems] as [string, NavItem[]]] : []),
     [t('Sell'), [
       { to: '/', label: t('Overview'), icon: Icons.overview },
       { to: '/counter', label: t('Counter'), icon: Icons.counter, permission: 'documents.issue' },
       { to: '/shifts', label: t('Cash register'), icon: Icons.register, permission: 'documents.issue' },
       { to: '/gift-cards', label: t('Gift cards'), icon: Icons.giftCard, permission: 'documents.issue' },
+      ...(sells !== 'services' ? [{ to: '/layaways', label: t('Layaways'), icon: Icons.layaway, permission: 'documents.issue' as Permission }] : []),
       { to: '/documents/new?type=01', label: t('New invoice'), icon: Icons.invoice, permission: 'documents.issue' },
       { to: '/quotes', label: t('Quotes'), icon: Icons.quote, permission: 'documents.issue' },
       ...(sells !== 'products' ? [{ to: '/work', label: t('Time and jobs'), icon: Icons.clock, permission: 'documents.issue' as Permission }] : []),
@@ -416,6 +430,12 @@ function BusinessApp() {
         <Route path="/inventory" element={<Allowed permission="catalog.manage"><Inventory /></Allowed>} />
         <Route path="/shifts" element={<Allowed permission="documents.issue"><Shifts /></Allowed>} />
         <Route path="/gift-cards" element={<Allowed permission="documents.issue"><GiftCards /></Allowed>} />
+        <Route path="/layaways" element={<Allowed permission="documents.issue"><Layaways /></Allowed>} />
+        <Route path="/floor" element={<FloorPage />} />
+        <Route path="/kitchen" element={<KitchenPage />} />
+        <Route path="/host" element={<HostPage />} />
+        <Route path="/hotel" element={<HotelPage />} />
+        <Route path="/venue-reports" element={<VenueReportsPage />} />
         <Route path="/site" element={<Allowed permission="business.manage"><SiteEditor /></Allowed>} />
         <Route path="/shifts/:id" element={<Allowed permission="documents.issue"><ShiftDetail /></Allowed>} />
         <Route path="/inventory/receive" element={<Allowed permission="catalog.manage"><ReceiveStock /></Allowed>} />

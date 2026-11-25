@@ -21,6 +21,7 @@ import { openReceivables } from '../receivables/receivables.ts';
 import { formatCents, parseCents } from '../engine/decimal.ts';
 import { toBigInt } from '../db/database.ts';
 import { loyaltySettings } from './loyalty.ts';
+import { counterSettings, MAX_STATIONS, MAX_TABLES, SERVICE_PERCENT } from '../commerce/counter.ts';
 
 // ---------- pagination ----------
 
@@ -211,8 +212,8 @@ export async function loadItems(deps: PipelineDeps, tenantId: string, ids: strin
 /** The business as the app's screens need it (GET /v1/me; also in a till's offline snapshot). */
 export async function meJson(deps: PipelineDeps, tenantId: string) {
   const { db } = deps;
-  const t = (await db.query<{ id: string; legal_name: string; trade_name: string | null; tin: string; environment: string; cashier_discount_limit: string | null; sells: 'products' | 'services' | 'both' }>(
-    'select id, legal_name, trade_name, tin, environment, cashier_discount_limit::text, sells from tenants where id = $1', [tenantId],
+  const t = (await db.query<{ id: string; legal_name: string; trade_name: string | null; tin: string; environment: string; cashier_discount_limit: string | null; sells: 'products' | 'services' | 'both'; counter_settings: unknown; venue: { restaurant?: boolean; bar?: boolean; hotel?: boolean } | null }>(
+    'select id, legal_name, trade_name, tin, environment, cashier_discount_limit::text, sells, counter_settings, venue from tenants where id = $1', [tenantId],
   )).rows[0]!;
   const period = (await db.query<{ started_at: string | Date; reason: string }>(
     'select started_at, reason from contingency_periods where tenant_id = $1 and ended_at is null', [tenantId],
@@ -235,9 +236,13 @@ export async function meJson(deps: PipelineDeps, tenantId: string) {
     notices: (await db.query<{ id: string; message: string; message_es: string | null; level: 'info' | 'warning' }>(
       `select id, message, message_es, level from platform_notices where starts_at <= now() and (ends_at is null or ends_at > now()) order by created_at desc limit 3`,
     )).rows.map((n) => ({ id: n.id, message: n.message, messageEs: n.message_es, level: n.level })),
+    // The hospitality module: which kinds of venue the business is (none: a shop).
+    venue: { restaurant: t.venue?.restaurant === true, bar: t.venue?.bar === true, hotel: t.venue?.hotel === true },
     counter: {
       cashierDiscountLimit: t.cashier_discount_limit === null ? null : String(Number(t.cashier_discount_limit)),
       loyalty: await loyaltySettings(db, tenantId).then((l) => (l.enabled ? { pointValue: l.pointValue, minRedeem: l.minRedeem } : null)),
+      // US$ totals, a service charge, tips (src/commerce/counter.ts).
+      ...counterSettings(t.counter_settings),
     },
   };
 }
@@ -269,14 +274,42 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: PipelineDeps) 
   }));
 
   // How the counter and the tills work for this business (owners and admins).
-  app.put<{ Body: { cashierDiscountLimit: string | null } }>(
+  // Only what is sent changes: a till or page that knows fewer settings leaves the others alone.
+  app.put<{ Body: { cashierDiscountLimit?: string | null; showUsd?: boolean; serviceChargePercent?: string | null; tips?: boolean; tables?: string[]; stations?: Array<{ name: string; categories: string[] }> } }>(
     '/counter-settings',
-    { schema: { body: { type: 'object', required: ['cashierDiscountLimit'], additionalProperties: false, properties: { cashierDiscountLimit: { anyOf: [{ type: 'string', pattern: '^(100(\\.0{1,2})?|\\d{1,2}(\\.\\d{1,2})?)$' }, { type: 'null' }] } } } } },
+    {
+      schema: {
+        body: {
+          type: 'object', additionalProperties: false, minProperties: 1,
+          properties: {
+            cashierDiscountLimit: { anyOf: [{ type: 'string', pattern: '^(100(\\.0{1,2})?|\\d{1,2}(\\.\\d{1,2})?)$' }, { type: 'null' }] },
+            showUsd: { type: 'boolean' },
+            serviceChargePercent: { anyOf: [{ type: 'string', pattern: SERVICE_PERCENT.source }, { type: 'null' }] },
+            tips: { type: 'boolean' },
+            // A bar or restaurant's tables, and where its order tickets print (by item category).
+            tables: { type: 'array', maxItems: MAX_TABLES, items: { type: 'string', minLength: 1, maxLength: 30 } },
+            stations: {
+              type: 'array', maxItems: MAX_STATIONS,
+              items: { type: 'object', required: ['name', 'categories'], additionalProperties: false, properties: { name: { type: 'string', minLength: 1, maxLength: 30 }, categories: { type: 'array', maxItems: 60, items: { type: 'string', minLength: 1, maxLength: 80 } } } },
+            },
+          },
+        },
+      },
+    },
     async (request) => {
       requirePermission(request, 'business.manage');
-      await db.query('update tenants set cashier_discount_limit = $2 where id = $1', [request.tenantId, request.body.cashierDiscountLimit]);
-      await audit(db, { tenantId: request.tenantId, userId: request.userId || null, action: 'counter.settings', details: { cashierDiscountLimit: request.body.cashierDiscountLimit }, ip: request.ip });
-      return { cashierDiscountLimit: request.body.cashierDiscountLimit === null ? null : String(Number(request.body.cashierDiscountLimit)) };
+      const b = request.body;
+      const { cashierDiscountLimit, ...rest } = b;
+      if (cashierDiscountLimit !== undefined) await db.query('update tenants set cashier_discount_limit = $2 where id = $1', [request.tenantId, cashierDiscountLimit]);
+      if (Object.keys(rest).length) {
+        // Kept as the app reads them: names trimmed, no blanks, no repeats.
+        const clean = counterSettings(rest);
+        const kept = Object.fromEntries(Object.keys(rest).map((k) => [k, clean[k as keyof typeof clean]]));
+        await db.query(`update tenants set counter_settings = counter_settings || $2::jsonb where id = $1`, [request.tenantId, JSON.stringify(kept)]);
+      }
+      await audit(db, { tenantId: request.tenantId, userId: request.userId || null, action: 'counter.settings', details: { ...b }, ip: request.ip });
+      const t = (await db.query<{ cashier_discount_limit: string | null; counter_settings: unknown }>('select cashier_discount_limit::text, counter_settings from tenants where id = $1', [request.tenantId])).rows[0]!;
+      return { cashierDiscountLimit: t.cashier_discount_limit === null ? null : String(Number(t.cashier_discount_limit)), ...counterSettings(t.counter_settings) };
     },
   );
 

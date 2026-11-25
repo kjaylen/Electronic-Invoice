@@ -238,7 +238,7 @@ test('preview returns exact totals for a draft without issuing anything', () =>
       payload: { type: '02', lines: [{ description: 'Coffee', quantity: '3', unitCode: 'H87', unitPrice: '0.04', gstCategory: 'S' }] },
     });
     assert.equal(res.statusCode, 200);
-    assert.deepEqual(res.json().totals, { lineExtension: '0.12', gst: '0.02', tax: '0.02', taxInclusive: '0.14', payable: '0.14' });
+    assert.deepEqual(res.json().totals, { lineExtension: '0.12', gst: '0.02', tax: '0.02', taxInclusive: '0.14', payable: '0.14', charges: '0.00' });
     assert.equal(f.bts.requests.length, 0);
     assert.equal((await f.db.query<{ n: number }>('select count(*)::int as n from documents')).rows[0]!.n, 0);
   }));

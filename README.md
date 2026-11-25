@@ -303,7 +303,7 @@ A React + TypeScript app (Vite) served by the API server from `web/dist`. It's b
 - **Daily summary** (opt-in, Settings → Business): each morning owners and admins get yesterday at a glance: sales and GST against the same day last week, how customers paid (split payments counted by part), best sellers, discounts given, cash drawer differences, what customers owe, what is running low and anything BTS rejected (`src/notify/daily.ts`). Quiet days send nothing.
 - **Counter controls** (Settings → Tills): the most a cashier may take off a line, checked by the server on the engine's own amounts; managers and above are not limited. Shift reports show the discounts given.
 - **Live status:** a bar at the top of the page appears while BTS is unreachable (with the queue count), when it comes back, and when the device is offline.
-- **Spanish:** every screen is in English and Spanish (`web/src/es.ts`). The choice is per device, defaulting to the browser's language. Customer emails go out in English or Spanish, as each business chooses under Templates (built-in text, subjects, dates and the lines the app writes); printed documents keep BTS's English names.
+- **Spanish:** every screen is in English and Spanish (`web/src/es.ts`). The counter, the till app, shifts and devices are also in Simplified Chinese (`web/src/zh.ts`). The choice is per device, defaulting to the browser's language. Customer emails go out in English or Spanish, as each business chooses under Templates (built-in text, subjects, dates and the lines the app writes); printed documents keep BTS's English names.
 - **Installable:** a web app manifest, icons and a service worker that caches the app shell (never API data), so it installs on phones and desktops and opens fast.
 - **Accessibility:** a skip link; focus moves to each new page; dialogs trap focus and give it back; a keyboard-operable combobox; every control labelled; muted text at 5:1 contrast.
 - **Sign-in screens:** a white card (floating labels, show or hide the password, keep me signed in, a clear busy, success and error state) beside a living panel: slowly drifting aurora light, a real-time fluid on the GPU (WebGL; velocity, pressure and dye, stirred by the pointer or a finger, a splash on a click) and a faint particle network that moves aside for the pointer (`web/src/scene/`). It scales down on phones and small machines, falls back to the still gradient without WebGL, stands still with reduced motion, and pauses while the tab is hidden.
@@ -432,6 +432,7 @@ Accounts receivable on top of the BTS documents, without touching them:
 - **Monthly statements** (opt-in, Getting paid → Reminders and paying): in the first week of each month, every customer who owes and has an email gets their statement (the PDF, a pay link per invoice and their account page), once that month.
 - **Belize Bank** (`src/commerce/belizebank.ts`, `src/commerce/ekyash.ts`, `src/receivables/billpay.ts`): card payments on the bank's hosted page in BZ$ (no card data reaches us), E-Kyash wallet payments (a QR code on the page, or a deep link on a phone; requests are HS256-signed, callbacks HMAC-checked), and bill payments from Belize Bank online banking: the bank validates the invoice number with us (balance, customer name), posts each payment (recorded once by the bank's reference) and sends a daily reconciliation; anything that matches no single open invoice is listed for the business to apply by hand. Callbacks from providers are never trusted on their own: they only make us ask the provider.
 - **Paying online from the link** (`/pay/<token>`, the same 90-day token as the PDF share link): the balance, the PDF, and a choice of the business's connected providers (Belize Bank cards, E-Kyash, PayPal; test payments in the BTS test environment). The payment is recorded on the invoice once (`invoice_payments.online_payment_id` is unique), whether the customer comes back or reconciliation finds it.
+- **Reminders by WhatsApp** (`src/receivables/whatsapp.ts`; Getting paid → Invoices → WhatsApp, or on the invoice): for customers who read WhatsApp and not email. The reminder is written in the business's email language with a link to the invoice (to pay, when online payments are on) and the business's own words on how to pay; a `wa.me` link opens the chat with it typed in, and whoever is collecting presses send. Nothing is sent from the server. A 7-digit number is taken as a Belize one (+501).
 
 ## Templates (`src/templates`, `src/api/templates.ts`)
 
@@ -462,6 +463,8 @@ Neither is a tax document: each keeps the `POST /v1/documents` body it will issu
 - **Time and jobs** (`GET/POST/PUT/DELETE /v1/work`, `POST /v1/work/invoice`): log the work done for each customer as it happens (a service from the catalog fills the rate, unit and GST, or any rate of its own; a timer on the page counts the hours to the quarter hour), see what is still to invoice customer by customer, and issue one tax invoice for it (all of it or the entries chosen, due on receipt or in 7 to 60 days, optionally emailed). Each entry becomes a dated line; invoiced work keeps its invoice and can no longer change; if BTS rejects the invoice the work stays to be invoiced, and work being invoiced is claimed so it is never billed twice. The overview shows how much work waits to be invoiced; a customer's page has **Log work**.
 - **For your accountant** (Reports → For your accountant (ZIP), for the period chosen): one ZIP with a README (what is in it and the GST return's warnings), the GST return (PDF and CSV), profit and loss (by month and by cost category), the sales register, payments received against invoices (voided ones marked), the expenses and their attached receipts (up to 300, named by date and supplier), who owes what and the stock on hand at average cost (both as of today). The signed e-invoices stay in the document archive.
 - **Profit and loss** (Reports → Profit and loss): income is sales before GST; costs are expenses before the GST claimed back (GST that cannot be claimed is a cost); by month and by category.
+- **Business tax worksheet** (`src/api/business-tax.ts`; Reports → Business tax, also CSV, PDF and in the accountant's ZIP): the period's receipts before GST by kind of receipt, the rate for each, less the contract tax customers withheld, and what is left to pay by the 15th of the next month. A business says which kinds it has under Settings → Business (a trade or business at 1.75%, a profession at 6% and rents at 3% are offered; any other kind and rate can be typed) and which item categories belong to each; everything else falls under the first kind. A working paper, like the GST worksheet: the rates are the business's to check.
+- **What is due and when** (`GET /v1/reports/due-dates`, `src/notify/filing.ts`): the GST return and the business tax return (the 15th, for the month before, with about how much each comes to from the records so far) and dates the owner adds (trade licence, Social Security, insurance; once, monthly or yearly). On the overview under "Coming up", and in one email a month to owners and admins from the 8th (`filing-reminder`; on unless turned off under Settings → Business).
 
 ## Repeating expenses (`src/api/recurring-expenses.ts`)
 
@@ -478,6 +481,9 @@ Neither is a tax document: each keeps the `POST /v1/documents` body it will issu
 - **Bundles** (an item's form → "A bundle of other items"): a combo or gift basket made of other items, each with its quantity (`PUT /v1/items/:id/components`). Selling a bundle takes its components off the shelf, and its line's cost (for the gross margin) is theirs added up. A bundle cannot hold another bundle, and an item inside a bundle cannot become one.
 - **Not selling** (Inventory → Not selling): items held for at least 60 days with nothing sold or ordered in that time, most money tied up first, with when each last sold.
 - **Counts and adjustments**: a stock count (one category at a time, or everything) sets the levels typed in (only differences are recorded); single adjustments add, take off or set with a reason. Low-stock levels per item; low and out-of-stock items show on the overview's to-do list. Stock value at average cost; CSV export. Changing a variant's stock in the product editor is recorded as a count.
+- **More than one shop** (`src/inventory/locations.ts`, `src/api/locations.ts`; Settings → Tills → Locations): a business that adds a second location names the one it already has too (the main one). `items.stock_quantity` stays the total the business owns, so the online store, low-stock warnings, reports and other systems read what they always did; `location_stock` holds what is at every location but the main one, and the main one has what is left (the total, less the others, less what is on the way). Stock is received, counted and adjusted at a location (`locationId`; none is the main one); a count sets what is on that shop's shelves and the total follows. Each register is at a location (Cash register → Registers) and its sales come off that shop's stock; a sale BTS rejects goes back to the same shelf. Inventory shows every location's level, or one location at a time. A location is closed only once it holds no stock, has no register and nothing on the way. A business with one shop sees none of this.
+- **Transfers** (Inventory → Transfers; `GET/POST /v1/transfers`, `/receive`, `/cancel`): stock sent from one location to another, numbered TR-0001…; never more than is at the sending shop. It leaves that shop when sent, is on the way (owned, on neither shelf) until the other shop receives it, and goes back where it came from if cancelled. Both ends are in each item's history with the transfer's number.
+- **Landed cost** (Receive stock → Bringing it in): freight, import duty, the customs broker, insurance and other costs of bringing a delivery in are entered once and spread over its items by value, to the cent (`spreadLanded`), so each item's average cost, the stock value and the margin reports show what the goods cost on the shelf. The supplier's bill recorded with the delivery is still the supplier's prices; the shipper's and broker's bills are recorded under Expenses as usual.
 
 ## Cash registers and shifts (`src/api/shifts.ts`, `src/render/zreport.ts`)
 
@@ -487,6 +493,13 @@ Neither is a tax document: each keeps the `POST /v1/documents` body it will issu
 - **Cash in and out**: money put in (change from the bank) or taken out (petty cash, a bank drop) with a reason; permanent, a mistake is corrected with the opposite movement.
 - **Closing**: the drawer is counted blind, by notes and coins (which must add up) or as a total. Expected cash = float + cash takings (cash receipts and invoice payments, less cash refunds) + paid in − paid out; the difference (short or over) is kept with the shift. The opener or anyone allowed to adjust documents can close a shift.
 - **The report**: sales by document type and GST, takings by payment (from the receipt's payment means), invoice payments, refunds (credit notes against receipts), cancelled documents, the cash drawer and every cash movement. While open it is an X report; once closed, the Z report, printable on the 80 mm receipt printer or as an A4 PDF. Cashiers see their own shifts; managers see everyone's.
+- **Mobile wallets** (DigiWallet, E-Kyash, taken by hand): a way to pay at the counter and on tills (payment means code 68), alone or as part of a split, with an optional reference that prints on the receipt; its own line in the shift report.
+- **For shops that sell to visitors, bars and restaurants** (Settings → Tills → Counter; `PUT /v1/counter-settings`, `src/commerce/counter.ts`): the total **in US dollars too** (BZ$2 to US$1, on the counter, the customer display and the receipt) and cash taken in US$ with change in BZ$; a **service charge** (a percentage, usually 10%) added with one tap as a charge on each line, with GST, shown as its own line on the receipt and in the shift report; **tips** on card and wallet payments, kept beside the sale (`sale_tips`) and never on the tax document, by means in the shift report and, in cash, in the drawer's expected cash.
+- **Layaway** (`src/api/layaways.ts`; counter → On account → Layaway; Sell → Layaways): goods kept for a customer who pays over time. It is a tax invoice on account issued when the layaway starts (the goods come off the shelf), due when the hold ends, with an optional deposit; payments are recorded like any invoice's. Collected when paid in full; cancelled with a credit note, the goods back in stock and what was paid given back.
+- **Tables and tabs** (Settings → Tills → Tables and order tickets): a bar or restaurant names its tables. The counter and every till get a Tables button: free and open tables, a tap to open a tab, more added over the evening from any till, paid like any sale. A table's tab is a held sale with the table's name (one open tab per table).
+- **Order tickets** for the kitchen and the bar: stations are named and given item categories; keeping a table open prints, per station, only what is new since the last ticket, with the table, the time, who took it and a note per item ("no onions"). Tickets print on the till's own receipt printer, or from the browser.
+- **Splitting a bill** by item: what is paid now gets its own receipt; the rest stays on the table.
+- **In Chinese** (`web/src/zh.ts`): the counter, the till app, shifts and devices are also in Simplified Chinese, chosen per person on the till's sign-in screen or under Settings → My account. Anything not translated shows in English; tax documents stay as BTS has them.
 
 ## Tills: the iOS, Android and desktop apps (`src/api/pos.ts`, `web/src/pos`, `apps/`)
 
@@ -564,6 +577,82 @@ All three are the same web code (`web/src/pos`). It reuses the counter and the s
   - `e2e/offline.spec.ts` (a real browser): selling offline, restarting and signing in offline, reconnecting; the connection dropping mid-upload; the app closed mid-sale; sending again; two tills selling the last item offline; a long time offline and the 7-day sign-in limit. Every sale reaches the server exactly once.
   - `apps/desktop` `npm run smoke`, and `node scripts/offline-check.mjs`: the desktop app with the server really stopped and started again.
   - `E2E_DB`, `E2E_PORT` and `E2E_BTS_PORT` run the browser tests on their own database and ports, beside another run.
+
+## Restaurants, bars and hotels (`src/venue`, `src/api/venue*.ts`, `src/api/hotel.ts`, `web/src/venue`)
+
+Off for every business until an owner turns on Restaurant, Bar or Hotel under
+Settings → Venue. With all three off nothing here shows or runs, and the
+counter is the shop's counter as before. PLAN.md has the build list,
+TAX-RULES.md the rates and where each comes from, ETD-MAPPING.md which tax
+document is issued when, DECISIONS.md the judgment calls.
+
+- **A check is a list of operations.** `src/venue/check.ts` is a pure
+  reducer, `apply(store, op)`, used by the server and by the screens. Every
+  operation (open, add, fire, void, comp, move, merge, pay, …) has an id made
+  on the device, so sending one twice does nothing. The server keeps the
+  operations (`venue_ops`), the folded check (`venue_checks.state`) and a
+  change counter per business. A device applies an operation at once, queues
+  it, posts it (`POST /v1/venue/ops`) and reads everyone else's
+  (`GET /v1/venue/changes?since=`) every two seconds.
+- **Two servers on one table.** Items have their own ids and every operation
+  names its items, so two people adding never collide and nothing is
+  overwritten. An item goes to the kitchen once: the first `fire` to reach
+  the server sends it, a later one skips it, and the answer says what each
+  operation really sent. Tickets are made from that answer only.
+- **Setup** (Settings → Venue): floor plans by area with other layouts of the
+  same tables, drawn by dragging; menus and promotions by the clock (prices
+  per menu, happy hour, two for one, an item at a price, items together for a
+  price) with a supervisor's override for the day; stations with the
+  categories they make, the till whose printer they use, a kitchen screen,
+  and a fallback station; groups of choices with at least / at most, defaults
+  and prices; allergens, dietary tags, course and stations per item; sold out
+  in one tap with a countdown; sections per server; the tax rules in force.
+- **Roles**: supervisor, server, bartender, host, kitchen, housekeeper, each
+  signing in at a till with a PIN. A void after sending, a comp, a discount
+  over the limit and a price change need a supervisor's PIN
+  (`POST /v1/venue/approve`) and a reason; each is in the check's history.
+- **The floor** (`/floor`, and the Floor tab of the till app): tables coloured
+  by stage with the party, the server, minutes and the amount; tabs by name,
+  bar seat or room; quick sale. **The order screen**: seat, course, choices,
+  notes, the guest's allergy, hold and fire a course, repeat a round, move,
+  merge, give to another server, share an item between guests, the guest
+  check (marked as not a tax document).
+- **Paying** hands the chosen part (whole, by seat, evenly, by item) to the
+  counter, so every tender, US dollars, tips, the receipt, BTS and the
+  offline till work as they do for a shop; a room number charges it to the
+  guest's folio instead. `src/venue/bill.ts` does the arithmetic in cents:
+  what has been paid is recorded per item, the last payer takes what is left,
+  and the separate receipts add up to the unsplit bill exactly.
+- **The kitchen** (`/kitchen`): a ticket per station per send, printed by the
+  till that hosts the station's printer or shown on a screen; follow-up
+  tickets for voids; cards that age, done, recall, the all-day count, the
+  expediter's view; ready shows on the floor. A ticket that does not print
+  is shown to whoever sent it, retried, and can be sent to the fallback or
+  printed where they stand.
+- **The host stand** (`/host`): bookings against tables and time with clashes
+  refused, deposits (a tax receipt when taken, taken off the bill), email
+  confirmation and a reminder the day before, a WhatsApp or text message the
+  host sends from their own phone, no-shows, the waitlist, guest records.
+- **The hotel** (`/hotel`): room types, rooms, rates by season and weekend in
+  BZ$ or US$, minimum stays; a calendar of rooms against dates (sweep to
+  book, drag to move); the front desk; folios (nights posted by the night
+  audit, restaurant and bar charges by room, extras, a second folio,
+  deposits, part payments, the final bill); housekeeping from a phone; the
+  night audit with occupancy, average daily rate and revenue per available
+  room.
+- **Closing**: the server's checkout report, tips per server and the pooled
+  shares (figures only: no payroll), and a guided day close. The business day
+  ends at an hour the owner sets, so a sale at 1 a.m. belongs to the evening
+  before.
+- **With no connection**: opening tables, ordering, sending (the device makes
+  and prints the tickets itself) and working out a bill happen on the device
+  and are sent when the connection is back (tested in a browser). Payment
+  goes through the till app's own offline receipts; a table paid with no
+  connection has not been run end to end. The kitchen screen, the host
+  stand, the hotel, a charge to a room and the reports need the server.
+- **Tests**: `test/venue-check.test.ts`, `venue-api.test.ts`,
+  `venue-floor.test.ts`, `hotel.test.ts`; in a browser `e2e/venue.spec.ts`
+  and `e2e/hotel.spec.ts`.
 
 ## Email (`src/mail`, `src/api/mail.ts`, `web/src/pages/Email.tsx`)
 

@@ -29,6 +29,7 @@ export const MAIL_TYPES = {
   'reminder': { label: 'Payment reminder', sender: 'business', category: 'transactional' },
   'statement': { label: 'Statement of account', sender: 'business', category: 'transactional' },
   'quote': { label: 'Quotation', sender: 'business', category: 'transactional' },
+  'reservation': { label: 'Table booking', sender: 'business', category: 'transactional' },
   'purchase-order': { label: 'Purchase order', sender: 'business', category: 'transactional' },
   'order': { label: 'Order confirmation', sender: 'business', category: 'transactional' },
   'order-ready': { label: 'Order ready', sender: 'business', category: 'transactional' },
@@ -52,6 +53,7 @@ export const MAIL_TYPES = {
   'quote-answer': { label: 'Quote accepted or declined', sender: 'platform', category: 'transactional' },
   'notice': { label: 'Notice', sender: 'platform', category: 'transactional' },
   'daily-summary': { label: 'Daily summary', sender: 'platform', category: 'optional' },
+  'filing-reminder': { label: 'What is due this month', sender: 'platform', category: 'optional' },
   'test': { label: 'Test email', sender: 'business', category: 'transactional' },
 } as const satisfies Record<string, MailTypeDef>;
 

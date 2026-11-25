@@ -8,9 +8,10 @@ import { printPdf } from '../print';
 import { useSession } from '../session';
 import { useToast } from '../toast';
 import { ErrorText, Field, fromCents, Modal, money, Select, toCents, usePageTitle } from '../ui';
+import { useLocations } from './Locations';
 
-type Means = 'cash' | 'card' | 'bank_transfer' | 'cheque' | 'other';
-const MEANS: Array<[Means, string]> = [['cash', 'Cash'], ['card', 'Card'], ['bank_transfer', 'Bank transfer'], ['cheque', 'Cheque'], ['other', 'Other']];
+type Means = 'cash' | 'card' | 'bank_transfer' | 'wallet' | 'cheque' | 'other';
+const MEANS: Array<[Means, string]> = [['cash', 'Cash'], ['card', 'Card'], ['bank_transfer', 'Bank transfer'], ['wallet', 'Mobile wallet'], ['cheque', 'Cheque'], ['other', 'Other']];
 const DENOMINATIONS = ['100', '50', '20', '10', '5', '2', '1', '0.50', '0.25', '0.10', '0.05', '0.01'] as const;
 
 export interface Shift {
@@ -41,11 +42,13 @@ export interface ShiftReport {
   totalTakings: string;
   voided: { count: number; total: string };
   discounts?: { count: number; total: string };
+  serviceCharge?: { count: number; total: string };
+  tips?: { count: number; total: string };
   cash: { float: string; in: string; payIn: string; payOut: string; expected: string; counted: string | null; difference: string | null };
   movements: Array<{ id: string; kind: 'pay_in' | 'pay_out'; amount: string; reason: string; at: string; by: string | null }>;
 }
 
-interface Register { id: string; name: string; openBy: string | null; openSince: string | null }
+interface Register { id: string; name: string; openBy: string | null; openSince: string | null; location?: { id: string; name: string } }
 
 const time = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 const MONEY = /^\d{1,13}(\.\d{1,2})?$/;
@@ -276,6 +279,8 @@ export function ReportView({ report, shift }: { report: ShiftReport; shift: Shif
             <tr><td>GST</td><td className="right mono">{money(report.gst)}</td></tr>
             {report.voided.count > 0 && <tr><td className="muted">{t('Cancelled ({n})', { n: report.voided.count })}</td><td className="right mono muted">{money(report.voided.total)}</td></tr>}
             {report.discounts && report.discounts.count > 0 && <tr><td className="muted">{t('Discounts given ({n} sales, before GST)', { n: report.discounts.count })}</td><td className="right mono muted">−{money(report.discounts.total)}</td></tr>}
+            {report.serviceCharge && report.serviceCharge.count > 0 && <tr><td>{t('Service charge ({n} sales, before GST), in the sales', { n: report.serviceCharge.count })}</td><td className="right mono">{money(report.serviceCharge.total)}</td></tr>}
+            {report.tips && report.tips.count > 0 && <tr><td>{t('Tips for the staff ({n}), not in the sales or the takings', { n: report.tips.count })}</td><td className="right mono">{money(report.tips.total)}</td></tr>}
             {report.giftCards && report.giftCards.sold.count > 0 && <tr><td>{t('Gift cards sold ({n}), in the takings', { n: report.giftCards.sold.count })}</td><td className="right mono">{money(report.giftCards.sold.total)}</td></tr>}
             {report.giftCards && report.giftCards.used !== '0.00' && <tr><td className="muted">{t('Paid with gift cards (not in the takings)')}</td><td className="right mono muted">{money(report.giftCards.used)}</td></tr>}
           </tbody>
@@ -374,6 +379,17 @@ function Registers() {
   const [error, setError] = useState<unknown>(null);
   const load = useCallback(() => api<{ data: Register[] }>('/v1/registers').then((r) => setRows(r.data)).catch(setError), []);
   useEffect(() => void load(), [load]);
+  // More than one shop: each register is at one of them, and sells from its stock.
+  const [places] = useLocations();
+  const moveTo = async (r: Register, locationId: string) => {
+    try {
+      await api(`/v1/registers/${r.id}`, { method: 'PUT', body: { name: r.name, locationId } });
+      toast(t('{register} now sells from {location}', { register: r.name, location: places.find((p) => p.id === locationId)?.name ?? '' }));
+      void load();
+    } catch (err) {
+      setError(err);
+    }
+  };
   const add = async (e: FormEvent) => {
     e.preventDefault();
     try {
@@ -398,6 +414,11 @@ function Registers() {
               <strong>{r.name}</strong>
               <span className="small muted">{r.openBy ? t('open by {name}', { name: r.openBy }) : t('closed')}</span>
               <span className="spacer" />
+              {places.length > 1 && (
+                <Select value={r.location?.id ?? places.find((p) => p.main)?.id ?? ''} onChange={(e) => void moveTo(r, e.target.value)} aria-label={t('Location of {register}', { register: r.name })} className="location-select">
+                  {places.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </Select>
+              )}
               {!r.openBy && <button type="button" className="link danger-link small" onClick={() => void api(`/v1/registers/${r.id}`, { method: 'DELETE' }).then(load).catch(setError)}>{t('Archive')}</button>}
             </li>
           ))}

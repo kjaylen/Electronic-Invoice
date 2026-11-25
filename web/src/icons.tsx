@@ -37,5 +37,6 @@ export const Icons = {
   templates: () => <Svg><rect x="2.5" y="3.5" width="15" height="13" rx="2" /><path d="M2.5 7h15" /><path d="m8 10-2 2 2 2M12 10l2 2-2 2" /></Svg>,
   clock: () => <Svg><circle cx="10" cy="10" r="7" /><path d="M10 6v4.2l2.8 1.8" /></Svg>,
   check: () => <Svg><circle cx="10" cy="10" r="7" /><path d="m7 10 2 2 4-4" /></Svg>,
+  layaway: () => <Svg><path d="M3 7.5 10 4l7 3.5v6L10 17l-7-3.5v-6Z" /><path d="M3 7.5 10 11l7-3.5M10 11v6" /></Svg>,
   giftCard: () => <Svg><rect x="2.5" y="5.5" width="15" height="10" rx="1.8" /><path d="M2.5 9.5h15M7.5 5.5v10" /><path d="M7.5 9.5C6 7 3.8 7 3.8 8.2s2.2 1.3 3.7 1.3Zm0 0C9 7 11.2 7 11.2 8.2S9 9.5 7.5 9.5Z" /></Svg>,
 };

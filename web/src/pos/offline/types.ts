@@ -46,6 +46,8 @@ export interface SaleEvent {
     lineItemIds: Array<string | null>;
   };
   tenders?: Tender[];
+  /** A tip added to the payment: for the staff, not on the receipt. */
+  tip?: Tender;
 }
 
 export interface ShiftOpenEvent { id: string; kind: 'shift_open'; at: string; userId: string; shiftId: string; openingFloat: string }
@@ -62,6 +64,10 @@ export interface LocalSale {
   tenders: Tender[];
   /** Taken off the lines' full prices, before GST (the shift report's discounts). */
   discountCents: string;
+  /** The service charge on the sale, before GST. */
+  serviceCents?: string;
+  /** A tip added to the payment. */
+  tip?: Tender;
   userId: string | null;
 }
 

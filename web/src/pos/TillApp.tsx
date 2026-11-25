@@ -11,10 +11,12 @@
 
 import { createContext, type FormEvent, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { api, ApiError, apiBlob, type Account, type Me, type Permission, type Role, setTillTransport, UNAUTHORIZED_EVENT } from '../api';
-import { LanguageToggle, useT } from '../i18n';
+import { LanguagePicker, useT } from '../i18n';
+import { VenueFloor } from '../venue/Floor';
+import { KitchenScreen } from '../venue/Kitchen';
 import { SessionContext, type SessionState } from '../session';
 import { useToast } from '../toast';
-import { ErrorText, Field } from '../ui';
+import { ErrorText, Field, usdOf } from '../ui';
 import { HardwareSettings } from './Devices';
 import { type HardwareConfig, hardwareReport, HardwareError, loadHardware, openDrawer as kickDrawer, type PrinterConfig, printTicket as sendTicket, saveHardware } from './hardware';
 import { browserCanScan, type Platform, platform as getPlatform } from './platform';
@@ -411,7 +413,7 @@ function Pair({ platform, initialServer, onPaired }: { platform: Platform; initi
         </Field>
         <ErrorText error={error} />
         <button className="big" disabled={busy || code.replace('-', '').length !== 8}>{busy ? t('Pairing…') : t('Pair this till')}</button>
-        <div className="row"><span className="spacer" /><LanguageToggle /></div>
+        <div className="row"><span className="spacer" /><LanguagePicker /></div>
       </form>
       {camera && <CameraScanner onClose={() => setCamera(false)} onScan={scanned} />}
     </div>
@@ -463,7 +465,7 @@ function Lock({ till, deviceToken, offline, status, onSignedIn, onRefresh }: { t
             <button type="button" className="secondary" onClick={() => setSetup(true)}>{t('Set up my PIN')}</button>
             <button type="button" className="link" onClick={onRefresh}>{t('Refresh')}</button>
             <span className="spacer" />
-            <LanguageToggle />
+            <LanguagePicker />
           </div>
         </main>
       )}
@@ -594,7 +596,16 @@ function SetPin({ deviceToken, onDone, onCancel }: { deviceToken: string; onDone
 
 // ---------- signed in ----------
 
-type Tab = 'sell' | 'sales' | 'shift' | 'devices' | 'sync';
+type Tab = 'floor' | 'kitchen' | 'sell' | 'sales' | 'shift' | 'devices' | 'sync';
+
+/** Table service on a till: the floor, paid at this till's counter, tickets on this till's printer. */
+function TillFloor() {
+  const till = useTill();
+  const printer = useRef(till.printTicket);
+  printer.current = till.printTicket;
+  const print = useCallback((ticket: Ticket, title: string) => printer.current(ticket, { title }), []);
+  return <VenueFloor counter={<Sell />} print={print} />;
+}
 
 /** A logo from the snapshot (data: URL, printed offline) or the server. */
 function logoBlob(url: string): Promise<Blob> {
@@ -724,7 +735,10 @@ function SignedInTill(props: {
       if (!view.printed.printable) throw new HardwareError(t('This document has no valid printed copy'));
       // The business's logo on top (fetched once; printed without it if it cannot be had).
       const logo = view.logo ? await ticketLogo(view.logo, logoBlob).catch(() => null) : null;
-      const ticket = documentTicket(view, { message: hardware.receiptMessage, ...(options.copy && { copy: true }), logo });
+      // For visitors: the total in US dollars, in the receipt's message space (the rest of a printed copy is only what the signed document holds).
+      const usd = me?.counter?.showUsd ? `US$ ${usdOf(view.view.totals.taxInclusive)} (BZ$2 = US$1)` : '';
+      const message = [usd, hardware.receiptMessage].filter((x) => x?.trim()).join('\n');
+      const ticket = documentTicket(view, { message, ...(options.copy && { copy: true }), logo });
       for (let i = 0; i < (options.copy ? 1 : hardware.copies); i++) await printTicket(ticket, { openDrawer: i === 0 && options.openDrawer, title: view.view.typeName });
     },
     openDrawer: async () => {
@@ -759,8 +773,22 @@ function SignedInTill(props: {
     logout: async () => lock(),
   };
 
+  // A restaurant or bar: the floor comes first for those who serve, the kitchen screen for those who cook.
+  const service = Boolean(me?.venue?.restaurant || me?.venue?.bar);
+  const sells = permissions.has('documents.issue');
+  const serves = service && (permissions.has('venue.orders') || permissions.has('venue.floor'));
+  const cooks = service && permissions.has('venue.kitchen');
+  const landed = useRef(false);
+  useEffect(() => {
+    if (!me || landed.current) return;
+    landed.current = true;
+    if (serves) setTab('floor');
+    else if (cooks && !sells) setTab('kitchen');
+  }, [me, serves, cooks, sells]);
   const tabs: Array<[Tab, string]> = [
-    ['sell', t('Sell')], ['sales', t('Sales')], ['shift', t('Shift')],
+    ...(serves ? [['floor', t('Floor')] as [Tab, string]] : []),
+    ...(cooks ? [['kitchen', t('Kitchen')] as [Tab, string]] : []),
+    ...(sells ? [['sell', t('Sell')], ['sales', t('Sales')], ['shift', t('Shift')]] as Array<[Tab, string]> : []),
     ...(isManager ? [['devices', t('Devices')] as [Tab, string]] : []),
     ...(isManager && props.offline ? [['sync', t('Sync')] as [Tab, string]] : []),
   ];
@@ -784,6 +812,8 @@ function SignedInTill(props: {
           <main className="till-main">
             {/* The counter and the shift wait for the business and the person (from the till's own copy: a moment). */}
             {!me && tab !== 'devices' && tab !== 'sync' && <div className="till-loading" aria-busy="true">{t('Loading…')}</div>}
+            {me && tab === 'floor' && serves && <TillFloor />}
+            {me && tab === 'kitchen' && cooks && <KitchenScreen />}
             {me && tab === 'sell' && <Sell />}
             {me && tab === 'sales' && <Sales />}
             {me && tab === 'shift' && <ShiftPanel />}

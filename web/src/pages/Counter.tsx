@@ -23,9 +23,11 @@ import { useT } from '../i18n';
 import { printPdf } from '../print';
 import { useSession } from '../session';
 import { useToast } from '../toast';
-import { belizeDate, Combobox, CountUp, ErrorText, fromCents, Modal, money, Segmented, StatusBadge, store, toCents, useDebounced, usePageTitle } from '../ui';
+import { belizeDate, Combobox, CountUp, ErrorText, fromCents, Modal, money, Segmented, StatusBadge, store, toCents, useDebounced, usePageTitle, usdOf } from '../ui';
 import { searchItems } from './NewDocument';
 import { ClockButton } from './TimeClock';
+import { printInBrowser } from '../pos/hardware';
+import { orderTicket, type Ticket, toHtml } from '../pos/ticket';
 
 interface LineDiscount { kind: 'percent' | 'amount'; value: string }
 
@@ -45,9 +47,18 @@ interface CartLine {
   wholesalePrice?: string | null;
   /** Lower prices from a quantity on (retail customers). */
   breaks?: Array<{ minQuantity: string; unitPrice: string }>;
+  /** The item's category: decides which station (kitchen, bar) makes it. */
+  category?: string | null;
+  /** For whoever makes it: "no onions". On the order ticket, not on the receipt. */
+  note?: string;
+  /** How many have already gone to the kitchen or bar on an order ticket. */
+  sent?: string;
+  /** From a table's check: its discounts and service charge as worked out there, used as they are. */
+  fixed?: Array<{ isCharge: boolean; reason: string; amount: string }>;
 }
 
-type Means = '10' | '48' | '30' | 'split' | 'account';
+/** 68: a mobile wallet (DigiWallet, E-Kyash): the customer pays on their phone and shows the confirmation. */
+type Means = '10' | '48' | '30' | '68' | 'split' | 'account';
 
 interface Sale {
   lines: CartLine[];
@@ -60,20 +71,33 @@ interface Sale {
   /** A percentage off every line. */
   discount?: string;
   customer?: { id: string; name: string; tin: string | null; email?: string | null; priceList?: 'retail' | 'wholesale' } | null;
-  /** Split payment: the card or transfer part; cash pays the rest. */
-  split?: { means: '48' | '30'; amount: string };
+  /** Split payment: the card, transfer or wallet part; cash pays the rest. */
+  split?: { means: '48' | '30' | '68'; amount: string };
+  /** The wallet's confirmation number, when the cashier types it. */
+  walletRef?: string;
+  /** The business's service charge is on this sale. */
+  service?: boolean;
+  /** A tip the customer adds to a card or wallet payment (not part of the sale). */
+  tip?: string;
+  /** The table this sale is the tab of. */
+  table?: string;
+  /** A part of a table's or tab's check being paid (the hospitality module): its lines are fixed. */
+  venue?: VenuePay;
   /** Charged to the customer's account: days until it is due. */
   dueDays?: number;
+  /** On account as a layaway: the goods stay in the shop until paid. How long they are kept, and the deposit paid now. */
+  layaway?: { weeks: number; deposit: string; method: 'cash' | 'card' | 'bank_transfer' | 'online' };
   /** Loyalty points the customer uses on this sale. */
   redeemPoints?: number;
   /** A gift card paying what it can (checked when it was entered); cash, card or transfer pays the rest. */
   giftCard?: { code: string; last4: string; balance: string };
 }
 
-interface HeldSale { id: string; at: string; label: string; total: string; count: number; sale: Sale; heldBy?: string | null }
+interface HeldSale { id: string; at: string; label: string; total: string; count: number; sale: Sale; heldBy?: string | null; table?: string | null }
 
 /** A barcode scanned outside the search box (a CustomEvent<string> on window). */
 export const SCAN_EVENT = 'etd:scan';
+import { clearPay, finishPay, PAY_EVENT, peekPay, type VenuePay } from '../venue/handoff';
 
 export interface CounterCart {
   lines: Array<{ name: string; quantity: string; unitPrice: string }>;
@@ -81,6 +105,8 @@ export interface CounterCart {
   gst: string;
   total: string;
   change: string | null;
+  /** The total in US dollars, when the business shows it. */
+  usd?: string;
 }
 
 let key = 0;
@@ -91,6 +117,7 @@ const fromItem = (it: Item, quantity = '1', wholesale = false): CartLine => ({
   key: ++key, itemId: it.id, name: it.name, quantity, unitCode: it.unitCode, unitPrice: wholesale && it.wholesalePrice ? it.wholesalePrice : it.unitPrice, gstCategory: it.gstCategory,
   retailPrice: it.unitPrice, wholesalePrice: it.wholesalePrice ?? null,
   ...(it.priceBreaks?.length && { breaks: it.priceBreaks }),
+  ...(it.category && { category: it.category }),
   ...(it.exemptionReasonCode && { exemptionReasonCode: it.exemptionReasonCode }),
 });
 /** The retail price each at this quantity: the best quantity price reached, else the usual price. */
@@ -152,6 +179,7 @@ export function Counter() {
         if (autoPrint && doc.status !== 'rejected') print(doc);
       }}
       print={print}
+      printOrder={(ticket, title) => printInBrowser(toHtml(ticket, { paperWidth: 80 }, title))}
       lastSaleActions={(doc) => <Link className="button secondary" to={`/documents/${doc.id}`} viewTransition>{t('Open or send')}</Link>}
     />
   );
@@ -168,6 +196,8 @@ export function CounterPanel(props: {
   extraButtons?: ReactNode;
   /** The sale as it changes (the customer display). */
   onCart?: (cart: CounterCart) => void;
+  /** Print an order ticket for the kitchen or the bar. */
+  printOrder: (ticket: Ticket, title: string) => Promise<void> | void;
 }) {
   const t = useT();
   const toast = useToast();
@@ -184,6 +214,23 @@ export function CounterPanel(props: {
     if (saved?.lines) key = Math.max(key, ...saved.lines.map((l) => l.key), 0);
     return saved?.lines ? saved : newSale();
   });
+  // A part of a check to pay arrives from the floor: its lines replace whatever was in the cart (which is held first, not lost).
+  useEffect(() => {
+    const take = () => {
+      const pay = peekPay();
+      if (!pay) return;
+      setSale((old) => {
+        if (old.lines.length && !old.venue) void api('/v1/held-sales', { method: 'POST', body: { label: '', total: '0.00', count: Math.max(1, old.lines.length), sale: old } }).catch(() => {});
+        return {
+          ...newSale(), venue: pay,
+          lines: pay.lines.map((l) => ({ key: ++key, ...(l.itemId && { itemId: l.itemId }), name: l.description, quantity: l.quantity, unitCode: l.unitCode, unitPrice: l.unitPrice, gstCategory: l.gstCategory, ...(l.exemptionReasonCode && { exemptionReasonCode: l.exemptionReasonCode }), custom: !l.itemId, fixed: l.allowanceCharges ?? [] })),
+        };
+      });
+    };
+    take();
+    window.addEventListener(PAY_EVENT, take);
+    return () => window.removeEventListener(PAY_EVENT, take);
+  }, []);
   const [held, setHeld] = useState<HeldSale[]>([]);
   const loadHeld = useCallback(() => api<{ data: HeldSale[] }>('/v1/held-sales').then((r) => setHeld(r.data)).catch(() => {}), []);
   const [favorites, setFavorites] = useState<Item[]>([]);
@@ -199,7 +246,7 @@ export function CounterPanel(props: {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [discountFor, setDiscountFor] = useState<number | null>(null);
-  const [dialog, setDialog] = useState<'hold' | 'held' | 'discount' | null>(null);
+  const [dialog, setDialog] = useState<'hold' | 'held' | 'discount' | 'tables' | 'split' | null>(null);
   const search = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -297,11 +344,15 @@ export function CounterPanel(props: {
   };
 
   const saleDiscount = percentOk(sale.discount) ? sale.discount! : null;
+  // The business's service charge, when this sale carries it: a charge on every line, so it is on the receipt with its GST.
+  const servicePercent = me?.counter?.serviceChargePercent ?? null;
+  const serviceOn = Boolean(servicePercent) && sale.service === true && !sale.venue;
   const valid = sale.lines.filter((l) => l.name.trim() && DECIMAL.test(l.quantity) && Number(l.quantity) > 0 && DECIMAL.test(l.unitPrice) && (l.gstCategory !== 'E' || l.exemptionReasonCode) && discountOk(l));
   const linesBody = valid.map((l) => {
-    const allowances = [
+    const allowances = l.fixed ?? [
       ...(l.discount ? [{ isCharge: false, reason: 'Discount', ...(l.discount.kind === 'percent' ? { percent: l.discount.value } : { amount: l.discount.value }) }] : []),
       ...(saleDiscount ? [{ isCharge: false, reason: `Sale discount ${saleDiscount}%`, percent: saleDiscount }] : []),
+      ...(serviceOn ? [{ isCharge: true, reason: `Service charge ${servicePercent}%`, percent: servicePercent! }] : []),
     ];
     return {
       ...(l.itemId && !l.custom ? { itemId: l.itemId } : {}),
@@ -364,7 +415,9 @@ export function CounterPanel(props: {
   const totalCents = toCents(total);
   // What was taken off, before GST: the lines at full price less the subtotal.
   const fullPrice = valid.reduce((a, l) => a + (lineBase(l) ?? 0n), 0n);
-  const discounted = totals ? fullPrice - toCents(totals.lineExtension) : 0n;
+  const chargeCents = totals?.charges ? toCents(totals.charges) : 0n;
+  const discounted = totals ? fullPrice + chargeCents - toCents(totals.lineExtension) : 0n;
+  const showUsd = Boolean(me?.counter?.showUsd);
 
   // A gift card pays what it can; the rest is paid by cash, card or transfer (not split, not on account).
   const gift = sale.giftCard ?? null;
@@ -385,7 +438,15 @@ export function CounterPanel(props: {
     const net = preview.lines[i]?.net;
     return base !== null && base > 0n && net !== undefined && Number(base - toCents(net)) * 100 > Number(limitText) * Number(base) + 50;
   });
-  const canIssue = valid.length > 0 && valid.length === sale.lines.length && Boolean(totals) && previewFresh && Boolean(me?.certificate) && (change === null || change >= 0n) && splitOk && !overLimit;
+  // A layaway's deposit: nothing, or an amount up to the total.
+  const layaway = means === 'account' && sale.customer ? sale.layaway ?? null : null;
+  const depositCents = layaway && MONEY.test(layaway.deposit) ? toCents(layaway.deposit) : 0n;
+  const depositOk = !layaway || layaway.deposit === '' || (MONEY.test(layaway.deposit) && depositCents <= totalCents);
+  // A tip rides with a card or wallet payment; cash tips go straight to the staff.
+  const tipAllowed = (Boolean(me?.counter?.tips) || Boolean(sale.venue)) && (means === '48' || means === '68') && !gift && !sale.venue?.room;
+  const tipOk = !tipAllowed || !sale.tip || MONEY.test(sale.tip);
+  const tipCents = tipAllowed && sale.tip && MONEY.test(sale.tip) ? toCents(sale.tip) : 0n;
+  const canIssue = tipOk && depositOk && valid.length > 0 && valid.length === sale.lines.length && Boolean(totals) && previewFresh && Boolean(me?.certificate) && (change === null || change >= 0n) && splitOk && !overLimit;
 
   const issue = async (e?: FormEvent, overrideCreditLimit = false) => {
     e?.preventDefault();
@@ -401,16 +462,24 @@ export function CounterPanel(props: {
         lines: linesBody,
         ...(overrideCreditLimit && { overrideCreditLimit: true }),
         ...(redeem && { redeemPoints: redeem }),
-        ...(onAccount
+        ...(tipCents > 0n && { tip: { amount: fromCents(tipCents), meansCode: means } }),
+        ...(sale.venue?.room
+          // Charged to the guest's room: the server makes it an invoice on their stay.
+          ? { room: { bookingId: sale.venue.room.bookingId }, payment: { meansCode: '10' } }
+          : onAccount && layaway
+          ? { layaway: { holdUntil: belizeDate(layaway.weeks * 7), ...(depositCents > 0n && { deposit: { amount: fromCents(depositCents), method: layaway.method } }) } }
+          : onAccount
           ? { payment: { meansCode: '30', dueDate: belizeDate(days), terms: `Payment due in ${days} days` } }
           : gift
             ? { giftCard: { code: gift.code, amount: fromCents(giftApplied) }, ...(rest > 0n && { tenders: [{ meansCode: '1', amount: fromCents(giftApplied) }, { meansCode: means, amount: fromCents(rest) }] }) }
           : means === 'split'
             ? { tenders: [{ meansCode: sale.split!.means, amount: sale.split!.amount }, { meansCode: '10', amount: fromCents(cashDue!) }] }
-            : { payment: { meansCode: means, terms: means === '10' && sale.usd && tenderedBz !== null ? `Paid by cash (US$${fromCents(toCents(sale.tendered))} received)` : `Paid by ${means === '10' ? 'cash' : means === '48' ? 'card' : 'bank transfer'}` } }),
+            : { payment: { meansCode: means, terms: means === '10' && sale.usd && tenderedBz !== null ? `Paid by cash (US$${fromCents(toCents(sale.tendered))} received)` : means === '68' ? `Paid by mobile wallet${sale.walletRef?.trim() ? ` (ref ${sale.walletRef.trim().slice(0, 40)})` : ''}` : `Paid by ${means === '10' ? 'cash' : means === '48' ? 'card' : 'bank transfer'}` } }),
       };
       const doc = await api<DocumentInfo>('/v1/documents', { method: 'POST', headers: { 'Idempotency-Key': sale.idempotencyKey }, body });
       const changeText = change !== null ? fromCents(change) : null;
+      // A check's part is paid: written back on the check, which shows the floor again.
+      if (sale.venue && doc.status !== 'rejected') finishPay(sale.venue, doc.id, Number(tipCents), means, sale.venue.room ? `Room ${sale.venue.room.room}` : means === '10' ? 'Cash' : means === '48' ? 'Card' : means === '68' ? 'Wallet' : means === '30' ? 'Transfer' : 'Split');
       setLast({ doc, change: changeText, email: sale.customer?.email ?? null });
       setSale(newSale());
       setDiscountFor(null);
@@ -426,7 +495,78 @@ export function CounterPanel(props: {
 
   // ---------- holding sales ----------
 
-  const putOnHold = (label: string, s: Sale) => api<HeldSale>('/v1/held-sales', { method: 'POST', body: { label: label.trim(), total: totals ? total : fromCents(fullPrice), count: s.lines.length, sale: s } });
+  const putOnHold = (label: string, s: Sale, amount?: string) => api<HeldSale>('/v1/held-sales', {
+    method: 'POST',
+    body: { label: label.trim(), ...(s.table && { table: s.table }), total: amount ?? (totals ? total : fromCents(fullPrice)), count: Math.max(1, s.lines.length), sale: s },
+  });
+
+  // ---------- tables: a tab that stays open, and what goes to the kitchen and the bar ----------
+
+  const tables = me?.counter?.tables ?? [];
+  const stations = me?.counter?.stations ?? [];
+  const stationOf = (l: CartLine) => stations.find((s) => l.category && s.categories.some((c) => c.toLowerCase() === l.category!.toLowerCase()));
+  const tabOf = (name: string) => held.find((h) => (h.table ?? h.sale.table ?? '').toLowerCase() === name.toLowerCase());
+  /** Print what is new for each station, and remember it went. */
+  const sendOrder = async (s: Sale): Promise<{ lines: CartLine[]; sentTo: string[] }> => {
+    const sentTo: string[] = [];
+    if (!s.table) return { lines: s.lines, sentTo };
+    for (const station of stations) {
+      const fresh = s.lines.flatMap((l) => {
+        if (stationOf(l) !== station || !l.name.trim()) return [];
+        const more = Number(l.quantity) - Number(l.sent ?? '0');
+        return more > 0 ? [{ quantity: String(Math.round(more * 1000) / 1000), name: l.name, note: l.note }] : [];
+      });
+      if (!fresh.length) continue;
+      await props.printOrder(orderTicket({ station: station.name, table: s.table, by: session?.user.name ?? null, at: new Date(), lines: fresh }), `${station.name} · ${s.table}`);
+      sentTo.push(station.name);
+    }
+    return { lines: s.lines.map((l) => (stationOf(l) ? { ...l, sent: l.quantity } : l)), sentTo };
+  };
+  /** Keep the table's tab open: the order goes to the kitchen and bar, the tab waits for more. */
+  const keepOpen = async () => {
+    if (!sale.table || !sale.lines.length) return;
+    try {
+      const order = await sendOrder(sale);
+      await putOnHold(sale.table, { ...sale, lines: order.lines, giftCard: undefined, tip: undefined });
+      toast(order.sentTo.length ? t('{table} is open. Order sent to: {stations}.', { table: sale.table, stations: order.sentTo.join(', ') }) : t('{table} is open.', { table: sale.table }));
+    } catch (e) {
+      setError(e);
+      return;
+    }
+    setSale(newSale());
+    setDiscountFor(null);
+    setLast(null);
+    void loadHeld();
+    focusSearch();
+  };
+  /** A free table: this sale becomes its tab (with the service charge, when the business has one). */
+  const openTable = async (name: string) => {
+    setDialog(null);
+    if (sale.table && sale.table !== name && sale.lines.length) await keepOpen();
+    setSale((s) => ({ ...(s.table && s.table !== name ? newSale() : s), table: name, ...(servicePercent && { service: true }) }));
+    focusSearch();
+  };
+  /** Some of the bill is paid now; the rest stays on the table (or on hold). */
+  const splitBill = async (payNow: Record<number, number>) => {
+    const take = (l: CartLine) => Math.min(payNow[l.key] ?? 0, Number(l.quantity));
+    const now = sale.lines.filter((l) => take(l) > 0).map((l) => ({ ...l, quantity: String(take(l)), sent: undefined }));
+    const rest = sale.lines.flatMap((l) => {
+      const left = Math.round((Number(l.quantity) - take(l)) * 1000) / 1000;
+      return left > 0 ? [{ ...l, quantity: String(left), ...(l.sent !== undefined && { sent: String(Math.min(Number(l.sent), left)) }) }] : [];
+    });
+    setDialog(null);
+    if (!now.length || !rest.length) return;
+    try {
+      // The rest goes back where it was: the table's tab, or on hold.
+      await putOnHold(sale.table ?? t('Rest of the bill'), { ...sale, lines: rest, giftCard: undefined, tip: undefined, idempotencyKey: crypto.randomUUID() }, saleTotal({ ...sale, lines: rest }));
+    } catch (e) {
+      setError(e);
+      return;
+    }
+    setSale({ ...sale, lines: now, table: undefined, giftCard: undefined, tip: undefined, idempotencyKey: crypto.randomUUID() });
+    toast(sale.table ? t('Paying part of {table}. The rest is still on the table.', { table: sale.table }) : t('Paying part of the bill. The rest is on hold.'), 'info');
+    void loadHeld();
+  };
   const holdCurrent = async (label: string) => {
     if (!sale.lines.length) return;
     try {
@@ -497,6 +637,7 @@ export function CounterPanel(props: {
       gst: totals?.gst ?? '0.00',
       total,
       change: change !== null && change >= 0n ? fromCents(change) : null,
+      ...(showUsd && { usd: usdOf(total) }),
     });
     // Only when what the customer sees changes.
   }, [cartKey, onCart]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -511,7 +652,7 @@ export function CounterPanel(props: {
     }
   };
 
-  const meansOptions: Array<[Means, string]> = [['10', t('Cash')], ['48', t('Card')], ['30', t('Transfer')], ...(sale.giftCard ? [] : [['split', t('Split')] as [Means, string], ...(sale.customer && serverFeatures ? [['account', t('On account')] as [Means, string]] : [])])];
+  const meansOptions: Array<[Means, string]> = [['10', t('Cash')], ['48', t('Card')], ['30', t('Transfer')], ['68', t('Wallet')], ...(sale.giftCard ? [] : [['split', t('Split')] as [Means, string], ...(sale.customer && serverFeatures ? [['account', t('On account')] as [Means, string]] : [])])];
   const lineNet = (l: CartLine) => {
     const i = valid.indexOf(l);
     if (previewFresh && preview && i >= 0 && preview.lines[i]) return preview.lines[i]!.net;
@@ -576,7 +717,12 @@ export function CounterPanel(props: {
           <div className="row counter-actions">
             <button type="button" className="secondary" onClick={() => void repeatLast()}>{t('Repeat last sale')}</button>
             <button type="button" className="secondary" onClick={() => add({ key: ++key, name: '', quantity: '1', unitCode: 'H87', unitPrice: '', gstCategory: 'S', custom: true })}>+ {t('Custom item')}</button>
-            <button type="button" className="secondary" disabled={!sale.lines.length} onClick={() => setDialog('hold')}>{t('Hold sale')}</button>
+            {tables.length > 0 && (
+              <button type="button" className="secondary" onClick={() => { void loadHeld(); setDialog('tables'); }}>
+                {t('Tables')}{tables.filter((n) => tabOf(n)).length > 0 && <span className="chip">{tables.filter((n) => tabOf(n)).length}</span>}
+              </button>
+            )}
+            <button type="button" className="secondary" disabled={!sale.lines.length} onClick={() => (sale.table ? void keepOpen() : setDialog('hold'))}>{sale.table ? t('Keep the table open') : t('Hold sale')}</button>
             <button type="button" className="secondary" disabled={!held.length} onClick={() => { void loadHeld(); setDialog('held'); }}>
               {t('Held sales')}{held.length > 0 && <span className="chip">{held.length}</span>}
             </button>
@@ -604,8 +750,20 @@ export function CounterPanel(props: {
           )}
         </div>
 
-        <form className="card ticket cart stack" onSubmit={issue}>
-          <span className="kicker">{means === 'account' ? t('Tax invoice, on account') : t('Tax receipt')} · BZD</span>
+        <form className={`card ticket cart stack ${sale.venue ? 'venue-pay' : ''}`} onSubmit={issue}>
+          <span className="kicker">{sale.venue?.room ? t('Charged to a room') : means === 'account' ? t('Tax invoice, on account') : t('Tax receipt')} · BZD</span>
+          {sale.venue && (
+            <div className="cart-table">
+              <strong>{sale.venue.label}{sale.venue.room && ` → ${t('Room {room}, {guest}', { room: sale.venue.room.room, guest: sale.venue.room.guest })}`}</strong>
+              <button type="button" className="link on-dark" onClick={() => { clearPay(); setSale(newSale()); }}>{t('Back to the check')}</button>
+            </div>
+          )}
+          {sale.table && (
+            <div className="cart-table">
+              <strong>{sale.table}</strong>
+              <button type="button" className="link on-dark" onClick={() => set({ table: undefined })}>{t('Not a table')}</button>
+            </div>
+          )}
           {sale.lines.length === 0 ? <p className="cart-empty">{t('Scan or pick items to start a sale.')}</p> : (
             <ul className="cart-lines">
               {sale.lines.map((l) => (
@@ -619,6 +777,8 @@ export function CounterPanel(props: {
                     <span className="name">
                       {l.name}<span className="each num"> · {money(l.unitPrice)}</span>
                       {l.discount && discountOk(l) && <span className="line-discount num">{l.discount.kind === 'percent' ? t('{n}% off', { n: l.discount.value }) : t('{amount} off', { amount: money(l.discount.value) })}</span>}
+                      {l.note?.trim() && <span className="line-note">{l.note.trim()}</span>}
+                      {sale.table && stationOf(l) && Number(l.sent ?? '0') >= Number(l.quantity) && <span className="line-sent">{t('sent')}</span>}
                     </span>
                   )}
                   <div className="qty">
@@ -630,17 +790,33 @@ export function CounterPanel(props: {
                   <button type="button" className={`disc ${l.discount ? 'on' : ''}`} aria-label={t('Discount on {name}', { name: l.name || t('item') })} aria-expanded={discountFor === l.key} onClick={() => setDiscountFor((k) => (k === l.key ? null : l.key))}>%</button>
                   <button type="button" className="remove" aria-label={t('Remove {name}', { name: l.name || t('item') })} onClick={() => remove(l.key)}>×</button>
                   {discountFor === l.key && <LineDiscountEditor line={l} onChange={(d) => update(l.key, { discount: d })} onDone={() => { setDiscountFor(null); focusSearch(); }} />}
+                  {discountFor === l.key && stations.length > 0 && (
+                    <label className="line-note-editor">
+                      <span>{t('Note for the kitchen or bar')}</span>
+                      <input maxLength={80} placeholder={t('No onions, extra ice…')} value={l.note ?? ''} onChange={(e) => update(l.key, { note: e.target.value })} />
+                    </label>
+                  )}
                 </li>
               ))}
             </ul>
           )}
-          <div><span>{t('Subtotal')}</span><span>{money(totals?.lineExtension ?? '0.00')}</span></div>
+          <div><span>{t('Subtotal')}</span><span>{money(fromCents(toCents(totals?.lineExtension ?? '0.00') - chargeCents))}</span></div>
+          {chargeCents > 0n && <div className="cart-service"><span>{t('Service charge ({n}%)', { n: servicePercent ?? '' })}</span><span>{money(fromCents(chargeCents))}</span></div>}
           {discounted > 0n && <div className="cart-discount"><span>{saleDiscount ? t('Discounts (incl. {n}% on the sale)', { n: saleDiscount }) : t('Discounts')}</span><span>−{money(fromCents(discounted))}</span></div>}
           <div><span>GST</span><span>{money(totals?.gst ?? '0.00')}</span></div>
           <div className="grand"><span>{t('Total')}</span><span aria-live="polite"><CountUp value={Number(totalCents)} duration={420} format={(n) => money(fromCents(BigInt(Math.round(n))))} /></span></div>
+          {showUsd && totalCents > 0n && <div className="grand-usd"><span>{t('In US dollars')}</span><span>US${usdOf(total)}</span></div>}
           {sale.lines.length > 0 && (
             <button type="button" className="link on-dark cart-sale-discount" onClick={() => setDialog('discount')}>
               {saleDiscount ? t('Sale discount: {n}% (change)', { n: saleDiscount }) : t('Discount the whole sale')}
+            </button>
+          )}
+          {sale.lines.length > 0 && (sale.lines.length > 1 || Number(sale.lines[0]!.quantity) > 1) && (tables.length > 0 || sale.table) && (
+            <button type="button" className="link on-dark cart-sale-discount" onClick={() => setDialog('split')}>{t('Split the bill')}</button>
+          )}
+          {sale.lines.length > 0 && servicePercent && (
+            <button type="button" className="link on-dark cart-sale-discount" aria-pressed={serviceOn} onClick={() => set({ service: !serviceOn })}>
+              {serviceOn ? t('Service charge {n}%: on (remove)', { n: servicePercent }) : t('Add the service charge ({n}%)', { n: servicePercent })}
             </button>
           )}
 
@@ -674,9 +850,10 @@ export function CounterPanel(props: {
           {means === 'split' && (
             <div className="tender split">
               <label>
-                <select aria-label={t('Paid with')} value={sale.split?.means ?? '48'} onChange={(e) => set({ split: { means: e.target.value as '48' | '30', amount: sale.split?.amount ?? '' } })}>
+                <select aria-label={t('Paid with')} value={sale.split?.means ?? '48'} onChange={(e) => set({ split: { means: e.target.value as '48' | '30' | '68', amount: sale.split?.amount ?? '' } })}>
                   <option value="48">{t('Card')}</option>
                   <option value="30">{t('Transfer')}</option>
+                  <option value="68">{t('Wallet')}</option>
                 </select>
                 <input inputMode="decimal" placeholder="0.00" aria-label={t('Amount by card or transfer')} value={sale.split?.amount ?? ''} onChange={(e) => set({ split: { means: sale.split?.means ?? '48', amount: e.target.value } })} />
               </label>
@@ -708,10 +885,58 @@ export function CounterPanel(props: {
               )}
             </div>
           )}
+          {means === '68' && (
+            <div className="tender wallet">
+              <label>
+                <span>{t('Wallet reference (optional)')}</span>
+                <input aria-label={t('Wallet reference (optional)')} value={sale.walletRef ?? ''} maxLength={40} autoComplete="off" onChange={(e) => set({ walletRef: e.target.value })} />
+              </label>
+              <span className="small muted">{t('The number the customer’s DigiWallet or E-Kyash shows after paying. It prints on the receipt.')}</span>
+            </div>
+          )}
+          {tipAllowed && (
+            <div className="tender wallet">
+              <label>
+                <span>{t('Tip (optional)')}</span>
+                <input inputMode="decimal" placeholder="0.00" aria-label={t('Tip (optional)')} value={sale.tip ?? ''} onChange={(e) => set({ tip: e.target.value })} />
+              </label>
+              <span className="small muted">
+                {tipCents > 0n ? t('Charge {amount} in all. The tip is not on the receipt.', { amount: money(fromCents(rest + tipCents)) }) : t('What the customer adds for the staff. It is not on the receipt.')}
+              </span>
+            </div>
+          )}
           {means === 'account' && sale.customer && (
             <div className="tender account">
-              <span>{t('Invoice {name}, due in', { name: sale.customer.name })}</span>
-              <Segmented label={t('Due in')} value={String(sale.dueDays ?? 30)} onChange={(v) => set({ dueDays: Number(v) })} options={[['7', t('{n} days', { n: 7 })], ['15', t('{n} days', { n: 15 })], ['30', t('{n} days', { n: 30 })]]} />
+              <Segmented
+                label={t('On account')}
+                value={sale.layaway ? 'layaway' : 'now'}
+                onChange={(v) => set({ layaway: v === 'layaway' ? sale.layaway ?? { weeks: 4, deposit: '', method: 'cash' } : undefined })}
+                options={[['now', t('Takes the goods now')], ['layaway', t('Layaway')]]}
+              />
+              {!sale.layaway ? (
+                <>
+                  <span>{t('Invoice {name}, due in', { name: sale.customer.name })}</span>
+                  <Segmented label={t('Due in')} value={String(sale.dueDays ?? 30)} onChange={(v) => set({ dueDays: Number(v) })} options={[['7', t('{n} days', { n: 7 })], ['15', t('{n} days', { n: 15 })], ['30', t('{n} days', { n: 30 })]]} />
+                </>
+              ) : (
+                <>
+                  <span>{t('The goods stay here until {name} has paid. Kept for', { name: sale.customer.name })}</span>
+                  <Segmented label={t('Kept for')} value={String(sale.layaway.weeks)} onChange={(v) => set({ layaway: { ...sale.layaway!, weeks: Number(v) } })} options={[['2', t('{n} weeks', { n: 2 })], ['4', t('{n} weeks', { n: 4 })], ['8', t('{n} weeks', { n: 8 })], ['12', t('{n} weeks', { n: 12 })]]} />
+                  <label className="layaway-deposit">
+                    <span>{t('Deposit now')}</span>
+                    <span className="row">
+                      <input inputMode="decimal" placeholder="0.00" aria-label={t('Deposit now')} value={sale.layaway.deposit} onChange={(e) => set({ layaway: { ...sale.layaway!, deposit: e.target.value } })} />
+                      <select aria-label={t('Deposit paid by')} value={sale.layaway.method} onChange={(e) => set({ layaway: { ...sale.layaway!, method: e.target.value as 'cash' | 'card' | 'bank_transfer' | 'online' } })}>
+                        <option value="cash">{t('Cash')}</option>
+                        <option value="card">{t('Card')}</option>
+                        <option value="bank_transfer">{t('Transfer')}</option>
+                        <option value="online">{t('Wallet')}</option>
+                      </select>
+                    </span>
+                  </label>
+                  <span className="small">{!depositOk ? t('A deposit up to the total, please') : t('Still to pay: {amount}', { amount: money(fromCents(totalCents - depositCents)) })}</span>
+                </>
+              )}
             </div>
           )}
           {overLimit && <p className="form-error" role="alert">{t('You can take up to {n}% off a line. Ask a manager to make this sale.', { n: limitText! })}</p>}
@@ -720,7 +945,7 @@ export function CounterPanel(props: {
             <button type="button" className="secondary" disabled={busy} onClick={() => void issue(undefined, true)}>{t('Allow it this time')}</button>
           )}
           <button type="submit" className="big lime" disabled={!canIssue || busy}>
-            {busy ? t('Signing and sending…') : means === 'account' ? t('Issue invoice') : t('Issue receipt')}<span className="chip" aria-hidden="true">F2</span>
+            {busy ? t('Signing and sending…') : sale.venue?.room ? t('Charge to the room') : layaway ? t('Start the layaway') : means === 'account' ? t('Issue invoice') : t('Issue receipt')}<span className="chip" aria-hidden="true">F2</span>
           </button>
           {sale.lines.length > 0 && <button type="button" className="link on-dark" onClick={() => { setSale(newSale()); setDiscountFor(null); focusSearch(); }}>{t('Clear sale')}</button>}
         </form>
@@ -735,6 +960,25 @@ export function CounterPanel(props: {
           onClose={() => setDialog(null)}
         />
       )}
+      {dialog === 'tables' && (
+        <Modal title={t('Tables')} onClose={() => setDialog(null)} wide>
+          <p className="muted small">{t('Tap a free table to start its tab, or an open one to add to it or take the payment. Any till can open any table.')}</p>
+          <div className="table-grid" role="group" aria-label={t('Tables')}>
+            {tables.map((name) => {
+              const tab = tabOf(name);
+              const mine = sale.table?.toLowerCase() === name.toLowerCase();
+              return (
+                <button key={name} type="button" className={`table-tile ${mine ? 'mine' : tab ? 'open' : 'free'}`} onClick={() => (mine ? setDialog(null) : tab ? void recall(tab) : void openTable(name))}>
+                  <strong>{name}</strong>
+                  <span>{mine ? t('This sale') : tab ? money(tab.total === '0.00' ? saleTotal(tab.sale) : tab.total) : t('Free')}</span>
+                  {tab && !mine && <span className="small">{new Date(tab.at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}{tab.heldBy ? ` · ${tab.heldBy}` : ''}</span>}
+                </button>
+              );
+            })}
+          </div>
+        </Modal>
+      )}
+      {dialog === 'split' && <SplitDialog lines={sale.lines} onSplit={(q) => void splitBill(q)} onClose={() => setDialog(null)} />}
       {dialog === 'discount' && (
         <SaleDiscountDialog
           value={sale.discount ?? ''}
@@ -874,6 +1118,51 @@ function SaleDiscountDialog({ value, onSave, onClose }: { value: string; onSave:
           <button type="submit" disabled={!ok}>{t('Apply')}</button>
         </div>
       </form>
+    </Modal>
+  );
+}
+
+/** What a held sale comes to before GST and charges, for a tab whose total was not known when it was put back. */
+function saleTotal(s: Sale): string {
+  const cents = s.lines.reduce((a, l) => a + (lineBase(l) ?? 0n), 0n);
+  return fromCents(cents);
+}
+
+/** Paying part of a bill: how many of each line are paid now. */
+function SplitDialog({ lines, onSplit, onClose }: { lines: CartLine[]; onSplit: (payNow: Record<number, number>) => void; onClose: () => void }) {
+  const t = useT();
+  const [now, setNow] = useState<Record<number, number>>({});
+  const whole = (l: CartLine) => Number.isInteger(Number(l.quantity));
+  const chosen = lines.reduce((a, l) => a + (now[l.key] ?? 0), 0);
+  const all = lines.every((l) => (now[l.key] ?? 0) >= Number(l.quantity));
+  return (
+    <Modal title={t('Split the bill')} onClose={onClose}>
+      <p className="muted small">{t('Choose what is paid now. It gets its own receipt; the rest stays on the table.')}</p>
+      <ul className="split-lines">
+        {lines.filter((l) => l.name.trim()).map((l) => {
+          const n = now[l.key] ?? 0;
+          const max = Number(l.quantity);
+          return (
+            <li key={l.key}>
+              <span className="name">{l.name}<span className="muted"> · {t('{n} on the bill', { n: l.quantity })}</span></span>
+              {whole(l) ? (
+                <span className="qty">
+                  <button type="button" aria-label={t('One less {name}', { name: l.name })} disabled={n <= 0} onClick={() => setNow({ ...now, [l.key]: n - 1 })}>−</button>
+                  <output aria-label={t('{name} paid now', { name: l.name })}>{n}</output>
+                  <button type="button" aria-label={t('One more {name}', { name: l.name })} disabled={n >= max} onClick={() => setNow({ ...now, [l.key]: n + 1 })}>+</button>
+                </span>
+              ) : (
+                <label className="row small"><input type="checkbox" checked={n >= max} onChange={(e) => setNow({ ...now, [l.key]: e.target.checked ? max : 0 })} /> {t('Paid now')}</label>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+      {all && <p className="form-error">{t('That is the whole bill. Leave something for the rest, or just take the payment.')}</p>}
+      <div className="row end">
+        <button type="button" className="secondary" onClick={onClose}>{t('Cancel')}</button>
+        <button type="button" disabled={chosen <= 0 || all} onClick={() => onSplit(now)}>{t('Pay these now')}</button>
+      </div>
     </Modal>
   );
 }

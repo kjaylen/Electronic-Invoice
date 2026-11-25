@@ -46,7 +46,7 @@ import { assertCanAddUser } from '../billing/billing.ts';
 
 const role = { type: 'string', enum: [...ROLES] } as const;
 const idParams = { type: 'object', required: ['id'], properties: { id: uuid } } as const;
-const ROLE_NAMES: Record<Role, string> = { owner: 'an owner', admin: 'an admin', manager: 'a manager', cashier: 'a cashier', accountant: 'an accountant' };
+const ROLE_NAMES: Record<Role, string> = { owner: 'an owner', admin: 'an admin', manager: 'a manager', cashier: 'a cashier', accountant: 'an accountant', supervisor: 'a supervisor', server: 'a server', bartender: 'a bartender', host: 'a host', kitchen: 'kitchen staff', housekeeper: 'a housekeeper' };
 
 /** The activity log's kinds, as action patterns. */
 export const AUDIT_KINDS = {

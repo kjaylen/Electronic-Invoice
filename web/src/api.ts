@@ -135,10 +135,11 @@ export const isSignedOut = (e: unknown) => e instanceof ApiError && e.status ===
 
 // ---------- shapes returned by the API ----------
 
-export type Role = 'owner' | 'admin' | 'manager' | 'cashier' | 'accountant';
+export type Role = 'owner' | 'admin' | 'manager' | 'cashier' | 'accountant' | 'supervisor' | 'server' | 'bartender' | 'host' | 'kitchen' | 'housekeeper';
 export type Permission =
   | 'documents.issue' | 'documents.adjust' | 'documents.cancel' | 'documents.send' | 'catalog.manage' | 'orders.manage'
-  | 'payments.record' | 'expenses.manage' | 'reports.view' | 'business.manage' | 'users.manage' | 'apikeys.manage' | 'audit.view';
+  | 'payments.record' | 'expenses.manage' | 'reports.view' | 'business.manage' | 'users.manage' | 'apikeys.manage' | 'audit.view'
+  | 'venue.orders' | 'venue.approve' | 'venue.floor' | 'venue.kitchen' | 'hotel.frontdesk' | 'hotel.housekeeping';
 
 export interface Account {
   id: string;
@@ -166,6 +167,8 @@ export interface SessionInfo {
 }
 
 export interface Me {
+  /** The hospitality module: which kinds of venue the business is (all false: a shop). */
+  venue?: { restaurant: boolean; bar: boolean; hotel: boolean };
   id: string;
   legalName: string;
   tradeName: string | null;
@@ -178,7 +181,20 @@ export interface Me {
   /** Notices from the platform (maintenance, a BTS outage, news). */
   notices?: Array<{ id: string; message: string; messageEs: string | null; level: 'info' | 'warning' }>;
   /** How the counter works: the most a cashier may take off a line (percent), or no limit. */
-  counter?: { cashierDiscountLimit: string | null; loyalty?: { pointValue: string; minRedeem: number } | null };
+  counter?: {
+    cashierDiscountLimit: string | null;
+    loyalty?: { pointValue: string; minRedeem: number } | null;
+    /** Totals also shown in US dollars (BZ$2 to US$1). */
+    showUsd?: boolean;
+    /** A service charge a cashier can add to a sale, in percent; null: none. */
+    serviceChargePercent?: string | null;
+    /** A tip can be recorded with a card or wallet payment. */
+    tips?: boolean;
+    /** A bar or restaurant's tables: each holds one open tab. */
+    tables?: string[];
+    /** Where order tickets print (Kitchen, Bar), each with the item categories it makes. */
+    stations?: Array<{ name: string; categories: string[] }>;
+  };
   billing?: { plan: 'starter' | 'business' | 'pro'; planName: string; status: 'trialing' | 'active' | 'past_due' | 'suspended'; trialDaysLeft: number | null; overdueInvoices: number; features: Array<'store' | 'api' | 'webhooks' | 'integrations'> };
 }
 
@@ -246,7 +262,7 @@ export interface DocumentInfo {
   customerId: string | null;
   customer: { name?: string; tin?: string; contact?: { telephone?: string; email?: string } } | null;
   referencedEtdui: string | null;
-  totals: { lineExtension: string; gst: string; tax: string; taxInclusive: string; payable: string };
+  totals: { lineExtension: string; gst: string; tax: string; taxInclusive: string; payable: string; charges?: string };
   conditions: Condition[];
   problem?: { kind: string; reason: string | null };
   supersedes: string | null;
@@ -269,7 +285,7 @@ export interface Receivable {
   issueDate: string;
   dueDate: string;
   daysOverdue: number;
-  customer: { id: string | null; key: string; name: string; tin: string | null; email: string | null };
+  customer: { id: string | null; key: string; name: string; tin: string | null; email: string | null; telephone?: string | null };
   total: string;
   paid: string;
   credited: string;

@@ -1,6 +1,8 @@
 /**
- * English and Spanish. Strings are written in English in the code and looked
- * up in the Spanish dictionary; anything missing falls back to English.
+ * English, Spanish and Simplified Chinese. Strings are written in English in
+ * the code and looked up in the language's dictionary; anything missing falls
+ * back to English. Spanish covers the whole app; Chinese covers the counter,
+ * the till app, shifts and devices (zh.ts).
  *
  *   const t = useT();
  *   t('Issued today')                         → "Emitidos hoy"
@@ -9,8 +11,12 @@
 
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { ES } from './es';
+import { ZH } from './zh';
 
-export type Lang = 'en' | 'es';
+export type Lang = 'en' | 'es' | 'zh';
+const LANGS: Lang[] = ['en', 'es', 'zh'];
+/** What the switch shows for each language, in that language. */
+export const LANG_FULL: Record<Lang, string> = { en: 'English', es: 'Español', zh: '中文' };
 type Vars = Record<string, string | number>;
 export type T = (text: string, vars?: Vars) => string;
 
@@ -19,15 +25,16 @@ const STORAGE_KEY = 'etd.lang';
 function initialLang(): Lang {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved === 'en' || saved === 'es') return saved;
+    if (saved === 'en' || saved === 'es' || saved === 'zh') return saved;
   } catch {
     /* storage blocked */
   }
-  return navigator.language?.toLowerCase().startsWith('es') ? 'es' : 'en';
+  const browser = navigator.language?.toLowerCase() ?? '';
+  return browser.startsWith('es') ? 'es' : browser.startsWith('zh') ? 'zh' : 'en';
 }
 
 export function translate(lang: Lang, text: string, vars?: Vars): string {
-  const base = lang === 'es' ? (ES[text] ?? text) : text;
+  const base = lang === 'es' ? (ES[text] ?? text) : lang === 'zh' ? (ZH[text] ?? text) : text;
   return vars ? base.replace(/\{(\w+)\}/g, (m, k: string) => (k in vars ? String(vars[k]) : m)) : base;
 }
 
@@ -42,7 +49,7 @@ const Ctx = createContext<I18n>({ lang: 'en', setLang: () => {}, t: (s, v) => tr
 export function I18nProvider({ children }: { children: ReactNode }) {
   const [lang, setLangState] = useState<Lang>(initialLang);
   useEffect(() => {
-    document.documentElement.lang = lang;
+    document.documentElement.lang = lang === 'zh' ? 'zh-Hans' : lang;
   }, [lang]);
   const setLang = useCallback((l: Lang) => {
     setLangState(l);
@@ -86,12 +93,24 @@ export function errorMessage(t: T, error: unknown): string {
   return e.message ? t(e.message) : String(error);
 }
 
-/** EN/ES switch for the top bar and sign-in pages. */
+/** EN/ES switch for the top bar and sign-in pages (from Chinese it goes back to English). */
 export function LanguageToggle() {
   const { lang, setLang, t } = useI18n();
   return (
     <button type="button" className="lang secondary" onClick={() => setLang(lang === 'en' ? 'es' : 'en')} aria-label={t('Change language')} title={t('Change language')}>
       {lang === 'en' ? 'ES' : 'EN'}
     </button>
+  );
+}
+
+/** Every language, one button each: on the till's sign-in screen and under My account. */
+export function LanguagePicker() {
+  const { lang, setLang, t } = useI18n();
+  return (
+    <div className="tabs lang-picker" role="group" aria-label={t('Language')}>
+      {LANGS.map((l) => (
+        <button key={l} type="button" lang={l === 'zh' ? 'zh-Hans' : l} aria-pressed={lang === l} className={lang === l ? 'active' : ''} onClick={() => setLang(l)}>{LANG_FULL[l]}</button>
+      ))}
+    </div>
   );
 }
