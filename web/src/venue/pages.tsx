@@ -8,6 +8,9 @@ import { type Ticket, toHtml } from '../pos/ticket';
 import { usePageTitle } from '../ui';
 import { VenueFloor } from './Floor';
 import { KitchenScreen } from './Kitchen';
+export { HostPage } from './Host';
+export { HotelPage } from './Hotel';
+export { VenueReportsPage } from './Reports';
 
 export function FloorPage() {
   const t = useT();

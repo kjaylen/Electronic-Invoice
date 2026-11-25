@@ -15,6 +15,7 @@ import { useSyncExternalStore } from 'react';
 import { api } from '../api';
 import { apply, type Applied, type Check, memoryStore, type Op, type OpType } from '../../../src/venue/check.ts';
 import type { ModifierGroup, Period } from '../../../src/venue/pricing.ts';
+import { ticketsFor } from '../../../src/venue/station-tickets.ts';
 
 export interface FloorItem { id: string; type: 'table' | 'stool' | 'wall' | 'fixture'; name: string; shape: 'round' | 'rect' | 'square'; seats: number; x: number; y: number; w: number; h: number; rotation: number }
 export interface FloorPlan { id: string; area: string; layout: string; position: number; items: FloorItem[] }
@@ -114,8 +115,29 @@ export function dispatch(checkId: string, type: OpType, payload: Record<string, 
   state.pending.push(op);
   save();
   rebuild();
+  // With no connection the server cannot queue the tickets: this device makes and prints them itself, and says so
+  // when the order goes up (so they are not printed a second time). If its printer fails, the server queues them later.
+  if (!state.online && (done.sent.length || done.voided.length)) void printOffline(op, store.get(checkId) as NumberedCheck, done);
   void flush();
   return done;
+}
+
+async function printOffline(op: Op, check: NumberedCheck | undefined, done: Applied) {
+  if (!printer || !check || !state.data) return;
+  const jobs = [
+    ...ticketsFor(check, done.sent, 'order', state.data.stations, check.number ?? 0).map((j) => ({ ...j, kind: 'order' as const })),
+    ...ticketsFor(check, done.voided, 'void', state.data.stations, check.number ?? 0).map((j) => ({ ...j, kind: 'void' as const })),
+  ];
+  try {
+    for (const j of jobs) {
+      await printer({ id: crypto.randomUUID(), checkId: check.id, stationId: j.station.id, kind: j.kind, body: j.body, status: 'queued', attempts: 0, error: null, originDeviceId: state.data.me.deviceId, sentBy: who.id, createdAt: op.at, printedAt: null, bumpedAt: null }, j.station);
+    }
+    const queued = state.pending.find((o) => o.id === op.id);
+    if (queued) { queued.payload = { ...queued.payload, printed: true }; save(); }
+  } catch (e) {
+    state.problems.push({ id: crypto.randomUUID(), checkId: check.id, type: 'print', reason: `${check.tableName ?? check.name ?? 'Order'}: the kitchen ticket did not print (${e instanceof Error ? e.message : String(e)}). It will print when the connection is back; tell the kitchen now.` });
+    rebuild();
+  }
 }
 
 let flushing = false;

@@ -37,8 +37,9 @@ export const ROLE_DESCRIPTION: Record<Role, string> = {
 const RANK: Record<Role, number> = { owner: 4, admin: 3, manager: 2, supervisor: 1, cashier: 1, accountant: 1, server: 1, bartender: 1, host: 1, kitchen: 1, housekeeper: 1 };
 
 /** Roles the person may give to others. */
-export function assignableRoles(actor: Role): Role[] {
-  if (actor === 'owner') return ROLE_ORDER;
-  if (actor === 'admin') return ROLE_ORDER.filter((r) => RANK[r] < RANK.admin);
+export function assignableRoles(actor: Role, venue = false): Role[] {
+  const all = venue ? [...ROLE_ORDER, ...VENUE_ROLES] : ROLE_ORDER;
+  if (actor === 'owner') return all;
+  if (actor === 'admin') return all.filter((r) => RANK[r] < RANK.admin);
   return [];
 }

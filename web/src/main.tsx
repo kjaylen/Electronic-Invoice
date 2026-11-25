@@ -10,7 +10,7 @@ import { Brand } from './art';
 import { BUSINESS, STORE_DOMAIN } from './business';
 import { ErrorBoundary } from './ErrorBoundary';
 import { Icons } from './icons';
-import { FloorPage, KitchenPage } from './venue/pages';
+import { FloorPage, HostPage, HotelPage, KitchenPage, VenueReportsPage } from './venue/pages';
 import { I18nProvider, LanguageToggle, useI18n } from './i18n';
 import { ROLE_LABEL } from './permissions';
 import { SessionProvider, useSession } from './session';
@@ -433,6 +433,9 @@ function BusinessApp() {
         <Route path="/layaways" element={<Allowed permission="documents.issue"><Layaways /></Allowed>} />
         <Route path="/floor" element={<FloorPage />} />
         <Route path="/kitchen" element={<KitchenPage />} />
+        <Route path="/host" element={<HostPage />} />
+        <Route path="/hotel" element={<HotelPage />} />
+        <Route path="/venue-reports" element={<VenueReportsPage />} />
         <Route path="/site" element={<Allowed permission="business.manage"><SiteEditor /></Allowed>} />
         <Route path="/shifts/:id" element={<Allowed permission="documents.issue"><ShiftDetail /></Allowed>} />
         <Route path="/inventory/receive" element={<Allowed permission="catalog.manage"><ReceiveStock /></Allowed>} />

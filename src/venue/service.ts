@@ -15,6 +15,8 @@ import { StockError, moveStock, recordSale } from '../inventory/stock.ts';
 import { apply, type Applied, type Check, type CheckItem, fullyPaid, needsApproval, type Op, type Store } from './check.ts';
 import { type ModifierGroup, modifierProblem, type Period, priceNow, type PromoRule, resolveModifiers } from './pricing.ts';
 import { belizeClock, businessDate, loadVenue, openBusinessDate, type VenueSettings } from './settings.ts';
+import { type TicketBody, ticketsFor } from './station-tickets.ts';
+export { type TicketBody, ticketsFor } from './station-tickets.ts';
 
 export class VenueError extends Error {
   override name = 'VenueError';
@@ -129,7 +131,8 @@ export async function applyOps(db: Database, tenantId: string, actor: Actor, inp
     let periods: Period[] | null = null;
     let groups: ModifierGroup[] | null = null;
     const results: OpResult[] = [];
-    const tickets: Array<{ check: Check; itemIds: string[]; kind: 'order' | 'void' }> = [];
+    // `printed`: the device had no connection when it sent the order, and printed the tickets itself.
+    const tickets: Array<{ check: Check; itemIds: string[]; kind: 'order' | 'void'; printed: boolean }> = [];
 
     for (const input of inputs) {
       const refuse = async (code: string, reason: string) => {
@@ -218,8 +221,9 @@ export async function applyOps(db: Database, tenantId: string, actor: Actor, inp
       results.push({ id: op.id, ok: done.ok, ...(done.reason && { reason: done.reason, code: 'refused' }), ...(done.duplicate && { duplicate: true }), sent: done.sent });
       if (!done.ok) continue;
       const after = store.get(op.checkId)!;
-      if (done.sent.length) tickets.push({ check: after, itemIds: done.sent, kind: 'order' });
-      if (done.voided.length) tickets.push({ check: after, itemIds: done.voided, kind: 'void' });
+      const printed = op.payload.printed === true;
+      if (done.sent.length) tickets.push({ check: after, itemIds: done.sent, kind: 'order', printed });
+      if (done.voided.length) tickets.push({ check: after, itemIds: done.voided, kind: 'void', printed });
       if (op.type === 'pay') await stockForPaid(tx, tenantId, after, before, String(op.payload.documentId), actor.userId);
     }
 
@@ -246,41 +250,13 @@ export async function applyOps(db: Database, tenantId: string, actor: Actor, inp
           seq += 1;
           await tx.query(
             'insert into venue_tickets (id, tenant_id, check_id, station_id, kind, body, status, origin_device_id, sent_by, seq) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)',
-            [randomUUID(), tenantId, t.check.id, ticket.station.id, t.kind, JSON.stringify(ticket.body), ticket.station.screen && !ticket.station.deviceId ? 'screen' : 'queued', actor.deviceId, actor.userId, seq],
+            [randomUUID(), tenantId, t.check.id, ticket.station.id, t.kind, JSON.stringify(ticket.body), t.printed ? 'printed' : ticket.station.screen && !ticket.station.deviceId ? 'screen' : 'queued', actor.deviceId, actor.userId, seq],
           );
         }
       }
     }
     if (seq !== Number(t.venue_seq)) await tx.query('update tenants set venue_seq = $2 where id = $1', [tenantId, seq]);
     return { results, seq };
-  });
-}
-
-export interface TicketBody {
-  number: number;
-  table: string;
-  server: string;
-  partySize: number;
-  allergy: string | null;
-  at: string;
-  /** Grouped by course, then seat. */
-  items: Array<{ id: string; name: string; quantity: number; seat: number; course: number; modifiers: string[]; note: string | null; allergens: string[] }>;
-}
-
-/** One ticket per station for these items: each station sees only what it makes. */
-export function ticketsFor(check: Check, itemIds: string[], kind: 'order' | 'void', stations: Station[], number: number): Array<{ station: Station; body: TicketBody }> {
-  const items = check.items.filter((i) => itemIds.includes(i.id));
-  const at = kind === 'order' ? items[0]?.sentAt ?? check.lastActivityAt : check.lastActivityAt;
-  return stations.flatMap((station) => {
-    const mine = items.filter((i) => i.stationIds.includes(station.id)).sort((a, b) => a.course - b.course || a.seat - b.seat);
-    if (!mine.length) return [];
-    return [{
-      station,
-      body: {
-        number, table: check.tableName ?? check.name ?? (check.kind === 'quick' ? 'Counter' : 'Tab'), server: check.server.name, partySize: check.partySize, allergy: check.allergy, at,
-        items: mine.map((i: CheckItem) => ({ id: i.id, name: i.name, quantity: i.quantity, seat: i.seat, course: i.course, modifiers: i.modifiers.map((m) => m.name), note: i.note ?? null, allergens: i.allergens })),
-      },
-    }];
   });
 }
 
