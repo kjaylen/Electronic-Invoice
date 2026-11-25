@@ -10,6 +10,9 @@ import { Field, Modal, Select } from '../ui';
 import { type HardwareConfig, newPrinter, openDrawer, type PrinterConfig, printerWhere, printTicket, useKeyboardScanner } from './hardware';
 import type { BluetoothPrinter, PrinterConnection, SystemPrinter } from './platform';
 import { testTicket } from './ticket';
+import { Button, Chip, Toggle } from './design/components';
+import { feedbackSettings } from './design/feedback';
+import { useTheme } from './design/theme';
 import { useTill } from './TillApp';
 
 const CONNECTION_NAMES: Record<PrinterConnection, string> = {
@@ -41,12 +44,14 @@ export function HardwareSettings({ onError }: { onError: (e: unknown) => void })
   };
 
   return (
-    <div className="stack">
+    <div className="stack till-settings">
       <div><span className="kicker">{till.till.device.name}</span><h1>{t('Devices')}</h1></div>
+
+      <Appearance />
 
       <section className="card stack">
         <div className="row"><h2>{t('Receipt printers')}</h2><span className="spacer" />
-          {connections.map((c) => <button key={c} type="button" className="secondary small-button" onClick={() => setEditing({ ...newPrinter(c), name: c === 'browser' ? t('This browser') : '' })}>+ {t(CONNECTION_NAMES[c])}</button>)}
+          {connections.map((c) => <Button key={c} icon="plus" onClick={() => setEditing({ ...newPrinter(c), name: c === 'browser' ? t('This browser') : '' })}>{t(CONNECTION_NAMES[c])}</Button>)}
         </div>
         {hw.printers.length === 0 && <p className="muted">{t('No printer yet. Most receipt printers connect over the network (port 9100), by Bluetooth (Android) or by USB (computers).')}</p>}
         <ul className="device-list">
@@ -57,18 +62,18 @@ export function HardwareSettings({ onError }: { onError: (e: unknown) => void })
                 <span><strong>{p.name}</strong><span className="muted small"> · {t(CONNECTION_NAMES[p.connection])}{printerWhere(p) && ` · ${printerWhere(p)}`} · {p.paperWidth} mm{p.drawer ? ` · ${t('cash drawer')}` : ''}</span></span>
               </label>
               <span className="spacer" />
-              <button type="button" className="secondary small-button" onClick={() => void test(p)}>{t('Test')}</button>
-              {p.drawer && <button type="button" className="secondary small-button" onClick={() => void openDrawer(till.platform, p).then(() => toast(t('Drawer opened'))).catch(onError)}>{t('Open drawer')}</button>}
-              <button type="button" className="secondary small-button" onClick={() => setEditing(p)}>{t('Edit')}</button>
+              <Button icon="printer" onClick={() => void test(p)}>{t('Test')}</Button>
+              {p.drawer && <Button icon="drawer" onClick={() => void openDrawer(till.platform, p).then(() => toast(t('Drawer opened'))).catch(onError)}>{t('Open drawer')}</Button>}
+              <Button onClick={() => setEditing(p)}>{t('Edit')}</Button>
               <button type="button" className="link" onClick={() => save({ printers: hw.printers.filter((x) => x.id !== p.id), receiptPrinter: hw.receiptPrinter === p.id ? null : hw.receiptPrinter })}>{t('Remove')}</button>
             </li>
           ))}
         </ul>
-        <div className="form-grid">
-          <label className="row"><input type="checkbox" checked={hw.autoPrint} onChange={(e) => save({ autoPrint: e.target.checked })} /> {t('Print each receipt automatically')}</label>
-          <label className="row"><input type="checkbox" checked={hw.copies === 2} onChange={(e) => save({ copies: e.target.checked ? 2 : 1 })} /> {t('Print two copies')}</label>
-          <label className="row"><input type="checkbox" checked={hw.openDrawerOnCash} onChange={(e) => save({ openDrawerOnCash: e.target.checked })} /> {t('Open the cash drawer for cash sales and refunds')}</label>
-          <label className="row"><input type="checkbox" checked={hw.printZReport} onChange={(e) => save({ printZReport: e.target.checked })} /> {t('Print the end-of-day report when a shift closes')}</label>
+        <div className="toggle-list">
+          <Toggle checked={hw.autoPrint} onChange={(v) => save({ autoPrint: v })} label={t('Print each receipt automatically')} />
+          <Toggle checked={hw.copies === 2} onChange={(v) => save({ copies: v ? 2 : 1 })} label={t('Print two copies')} />
+          <Toggle checked={hw.openDrawerOnCash} onChange={(v) => save({ openDrawerOnCash: v })} label={t('Open the cash drawer for cash sales and refunds')} />
+          <Toggle checked={hw.printZReport} onChange={(v) => save({ printZReport: v })} label={t('Print the end-of-day report when a shift closes')} />
         </div>
         <Field label={t('Message at the bottom of receipts')} hint={t('Optional: thanks, opening hours, your returns policy.')}>
           <textarea rows={2} maxLength={200} value={hw.receiptMessage} onChange={(e) => save({ receiptMessage: e.target.value })} />
@@ -77,7 +82,7 @@ export function HardwareSettings({ onError }: { onError: (e: unknown) => void })
 
       <section className="card stack">
         <h2>{t('Barcode scanners')}</h2>
-        <label className="row"><input type="checkbox" checked={hw.scanner.keyboard} onChange={(e) => save({ scanner: { ...hw.scanner, keyboard: e.target.checked } })} /> {t('USB and Bluetooth scanners (they type like a keyboard)')}</label>
+        <Toggle checked={hw.scanner.keyboard} onChange={(v) => save({ scanner: { ...hw.scanner, keyboard: v } })} label={t('USB and Bluetooth scanners (they type like a keyboard)')} />
         <p className="small muted">{t('Plug the scanner in or pair it with this device, then scan anything here to test it. Set it to send Enter after each code.')}</p>
         <div className="scan-test" role="status">{lastScan ? <>{t('Read')}: <strong className="mono">{lastScan}</strong></> : <span className="muted">{t('Waiting for a scan…')}</span>}</div>
         {till.scanWithCamera
@@ -88,7 +93,7 @@ export function HardwareSettings({ onError }: { onError: (e: unknown) => void })
       {till.platform.customerDisplay && (
         <section className="card stack">
           <h2>{t('Customer display')}</h2>
-          <label className="row"><input type="checkbox" checked={hw.customerDisplay} onChange={(e) => save({ customerDisplay: e.target.checked })} /> {t('Show the sale and the total on a second screen facing the customer')}</label>
+          <Toggle checked={hw.customerDisplay} onChange={(v) => save({ customerDisplay: v })} label={t('Show the sale and the total on a second screen facing the customer')} />
           <p className="small muted">{t('Connect a second monitor or pole display set up as a screen; the till opens full screen on it.')}</p>
         </section>
       )}
@@ -108,7 +113,7 @@ export function HardwareSettings({ onError }: { onError: (e: unknown) => void })
           </Select>
         </Field>
         <p className="small muted">{t('Rename the till or move it to another cash drawer in the web app: Settings → Tills.')}</p>
-        <div className="row"><button type="button" className="danger" onClick={() => setConfirmUnpair(true)}>{t('Unpair this till')}</button></div>
+        <div className="row"><Button variant="danger" onClick={() => setConfirmUnpair(true)}>{t('Unpair this till')}</Button></div>
       </section>
 
       {editing && <PrinterEditor printer={editing} onClose={() => setEditing(null)} onSave={(p) => {
@@ -125,6 +130,31 @@ export function HardwareSettings({ onError }: { onError: (e: unknown) => void })
         </Modal>
       )}
     </div>
+  );
+}
+
+/** How this till looks and feels: light or dark, a vibration on key taps, a soft click. Kept on this device. */
+function Appearance() {
+  const t = useT();
+  const [theme, setTheme] = useTheme();
+  const [haptics, setHaptics] = useState(feedbackSettings.haptics);
+  const [sound, setSound] = useState(feedbackSettings.sound);
+  return (
+    <section className="card stack">
+      <h2>{t('Appearance')}</h2>
+      <div className="setting-line">
+        <span className="what"><strong>{t('Theme')}</strong><span>{t('Dark is easier on the eyes in a dim bar or at night.')}</span></span>
+        <div className="chip-row" role="group" aria-label={t('Theme')}>
+          <Chip icon="sun" pressed={theme === 'light'} onClick={() => setTheme('light')}>{t('Light')}</Chip>
+          <Chip icon="moon" pressed={theme === 'dark'} onClick={() => setTheme('dark')}>{t('Dark')}</Chip>
+          <Chip icon="devices" pressed={theme === 'system'} onClick={() => setTheme('system')}>{t('Same as the device')}</Chip>
+        </div>
+      </div>
+      <div className="toggle-list">
+        <Toggle checked={haptics} onChange={(v) => { feedbackSettings.set('haptics', v); setHaptics(v); }} label={t('Vibrate on key taps (where the device can)')} />
+        <Toggle checked={sound} onChange={(v) => { feedbackSettings.set('sound', v); setSound(v); }} label={t('A soft click on key taps')} />
+      </div>
+    </section>
   );
 }
 
