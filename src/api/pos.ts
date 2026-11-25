@@ -57,6 +57,8 @@ export const TILL_ROUTES: ReadonlySet<string> = new Set([
   // Table service, the bar and the kitchen screen (the hospitality module).
   'GET /v1/venue', 'POST /v1/venue/ops', 'GET /v1/venue/changes', 'GET /v1/venue/checks/:id', 'POST /v1/venue/tickets/:id/:what', 'POST /v1/venue/approve',
   'POST /v1/venue/items/:id/availability', 'POST /v1/venue/waste', 'PUT /v1/venue/sections', 'POST /v1/venue/menu-override',
+  // Charging to a room, and a housekeeper's phone.
+  'GET /v1/hotel/in-house', 'GET /v1/hotel/housekeeping', 'POST /v1/hotel/rooms/:id/status',
   'GET /v1/me',
   'GET /v1/business',
   'GET /v1/items',

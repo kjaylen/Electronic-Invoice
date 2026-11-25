@@ -166,6 +166,8 @@ export const issueSchema = {
       type: 'object', required: ['code', 'amount'], additionalProperties: false,
       properties: { code: { type: 'string', minLength: 16, maxLength: 40 }, amount: money },
     },
+    // Charged to a hotel room (the guest's stay, and which of its folios).
+    room: { type: 'object', required: ['bookingId'], additionalProperties: false, properties: { bookingId: uuid, folioId: uuid } },
     // A layaway (tax invoices on a saved customer's account): until when the goods are kept, and the deposit paid now.
     layaway: {
       type: 'object', required: ['holdUntil'], additionalProperties: false,
