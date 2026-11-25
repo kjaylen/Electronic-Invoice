@@ -604,15 +604,25 @@ document is issued when, DECISIONS.md the judgment calls.
 - **Setup** (Settings → Venue): floor plans by area with other layouts of the
   same tables; sections per server; the tax rules in force.
 - **The floor plan editor** (`web/src/venue/FloorEditor.tsx`): a canvas of
-  the room with its seats drawn. Drag to move (the chosen items together),
-  with guides that snap to other items' edges and centres, or to the grid;
-  drag any side or corner to resize (Shift keeps the shape) and the round
-  handle to turn (15° steps, Alt for any angle); drag a box to choose
-  several. A panel beside the plan sets the exact name, seats, shape, size
-  and angle, lines up, spaces out or matches the size of what is chosen.
-  Undo and redo, zoom (or Ctrl+wheel), numbering in reading order, and keys
-  (arrows, R, Delete, Ctrl+Z, Ctrl+D, Ctrl+A). Nothing is saved until "Save
-  the plan".
+  the room drawn to scale, with each table's chairs, walls and doors (with
+  their swing).
+  - Adding: click a tool to put the item in a free spot in view (with room
+    for its chairs), or drag the tool onto the plan to put it where it goes.
+  - Moving: drag (the chosen items together), with guides that snap to the
+    other items' edges and centres and the room's middle, or to the grid
+    (Alt for neither). Arrows nudge (Shift for more, Alt for a little).
+  - Handles that fit the item: every side and corner of a table, the two ends
+    of a wall, the corners of something small. Shift keeps the shape; the
+    round handle turns it (15° steps, Alt for any angle).
+  - Choosing: click, Shift-click, drag a box, Ctrl+A. Right-click for
+    duplicate, turn 90°, front and back, remove.
+  - The panel beside the plan: name, seats, shape, width and depth (a wall's
+    length and thickness), angle, checked when the field is left or Enter is
+    pressed; line up, space out, same size. Tables that overlap are marked.
+  - Undo and redo (typing in one field or nudging is one step), copy and
+    paste, zoom at the pointer (Ctrl+wheel) and panning (Space+drag, the
+    middle button). Nothing is saved until "Save the plan"; leaving the area
+    or the page with changes not saved asks first.
 - **The menu** (`/menu`, in the sidebar after Products when Restaurant or Bar
   is on; `web/src/venue/Menu.tsx`, `src/venue/sections.ts`). The menu's items
   are the business's products (one list: price, GST, stock and recipes stay

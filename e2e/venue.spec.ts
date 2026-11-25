@@ -394,6 +394,78 @@ test('the layout editor: drag a corner to resize, the round handle to turn, a bo
   expect(one.rotation).toBe(0);
 });
 
+test('the layout editor: a table dragged in from the toolbar, a size typed (one undo step), overlaps marked, the right-click menu, and leaving unsaved asks first', async ({ page }) => {
+  await logIn(page);
+  await setUp(page);
+  await put(page, 'post', '/v1/venue/floor', { area: 'Patio', items: [{ id: 'p1', type: 'table', name: 'Patio 1', shape: 'round', seats: 4, x: 100, y: 200, w: 100, h: 160 }] });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto(`/${SLUG}/settings?tab=venue`);
+  const editor = page.getByLabel('Floor plan editor');
+  const panel = page.getByRole('complementary', { name: 'The chosen item' });
+  await editor.scrollIntoViewIfNeeded();
+  await expect(editor.getByRole('button', { name: 'Table 1' })).toBeVisible();
+
+  // Dragged from the toolbar onto the empty lower right of the plan: it lands where it is dropped.
+  const tool = await page.getByRole('button', { name: 'Round table' }).boundingBox();
+  const plan = await editor.boundingBox();
+  const drop = { x: plan!.x + plan!.width * 0.7, y: plan!.y + plan!.height * 0.75 };
+  await page.mouse.move(tool!.x + 20, tool!.y + 10);
+  await page.mouse.down();
+  await page.mouse.move(tool!.x + 60, tool!.y + 60, { steps: 4 });
+  await page.mouse.move(drop.x, drop.y, { steps: 10 });
+  await page.mouse.up();
+  const added = editor.getByRole('button', { name: 'Table 3' });
+  const box = await added.boundingBox();
+  expect(Math.abs(box!.x + box!.width / 2 - drop.x)).toBeLessThan(20);
+  expect(Math.abs(box!.y + box!.height / 2 - drop.y)).toBeLessThan(20);
+  await expect(panel.getByRole('heading', { name: 'Table 3' })).toBeVisible();
+
+  // A width typed digit by digit is applied on Enter, as one step: one undo puts it back.
+  const width = panel.getByLabel('Width');
+  const before = await width.inputValue();
+  await width.fill('');
+  await width.pressSequentially('300');
+  await width.press('Enter');
+  await expect(width).toHaveValue('300');
+  await page.getByRole('button', { name: 'Undo' }).click();
+  await expect(width).toHaveValue(before);
+  await page.getByRole('button', { name: 'Redo' }).click();
+  await expect(width).toHaveValue('300');
+
+  // Dragged over Table 1 (Alt: no snapping): both are marked as overlapping, and the panel says so.
+  const one = await editor.getByRole('button', { name: 'Table 1' }).boundingBox();
+  const now = await added.boundingBox();
+  await page.mouse.move(now!.x + now!.width / 2, now!.y + now!.height / 2);
+  await page.mouse.down();
+  await page.keyboard.down('Alt');
+  await page.mouse.move(one!.x + one!.width / 2 + 10, one!.y + one!.height / 2, { steps: 12 });
+  await page.mouse.up();
+  await page.keyboard.up('Alt');
+  await expect(panel.getByText('Overlaps Table 1')).toBeVisible();
+  await expect(editor.locator('.fe-item.clash')).toHaveCount(2);
+
+  // The right-click menu: Remove takes it off the plan; the overlap goes with it.
+  await added.click({ button: 'right' });
+  await page.getByRole('menuitem', { name: /^Remove/ }).click();
+  await expect(added).toHaveCount(0);
+  await expect(editor.locator('.fe-item.clash')).toHaveCount(0);
+
+  // A change not saved, then another area: asked first; Cancel stays, Leave without saving goes.
+  await page.getByRole('button', { name: 'Square table' }).click();
+  await expect(page.getByText('Unsaved changes')).toBeVisible();
+  await page.getByRole('group', { name: 'Floor plan' }).getByRole('button', { name: 'Patio' }).click();
+  const ask = page.getByRole('dialog', { name: 'Leave without saving?' });
+  await expect(ask).toBeVisible();
+  await ask.getByRole('button', { name: 'Cancel' }).click();
+  await expect(editor.getByRole('button', { name: 'Table 3' })).toBeVisible();
+  await page.getByRole('group', { name: 'Floor plan' }).getByRole('button', { name: 'Patio' }).click();
+  await page.getByRole('dialog', { name: 'Leave without saving?' }).getByRole('button', { name: 'Leave without saving' }).click();
+  await expect(editor.getByRole('button', { name: 'Patio 1' })).toBeVisible();
+  // Nothing of it was saved.
+  const venue = await (await page.request.get('/v1/venue', { headers: API })).json() as { floor: Array<{ area: string; items: Array<{ name: string }> }> };
+  expect(venue.floor.find((p) => p.area === 'Dining room')!.items.map((i) => i.name)).not.toContain('Table 3');
+});
+
 test('speed: a table opened and four items with choices sent, on a slow connection, without one tap waiting for the server', async ({ page }) => {
   await logIn(page);
   await setUp(page);

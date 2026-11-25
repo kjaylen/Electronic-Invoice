@@ -119,14 +119,21 @@ function FloorCard({ plans, layout, onChange }: { plans: FloorPlan[]; layout: st
   const [area, setArea] = useState('');
   const [newLayout, setNewLayout] = useState('');
   const [error, setError] = useState<unknown>(null);
+  const [dirty, setDirty] = useState(false);
   const run = async (fn: () => Promise<unknown>, done?: string) => { setError(null); try { await fn(); if (done) toast(done); onChange(); } catch (e) { setError(e); } };
+  // Another area with changes not saved here: ask first.
+  const leave = async (go: () => void) => {
+    if (dirty && !(await confirm({ title: t('Leave without saving?'), body: t('The changes to {area} are not saved yet.', { area: plan?.area ?? '' }), confirm: t('Leave without saving'), danger: true }))) return;
+    setDirty(false);
+    go();
+  };
   return (
     <section className="card stack">
       <div><h2>{t('Floor plans')}</h2><p className="small muted">{t('One plan for each area: dining room, patio, bar. Drag tables where they stand. An area can have other layouts (weekday, event) with the same tables in other places.')}</p></div>
       {plans.length > 0 && (
         <div className="row venue-bar">
           <div className="tabs" role="group" aria-label={t('Floor plan')}>
-            {plans.map((p) => <button key={p.id} type="button" aria-pressed={plan?.id === p.id} className={plan?.id === p.id ? 'active' : ''} onClick={() => setPlanId(p.id)}>{p.area}{p.layout !== 'Standard' && ` · ${p.layout}`}</button>)}
+            {plans.map((p) => <button key={p.id} type="button" aria-pressed={plan?.id === p.id} className={plan?.id === p.id ? 'active' : ''} onClick={() => p.id !== plan?.id && void leave(() => setPlanId(p.id))}>{p.area}{p.layout !== 'Standard' && ` · ${p.layout}`}</button>)}
           </div>
           <span className="spacer" />
           <Field label={t('Layout in use')}>
@@ -136,7 +143,7 @@ function FloorCard({ plans, layout, onChange }: { plans: FloorPlan[]; layout: st
       )}
       {plan && (
         <>
-          <FloorEditor key={plan.id} items={plan.items} onSave={(items) => void run(() => api(`/v1/venue/floor/${plan.id}`, { method: 'PUT', body: { items } }), t('Floor plan saved. Every device shows it within seconds.'))} />
+          <FloorEditor key={plan.id} items={plan.items} onDirty={setDirty} onSave={(items) => void run(() => api(`/v1/venue/floor/${plan.id}`, { method: 'PUT', body: { items } }), t('Floor plan saved. Every device shows it within seconds.'))} />
           <div className="row">
             <form className="row" onSubmit={(e) => { e.preventDefault(); void run(() => api('/v1/venue/floor', { method: 'POST', body: { area: plan.area, layout: newLayout.trim(), copyFrom: plan.id } }).then(() => setNewLayout('')), t('Layout added, with the same tables.')); }}>
               <Field label={t('Another layout of {area}', { area: plan.area })}><input value={newLayout} maxLength={40} placeholder={t('Weekday, Event…')} onChange={(e) => setNewLayout(e.target.value)} /></Field>
