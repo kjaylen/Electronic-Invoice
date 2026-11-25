@@ -27,6 +27,9 @@ import { type DocumentView, documentTicket, type Ticket } from './ticket';
 import { ticketLogo } from './logo';
 import { CameraScanner } from './CameraScanner';
 import { ConnectivityContext } from '../connectivity';
+import { Banner, Icon, useNow } from './design/components';
+import { feedback } from './design/feedback';
+import type { PosIconName } from './design/icons';
 import { offlineTill, type OfflineTill, type SignedInInfo } from './offline/till';
 import { SyncIndicator, SyncScreen, useSyncState } from './offline/status';
 import type { Snapshot } from './offline/types';
@@ -437,14 +440,15 @@ function Lock({ till, deviceToken, offline, status, onSignedIn, onRefresh }: { t
   if (setup) return <SetPin deviceToken={deviceToken} onDone={() => { setSetup(false); onRefresh(); }} onCancel={() => setSetup(false)} />;
   return (
     <div className="till-lock">
-      <header className="till-lock-head">
-        <div>
+      <header className="till-lock-head status-bar">
+        <div className="where">
           <strong>{till.business.name}</strong>
-          <span className="muted"> · {till.device.name}</span>
-          {till.business.environment !== 'production' && <span className="badge pending">{t('Test')}</span>}
+          <span>{till.device.name}{till.business.environment !== 'production' && ` · ${t('Test')}`}</span>
         </div>
-        {status}
-        <span className="till-clock num">{now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+        <div className="pills">
+          {status}
+          <time className="status-clock till-clock num" dateTime={now.toISOString()}>{now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>
+        </div>
       </header>
       {who ? (
         <PinPad user={who} deviceToken={deviceToken} offline={offline} onBack={() => setWho(null)} onSignedIn={onSignedIn} />
@@ -454,9 +458,9 @@ function Lock({ till, deviceToken, offline, status, onSignedIn, onRefresh }: { t
           {withPin.length === 0 && <p className="muted">{t('Nobody has a PIN yet. Each person sets one once: tap "Set up my PIN" and sign in with your password.')}</p>}
           <div className="people-grid">
             {withPin.map((u) => (
-              <button key={u.id} type="button" className="person" onClick={() => setWho(u)}>
-                <span className="avatar" aria-hidden="true">{initials(u.name)}</span>
-                <span>{u.name}</span>
+              <button key={u.id} type="button" className="person" onClick={() => { feedback('tap'); setWho(u); }}>
+                <span className="pos-avatar lg" aria-hidden="true">{initials(u.name)}</span>
+                <span className="person-name">{u.name}</span>
               </button>
             ))}
           </div>
@@ -533,20 +537,24 @@ function PinPad({ user, deviceToken, offline, onBack, onSignedIn }: { user: Till
   }, [pin, submit, onBack]);
   return (
     <main className="pin-screen">
-      <span className="avatar big" aria-hidden="true">{initials(user.name)}</span>
-      <h1>{user.name}</h1>
-      <p className="muted">{t('Enter your PIN')}</p>
-      <div className={`pin-dots${error ? ' shake' : ''}`} aria-label={t('{n} digits entered', { n: pin.length })} role="status">
-        {Array.from({ length: Math.max(4, pin.length) }, (_, i) => <span key={i} className={i < pin.length ? 'on' : ''} />)}
+      <div className="pin-who">
+        <span className="pos-avatar lg" aria-hidden="true">{initials(user.name)}</span>
+        <h1>{user.name}</h1>
+        <p className="muted">{t('Enter your PIN')}</p>
+        <div className={`pin-dots${error ? ' shake' : ''}`} aria-label={t('{n} digits entered', { n: pin.length })} role="status">
+          {Array.from({ length: Math.max(4, pin.length) }, (_, i) => <span key={i} className={i < pin.length ? 'on' : ''} />)}
+        </div>
+        <ErrorText error={error} />
       </div>
-      <ErrorText error={error} />
-      <div className="pin-pad" role="group" aria-label={t('PIN')}>
-        {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((d) => <button key={d} type="button" onClick={() => press(d)} disabled={busy}>{d}</button>)}
-        <button type="button" className="secondary" onClick={onBack} aria-label={t('Back')}>←</button>
-        <button type="button" onClick={() => press('0')} disabled={busy}>0</button>
-        <button type="button" className="lime" onClick={() => void submit(pin)} disabled={busy || pin.length < 4} aria-label={t('Sign in')}>{busy ? '…' : '✓'}</button>
+      <div className="pin-keys">
+        <div className="pin-pad pos-numpad" role="group" aria-label={t('PIN')}>
+          {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((d) => <button key={d} type="button" onClick={() => { feedback('tap'); press(d); }} disabled={busy}>{d}</button>)}
+          <button type="button" className="soft" onClick={onBack} aria-label={t('Back')}><Icon name="back" /></button>
+          <button type="button" onClick={() => { feedback('tap'); press('0'); }} disabled={busy}>0</button>
+          <button type="button" className={`accent${busy ? ' is-busy' : ''}`} onClick={() => void submit(pin)} disabled={busy || pin.length < 4} aria-label={t('Sign in')}>{busy ? '…' : <Icon name="check" />}</button>
+        </div>
+        <button type="button" className="pos-btn quiet block" onClick={() => setPin((v) => v.slice(0, -1))} disabled={!pin}><Icon name="backspace" />{t('Delete a digit')}</button>
       </div>
-      <button type="button" className="link" onClick={() => setPin((v) => v.slice(0, -1))} disabled={!pin}>{t('Delete a digit')}</button>
     </main>
   );
 }
@@ -784,6 +792,9 @@ function SignedInTill(props: {
     if (serves) setTab('floor');
     else if (cooks && !sells) setTab('kitchen');
   }, [me, serves, cooks, sells]);
+  const now = useNow(15_000);
+  const tabIcon: Record<Tab, PosIconName> = { floor: 'floor', kitchen: 'kitchen', sell: 'sell', sales: 'receipt', shift: 'drawer', devices: 'devices', sync: 'sync' };
+  const printerName = receiptPrinter?.name ?? (p.kind === 'web' ? t('This browser') : null);
   const tabs: Array<[Tab, string]> = [
     ...(serves ? [['floor', t('Floor')] as [Tab, string]] : []),
     ...(cooks ? [['kitchen', t('Kitchen')] as [Tab, string]] : []),
@@ -796,18 +807,26 @@ function SignedInTill(props: {
       <ConnectivityContext.Provider value={{ online, serverFeatures: online && hasSession }}>
       <SessionContext.Provider value={sessionValue}>
         <div className="till">
-          <header className="till-bar">
-            <div className="till-where"><strong>{till.business.name}</strong><span className="muted"> · {till.device.name}</span></div>
-            <nav className="till-tabs" aria-label={t('Till')}>
-              {tabs.map(([k, label]) => <button key={k} type="button" className={tab === k ? 'active' : ''} aria-current={tab === k ? 'page' : undefined} onClick={() => k !== tab && setTab(k)}>{label}</button>)}
+          {/* The status bar: where, the screens, the connection, the printer, the time, and who is selling (one tap to switch). */}
+          <header className="till-bar status-bar">
+            <div className="till-where where"><strong>{till.business.name}</strong><span>{till.device.name}</span></div>
+            <nav className="till-tabs status-tabs" aria-label={t('Till')}>
+              {tabs.map(([k, label]) => <button key={k} type="button" className={tab === k ? 'active' : ''} aria-current={tab === k ? 'page' : undefined} onClick={() => k !== tab && setTab(k)}><Icon name={tabIcon[k]} /><span>{label}</span></button>)}
             </nav>
-            <span className="spacer" />
-            {sync && <SyncIndicator state={sync} onOpen={isManager ? () => setTab('sync') : undefined} />}
-            <span className="till-user"><span className="avatar" aria-hidden="true">{initials(session.user.name)}</span>{session.user.name}</span>
-            <button type="button" className="secondary small-button" onClick={lock}>{t('Lock')}</button>
+            <div className="pills">
+              {sync && <SyncIndicator state={sync} onOpen={isManager ? () => setTab('sync') : undefined} />}
+              <button type="button" className={`status-pill printer${printerName ? '' : ' bad'}`} title={printerName ? t('Receipt printer: {name}', { name: printerName }) : t('No receipt printer is set up')}
+                onClick={isManager ? () => setTab('devices') : undefined} aria-label={printerName ? t('Receipt printer: {name}', { name: printerName }) : t('No receipt printer is set up')}>
+                <Icon name="printer" /><span className="pill-text">{printerName ?? t('No printer')}</span>
+              </button>
+              <time className="status-clock num" dateTime={now.toISOString()}>{now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>
+              <button type="button" className="status-switch till-user" onClick={lock} aria-label={t('Switch user')} title={t('Switch user: {name} is selling', { name: session.user.name })}>
+                <span className="pos-avatar" aria-hidden="true">{initials(session.user.name)}</span><span className="pill-text">{session.user.name}</span><Icon name="switchUser" />
+              </button>
+            </div>
           </header>
-          {!online && !props.offline && <div className="banner bad till-banner"><strong>{t('No connection.')}</strong> {t('Sales need the internet: every receipt is signed and sent to BTS.')}</div>}
-          {me?.contingency.active && <div className="banner warn till-banner">{t('BTS cannot be reached right now. Receipts are issued and sent when it is back.')}</div>}
+          {!online && !props.offline && <div className="till-banner"><Banner tone="danger" title={t('No connection.')}>{t('Sales need the internet: every receipt is signed and sent to BTS.')}</Banner></div>}
+          {me?.contingency.active && <div className="till-banner"><Banner tone="warning" title={t('BTS cannot be reached right now.')}>{t('Receipts are issued and sent when it is back.')}</Banner></div>}
           {/* A tab is a whole screen: the new one replaces the old at once and fades in (keyed by tab), never two on screen together. */}
           <main className="till-main" key={tab}>
             {/* The counter and the shift wait for the business and the person (from the till's own copy: a moment). */}

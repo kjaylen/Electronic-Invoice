@@ -9,40 +9,35 @@ body.till-body { overflow: hidden; background: var(--paper); padding: env(safe-a
 .till-card h1 { margin: 0; }
 .pair-code { font-family: var(--mono); font-size: 1.6rem; letter-spacing: 0.18em; text-align: center; text-transform: uppercase; }
 
-/* lock screen */
-.till-lock { min-height: 100%; display: flex; flex-direction: column; }
-.till-lock-head { display: flex; align-items: center; gap: 0.75rem; padding: 1rem 1.5rem; border-bottom: 1px solid var(--hairline); background: var(--sheet); }
-.till-lock-head > div { flex: 1; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
-.till-clock { font-size: 1.4rem; font-weight: 600; }
-.till-people { flex: 1; width: min(60rem, 100%); margin: 0 auto; padding: 2rem 1.5rem; display: flex; flex-direction: column; gap: 1.25rem; overflow: auto; }
-.people-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr)); gap: 0.85rem; }
-.person { display: flex; flex-direction: column; align-items: center; gap: 0.6rem; padding: 1.25rem 0.75rem; min-height: 9rem; background: var(--sheet); color: var(--ink); border: 1px solid var(--hairline-strong); border-radius: var(--radius-lg); font-size: 1rem; font-weight: 560; }
-.person:hover:not(:disabled) { background: white; }
-.avatar { display: inline-grid; place-items: center; width: 2rem; height: 2rem; border-radius: 999px; background: var(--brand); color: white; font-size: 0.8rem; font-weight: 650; letter-spacing: 0.02em; flex: none; }
-.person .avatar, .avatar.big { width: 4rem; height: 4rem; font-size: 1.4rem; }
+/* lock screen: who is selling, then their PIN (design system: large tiles and keys) */
+.till-lock { min-height: 100%; display: flex; flex-direction: column; background: var(--pos-bg); }
+.till-lock-head .pills { margin-left: auto; }
+.till-people { flex: 1; width: min(64rem, 100%); margin: 0 auto; padding: var(--pos-6) var(--pos-5); display: flex; flex-direction: column; gap: var(--pos-5); overflow: auto; }
+.till-people h1 { margin: 0; font-size: var(--pos-text-2xl); }
+.people-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(10.5rem, 1fr)); gap: var(--pos-3); }
+.person { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--pos-3); min-height: 160px; padding: var(--pos-4); background: var(--pos-surface); color: var(--pos-text); border: 1px solid var(--pos-border); border-radius: var(--pos-radius-lg); box-shadow: var(--pos-elev-1); cursor: pointer; touch-action: manipulation; transition: transform var(--pos-press) linear, border-color var(--pos-quick) var(--pos-ease); }
+.person:hover:not(:disabled) { border-color: var(--pos-brand-line); }
+.person:active:not(:disabled) { transform: scale(0.97); background: var(--pos-brand-soft); border-color: var(--pos-brand); }
+.person-name { font-size: var(--pos-text-lg); font-weight: var(--pos-weight-medium); text-align: center; overflow-wrap: anywhere; }
+.avatar { display: inline-grid; place-items: center; width: 40px; height: 40px; border-radius: 999px; background: var(--pos-brand); color: var(--pos-on-brand); font-size: var(--pos-text-sm); font-weight: var(--pos-weight-bold); flex: none; }
 
-.pin-screen { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.75rem; padding: 1.5rem; }
-.pin-screen h1 { margin: 0; }
-.pin-dots { display: flex; gap: 0.7rem; min-height: 1.2rem; }
-.pin-dots span { width: 0.95rem; height: 0.95rem; border-radius: 999px; border: 2px solid var(--ink); }
-.pin-dots span.on { background: var(--ink); }
-.pin-dots.shake { animation: till-shake 0.35s; }
+.pin-screen { flex: 1; display: flex; align-items: center; justify-content: center; gap: var(--pos-7); padding: var(--pos-5); flex-wrap: wrap; }
+.pin-who { display: grid; justify-items: center; gap: var(--pos-3); text-align: center; min-width: 16rem; }
+.pin-who h1 { margin: 0; font-size: var(--pos-text-2xl); }
+.pin-who p { margin: 0; font-size: var(--pos-text-lg); }
+.pin-dots { display: flex; gap: var(--pos-3); min-height: 20px; }
+.pin-dots span { width: 18px; height: 18px; border-radius: 999px; border: 2px solid var(--pos-text); }
+.pin-dots span.on { background: var(--pos-text); }
+.pin-dots.shake { animation: till-shake 0.3s; }
 @keyframes till-shake { 25% { transform: translateX(-8px); } 75% { transform: translateX(8px); } }
-.pin-pad { display: grid; grid-template-columns: repeat(3, 5rem); gap: 0.75rem; margin-top: 0.5rem; }
-.pin-pad button { height: 5rem; border-radius: 999px; font-size: 1.6rem; font-weight: 560; padding: 0; justify-content: center; }
-@media (max-height: 640px) { .pin-pad { grid-template-columns: repeat(3, 4rem); } .pin-pad button { height: 4rem; } }
+.pin-keys { display: grid; gap: var(--pos-3); width: min(22rem, 100%); }
+.pin-pad.pos-numpad { grid-template-columns: repeat(3, 1fr); }
+.pin-pad.pos-numpad > button { min-height: 72px; font-size: var(--pos-text-3xl); }
+@media (max-height: 700px) { .pin-pad.pos-numpad > button { min-height: var(--pos-target-lg); font-size: var(--pos-text-2xl); } .pin-screen { gap: var(--pos-5); } }
+@media (prefers-reduced-motion: reduce) { .pin-dots.shake { animation: none; } }
 
 /* signed in */
 .till { height: 100%; display: flex; flex-direction: column; }
-.till-bar { display: flex; align-items: center; gap: 0.75rem; padding: 0.5rem 1rem; background: var(--ink); color: var(--sheet); flex-wrap: wrap; }
-.till-bar .muted { color: rgba(251, 248, 241, 0.65); }
-.till-where { font-size: 0.92rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 18rem; }
-.till-tabs { display: flex; gap: 0.25rem; }
-.till-tabs button { background: transparent; border: none; color: rgba(251, 248, 241, 0.75); padding: 0.55rem 0.95rem; font-size: 0.95rem; box-shadow: none; border-radius: 999px; }
-.till-tabs button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.08); color: white; transform: none; box-shadow: none; }
-.till-tabs button.active { background: var(--lime); color: var(--ink); }
-.till-user { display: inline-flex; align-items: center; gap: 0.45rem; font-size: 0.9rem; }
-.till-bar .secondary { background: transparent; color: var(--sheet); border-color: rgba(251, 248, 241, 0.35); }
 .till-banner { margin: 0.75rem 1rem 0; }
 .till-main { flex: 1; overflow: auto; padding: 1rem; view-transition-name: none; animation: till-screen-in 140ms var(--ease-out) both; }
 /* A tab's screen comes in on its own: a quick fade and a few pixels up. Nothing of the screen before it stays. */
@@ -71,10 +66,17 @@ body.till-body { overflow: hidden; background: var(--paper); padding: env(safe-a
 .facts dt { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
 .facts dd { margin: 0.15rem 0 0; overflow-wrap: anywhere; }
 
+/* The status bar (design/components.css): on a phone the screens are a tab bar at the bottom, in thumb reach. */
+.till-bar .sync-indicator { min-height: var(--pos-target); }
+.till-banner { padding: var(--pos-2) var(--pos-4) 0; }
+@media (max-width: 1100px) { .status-bar .pill-text { display: none; } .status-bar .sync-indicator span:not(.dot):not(.count) { display: none; } }
 @media (max-width: 720px) {
-  .till-where { max-width: 100%; flex-basis: 100%; }
-  .till-tabs { order: 3; flex-basis: 100%; overflow-x: auto; }
-  .till-main { padding: 0.75rem; }
+  .status-bar { padding-right: var(--pos-2); }
+  .status-bar .status-tabs { position: fixed; z-index: 40; left: 0; right: 0; bottom: 0; justify-content: space-around; gap: 0; background: var(--pos-bar); border-top: 1px solid rgba(255, 255, 255, 0.08); padding: var(--pos-1) var(--pos-1) calc(var(--pos-1) + env(safe-area-inset-bottom)); }
+  .status-bar .status-tabs button { flex: 1 1 0; flex-direction: column; gap: 2px; min-height: 56px; padding: 0 var(--pos-1); font-size: var(--pos-text-xs); }
+  .status-bar .status-tabs button[aria-current='page'] { background: rgba(255, 255, 255, 0.14); color: var(--pos-on-bar); }
+  .status-bar .status-clock { display: none; }
+  .till-main { padding: var(--pos-3); padding-bottom: calc(76px + env(safe-area-inset-bottom)); }
 }
 
 /* the customer display (desktop, second screen) */
@@ -87,9 +89,6 @@ body.till-body { overflow: hidden; background: var(--paper); padding: env(safe-a
 .display-message { flex: 1; display: grid; place-items: center; font-size: 8vh; font-weight: 650; text-align: center; }
 
 /* Offline first: the connection indicator, the sync screen, the counter's offline note. */
-.sync-indicator { display: inline-flex; align-items: center; gap: 0.45rem; padding: 0.3rem 0.65rem; border-radius: 999px; font-size: 0.85rem; font-weight: 560; background: transparent; color: inherit; border: 1px solid var(--hairline-strong); white-space: nowrap; }
-button.sync-indicator { cursor: pointer; min-height: 0; }
-.till-bar .sync-indicator { border-color: rgba(251, 248, 241, 0.3); }
 .sync-dot { width: 0.6rem; height: 0.6rem; border-radius: 999px; flex: none; background: var(--muted); }
 .sync-dot.ok { background: var(--success-dot); }
 .sync-dot.busy { background: var(--brand); animation: sync-pulse 1.2s var(--ease) infinite; }

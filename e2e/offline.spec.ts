@@ -92,7 +92,7 @@ The till shows: ${(await till.locator('body').innerText().catch(() => '?')).slic
 }
 
 async function lock(till: Page) {
-  await till.getByRole('button', { name: 'Lock' }).click();
+  await till.getByRole('button', { name: 'Switch user' }).click();
   await expect(till.getByRole('heading', { name: /Who is selling\?|Rosa Owner/ })).toBeVisible();
 }
 

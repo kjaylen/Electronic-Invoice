@@ -41,14 +41,15 @@ export function SyncIndicator({ state, onOpen }: { state: SyncState; onOpen?: ()
     : t('Last sent: {when}', { when: ago(state.lastSyncAt, t) });
   const content = (
     <>
-      <span className={`sync-dot ${kind}`} aria-hidden="true" />
+      <span className={`sync-dot dot ${kind}`} aria-hidden="true" />
       <span>{words}</span>
-      {state.failed > 0 && !state.unpaired && <span className="sync-failed">{t('{n} need attention', { n: state.failed })}</span>}
+      {state.failed > 0 && !state.unpaired && <span className="sync-failed count">{t('{n} need attention', { n: state.failed })}</span>}
     </>
   );
+  const cls = `sync-indicator status-pill ${kind === 'off' ? 'off' : kind === 'busy' ? 'busy' : kind === 'bad' || kind === 'warn' ? 'bad' : 'ok'}`;
   return onOpen
-    ? <button type="button" className="sync-indicator" title={title} onClick={onOpen} aria-live="polite">{content}</button>
-    : <span className="sync-indicator" title={title} role="status" aria-live="polite">{content}</span>;
+    ? <button type="button" className={cls} title={title} onClick={onOpen} aria-live="polite">{content}</button>
+    : <span className={cls} title={title} role="status" aria-live="polite">{content}</span>;
 }
 
 /** Managers: everything waiting to reach the server, what it refused and why. */

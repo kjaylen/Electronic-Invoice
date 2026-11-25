@@ -700,7 +700,7 @@ test('till: set a PIN, add a till and pair it from the link, sign in, open a shi
   await expect(page.locator('.till-admin-list')).toContainText('Front counter');
   await expect(page.locator('.till-admin-list')).toContainText('Signed in: Rosa Owner');
 
-  await till.getByRole('button', { name: 'Lock' }).click();
+  await till.getByRole('button', { name: 'Switch user' }).click();
   await expect(till.getByRole('heading', { name: /Who is selling\?|Rosa Owner/ })).toBeVisible();
   await device.close();
 });
