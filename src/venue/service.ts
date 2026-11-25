@@ -14,7 +14,7 @@ import type { Database, Queryable } from '../db/database.ts';
 import { StockError, moveStock, recordSale } from '../inventory/stock.ts';
 import { apply, type Applied, type Check, type CheckItem, fullyPaid, needsApproval, type Op, type Store } from './check.ts';
 import { type ModifierGroup, modifierProblem, type Period, priceNow, type PromoRule, resolveModifiers } from './pricing.ts';
-import { belizeClock, businessDate, loadVenue, type VenueSettings } from './settings.ts';
+import { belizeClock, businessDate, loadVenue, openBusinessDate, type VenueSettings } from './settings.ts';
 
 export class VenueError extends Error {
   override name = 'VenueError';
@@ -87,7 +87,7 @@ const isUuid = (s: unknown): s is string => typeof s === 'string' && /^[0-9a-f]{
 
 export interface OpInput { id: string; checkId: string; type: Op['type']; at: string; payload: Record<string, unknown> }
 export interface OpResult { id: string; ok: boolean; reason?: string; code?: string; duplicate?: boolean; sent: string[] }
-export interface Actor { userId: string; name: string; deviceId: string | null; mayApprove: boolean; mayOrder: boolean; mayKitchen: boolean }
+export interface Actor { userId: string; name: string; deviceId: string | null; mayApprove: boolean; mayOrder: boolean; mayKitchen: boolean; /** The server itself, for what only it may do (taking a deposit off a bill). */ internal?: boolean }
 
 /** Who may approve, for the operations that need it: the approver named in the payload must hold the right. */
 async function approver(db: Queryable, tenantId: string, raw: unknown, approvers: (role: string) => boolean): Promise<{ id: string; name: string } | null> {
@@ -145,6 +145,7 @@ export async function applyOps(db: Database, tenantId: string, actor: Actor, inp
       // A device's clock is trusted for the past (it may have been offline), never for the future.
       const when = Number.isNaN(at.getTime()) || at.getTime() > now.getTime() + 120_000 ? now : at;
       const op: Op = { id: input.id, checkId: input.checkId, type: input.type, at: when.toISOString(), by: { id: actor.userId, name: actor.name }, payload: { ...(input.payload ?? {}) } };
+      if (op.type === 'deposit' && !actor.internal) { await refuse('forbidden', 'A deposit is taken off from the booking'); continue; }
       const kitchenOnly = op.type === 'ready';
       if (kitchenOnly ? !(actor.mayKitchen || actor.mayOrder) : !actor.mayOrder) { await refuse('forbidden', 'Your role does not take orders'); continue; }
       await load(op.checkId);
@@ -152,7 +153,7 @@ export async function applyOps(db: Database, tenantId: string, actor: Actor, inp
       const current = store.get(op.checkId);
 
       if (op.type === 'open') {
-        op.payload.businessDate = businessDate(when, venue.dayEndsHour);
+        op.payload.businessDate = openBusinessDate(venue, when);
         const tableId = typeof op.payload.tableId === 'string' ? op.payload.tableId : null;
         if (!current && tableId && op.payload.kind !== 'tab' && op.payload.kind !== 'quick') {
           const taken = (await tx.query<{ id: string }>("select id from venue_checks where tenant_id = $1 and table_id = $2 and status in ('open', 'paid')", [tenantId, tableId])).rows[0];

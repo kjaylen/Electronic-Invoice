@@ -84,6 +84,11 @@ export function checkAmounts(check: Check, ctx: BillContext): Map<string, ItemAm
       }
     }
     const serviceCents = ctx.servicePercent ? percentCents(grossCents - allowCents, ctx.servicePercent) : 0;
+    // A deposit already paid (and receipted): off the line, after the service charge is worked out on the full price.
+    if (i.deposit && !i.comp) {
+      allowCents += Math.min(i.deposit.cents, grossCents - allowCents);
+      reasons.push('Deposit paid');
+    }
     out.set(i.id, { grossCents, allowCents, allowReason: reasons.join('; ').slice(0, 100), serviceCents });
   }
   return out;

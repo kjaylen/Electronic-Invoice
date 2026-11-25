@@ -109,6 +109,7 @@ export function registerVenueRoutes(app: FastifyInstance, deps: PipelineDeps) {
     const b = request.body as Record<string, unknown>;
     // The hotel's date is the night audit's to move.
     delete b.hotelDate;
+    delete b.closedThrough;
     const next = await saveVenue(db, request.tenantId, b);
     if (venueOn(next) !== venueOn(before) || next.restaurant !== before.restaurant || next.bar !== before.bar || next.hotel !== before.hotel) {
       await audit(db, { tenantId: request.tenantId, userId: request.userId || null, action: 'venue.kinds', details: { restaurant: next.restaurant, bar: next.bar, hotel: next.hotel }, ip: request.ip });

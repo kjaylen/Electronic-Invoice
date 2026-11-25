@@ -17,6 +17,7 @@ import type { Mailer } from '../mail/mailer.ts';
 import { runNotifications, type NotifyResult } from '../notify/notifications.ts';
 import { runDailySummaries } from '../notify/daily.ts';
 import { runFilingReminders } from '../notify/filing.ts';
+import { runReservationReminders } from './venue-floor.ts';
 import { heartbeat, opsStatus, type OpsThresholds, sendAlerts } from '../ops/monitoring.ts';
 import { backfillDueDates } from '../receivables/receivables.ts';
 import { reverseVoidedSales } from '../inventory/stock.ts';
@@ -88,6 +89,7 @@ export async function runHousekeepingOnce(db: Queryable, options: HousekeepingOp
     result.notifications = await step('notifications', () => runNotifications(db, { mailer, ...(options.publicUrl && { publicUrl: options.publicUrl }) }));
     await step('daily summaries', () => runDailySummaries(db, { mailer, ...(options.publicUrl && { publicUrl: options.publicUrl }) }));
     await step('filing reminders', () => runFilingReminders(db, { mailer, ...(options.publicUrl && { publicUrl: options.publicUrl }) }));
+    await step('table reminders', () => runReservationReminders(db, mailer));
     await step('back in stock', () => runStockAlerts(db, { mailer, ...(options.publicUrl && { publicUrl: options.publicUrl }) }));
     await step('checkout reminders', () => runCheckoutReminders(db, {}, { mailer, ...(options.publicUrl && { publicUrl: options.publicUrl }) }));
   }

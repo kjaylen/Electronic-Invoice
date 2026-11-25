@@ -52,6 +52,21 @@ tax values in TAX-RULES.md; which tax document when in ETD-MAPPING.md.
   Reservations, Tabs, Hotel*, VenueReports). Spanish in `es.ts`, Chinese for
   the service screens in `zh.ts`.
 
+## Where it stands (update as you go)
+
+- **Server: done and tested** for every section (A to J). Files: `src/venue/`
+  (`check.ts` reducer, `bill.ts` splits, `pricing.ts`, `settings.ts`,
+  `service.ts` ops + tickets, `tax-rules.ts`, `room-charge.ts`), `src/api/`
+  (`venue.ts` setup + ops, `venue-floor.ts` reservations, waitlist, guests,
+  day close, checkout, tips, reports, tax rules; `hotel.ts`). Migrations 063
+  to 066. Tests: `test/venue-check.test.ts` (pure), `venue-api.test.ts`,
+  `venue-floor.test.ts` (scenarios 1 and 2), `hotel.test.ts` (scenario 3),
+  helpers in `test/venue-helpers.ts`.
+- **Web: to build** in `web/src/venue/` (the same screens run in the web
+  app and in the till app on desktop, Android and iOS): the store (local-first
+  ops queue), Floor, Order, Pay hand-off to the counter, FloorEditor, MenuSetup,
+  Kitchen, Reservations, Hotel, VenueReports, Settings; Spanish; browser tests.
+
 ## Build order
 
 ### 0. Groundwork

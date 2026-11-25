@@ -57,6 +57,8 @@ export interface CheckItem {
   comp?: { at: string; by: Who; reason: string; approvedBy?: Who };
   /** A discount on this item: percent (0 to 100) or cents off the line. */
   discount?: { percent?: number; cents?: number; reason: string; by: Who; approvedBy?: Who };
+  /** Its share of a deposit paid when the table was booked (the deposit's own receipt carries that money's GST). */
+  deposit?: { cents: number; documentId: string };
   /** A price typed over the menu's. */
   priceOverride?: { fromCents: number; reason: string; by: Who; approvedBy?: Who };
   /** Shared between this many guests when the bill is split (1: not shared). */
@@ -105,7 +107,7 @@ export interface Check {
 
 export type OpType =
   | 'open' | 'add' | 'edit' | 'remove' | 'fire' | 'holdCourse' | 'void' | 'comp' | 'discount' | 'price' | 'ready' | 'served'
-  | 'move' | 'transfer' | 'moveItems' | 'merge' | 'party' | 'service' | 'share' | 'requestBill' | 'pay' | 'clean' | 'close' | 'reopen' | 'allergy';
+  | 'move' | 'transfer' | 'moveItems' | 'merge' | 'party' | 'service' | 'share' | 'requestBill' | 'pay' | 'clean' | 'close' | 'reopen' | 'allergy' | 'deposit';
 
 export interface Op {
   id: string;
@@ -344,6 +346,24 @@ export function apply(store: Store, op: Op): Applied {
         i.discount = { ...(percent ? { percent } : { cents: share }), reason, by: op.by, ...(approvedBy && { approvedBy }) };
       });
       log('discounted', { itemIds: items.map((i) => i.id), note: `${percent ? `${percent}%` : `${(cents / 100).toFixed(2)}`}: ${reason}` });
+      break;
+    }
+    case 'deposit': {
+      // A booking's deposit comes off the bill: spread over what is standard-rated and not yet paid, by value.
+      const cents = Number(p.cents);
+      const documentId = str(p.documentId, 60);
+      const items = check.items.filter((i) => live(i) && i.gst === 'S' && !i.comp && paidShares(i) === 0);
+      const base = items.reduce((a, i) => a + lineCents(i), 0);
+      if (!Number.isInteger(cents) || cents <= 0 || !documentId) return no('A deposit and its receipt');
+      if (check.items.some((i) => i.deposit?.documentId === documentId)) break;
+      if (cents > base) return no('The deposit is more than what has been ordered so far: take it off when the bill is asked for');
+      let left = cents;
+      items.forEach((i, n) => {
+        const share = n === items.length - 1 ? left : Math.floor((cents * lineCents(i)) / base);
+        left -= share;
+        if (share > 0) i.deposit = { cents: share, documentId };
+      });
+      log('deposit taken off', { note: `${(cents / 100).toFixed(2)} before GST` });
       break;
     }
     case 'price': {

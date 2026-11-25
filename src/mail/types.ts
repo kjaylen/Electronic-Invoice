@@ -29,6 +29,7 @@ export const MAIL_TYPES = {
   'reminder': { label: 'Payment reminder', sender: 'business', category: 'transactional' },
   'statement': { label: 'Statement of account', sender: 'business', category: 'transactional' },
   'quote': { label: 'Quotation', sender: 'business', category: 'transactional' },
+  'reservation': { label: 'Table booking', sender: 'business', category: 'transactional' },
   'purchase-order': { label: 'Purchase order', sender: 'business', category: 'transactional' },
   'order': { label: 'Order confirmation', sender: 'business', category: 'transactional' },
   'order-ready': { label: 'Order ready', sender: 'business', category: 'transactional' },

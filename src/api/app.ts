@@ -94,6 +94,7 @@ import { registerLocationRoutes } from './locations.ts';
 import { registerBusinessTaxRoutes } from './business-tax.ts';
 import { registerVenueRoutes } from './venue.ts';
 import { registerHotelRoutes } from './hotel.ts';
+import { registerVenueFloorRoutes } from './venue-floor.ts';
 
 export type Principal = 'api' | Role;
 
@@ -438,6 +439,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     registerBusinessTaxRoutes(tenant, deps);
     registerVenueRoutes(tenant, deps);
     registerHotelRoutes(tenant, deps);
+    registerVenueFloorRoutes(tenant, deps, ctx);
     registerSiteRoutes(tenant, deps);
     registerConnectRoutes(tenant, deps, ctx);
     registerDeveloperRoutes(tenant, deps, devlog);

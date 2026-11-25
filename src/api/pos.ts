@@ -57,6 +57,10 @@ export const TILL_ROUTES: ReadonlySet<string> = new Set([
   // Table service, the bar and the kitchen screen (the hospitality module).
   'GET /v1/venue', 'POST /v1/venue/ops', 'GET /v1/venue/changes', 'GET /v1/venue/checks/:id', 'POST /v1/venue/tickets/:id/:what', 'POST /v1/venue/approve',
   'POST /v1/venue/items/:id/availability', 'POST /v1/venue/waste', 'PUT /v1/venue/sections', 'POST /v1/venue/menu-override',
+  // The host stand, a server's checkout and the day's close.
+  'GET /v1/venue/reservations', 'POST /v1/venue/reservations', 'PUT /v1/venue/reservations/:id', 'POST /v1/venue/reservations/:id/seat', 'POST /v1/venue/reservations/:id/cancel', 'POST /v1/venue/reservations/:id/no-show',
+  'POST /v1/venue/reservations/:id/apply-deposit', 'POST /v1/venue/reservations/:id/message', 'POST /v1/venue/waitlist', 'POST /v1/venue/waitlist/:id/notify', 'POST /v1/venue/waitlist/:id/seat', 'POST /v1/venue/waitlist/:id/left',
+  'GET /v1/venue/guests', 'GET /v1/venue/guests/:id', 'PUT /v1/venue/guests/:id', 'GET /v1/venue/checkout', 'GET /v1/venue/day', 'POST /v1/venue/day/close',
   // Charging to a room, and a housekeeper's phone.
   'GET /v1/hotel/in-house', 'GET /v1/hotel/housekeeping', 'POST /v1/hotel/rooms/:id/status',
   'GET /v1/me',

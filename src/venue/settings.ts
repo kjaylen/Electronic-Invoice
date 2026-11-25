@@ -41,6 +41,8 @@ export interface VenueSettings {
   rateCurrency: 'BZD' | 'USD' | 'both';
   /** The hotel's business date: moved on by the night audit. */
   hotelDate: string | null;
+  /** The last business day closed: anything rung up after the close belongs to the next day. */
+  closedThrough: string | null;
 }
 
 export const VENUE_DEFAULTS: VenueSettings = {
@@ -56,6 +58,7 @@ export const VENUE_DEFAULTS: VenueSettings = {
   checkInTime: '15:00', checkOutTime: '11:00',
   rateCurrency: 'both',
   hotelDate: null,
+  closedThrough: null,
 };
 
 const PERCENT = /^(100(\.0{1,2})?|\d{1,2}(\.\d{1,2})?)$/;
@@ -87,6 +90,7 @@ export function venueSettings(raw: unknown): VenueSettings {
     checkOutTime: typeof r.checkOutTime === 'string' && TIME.test(r.checkOutTime) ? r.checkOutTime : d.checkOutTime,
     rateCurrency: r.rateCurrency === 'BZD' || r.rateCurrency === 'USD' ? r.rateCurrency : 'both',
     hotelDate: typeof r.hotelDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(r.hotelDate) ? r.hotelDate : null,
+    closedThrough: typeof r.closedThrough === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(r.closedThrough) ? r.closedThrough : null,
   };
 }
 
@@ -112,6 +116,13 @@ const BELIZE_OFFSET_MS = 6 * 3600_000;
  */
 export function businessDate(at: Date, dayEndsHour: number): string {
   return new Date(at.getTime() - BELIZE_OFFSET_MS - dayEndsHour * 3600_000).toISOString().slice(0, 10);
+}
+
+/** The business date for a venue: by the clock, and never a day that has already been closed. */
+export function openBusinessDate(v: Pick<VenueSettings, 'dayEndsHour' | 'closedThrough'>, at: Date): string {
+  const byClock = businessDate(at, v.dayEndsHour);
+  if (!v.closedThrough || byClock > v.closedThrough) return byClock;
+  return new Date(new Date(`${v.closedThrough}T12:00:00Z`).getTime() + 86_400_000).toISOString().slice(0, 10);
 }
 
 /** Minutes from midnight and the weekday (0 Sunday) in Belize. */
