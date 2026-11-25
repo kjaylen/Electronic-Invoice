@@ -97,7 +97,8 @@ export function registerVenueFloorRoutes(app: FastifyInstance, deps: PipelineDep
     if (!tableIds.length) return;
     const end = new Date(startsAt.getTime() + durationMin * 60_000);
     const other = (await db.query<{ name: string; starts_at: Date | string; table_ids: string[] }>(
-      `select name, starts_at, table_ids from venue_reservations where tenant_id = $1 and status in ('booked', 'confirmed', 'seated') and table_ids && $2::text[]
+      `select name, starts_at, table_ids from venue_reservations v where tenant_id = $1 and table_ids && $2::text[]
+         and (status in ('booked', 'confirmed') or (status = 'seated' and exists (select 1 from venue_checks c where c.id = v.check_id and c.status in ('open', 'paid'))))
          and starts_at < $4 and starts_at + duration_min * interval '1 minute' > $3 and ($5::uuid is null or id <> $5) order by starts_at limit 1`,
       [tenantId, tableIds, startsAt.toISOString(), end.toISOString(), except ?? null],
     )).rows[0];

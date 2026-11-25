@@ -243,6 +243,9 @@ export async function applyOps(db: Database, tenantId: string, actor: Actor, inp
           [id, tenantId, c.kind, c.status, c.tableId, isUuid(c.server.id) ? c.server.id : null, closedAt, JSON.stringify(c), seq]);
       }
     }
+    // A party that has gone gives its booking's table back.
+    const gone = [...changed].filter((id) => { const st = loaded.get(id)!.state.status; return st === 'closed' || st === 'merged'; });
+    if (gone.length) await tx.query("update venue_reservations set status = 'completed' where tenant_id = $1 and status = 'seated' and check_id = any($2::uuid[])", [tenantId, gone]);
     if (tickets.length) {
       stations ??= await loadStations(tx, tenantId);
       for (const t of tickets) {
