@@ -39,3 +39,81 @@
 .pos-table-flag.idle { background: var(--pos-warning); }
 .pos-table-flag.ready { background: var(--pos-danger); right: auto; left: -6px; animation: pos-blink 1.4s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) { .pos-table-flag.ready { animation: none; } }
+
+/* ---------- The till's floor screen: tools, then the plan (or list) filling the screen ---------- */
+body.till-body .till-main:has(> .venue-floor.is-touch) { display: flex; flex-direction: column; overflow: hidden; }
+body.till-body .venue-floor.is-touch { flex: 1 1 auto; min-height: 0; width: 100%; display: flex; flex-direction: column; gap: var(--pos-2); }
+body.till-body .venue-floor.is-touch > * + * { margin-top: 0; }
+.floor-touch { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: var(--pos-2); }
+.floor-tools { display: flex; align-items: center; gap: var(--pos-2) var(--pos-3); flex-wrap: wrap; }
+.floor-tools > .pos-tabs, .floor-tools > .till-filters { flex: 1 1 auto; min-width: 0; }
+.floor-tools-end { display: flex; align-items: center; gap: var(--pos-2); margin-left: auto; flex-wrap: wrap; }
+.floor-tools .venue-sync { font-size: var(--pos-text-sm); color: var(--pos-text-2); }
+.floor-tools .venue-sync.off { color: var(--pos-warning-text); font-weight: var(--pos-weight-bold); }
+.floor-tools .pos-btn .count, .pos-chip .count.plain { min-width: 1.5rem; padding: 0 var(--pos-2); border-radius: var(--pos-radius-pill); background: var(--pos-surface-3); color: var(--pos-text); font-size: var(--pos-text-xs); line-height: 1.5rem; text-align: center; font-weight: var(--pos-weight-bold); }
+.floor-tools .pos-btn.primary .count { background: rgba(255, 255, 255, 0.25); color: var(--pos-on-brand); }
+
+/* A two-way switch (plan or list). */
+.pos-seg { display: inline-flex; padding: 3px; gap: 3px; border-radius: var(--pos-radius); background: var(--pos-surface-2); border: 1px solid var(--pos-border); }
+.pos-seg > button { display: inline-flex; align-items: center; gap: var(--pos-2); min-height: 42px; padding: 0 var(--pos-3); border: 0; border-radius: calc(var(--pos-radius) - 3px); background: transparent; color: var(--pos-text-2); font: inherit; font-size: var(--pos-text-md); font-weight: var(--pos-weight-medium); cursor: pointer; box-shadow: none; }
+.pos-seg > button svg { width: 1.2rem; height: 1.2rem; }
+.pos-seg > button[aria-pressed='true'] { background: var(--pos-surface); color: var(--pos-text); box-shadow: var(--pos-elev-1); }
+.pos-seg > button:focus-visible { outline: none; box-shadow: var(--pos-focus); }
+
+/* The legend: a small panel under its button. */
+.floor-legend-wrap { position: relative; }
+.floor-legend { position: absolute; right: 0; top: calc(100% + var(--pos-2)); z-index: 30; width: max-content; max-width: min(22rem, 90vw); padding: var(--pos-3) var(--pos-4); border-radius: var(--pos-radius); background: var(--pos-surface); color: var(--pos-text); border: 1px solid var(--pos-border); box-shadow: var(--pos-elev-3); animation: pos-fade var(--pos-quick) var(--pos-ease); }
+.floor-legend ul { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--pos-2); }
+.floor-legend li { display: flex; align-items: center; gap: var(--pos-3); font-size: var(--pos-text-md); }
+.floor-legend .swatch { display: grid; place-items: center; width: 32px; height: 32px; border-radius: var(--pos-radius-sm); border: 2px solid; flex: none; }
+.floor-legend .swatch svg { width: 18px; height: 18px; }
+.floor-legend .swatch.flag { border: 0; border-radius: 999px; color: #fff; }
+.floor-legend .swatch.flag.idle { background: var(--pos-warning); }
+.floor-legend .swatch.flag.ready { background: var(--pos-danger); }
+
+/* The plan: a room drawn to scale, tables placed on it in screen pixels. */
+.floor-frame { position: relative; flex: 1 1 auto; min-height: 0; }
+.floor-frame > .pos-list, .floor-frame > .pos-empty { position: absolute; inset: 0; overflow-y: auto; align-content: start; padding: 2px; }
+.floor-canvas { position: absolute; inset: 0; overflow: hidden; border-radius: var(--pos-radius-lg); background: var(--pos-bg); border: 1px solid var(--pos-border); touch-action: none; user-select: none; -webkit-user-select: none; cursor: grab; outline: none; }
+.floor-canvas:active { cursor: grabbing; }
+.floor-room { position: absolute; border-radius: var(--pos-radius); background-color: var(--pos-plan); background-image: linear-gradient(var(--pos-plan-grid) 1px, transparent 1px), linear-gradient(90deg, var(--pos-plan-grid) 1px, transparent 1px); box-shadow: inset 0 0 0 2px var(--pos-plan-wall); pointer-events: none; }
+.floor-fixture { position: absolute; pointer-events: none; display: grid; place-items: center; }
+.floor-fixture.wall { background: var(--pos-plan-wall); border-radius: 2px; }
+.floor-fixture.fixture { background: var(--pos-plan-fixture); border: 1px solid var(--pos-border); border-radius: var(--pos-radius-sm); color: var(--pos-text-2); font-size: var(--pos-text-sm); font-weight: var(--pos-weight-medium); overflow: hidden; container-type: size; }
+.floor-fixture.fixture span { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.floor-fixture.fixture svg { width: 16px; height: 16px; }
+.floor-fixture.door { background: transparent; border: 2px dashed var(--pos-border-strong); }
+@container (max-height: 24px) { .floor-fixture.fixture span { display: none; } }
+
+.floor-table { position: absolute; padding: 0; margin: 0; border: 0; background: transparent; box-shadow: none; cursor: pointer; touch-action: none; transform-origin: center; transition: opacity var(--pos-quick) var(--pos-ease), filter var(--pos-quick) var(--pos-ease); }
+body.till-body .floor-table { min-height: 0; border-radius: 0; }
+.floor-table:hover:not(:disabled), .floor-table:active:not(:disabled) { background: transparent; }
+.floor-table:active:not(.is-dragging) .pos-table-top { transform: scale(0.97); }
+.floor-table:focus-visible { outline: none; }
+.floor-table:focus-visible .pos-table-top { box-shadow: var(--pos-focus); }
+.floor-table.is-dimmed { opacity: 0.32; filter: saturate(0.4); }
+.floor-table.is-dragging { z-index: 20; transition: none; cursor: grabbing; }
+.floor-table.is-dragging .pos-table-top { box-shadow: var(--pos-elev-3); }
+.floor-table.is-target .pos-table-top { box-shadow: 0 0 0 3px var(--pos-surface), 0 0 0 6px var(--pos-brand), var(--pos-elev-2); }
+.floor-zoom { position: absolute; right: var(--pos-3); bottom: var(--pos-3); display: flex; gap: var(--pos-2); z-index: 10; }
+.floor-zoom .pos-btn { box-shadow: var(--pos-elev-2); }
+.floor-drag-hint { position: absolute; left: 50%; top: var(--pos-3); transform: translateX(-50%); z-index: 25; padding: var(--pos-2) var(--pos-4); border-radius: var(--pos-radius-pill); background: var(--pos-text); color: var(--pos-surface); font-size: var(--pos-text-md); font-weight: var(--pos-weight-medium); pointer-events: none; }
+
+/* The list of tables. */
+.floor-list > li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--pos-2); align-items: center; }
+.floor-list .state-swatch { display: grid; place-items: center; width: 40px; height: 40px; border-radius: var(--pos-radius); border: 2px solid; }
+.floor-list .state-swatch svg { width: 1.2rem; height: 1.2rem; }
+.floor-list .list-state { font-weight: var(--pos-weight-regular); color: var(--pos-text-2); font-size: var(--pos-text-md); }
+.floor-list .pos-row .end { display: flex; gap: var(--pos-2); align-items: center; }
+
+/* Sheets for the actions and the pickers. */
+.action-grid, .pick-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr)); gap: var(--pos-gap-target); }
+.action-grid .pos-btn, .pick-grid .pos-btn { justify-content: flex-start; }
+.pick-grid .pos-btn .muted { margin-left: auto; font-weight: var(--pos-weight-regular); font-size: var(--pos-text-sm); }
+.confirm-text { font-size: var(--pos-text-lg); margin: 0; }
+
+@media (max-width: 720px) {
+  .floor-tools .venue-sync { display: none; }
+  .floor-zoom { bottom: var(--pos-2); right: var(--pos-2); }
+}
+@media (prefers-reduced-motion: reduce) { .floor-table, .floor-legend { transition: none; animation: none; } }

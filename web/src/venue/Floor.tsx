@@ -17,7 +17,9 @@ import type { Ticket as Printed } from '../pos/ticket';
 import { PAID_EVENT, peekPay } from './handoff';
 import { billContext, OrderScreen } from './Order';
 import { dismissProblem, dispatch, type FloorItem, type NumberedCheck, poll, setActor, setPrinter, useVenue, watch } from './store';
-import { stationTicket } from './tickets';
+import { guestCheck, stationTicket } from './tickets';
+import { type FloorTable, TouchFloor } from './TouchFloor';
+import { Button } from '../pos/design/components';
 import './venue.css';
 
 const STATE_TEXT: Record<TableState, string> = { free: 'Free', reserved: 'Reserved', seated: 'Seated', ordered: 'Ordered', sent: 'Food sent', mains: 'Mains served', bill: 'Bill requested', paid: 'Paid: clean it' };
@@ -26,10 +28,15 @@ const initials = (name: string) => name.split(/\s+/).map((w) => w[0]).join('').s
 
 interface Arrival { id: string; kind: 'reservation' | 'waitlist'; name: string; partySize: number; at: string; allergy: string | null; tableIds: string[] }
 
-export function VenueFloor({ counter, print }: {
+/** No activity at a table for this long (minutes): a warning on it. */
+const IDLE_MINUTES = 20;
+
+export function VenueFloor({ counter, print, touch }: {
   /** The screen that takes the payment: the counter in the web app, Sell on a till. */
   counter: ReactNode;
   print: (ticket: Printed, title: string) => Promise<void> | void;
+  /** A till: the touch floor (zoom, pan, hold for actions, drag to move, a list view). */
+  touch?: boolean;
 }) {
   const t = useT();
   const toast = useToast();
@@ -37,6 +44,7 @@ export function VenueFloor({ counter, print }: {
   const { data, checks, tickets, online, pending, problems } = useVenue();
   const [area, setArea] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
+  const [startPay, setStartPay] = useState(false);
   const [seating, setSeating] = useState<FloorItem | null>(null);
   const [panel, setPanel] = useState<'tabs' | null>(null);
   const [paying, setPaying] = useState(Boolean(peekPay()));
@@ -90,7 +98,7 @@ export function VenueFloor({ counter, print }: {
   if (!data) return <div className="skeleton" style={{ height: '20rem' }} />;
   if (!data.on) return <div className="card"><p>{t('Table service is off. An owner turns on Restaurant or Bar under Settings.')}</p></div>;
   if (paying) return <div className="venue-paying">{counter}</div>;
-  if (open) return <OrderScreen checkId={open} onBack={() => setOpen(null)} onPay={() => setPaying(true)} print={print} />;
+  if (open) return <OrderScreen checkId={open} startWith={startPay ? 'pay' : undefined} onBack={() => { setOpen(null); setStartPay(false); }} onPay={() => { setStartPay(false); setPaying(true); }} print={print} />;
 
   const mayOrder = data.me.orders;
   const reservedSoon = (tableId: string) => arrivals.find((a) => a.kind === 'reservation' && a.tableIds.includes(tableId) && new Date(a.at).getTime() - Date.now() < 90 * 60_000 && new Date(a.at).getTime() - Date.now() > -30 * 60_000);
@@ -103,8 +111,62 @@ export function VenueFloor({ counter, print }: {
   const quick = () => { const id = openCheck({ kind: 'quick' }); if (id) setOpen(id); };
   const stuck = tickets.filter((k) => !k.bumpedAt && (k.status === 'failed' || (k.status === 'queued' && Date.now() - new Date(k.createdAt).getTime() > 45_000)));
 
+  // The till's floor: each table with what is happening at it.
+  const touchTables = (): FloorTable[] => (plan?.items ?? []).filter((i) => i.type === 'table' || i.type === 'stool').map((item) => {
+    const c = byTable.get(item.id) ?? null;
+    const booked = !c ? reservedSoon(item.id) : undefined;
+    const st: TableState = c ? tableState(c) : booked ? 'reserved' : 'free';
+    const total = c ? wholeBill(c, billContext(data, c)).totalCents : 0;
+    const section = data.sections.find((s) => s.tableIds.includes(item.id));
+    return {
+      item, check: c, state: st,
+      total: total > 0 ? money(centsText(total)) : undefined,
+      booking: booked ? `${booked.name} · ${new Date(booked.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : undefined,
+      mine: c ? c.server.id === data.me.id : section?.userId === data.me.id,
+      idle: Boolean(c && c.status === 'open' && (st === 'seated' || st === 'ordered' || st === 'sent' || st === 'mains') && minutes(c.lastActivityAt) >= IDLE_MINUTES),
+      ready: Boolean(c && hasReady(c)),
+      server: c?.server.name, minutes: c ? minutes(c.openedAt) : undefined,
+    };
+  });
+  const freeTables = () => data.floor.filter((p) => p.layout === data.venue.layout || !data.floor.some((x) => x.area === p.area && x.layout === data.venue.layout))
+    .flatMap((p) => p.items.filter((i) => i.type !== 'wall' && i.type !== 'fixture').map((i) => ({ ...i, area: p.area })))
+    .filter((i) => !checks.some((x) => x.tableId === i.id && (x.status === 'open' || x.status === 'paid')));
+  const op = (checkId: string, type: Parameters<typeof dispatch>[1], payload: Record<string, unknown> = {}) => {
+    const done = dispatch(checkId, type, payload);
+    if (!done.ok) toast(t(done.reason ?? 'That cannot be done'), 'bad');
+    return done.ok;
+  };
+  const tapTable = (x: FloorTable) => (x.check ? setOpen(x.check.id) : mayOrder || data.me.floor ? setSeating(x.item) : undefined);
+
   return (
-    <div className="venue-floor stack">
+    <div className={`venue-floor stack${touch ? ' is-touch' : ''}`}>
+      {touch && plan && (
+        <TouchFloor
+          plans={plans} plan={plan} onArea={setArea} tables={touchTables()} freeTables={freeTables()}
+          openChecks={checks.filter((x) => x.status === 'open')} staff={data.staff}
+          onTap={tapTable}
+          onAction={(a) => {
+            const c = a.table.check;
+            if (a.kind === 'open' && c) setOpen(c.id);
+            else if (a.kind === 'seat') setSeating(a.table.item);
+            else if (a.kind === 'split' && c) { setStartPay(true); setOpen(c.id); }
+            else if (a.kind === 'clean' && c) op(c.id, 'clean');
+            else if (a.kind === 'printBill' && c) {
+              const ctx = billContext(data, c);
+              void print(guestCheck({ business: '', label: c.tableName ?? a.table.item.name, server: c.server.name, partySize: c.partySize, part: wholeBill(c, ctx), servicePercent: ctx.servicePercent, usdRateCents: data.venue.usdRateCents, at: new Date() }), t('Guest check'));
+              op(c.id, 'requestBill');
+            } else if (a.kind === 'move' && c) { if (op(c.id, 'move', { tableId: a.to.id, tableName: a.to.name })) toast(t('{from} is now at {to}', { from: a.table.item.name, to: a.to.name })); }
+            else if (a.kind === 'merge' && c) { if (op(c.id, 'merge', { toCheckId: a.to.id })) toast(t('Joined with {to}', { to: a.to.tableName ?? a.to.name ?? t('Tab') })); }
+            else if (a.kind === 'transfer' && c) op(c.id, 'transfer', { server: { id: a.to.id, name: a.to.name } });
+          }}
+          toolbar={<>
+            <span className={`venue-sync ${online ? '' : 'off'}`} role="status">{online ? (pending ? t('Sending {n}…', { n: pending }) : t('In step')) : t('No connection: {n} to send', { n: pending })}</span>
+            {(data.venue.bar || tabs.length > 0) && <Button icon="receipt" onClick={() => setPanel('tabs')}>{t('Tabs')}{tabs.length > 0 && <span className="count num">{tabs.length}</span>}</Button>}
+            {mayOrder && <Button variant="primary" icon="sell" onClick={quick}>{t('Quick sale')}</Button>}
+          </>}
+        />
+      )}
+      {!(touch && plan) && <>
       <div className="row venue-bar">
         <div className="tabs" role="group" aria-label={t('Area')}>
           {plans.map((p) => <button key={p.id} type="button" aria-pressed={plan?.id === p.id} className={plan?.id === p.id ? 'active' : ''} onClick={() => setArea(p.area)}>{p.area}</button>)}
@@ -150,6 +212,11 @@ export function VenueFloor({ counter, print }: {
         </div>
       )}
       <div className="venue-legend small" aria-hidden="true">{(Object.keys(STATE_TEXT) as TableState[]).map((s) => <span key={s} className={`state-${s}`}>{t(STATE_TEXT[s])}</span>)}</div>
+      </>}
+      {touch && plan && <>
+        {stuck.length > 0 && <div className="banner bad" role="alert"><div><strong>{stuck.length === 1 ? t('An order did not print.') : t('{n} orders did not print.', { n: stuck.length })}</strong> {t('Open the table to print it again or send it to another printer.')} {[...new Set(stuck.map((k) => k.body.table))].join(', ')}</div></div>}
+        {problems.map((p) => <div key={p.id} className="banner warn" role="alert"><div>{p.reason}</div><button type="button" className="link" onClick={() => dismissProblem(p.id)}>{t('OK')}</button></div>)}
+      </>}
 
       {seating && (
         <SeatDialog table={seating} arrivals={arrivals} staff={data.staff.filter((s) => s.orders)} me={data.me.id} section={data.sections.find((s) => s.tableIds.includes(seating.id))?.userId}

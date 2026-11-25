@@ -232,7 +232,7 @@ test('the till app with no connection: a table opened, ordered, sent and paid in
   await expect(cart.locator('.grand')).toContainText('BZ$7.88');
   await cart.getByLabel('Cash received').fill('10');
   await cart.getByRole('button', { name: /^Issue receipt/ }).click();
-  await expect(plan.getByRole('button', { name: /^Table 1: Paid: clean it/ })).toBeVisible();
+  await expect(plan.getByRole('button', { name: /^Table 1: Needs cleaning/ })).toBeVisible();
   await expect(indicator).toContainText(/Offline · \d+ to send/);
   // Nothing of it is on the server yet.
   const before = await (await page.request.get('/v1/venue/changes', { headers: API })).json() as { checks: Array<{ tableName: string }> };
@@ -253,6 +253,96 @@ test('the till app with no connection: a table opened, ordered, sent and paid in
   expect([doc.type, doc.totals.payable]).toEqual(['02', '7.88']);
   await expect.poll(async () => (await (await page.request.get(`/v1/documents/${doc.id}`, { headers: API })).json()).status, { timeout: 20_000 }).toBe('authorized');
   await context.close();
+});
+
+test('the till floor: the plan and the list, the legend, a table held for its actions, dragged onto another to move it (confirmed), the filters', async ({ page, browser }) => {
+  await logIn(page);
+  await setUp(page);
+  const added = await put(page, 'post', '/v1/pos/devices', { name: `Floor till ${Math.random().toString(36).slice(2, 6)}` });
+  const context = await browser.newContext({ viewport: { width: 1366, height: 768 } });
+  const till = await context.newPage();
+  await till.goto(`/pos?pair=${added.pairing.code}`);
+  await expect(till.getByRole('heading', { name: /Who is selling\?|Rosa Owner/ })).toBeVisible({ timeout: 20_000 });
+  if (await till.getByRole('heading', { name: 'Who is selling?' }).isVisible()) await till.getByRole('button', { name: 'Rosa Owner' }).click();
+  for (const d of '4826') await till.keyboard.press(d);
+  await till.keyboard.press('Enter');
+  const plan = till.getByRole('group', { name: 'Floor plan of Dining room' });
+  await expect(plan.getByRole('button', { name: /^Table 1: Free/ })).toBeVisible({ timeout: 20_000 });
+
+  // The legend is one tap away: every state in a word, with its icon.
+  await till.getByRole('button', { name: 'Legend' }).click();
+  const legend = till.getByRole('dialog', { name: 'Legend' });
+  for (const word of ['Free', 'Reserved', 'Seated', 'Ordered', 'Food sent', 'Mains served', 'Bill requested', 'Needs cleaning', 'Food is ready']) await expect(legend).toContainText(word);
+  await till.keyboard.press('Escape');
+  await expect(legend).toHaveCount(0);
+
+  // Seat two at table 1 and come back to the floor.
+  await plan.getByRole('button', { name: /^Table 1/ }).click();
+  await till.getByRole('dialog', { name: 'Seat a party at Table 1' }).getByRole('button', { name: /^Open the table/ }).click();
+  await till.locator('.venue-order-head').getByRole('button', { name: /Floor/ }).click();
+  await expect(plan.getByRole('button', { name: /^Table 1: Seated, 2/ })).toBeVisible();
+
+  // Held (right-click with a mouse): its actions.
+  await plan.getByRole('button', { name: /^Table 1/ }).click({ button: 'right' });
+  const actions = till.getByRole('dialog', { name: 'Table 1' });
+  for (const a of ['Open the table', 'Move to another table', 'Join with another table', 'Give to another server']) await expect(actions.getByRole('button', { name: a })).toBeVisible();
+  await till.keyboard.press('Escape');
+
+  // Held and dragged onto table 2: moved, after saying yes.
+  const from = await plan.getByRole('button', { name: /^Table 1/ }).boundingBox();
+  const to = await plan.getByRole('button', { name: /^Table 2/ }).boundingBox();
+  await till.mouse.move(from!.x + from!.width / 2, from!.y + from!.height / 2);
+  await till.mouse.down();
+  await till.waitForTimeout(650);
+  await till.mouse.move(from!.x + from!.width / 2 + 40, from!.y + from!.height / 2, { steps: 4 });
+  await till.mouse.move(to!.x + to!.width / 2, to!.y + to!.height / 2, { steps: 12 });
+  await till.mouse.up();
+  const sure = till.getByRole('dialog', { name: 'Move the party?' });
+  await expect(sure).toContainText('Table 1 moves to Table 2');
+  await sure.getByRole('button', { name: 'Move' }).click();
+  await expect(plan.getByRole('button', { name: /^Table 2: Seated, 2/ })).toBeVisible();
+  await expect(plan.getByRole('button', { name: /^Table 1: Free/ })).toBeVisible();
+
+  // My tables dims the others; the list shows only those, and remembers it is the list.
+  await till.getByRole('button', { name: /^My tables/ }).click();
+  await till.getByRole('button', { name: 'List' }).click();
+  const list = till.getByRole('group', { name: 'Tables' });
+  await expect(list.getByRole('button', { name: /^Table 2/ }).first()).toBeVisible();
+  await expect(list.getByText('Table 1', { exact: true })).toHaveCount(0);
+  await till.getByRole('button', { name: /^All tables/ }).click();
+  await expect(list.getByRole('button', { name: 'Actions for Table 1' })).toBeVisible();
+  await till.getByRole('button', { name: 'Plan' }).click();
+  await context.close();
+});
+
+test('the layout editor: tables added, duplicated, undone and redone, numbered in reading order, lined up, and saved', async ({ page }) => {
+  await logIn(page);
+  await setUp(page);
+  await page.goto(`/${SLUG}/settings?tab=venue`);
+  const editor = page.getByLabel('Floor plan editor');
+  await expect(editor.getByRole('button', { name: 'Table 1' })).toBeVisible();
+  await page.getByRole('button', { name: '+ Round table' }).click();
+  await expect(editor.getByRole('button', { name: 'Table 3' })).toBeVisible();
+  await page.getByRole('button', { name: 'Duplicate' }).click();
+  await expect(editor.getByRole('button', { name: 'Table 3 (2)' })).toBeVisible();
+  await page.getByRole('button', { name: 'Undo' }).click();
+  await expect(editor.getByRole('button', { name: 'Table 3 (2)' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Redo' }).click();
+  await expect(editor.getByRole('button', { name: 'Table 3 (2)' })).toBeVisible();
+  // Numbered top to bottom, left to right: the copy (lower down) is last.
+  await page.getByRole('button', { name: 'Number the tables' }).click();
+  await expect(editor.getByRole('button', { name: /^Table \d$/ })).toHaveCount(4);
+  await expect(editor.getByRole('button', { name: 'Table 3 (2)' })).toHaveCount(0);
+  // Two chosen, lined up on the left.
+  await editor.getByRole('button', { name: 'Table 1' }).click();
+  await editor.getByRole('button', { name: 'Table 2' }).click({ modifiers: ['Shift'] });
+  await page.getByRole('button', { name: 'Line up left' }).click();
+  await page.getByRole('button', { name: 'Save the plan' }).click();
+  await expect(page.getByText('Floor plan saved')).toBeVisible();
+  const venue = await (await page.request.get('/v1/venue', { headers: API })).json() as { floor: Array<{ area: string; items: Array<{ name: string; x: number; type: string }> }> };
+  const items = venue.floor.find((p) => p.area === 'Dining room')!.items;
+  expect(items.filter((i) => i.type === 'table').map((i) => i.name).sort()).toEqual(['Table 1', 'Table 2', 'Table 3', 'Table 4']);
+  expect(items.find((i) => i.name === 'Table 1')!.x).toBe(items.find((i) => i.name === 'Table 2')!.x);
 });
 
 test('speed: a table opened and four items with choices sent, on a slow connection, without one tap waiting for the server', async ({ page }) => {

@@ -52,7 +52,7 @@ function useApproval(data: VenueData | null) {
   return { ask, dialog };
 }
 
-export function OrderScreen({ checkId, onBack, onPay, print }: { checkId: string; onBack: () => void; onPay: () => void; print: (ticket: Printed, title: string) => Promise<void> | void }) {
+export function OrderScreen({ checkId, onBack, onPay, print, startWith }: { checkId: string; onBack: () => void; onPay: () => void; print: (ticket: Printed, title: string) => Promise<void> | void; /** Open straight on taking the payment (split the bill, from the floor). */ startWith?: 'pay' }) {
   const t = useT();
   const toast = useToast();
   const { data, check, checks, tickets } = useVenue();
@@ -63,7 +63,7 @@ export function OrderScreen({ checkId, onBack, onPay, print }: { checkId: string
   const [q, setQ] = useState('');
   const [choosing, setChoosing] = useState<MenuEntry | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
-  const [dialog, setDialog] = useState<'pay' | 'more' | 'move' | 'merge' | 'transfer' | null>(null);
+  const [dialog, setDialog] = useState<'pay' | 'more' | 'move' | 'merge' | 'transfer' | null>(startWith ?? null);
   const approval = useApproval(data);
   const clock = belizeClock(new Date());
   const override = data?.venue.menuOverride?.businessDate === data?.businessDate ? data?.venue.menuOverride?.periodId : null;

@@ -1,0 +1,109 @@
+/*
+ * A table's order on a till (the venue order screen, shared with the web), on the design system:
+ * the menu on the left, the check on the right at full height with Send and Pay always in reach.
+ * Light and dark from the tokens; nothing here changes what the screen does.
+ */
+
+/* ---------- Layout: fits the screen on a tablet or till ---------- */
+@media (min-width: 721px) {
+  body.till-body .till-main:has(> .venue-order), body.till-body .till-main:has(> .venue-paying) { display: flex; flex-direction: column; overflow: hidden; }
+  body.till-body .till-main > .venue-order { flex: 1 1 auto; min-height: 0; width: 100%; display: flex; flex-direction: column; }
+  body.till-body .venue-order > * { flex: none; }
+  body.till-body .venue-order-body { flex: 1 1 auto; min-height: 0; align-items: stretch; }
+  body.till-body .venue-menu { min-height: 0; overflow-y: auto; align-content: start; padding: 4px; margin: -4px; }
+  body.till-body .venue-check { max-height: 100%; min-height: 0; }
+  /* Paying a table: the order panel alone, in the middle, at full height. */
+  body.till-body .till-main > .venue-paying { flex: 1 1 auto; min-height: 0; width: 100%; display: flex; flex-direction: column; }
+  body.till-body .venue-paying > .stack { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+  body.till-body .venue-paying > .stack > * { flex: none; }
+  body.till-body .venue-paying > .stack > * + * { margin-top: var(--pos-3); }
+  body.till-body .venue-paying > .stack > .counter { flex: 1 1 auto; min-height: 0; align-items: stretch; }
+}
+body.till-body .venue-paying .counter { grid-template-columns: minmax(0, 36rem); justify-content: center; }
+
+/* ---------- The head: back to the floor, the table, More ---------- */
+body.till-body .venue-order-head { gap: var(--pos-3); margin-bottom: var(--pos-3); }
+body.till-body .venue-order-head h1 { font-size: var(--pos-text-2xl); }
+body.till-body .venue-order-head p { font-size: var(--pos-text-sm); color: var(--pos-text-2); }
+
+/* ---------- The menu: search, sections as tabs, items as tiles ---------- */
+body.till-body .venue-menu { gap: var(--pos-3); }
+body.till-body .venue-menu .search-input { min-height: var(--pos-target-lg); font-size: var(--pos-text-lg); max-width: 28rem; }
+body.till-body .venue-chips { gap: var(--pos-2); }
+body.till-body .venue-chips button { min-height: var(--pos-target); padding: 0 var(--pos-4); border-radius: var(--pos-radius-pill); font-size: var(--pos-text-md); font-weight: var(--pos-weight-medium); background: var(--pos-surface); color: var(--pos-text-2); border: 1px solid var(--pos-border-strong); }
+body.till-body .venue-chips button[aria-pressed='true'] { background: var(--pos-text); color: var(--pos-surface); border-color: var(--pos-text); }
+body.till-body .venue-items { gap: var(--pos-gap-target); grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr)); }
+body.till-body .venue-item { grid-template-columns: minmax(0, 1fr); justify-content: stretch; text-align: left; min-height: 88px; padding: var(--pos-3); gap: var(--pos-1); background: var(--pos-surface); color: var(--pos-text); border: 1px solid var(--pos-border); border-radius: var(--pos-radius); box-shadow: var(--pos-elev-1); font-size: var(--pos-text-md); }
+body.till-body .venue-item strong { font-weight: var(--pos-weight-medium); line-height: 1.25; }
+body.till-body .venue-item .num { color: var(--pos-brand-text); font-weight: var(--pos-weight-bold); font-variant-numeric: tabular-nums; }
+body.till-body .venue-item:hover:not(:disabled) { background: var(--pos-surface); color: var(--pos-text); border-color: var(--pos-brand-line); }
+body.till-body .venue-item:active:not(:disabled) { background: var(--pos-brand-soft); border-color: var(--pos-brand); transform: scale(0.97); }
+body.till-body .venue-item.promo { border-color: var(--pos-success-line); }
+body.till-body .venue-item.out { opacity: 1; background: var(--pos-surface-2); color: var(--pos-text-muted); box-shadow: none; }
+body.till-body .venue-item.out strong { text-decoration: line-through; }
+body.till-body .venue-item .venue-allergens { color: var(--pos-danger-text); font-size: var(--pos-text-xs); }
+
+/* ---------- The check: seats and courses, lines by course, totals, Send and Pay ---------- */
+body.till-body .venue-check.ticket {
+  display: flex; flex-direction: column; gap: var(--pos-3); position: relative; top: auto; overflow: auto; overscroll-behavior: contain;
+  padding: var(--pos-4) var(--pos-4) 0; background: var(--pos-surface); color: var(--pos-text); border: 1px solid var(--pos-border); border-radius: var(--pos-radius-lg); box-shadow: var(--pos-elev-2);
+}
+body.till-body .venue-check.ticket > * { flex: none; }
+body.till-body .venue-check.ticket > * + * { margin-top: 0; }
+body.till-body .venue-check .muted { color: var(--pos-text-muted); }
+body.till-body .venue-seats { gap: var(--pos-2); }
+body.till-body .venue-check .venue-seats button,
+body.till-body .venue-seats.light button { min-width: var(--pos-target); min-height: var(--pos-target); padding: 0 var(--pos-3); border-radius: var(--pos-radius); background: var(--pos-surface); color: var(--pos-text-2); border: 1px solid var(--pos-border-strong); font-size: var(--pos-text-md); font-weight: var(--pos-weight-medium); }
+body.till-body .venue-check .venue-seats button[aria-pressed='true'],
+body.till-body .venue-seats.light button[aria-pressed='true'] { background: var(--pos-brand); color: var(--pos-on-brand); border-color: var(--pos-brand); }
+body.till-body .venue-check > .venue-lines { flex: 1 1 auto; min-height: 10rem; overflow-y: auto; gap: var(--pos-3); align-content: start; }
+body.till-body .venue-course > .row { gap: var(--pos-2); font-size: var(--pos-text-sm); text-transform: uppercase; letter-spacing: 0.04em; color: var(--pos-text-2); }
+body.till-body .venue-course > .row strong { color: var(--pos-text-2); }
+body.till-body .venue-course > .row button.link { min-height: 40px; text-transform: none; letter-spacing: 0; color: var(--pos-brand-text); }
+body.till-body .venue-course > .row button.lime { background: var(--pos-warning); color: #1a1300; border-color: var(--pos-warning); min-height: 40px; }
+body.till-body .venue-course ul { gap: 0; }
+body.till-body .venue-course li button {
+  grid-template-columns: 2rem minmax(0, 1fr) auto auto; gap: var(--pos-2); align-items: center; min-height: 56px; padding: var(--pos-2) var(--pos-1);
+  background: transparent; color: var(--pos-text); border: 0; border-bottom: 1px solid var(--pos-border); border-radius: 0; font-size: var(--pos-text-md);
+}
+body.till-body .venue-course li button:hover:not(:disabled) { background: var(--pos-surface-2); color: var(--pos-text); }
+body.till-body .venue-course .q { font-family: inherit; font-weight: var(--pos-weight-bold); font-variant-numeric: tabular-nums; }
+body.till-body .venue-course .seat { color: var(--pos-text-muted); opacity: 1; font-size: var(--pos-text-xs); }
+body.till-body .venue-course .mods { color: var(--pos-text-2); opacity: 1; font-size: var(--pos-text-sm); }
+body.till-body .venue-course .num { font-variant-numeric: tabular-nums; font-weight: var(--pos-weight-medium); }
+body.till-body .venue-course .state { font-size: var(--pos-text-xs); font-weight: var(--pos-weight-bold); border: 1px solid var(--pos-border); background: var(--pos-surface-2); color: var(--pos-text-2); }
+body.till-body .venue-course .state-held { background: var(--pos-warning-soft); color: var(--pos-warning-text); border-color: var(--pos-warning-line); }
+body.till-body .venue-course .state-sent { background: var(--pos-info-soft); color: var(--pos-info-text); border-color: var(--pos-info-line); }
+body.till-body .venue-course .state-ready { background: var(--pos-danger); color: #fff; border-color: var(--pos-danger); }
+body.till-body .venue-course .state-served { background: var(--pos-success-soft); color: var(--pos-success-text); border-color: var(--pos-success-line); }
+
+body.till-body .venue-totals { border-top: 1px solid var(--pos-border); padding-top: var(--pos-2); display: grid; gap: 2px; }
+body.till-body .venue-totals > div { display: flex; justify-content: space-between; font-size: var(--pos-text-md); }
+body.till-body .venue-totals > div span:first-child { color: var(--pos-text-2); }
+body.till-body .venue-totals > div span:last-child { color: var(--pos-text); font-variant-numeric: tabular-nums; }
+body.till-body .venue-totals .grand { align-items: baseline; font-size: var(--pos-text-3xl) !important; font-weight: var(--pos-weight-bold); border-top: 0 !important; color: var(--pos-text) !important; }
+body.till-body .venue-totals .grand span:first-child { color: var(--pos-text) !important; font-size: var(--pos-text-lg); }
+body.till-body .venue-totals .grand-usd span { font-size: var(--pos-text-sm); }
+
+/* Send and Pay: large, at the bottom of the check, always in reach. */
+body.till-body .venue-actions {
+  position: sticky; bottom: 0; z-index: 2; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--pos-2);
+  margin: 0 calc(-1 * var(--pos-4)); padding: var(--pos-3) var(--pos-4) var(--pos-4); background: var(--pos-surface); border-top: 1px solid var(--pos-border);
+}
+body.till-body .venue-actions button { min-height: var(--pos-target); font-size: var(--pos-text-md); }
+body.till-body .venue-actions button.secondary,
+body.till-body .venue-check.ticket button.secondary { background: var(--pos-surface); color: var(--pos-text); border: 1px solid var(--pos-border-strong); box-shadow: none; }
+body.till-body .venue-actions button.secondary:hover:not(:disabled) { background: var(--pos-surface-2); color: var(--pos-text); }
+body.till-body .venue-actions .big.lime { grid-column: 1 / -1; min-height: var(--pos-target-lg); background: var(--pos-surface); color: var(--pos-brand-text); border: 2px solid var(--pos-brand); font-size: var(--pos-text-lg); font-weight: var(--pos-weight-bold); box-shadow: none; }
+body.till-body .venue-actions .big.lime:hover:not(:disabled) { background: var(--pos-brand-soft); color: var(--pos-brand-text); border-color: var(--pos-brand); }
+body.till-body .venue-actions .big.lime .chip { background: var(--pos-brand); color: var(--pos-on-brand); }
+body.till-body .venue-actions .big.lime:disabled { border-color: var(--pos-border); color: var(--pos-text-muted); background: var(--pos-surface-2); opacity: 1; }
+/* Pay: the selling action, the strongest button. */
+body.till-body .venue-actions > button:not(.secondary):not(.big) { grid-column: 1 / -1; min-height: var(--pos-target-lg); background: var(--pos-brand); color: var(--pos-on-brand); border: 0; font-size: var(--pos-text-xl); font-weight: var(--pos-weight-bold); }
+body.till-body .venue-actions > button:not(.secondary):not(.big):hover:not(:disabled) { background: var(--pos-brand-pressed); color: var(--pos-on-brand); }
+body.till-body .venue-actions > button:not(.secondary):not(.big):disabled { background: var(--pos-surface-3); color: var(--pos-text-muted); opacity: 1; }
+
+@media (max-width: 720px) {
+  body.till-body .venue-actions { position: static; margin: 0; padding: 0 0 var(--pos-4); border-top: 0; }
+  body.till-body .venue-check > .venue-lines { max-height: none; overflow: visible; }
+}

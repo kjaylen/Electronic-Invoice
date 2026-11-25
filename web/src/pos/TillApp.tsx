@@ -611,7 +611,7 @@ function TillFloor() {
   const printer = useRef(till.printTicket);
   printer.current = till.printTicket;
   const print = useCallback((ticket: Ticket, title: string) => printer.current(ticket, { title }), []);
-  return <VenueFloor counter={<Sell />} print={print} />;
+  return <VenueFloor touch counter={<Sell />} print={print} />;
 }
 
 /** A logo from the snapshot (data: URL, printed offline) or the server. */
