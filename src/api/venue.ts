@@ -30,6 +30,7 @@ import type { PipelineDeps } from '../pipeline/issue.ts';
 import type { Check } from '../venue/check.ts';
 import { applyOps, changesSince, loadMenu, loadModifierGroups, loadPeriods, loadStations, type OpInput, touchTicket } from '../venue/service.ts';
 import { businessDate, loadVenue, saveVenue, venueOn, type VenueSettings } from '../venue/settings.ts';
+import { addSection, menuSections, moveItems, orderSections, removeSection, renameSection } from '../venue/sections.ts';
 import { taxRules } from '../venue/tax-rules.ts';
 import { ApiError, notFound } from './errors.ts';
 import { can, requirePermission, type Role } from './permissions.ts';
@@ -96,6 +97,8 @@ export function registerVenueRoutes(app: FastifyInstance, deps: PipelineDeps) {
       stations,
       modifierGroups: await loadModifierGroups(db, request.tenantId),
       items: await loadMenu(db, request.tenantId, stations),
+      // The menu's sections (item categories) in the business's order.
+      menuSections: await menuSections(db, request.tenantId),
       staff: staff.map((s) => ({ id: s.id, name: s.name, role: s.role, orders: can(s.role, 'venue.orders'), approves: can(s.role, 'venue.approve') })),
       sections: (await db.query<{ user_id: string; table_ids: string[] }>('select user_id, table_ids from venue_sections where tenant_id = $1 and business_date = $2', [request.tenantId, businessDate(now, venue.dayEndsHour)])).rows.map((r) => ({ userId: r.user_id, tableIds: r.table_ids })),
       allergens: ALLERGENS, dietary: DIETARY,
@@ -346,6 +349,69 @@ export function registerVenueRoutes(app: FastifyInstance, deps: PipelineDeps) {
       return oneItem(request.tenantId, request.params.id);
     },
   );
+  // ---------- the menu's sections (item categories, in the business's order) ----------
+  const sectionName = { type: 'string', minLength: 1, maxLength: 80 } as const;
+  const sectionsReply = async (tenantId: string) => ({ data: await menuSections(db, tenantId) });
+  app.get('/venue/menu-sections', async (request) => { service(request); return sectionsReply(request.tenantId); });
+  app.put<{ Body: { order: string[] } }>(
+    '/venue/menu-sections',
+    { schema: { body: { type: 'object', required: ['order'], additionalProperties: false, properties: { order: { type: 'array', maxItems: 500, items: sectionName } } } } },
+    async (request) => {
+      menuSetup(request);
+      await on(request.tenantId);
+      await orderSections(db, request.tenantId, request.body.order);
+      return sectionsReply(request.tenantId);
+    },
+  );
+  app.post<{ Body: { name: string } }>(
+    '/venue/menu-sections',
+    { schema: { body: { type: 'object', required: ['name'], additionalProperties: false, properties: { name: sectionName } } } },
+    async (request, reply) => {
+      menuSetup(request);
+      await on(request.tenantId);
+      const name = await addSection(db, request.tenantId, request.body.name);
+      if (!name) throw new ApiError(409, 'section_exists', 'There is already a section by that name');
+      await audit(db, { tenantId: request.tenantId, userId: request.userId || null, action: 'menu.section_added', target: name, ip: request.ip });
+      return reply.code(201).send(await sectionsReply(request.tenantId));
+    },
+  );
+  app.post<{ Body: { from: string; to: string } }>(
+    '/venue/menu-sections/rename',
+    { schema: { body: { type: 'object', required: ['from', 'to'], additionalProperties: false, properties: { from: sectionName, to: sectionName } } } },
+    async (request) => {
+      menuSetup(request);
+      await on(request.tenantId);
+      const done = await renameSection(db, request.tenantId, request.body.from, request.body.to);
+      if (!done) throw notFound('Section');
+      await audit(db, { tenantId: request.tenantId, userId: request.userId || null, action: 'menu.section_renamed', target: request.body.from, details: { to: done.name, items: done.items }, ip: request.ip });
+      return { name: done.name, ...(await sectionsReply(request.tenantId)) };
+    },
+  );
+  app.post<{ Body: { name: string; moveTo: string | null } }>(
+    '/venue/menu-sections/remove',
+    { schema: { body: { type: 'object', required: ['name', 'moveTo'], additionalProperties: false, properties: { name: sectionName, moveTo: { anyOf: [sectionName, { type: 'null' }] } } } } },
+    async (request) => {
+      menuSetup(request);
+      await on(request.tenantId);
+      const done = await removeSection(db, request.tenantId, request.body.name, request.body.moveTo);
+      if (!done) throw notFound('Section');
+      await audit(db, { tenantId: request.tenantId, userId: request.userId || null, action: 'menu.section_removed', target: request.body.name, details: { moveTo: request.body.moveTo, items: done.items }, ip: request.ip });
+      return sectionsReply(request.tenantId);
+    },
+  );
+  // Items into a section (one, or many at once); null takes them out of every section.
+  app.post<{ Body: { itemIds: string[]; section: string | null } }>(
+    '/venue/items/move',
+    { schema: { body: { type: 'object', required: ['itemIds', 'section'], additionalProperties: false, properties: { itemIds: { type: 'array', minItems: 1, maxItems: 1000, uniqueItems: true, items: uuid }, section: { anyOf: [sectionName, { type: 'null' }] } } } } },
+    async (request) => {
+      menuSetup(request);
+      await on(request.tenantId);
+      const done = await moveItems(db, request.tenantId, request.body.itemIds, request.body.section);
+      await audit(db, { tenantId: request.tenantId, userId: request.userId || null, action: 'menu.items_moved', target: done.section ?? '', details: { items: done.items }, ip: request.ip });
+      return { section: done.section, moved: done.items, ...(await sectionsReply(request.tenantId)) };
+    },
+  );
+
   // "86": one tap by anyone who takes orders or runs the kitchen. Every device hears within its next poll.
   app.post<{ Params: { id: string }; Body: { soldOut?: boolean; remaining?: number | null } }>(
     '/venue/items/:id/availability',
