@@ -184,6 +184,11 @@ tbody tr:nth-child(n + 9), .sale-list > li:nth-child(n + 9), .product-grid > :nt
 ::view-transition-new(panel) { animation: 360ms var(--ease-out) 30ms both panel-in; }
 html.vt-tab::view-transition-old(page) { animation: 200ms var(--ease) both fade reverse; }
 html.vt-tab::view-transition-new(page) { animation: 200ms var(--ease) both fade; }
+/* The till's tabs (html.vt-screen): every tab is a different screen, so a cross-fade would show two at
+   once. The old one fades out quickly, then the new one fades in; nothing inside moves on its own. */
+html.vt-screen .till-main .tab-panel { view-transition-name: none; }
+html.vt-screen::view-transition-old(page) { animation: 90ms var(--ease-in) both fade reverse; }
+html.vt-screen::view-transition-new(page) { animation: 170ms var(--ease-out) 90ms both fade; }
 /* While a transition plays, the page underneath keeps taking clicks once it is in view. */
 ::view-transition { pointer-events: none; }
 

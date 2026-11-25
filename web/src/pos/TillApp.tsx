@@ -800,10 +800,10 @@ function SignedInTill(props: {
           <header className="till-bar">
             <div className="till-where"><strong>{till.business.name}</strong><span className="muted"> · {till.device.name}</span></div>
             <nav className="till-tabs" aria-label={t('Till')}>
-              {tabs.map(([k, label]) => <button key={k} type="button" className={tab === k ? 'active' : ''} aria-current={tab === k ? 'page' : undefined} onClick={() => k !== tab && withTransition(() => setTab(k))}>{label}</button>)}
+              {tabs.map(([k, label]) => <button key={k} type="button" className={tab === k ? 'active' : ''} aria-current={tab === k ? 'page' : undefined} onClick={() => k !== tab && withTransition(() => setTab(k), 'screen')}>{label}</button>)}
             </nav>
             <span className="spacer" />
-            {sync && <SyncIndicator state={sync} onOpen={isManager ? () => withTransition(() => setTab('sync')) : undefined} />}
+            {sync && <SyncIndicator state={sync} onOpen={isManager ? () => withTransition(() => setTab('sync'), 'screen') : undefined} />}
             <span className="till-user"><span className="avatar" aria-hidden="true">{initials(session.user.name)}</span>{session.user.name}</span>
             <button type="button" className="secondary small-button" onClick={lock}>{t('Lock')}</button>
           </header>

@@ -81,9 +81,10 @@ type ViewTransitionDocument = Document & { startViewTransition?: (update: () => 
 
 /**
  * Change what is on screen as a view transition. "tab": a same-page switch (tabs, filters): a pure
- * cross-fade, so unchanged parts never move. "page": a new page eases in.
+ * cross-fade, so unchanged parts never move. "page": a new page eases in. "screen": the till's tabs,
+ * each a whole different screen: the old one goes first, then the new one comes in, never both at once.
  */
-export function withTransition(update: () => void, kind: 'tab' | 'page' = 'tab') {
+export function withTransition(update: () => void, kind: 'tab' | 'page' | 'screen' = 'tab') {
   const doc = document as ViewTransitionDocument;
   if (!doc.startViewTransition || reducedMotion() || document.visibilityState !== 'visible') {
     update();
