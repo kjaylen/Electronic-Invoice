@@ -3,15 +3,18 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import '@fontsource-variable/inter/opsz.css';
-import '@fontsource-variable/inter-tight';
-import '@fontsource-variable/geist-mono';
 import '../styles.css';
 import './pos.css';
+import './design/tokens.css';
+import './design/components.css';
+import './design/floor.css';
+import { initTheme } from './design/theme';
 import { ErrorBoundary } from '../ErrorBoundary';
 import { I18nProvider } from '../i18n';
 import { ConfirmProvider } from '../confirm';
 import { ToastProvider } from '../toast';
 import { TillApp } from './TillApp';
+import { lazy, Suspense } from 'react';
 import { installIndicators } from '../motion';
 
 /**
@@ -34,7 +37,13 @@ function keepForOffline() {
   });
 }
 
+/** The component gallery: development builds only (/pos.html?gallery), never in a built till. */
+const GALLERY = import.meta.env.DEV && new URLSearchParams(window.location.search).has('gallery');
+const Gallery = lazy(() => Promise.all([import('./design/Gallery'), import('./design/gallery.css')]).then(([m]) => ({ default: m.Gallery })));
+
 document.body.classList.add('till-body');
+// The device's theme, before the first paint.
+initTheme();
 installIndicators();
 keepForOffline();
 createRoot(document.getElementById('root')!).render(
@@ -43,7 +52,7 @@ createRoot(document.getElementById('root')!).render(
       <ToastProvider>
         <ConfirmProvider>
           <ErrorBoundary>
-            <TillApp />
+            {GALLERY ? <Suspense fallback={null}><Gallery /></Suspense> : <TillApp />}
           </ErrorBoundary>
         </ConfirmProvider>
       </ToastProvider>

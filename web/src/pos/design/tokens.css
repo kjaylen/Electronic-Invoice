@@ -1,0 +1,189 @@
+/*
+ * The till's design system: tokens. Every colour, size, space, radius, shadow and duration on a till
+ * comes from here (docs/design/DESIGN-SYSTEM.md). Two themes, light and dark, chosen per device
+ * (html[data-theme], set by theme.ts); "match the device" follows the system setting.
+ *
+ * The shared tokens of the web app (--paper, --sheet, --ink, --muted, --hairline, --brand…) are
+ * remapped onto these inside the till, so the shared pieces a till uses (fields, dialogs, the counter,
+ * the shift screens) follow the same system and both themes.
+ *
+ * Contrast (WCAG AA): body text ≥ 4.5:1 on every surface it sits on, large text and interface parts
+ * ≥ 3:1. The pairs are listed in DESIGN-SYSTEM.md with their ratios.
+ */
+
+body.till-body {
+  /* ---------- colour: light ---------- */
+  /* One brand colour: what you act on (primary buttons, selection, focus). */
+  --pos-brand: #6d2d93;          /* white on it 8.6:1 */
+  --pos-brand-pressed: #561f78;
+  --pos-brand-soft: #f3ecfa;     /* selected surfaces */
+  --pos-brand-line: #d9c4ec;
+  --pos-brand-text: #5a2380;     /* brand as text on surfaces: 9.1:1 on white */
+  --pos-on-brand: #ffffff;
+
+  /* Neutrals: surfaces and text. */
+  --pos-bg: #eef0f3;             /* behind everything */
+  --pos-surface: #ffffff;        /* panels, tiles, rows */
+  --pos-surface-2: #f6f7f9;      /* insets, hover */
+  --pos-surface-3: #e6e9ee;      /* pressed, keys */
+  --pos-border: #d9dde3;
+  --pos-border-strong: #8a919d;  /* field and control edges: 3:1 or more against white (WCAG non-text) */
+  --pos-text: #11141a;           /* 17.9:1 on white, 16.2:1 on bg */
+  --pos-text-2: #353b47;         /* 11.1:1 */
+  --pos-text-muted: #545c6b;     /* 6.6:1 on white, 5.9:1 on bg */
+  --pos-scrim: rgba(10, 12, 16, 0.48);
+  --pos-bar: #11141a;            /* the status bar */
+  --pos-on-bar: #f2f3f5;
+  --pos-on-bar-muted: #b4bac4;   /* 9.4:1 on the bar */
+
+  /* Status: fixed meanings, everywhere. Each comes with an icon or a word, never colour alone. */
+  --pos-success: #1a7f3c;  --pos-success-soft: #e7f6ec; --pos-success-line: #a9dcba; --pos-success-text: #11642d;
+  --pos-warning: #b26a00;  --pos-warning-soft: #fff4dc; --pos-warning-line: #f1cf8b; --pos-warning-text: #7a4800;
+  --pos-danger: #c62a1f;   --pos-danger-soft: #fdecea;  --pos-danger-line: #f2b8b2; --pos-danger-text: #a3241a;
+  --pos-info: #1f5fbf;     --pos-info-soft: #e8f0fc;    --pos-info-line: #b4cdf3;   --pos-info-text: #1a4f9e;
+
+  /* Table states: a colour, an icon and a word each (docs/design/DESIGN-SYSTEM.md, "Table states"). */
+  --pos-t-free: #ffffff;      --pos-t-free-ink: #353b47;      --pos-t-free-edge: #8a919d;
+  --pos-t-reserved: #ece3fb;  --pos-t-reserved-ink: #3d1a66;  --pos-t-reserved-edge: #8b63c9;
+  --pos-t-seated: #dceaff;    --pos-t-seated-ink: #0b3a66;    --pos-t-seated-edge: #3f7fd0;
+  --pos-t-ordered: #fff0bf;   --pos-t-ordered-ink: #5c4300;   --pos-t-ordered-edge: #a67c00;
+  --pos-t-sent: #ffe0bd;      --pos-t-sent-ink: #6b3200;      --pos-t-sent-edge: #d9771c;
+  --pos-t-mains: #d5f1db;     --pos-t-mains-ink: #0f4d1b;     --pos-t-mains-edge: #2e9a4a;
+  --pos-t-bill: #ffd8d3;      --pos-t-bill-ink: #7a1410;      --pos-t-bill-edge: #d4382c;
+  --pos-t-paid: #ebe8ef;      --pos-t-paid-ink: #2c2333;      --pos-t-paid-edge: #6b6274;
+  --pos-plan: #f8f9fb;        --pos-plan-grid: rgba(17, 20, 26, 0.05); --pos-plan-fixture: #d9dde3; --pos-plan-wall: #9aa2ae;
+
+  /* ---------- type ---------- */
+  /* One typeface (Inter). Figures are tabular, so prices line up. Nothing below 14px. */
+  --pos-font: 'Inter Variable', 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --pos-text-xs: 0.875rem;   /* 14: captions, badges (the smallest anything is) */
+  --pos-text-sm: 0.9375rem;  /* 15: secondary lines */
+  --pos-text-md: 1rem;       /* 16: body */
+  --pos-text-lg: 1.125rem;   /* 18: tiles, rows */
+  --pos-text-xl: 1.375rem;   /* 22: headings */
+  --pos-text-2xl: 1.75rem;   /* 28: screen titles, change due label */
+  --pos-text-3xl: 2.5rem;    /* 40: totals */
+  --pos-text-4xl: 3.5rem;    /* 56: amount due, change due */
+  --pos-weight-regular: 450;
+  --pos-weight-medium: 560;
+  --pos-weight-bold: 680;
+
+  /* ---------- space: an 8-point grid (4 only for hairline gaps) ---------- */
+  --pos-1: 4px; --pos-2: 8px; --pos-3: 12px; --pos-4: 16px; --pos-5: 24px; --pos-6: 32px; --pos-7: 48px; --pos-8: 64px;
+
+  /* ---------- touch ---------- */
+  --pos-target: 48px;        /* anything tappable (Android 48dp, iOS 44pt) */
+  --pos-target-lg: 64px;     /* selling actions: product tiles, pay, number keys */
+  --pos-gap-target: 8px;     /* between targets */
+
+  /* ---------- shape and depth ---------- */
+  --pos-radius-sm: 8px;      /* chips, keys */
+  --pos-radius: 12px;        /* buttons, tiles, fields */
+  --pos-radius-lg: 16px;     /* panels, sheets */
+  --pos-radius-pill: 999px;
+  --pos-elev-0: none;
+  --pos-elev-1: 0 1px 2px rgba(17, 20, 26, 0.08);
+  --pos-elev-2: 0 2px 6px rgba(17, 20, 26, 0.08), 0 8px 20px -8px rgba(17, 20, 26, 0.18);
+  --pos-elev-3: 0 8px 24px rgba(17, 20, 26, 0.14), 0 24px 56px -16px rgba(17, 20, 26, 0.32);
+  --pos-focus: 0 0 0 3px var(--pos-surface), 0 0 0 6px var(--pos-brand);
+
+  /* ---------- motion: short and purposeful ---------- */
+  --pos-press: 60ms;         /* a tap shows at once */
+  --pos-quick: 150ms;
+  --pos-move: 220ms;
+  --pos-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  /* ---------- the shared tokens, through the system ---------- */
+  --paper: var(--pos-bg);
+  --paper-2: var(--pos-surface-3);
+  --sheet: var(--pos-surface);
+  --sheet-2: var(--pos-surface-2);
+  --ink: var(--pos-text);
+  --ink-2: var(--pos-text-2);
+  --muted: var(--pos-text-muted);
+  --hairline: var(--pos-border);
+  --hairline-strong: var(--pos-border-strong);
+  --brand: var(--pos-brand);
+  --brand-hover: var(--pos-brand-pressed);
+  --brand-ink: var(--pos-brand-text);
+  --brand-soft: var(--pos-brand-soft);
+  --brand-line: var(--pos-brand-line);
+  --lime-ink: var(--pos-success-text);
+  --lime-soft: var(--pos-success-soft);
+  --lime-line: var(--pos-success-line);
+  --success-dot: var(--pos-success);
+  --coral: var(--pos-danger);
+  --coral-ink: var(--pos-danger-text);
+  --coral-soft: var(--pos-danger-soft);
+  --coral-line: var(--pos-danger-line);
+  --ochre: var(--pos-warning);
+  --ochre-ink: var(--pos-warning-text);
+  --ochre-soft: var(--pos-warning-soft);
+  --ochre-line: var(--pos-warning-line);
+  --info-soft: var(--pos-info-soft);
+  --radius-sm: var(--pos-radius-sm);
+  --radius: var(--pos-radius);
+  --radius-lg: var(--pos-radius-lg);
+  --radius-xl: var(--pos-radius-lg);
+  --shadow-xs: var(--pos-elev-1);
+  --shadow: var(--pos-elev-1);
+  --shadow-lift: var(--pos-elev-2);
+  --shadow-overlay: var(--pos-elev-3);
+  --ring: var(--pos-focus);
+  --dur-fast: var(--pos-quick);
+  --dur: var(--pos-move);
+  --sans: var(--pos-font);
+  --display: var(--pos-font);
+  --figures: var(--pos-font);
+
+  color-scheme: light;
+  font-family: var(--pos-font);
+  font-size: var(--pos-text-md);
+  font-variant-numeric: tabular-nums;
+  color: var(--pos-text);
+  background: var(--pos-bg);
+}
+
+/* ---------- colour: dark (bars, evenings; also easier on staff at night) ---------- */
+html[data-theme='dark'] body.till-body {
+  --pos-brand: #8c55c4;          /* white on it 4.6:1, and 3:1 against the dark surface */
+  --pos-brand-pressed: #7a47b0;
+  --pos-brand-soft: #2b1f3a;
+  --pos-brand-line: #5d4385;
+  --pos-brand-text: #cfa9f2;     /* 8.4:1 on the dark surface */
+  --pos-on-brand: #ffffff;
+
+  --pos-bg: #0c0e12;
+  --pos-surface: #161a20;
+  --pos-surface-2: #1c2129;
+  --pos-surface-3: #262c36;
+  --pos-border: #2c333e;
+  --pos-border-strong: #6b7586;  /* 3:1 or more against the surface */
+  --pos-text: #f1f3f6;           /* 16.4:1 on the surface */
+  --pos-text-2: #cdd2da;         /* 11.6:1 */
+  --pos-text-muted: #9ca4b1;     /* 6.8:1 */
+  --pos-scrim: rgba(0, 0, 0, 0.62);
+  --pos-bar: #07090c;
+  --pos-on-bar: #f1f3f6;
+  --pos-on-bar-muted: #a7aeba;
+
+  --pos-success: #3fbf6a;  --pos-success-soft: #10291a; --pos-success-line: #24603a; --pos-success-text: #7fe0a0;
+  --pos-warning: #e9a23b;  --pos-warning-soft: #2e2208; --pos-warning-line: #6e4f14; --pos-warning-text: #ffcc7a;
+  --pos-danger: #f06a5e;   --pos-danger-soft: #331412;  --pos-danger-line: #7a2a24; --pos-danger-text: #ff9e95;
+  --pos-info: #5b9cf4;     --pos-info-soft: #112038;    --pos-info-line: #2b4e85;   --pos-info-text: #9cc2ff;
+
+  --pos-t-free: #1c2129;      --pos-t-free-ink: #cdd2da;      --pos-t-free-edge: #6b7586;
+  --pos-t-reserved: #2c2142;  --pos-t-reserved-ink: #dcc8ff;  --pos-t-reserved-edge: #8b63c9;
+  --pos-t-seated: #132a46;    --pos-t-seated-ink: #b9d7ff;    --pos-t-seated-edge: #4d8fe0;
+  --pos-t-ordered: #352a07;   --pos-t-ordered-ink: #ffe28a;   --pos-t-ordered-edge: #a67c00;
+  --pos-t-sent: #3a230c;      --pos-t-sent-ink: #ffc58a;      --pos-t-sent-edge: #e0842c;
+  --pos-t-mains: #112d19;     --pos-t-mains-ink: #9fe6b3;     --pos-t-mains-edge: #36a856;
+  --pos-t-bill: #3a1613;      --pos-t-bill-ink: #ffb0a8;      --pos-t-bill-edge: #e2493c;
+  --pos-t-paid: #24212a;      --pos-t-paid-ink: #d6d0de;      --pos-t-paid-edge: #8a8194;
+  --pos-plan: #11151a;        --pos-plan-grid: rgba(241, 243, 246, 0.05); --pos-plan-fixture: #2c333e; --pos-plan-wall: #5c6574;
+
+  --pos-elev-1: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --pos-elev-2: 0 2px 6px rgba(0, 0, 0, 0.45), 0 10px 24px -8px rgba(0, 0, 0, 0.6);
+  --pos-elev-3: 0 8px 24px rgba(0, 0, 0, 0.55), 0 24px 56px -16px rgba(0, 0, 0, 0.75);
+  color-scheme: dark;
+}

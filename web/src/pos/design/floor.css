@@ -1,0 +1,41 @@
+/*
+ * The floor plan (docs/design/DESIGN-SYSTEM.md, "Floor and tables"): tables in their real shapes
+ * with seats, states by colour + icon + word, information that scales with the table on screen.
+ */
+
+.pos-table { position: absolute; inset: 0; display: block; color: var(--table-ink); container-type: size; }
+.pos-table-top {
+  position: absolute; inset: 0; display: grid; place-items: center; overflow: hidden;
+  background: var(--table-bg); border: 2px solid var(--table-edge); border-radius: 14%;
+  box-shadow: var(--pos-elev-1); transition: transform var(--pos-press) linear, box-shadow var(--pos-quick) var(--pos-ease);
+}
+.pos-table.shape-round .pos-table-top, .pos-table.shape-stool .pos-table-top { border-radius: 999px; }
+.pos-table.shape-rect .pos-table-top { border-radius: 10px; }
+.pos-table.tstate-free .pos-table-top { border-style: solid; border-width: 1.5px; }
+.pos-table.tstate-paid .pos-table-top { border-style: dashed; background-image: repeating-linear-gradient(135deg, transparent 0 8px, rgba(127, 127, 127, 0.1) 8px 16px); }
+.pos-table.is-selected .pos-table-top { box-shadow: 0 0 0 3px var(--pos-surface), 0 0 0 6px var(--pos-brand), var(--pos-elev-2); }
+.pos-table.is-idle .pos-table-top { box-shadow: 0 0 0 3px var(--pos-plan), 0 0 0 6px var(--pos-warning); }
+.pos-table.is-ready .pos-table-top { box-shadow: 0 0 0 3px var(--pos-plan), 0 0 0 6px var(--pos-danger); }
+
+.pos-seat { position: absolute; width: clamp(8px, 11cqmin, 18px); height: clamp(8px, 11cqmin, 18px); margin: calc(clamp(8px, 11cqmin, 18px) / -2) 0 0 calc(clamp(8px, 11cqmin, 18px) / -2); border-radius: 999px; background: var(--pos-plan); border: 1.5px solid var(--pos-border-strong); }
+.pos-seat.taken { background: var(--table-edge); border-color: var(--table-edge); }
+
+.pos-table-info { display: grid; justify-items: center; align-content: center; gap: max(1px, 2cqmin); padding: 6cqmin; text-align: center; line-height: 1.1; max-width: 100%; }
+.pos-table-name { font-size: clamp(14px, 24cqmin, 34px); font-weight: var(--pos-weight-bold); letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.pos-table-state { display: inline-flex; align-items: center; gap: 3px; font-size: clamp(14px, 10cqmin, 16px); font-weight: var(--pos-weight-medium); white-space: nowrap; }
+.pos-table-state svg { width: 1.05em; height: 1.05em; flex: none; }
+.pos-table-meta { display: inline-flex; gap: 0.45em; font-size: clamp(14px, 11cqmin, 18px); font-weight: var(--pos-weight-medium); white-space: nowrap; }
+.pos-table-meta span { display: inline-flex; align-items: center; gap: 2px; }
+.pos-table-meta svg { width: 0.95em; height: 0.95em; }
+.pos-table-total { font-size: clamp(14px, 13cqmin, 22px); font-weight: var(--pos-weight-bold); }
+.pos-table-booking { font-size: clamp(14px, 10cqmin, 16px); font-weight: var(--pos-weight-medium); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+/* Small on screen: the number first; the rest only as room allows. */
+@container (max-height: 96px) { .pos-table-state span, .pos-table-booking { display: none; } }
+@container (max-height: 70px) { .pos-table-meta, .pos-table-total { display: none; } }
+@container (max-width: 76px) { .pos-table-state span, .pos-table-meta span:nth-child(n + 2) { display: none; } }
+
+.pos-table-flag { position: absolute; top: -6px; right: -6px; width: 28px; height: 28px; border-radius: 999px; display: grid; place-items: center; color: #fff; z-index: 2; box-shadow: var(--pos-elev-1); }
+.pos-table-flag svg { width: 16px; height: 16px; }
+.pos-table-flag.idle { background: var(--pos-warning); }
+.pos-table-flag.ready { background: var(--pos-danger); right: auto; left: -6px; animation: pos-blink 1.4s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .pos-table-flag.ready { animation: none; } }
