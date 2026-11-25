@@ -166,3 +166,13 @@
 .menu-list > li.sold-out .menu-name, .menu-list > li.sold-out .num { color: var(--muted); }
 .menu-detail { padding: 0.75rem 0 0.35rem 1.75rem; }
 @media (max-width: 640px) { .menu-detail { padding-left: 0; } .menu-toolbar form, .menu-toolbar form input { width: 100%; } }
+
+/* The layout editor's tools: what to add, then how to arrange; a corner handle resizes the chosen item. */
+.floor-palette { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+.floor-palette > button { min-height: 2.75rem; }
+.floor-palette > button[aria-pressed='true'] { border-color: var(--brand); background: var(--brand-soft); color: var(--brand-ink); }
+.floor-snap { gap: 0.4rem; font-size: 0.9rem; min-height: 2.75rem; }
+.floor-editor > [role='button'] { touch-action: none; cursor: grab; }
+.floor-editor > [role='button']:focus-visible { outline: 3px solid var(--brand); outline-offset: 2px; }
+.floor-handle { position: absolute; right: -14px; bottom: -14px; width: 28px; height: 28px; border-radius: 999px; background: var(--brand); border: 3px solid #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3); cursor: nwse-resize; touch-action: none; }
+.venue-fixture.door { background: transparent; border: 2px dashed var(--hairline-strong, #cfc8d6); }
