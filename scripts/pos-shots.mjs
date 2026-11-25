@@ -167,7 +167,7 @@ for (const size of SIZES) {
   await page.waitForFunction(() => document.querySelector('.sync-indicator')?.textContent?.includes('all sent'), null, { timeout: 30_000 }).catch(() => {});
   await step('sales', async () => { await tab('Sales'); await page.waitForSelector('.sale-list li'); });
   await step('sale-detail', async () => { await page.locator('.sale-list li button').first().click(); await page.waitForSelector('[role="dialog"]'); });
-  await step('refund', async () => { await page.getByRole('button', { name: /^Refund/ }).click(); await page.waitForSelector('text=/A credit note goes to BTS/'); });
+  await step('refund', async () => { await page.getByRole('dialog').getByRole('button', { name: 'Refund', exact: true }).click(); await page.waitForSelector('text=/A credit note goes to BTS/'); });
   await page.keyboard.press('Escape').catch(() => {});
   await page.keyboard.press('Escape').catch(() => {});
   await step('shift', async () => { await tab('Shift'); await page.waitForTimeout(400); });

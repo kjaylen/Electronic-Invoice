@@ -5,6 +5,7 @@
  */
 
 import { type ButtonHTMLAttributes, type CSSProperties, type ReactNode, useEffect, useRef, useState } from 'react';
+import { useT } from '../../i18n';
 import { feedback } from './feedback';
 import { PosIcon, type PosIconName } from './icons';
 
@@ -156,11 +157,12 @@ export function typeAmount(current: string, key: string): string {
 // ---------- quantity stepper ----------
 
 export function Stepper({ value, onChange, min = 1, max = 999, label }: { value: number; onChange: (n: number) => void; min?: number; max?: number; label: string }) {
+  const t = useT();
   return (
     <div className="pos-stepper" role="group" aria-label={label}>
-      <button type="button" aria-label="One less" disabled={value <= min} onClick={() => { feedback('tap'); onChange(value - 1); }}><Icon name="minus" /></button>
+      <button type="button" aria-label={t('One less')} disabled={value <= min} onClick={() => { feedback('tap'); onChange(value - 1); }}><Icon name="minus" /></button>
       <output aria-live="polite">{value}</output>
-      <button type="button" aria-label="One more" disabled={value >= max} onClick={() => { feedback('tap'); onChange(value + 1); }}><Icon name="plus" /></button>
+      <button type="button" aria-label={t('One more')} disabled={value >= max} onClick={() => { feedback('tap'); onChange(value + 1); }}><Icon name="plus" /></button>
     </div>
   );
 }
@@ -217,6 +219,7 @@ export function Skeleton({ height = '1rem', width = '100%', style }: { height?: 
 // ---------- sheet (bottom sheet on phones, dialog or side panel on larger screens) ----------
 
 export function Sheet({ title, onClose, children, side, full, footer }: { title: ReactNode; onClose: () => void; children: ReactNode; side?: boolean; full?: boolean; footer?: ReactNode }) {
+  const t = useT();
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const before = document.activeElement as HTMLElement | null;
@@ -231,7 +234,7 @@ export function Sheet({ title, onClose, children, side, full, footer }: { title:
   return (
     <div className={cx('pos-scrim', side && 'side')} onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div ref={ref} className={cx('pos-sheet', full && 'full')} role="dialog" aria-modal="true" aria-label={typeof title === 'string' ? title : undefined}>
-        <header><h2>{title}</h2><Button variant="quiet" icon="close" aria-label="Close" onClick={onClose} /></header>
+        <header><h2>{title}</h2><Button variant="quiet" icon="close" aria-label={t('Close')} onClick={onClose} /></header>
         <div className="pos-sheet-body">{children}</div>
         {footer && <footer className="pos-sheet-foot">{footer}</footer>}
       </div>

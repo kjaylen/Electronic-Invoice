@@ -1,0 +1,122 @@
+/*
+ * The till's other screens on the design system: lists with filters (B5), forms (B6) and settings (B8).
+ * Scoped to body.till-body; colours, sizes and spacing come from the tokens only.
+ */
+
+/* ---------- A list screen: heading and search, filter chips, rows grouped by day ---------- */
+body.till-body .till-list-screen { gap: var(--pos-4); }
+body.till-body .till-list-screen > * + * { margin-top: 0; }
+body.till-body .till-list-head { display: flex; align-items: flex-end; gap: var(--pos-4); flex-wrap: wrap; }
+body.till-body .till-list-head h1 { margin: 0; font-size: var(--pos-text-2xl); }
+body.till-body .till-list-head .till-search { margin-left: auto; width: min(24rem, 100%); }
+body.till-body .till-filters { display: flex; gap: var(--pos-gap-target); overflow-x: auto; scrollbar-width: none; padding: 2px; margin: -2px; }
+body.till-body .till-filters::-webkit-scrollbar { display: none; }
+body.till-body .till-filters .pos-chip { flex: none; }
+body.till-body .pos-chip .count { min-width: 1.5rem; padding: 0 var(--pos-2); border-radius: var(--pos-radius-pill); background: var(--pos-warning-soft); color: var(--pos-warning-text); font-size: var(--pos-text-xs); font-weight: var(--pos-weight-bold); line-height: 1.5rem; text-align: center; }
+body.till-body .till-day { display: grid; gap: var(--pos-2); }
+body.till-body .till-day-head { display: flex; justify-content: space-between; align-items: baseline; margin: 0; padding: 0 var(--pos-1); font-size: var(--pos-text-sm); font-weight: var(--pos-weight-bold); color: var(--pos-text-2); text-transform: uppercase; letter-spacing: 0.04em; }
+body.till-body .till-day-head .num { font-weight: var(--pos-weight-regular); text-transform: none; letter-spacing: 0; color: var(--pos-text-muted); }
+body.till-body .pos-row .row-icon { display: grid; place-items: center; width: 40px; height: 40px; border-radius: var(--pos-radius); background: var(--pos-surface-2); color: var(--pos-text-2); }
+body.till-body .pos-row .row-icon.refund { background: var(--pos-warning-soft); color: var(--pos-warning-text); }
+body.till-body .pos-row .row-icon svg { width: 1.25rem; height: 1.25rem; }
+body.till-body .pos-row .end { grid-auto-flow: row; }
+body.till-body .pos-row .badge { font-size: var(--pos-text-xs); }
+@media (max-width: 720px) {
+  body.till-body .till-list-head .till-search { width: 100%; }
+  body.till-body .pos-row { padding: var(--pos-2) var(--pos-3); gap: var(--pos-2); }
+  body.till-body .pos-row .title { font-size: var(--pos-text-md); }
+}
+
+/* ---------- A sale's detail and the refund: a sheet from the side ---------- */
+body.till-body .pos-scrim.side .pos-sheet { width: min(36rem, 100%); }
+body.till-body .sale-facts { display: flex; align-items: center; gap: var(--pos-3); flex-wrap: wrap; font-size: var(--pos-text-md); }
+body.till-body .receipt-lines,
+body.till-body .refund-lines { list-style: none; margin: 0; padding: 0; display: grid; }
+body.till-body .receipt-lines li { display: flex; justify-content: space-between; align-items: baseline; gap: var(--pos-3); padding: var(--pos-3) 0; border-bottom: 1px solid var(--pos-border); font-size: var(--pos-text-md); }
+body.till-body .receipt-lines .what { display: grid; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+body.till-body .receipt-lines .what .muted { font-size: var(--pos-text-sm); }
+body.till-body .receipt-lines li.total { font-size: var(--pos-text-xl); font-weight: var(--pos-weight-bold); border-bottom: 0; }
+body.till-body .receipt-lines li.credited { color: var(--pos-warning-text); border-bottom: 0; padding-top: 0; }
+body.till-body .email-row { display: flex; gap: var(--pos-gap-target); flex-wrap: wrap; }
+body.till-body .email-row input { flex: 1; min-width: 12rem; }
+
+body.till-body .refund-form { display: grid; gap: var(--pos-4); }
+body.till-body .refund-form > p { margin: 0; }
+body.till-body .refund-lines li { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--pos-2) var(--pos-3); padding: var(--pos-2) 0; border-bottom: 1px solid var(--pos-border); min-height: 64px; }
+body.till-body .refund-lines .what { display: grid; gap: 2px; font-size: var(--pos-text-md); font-weight: var(--pos-weight-medium); overflow-wrap: anywhere; }
+body.till-body .refund-lines .what .muted { font-size: var(--pos-text-sm); font-weight: var(--pos-weight-regular); }
+body.till-body .refund-lines li.is-kept .what { color: var(--pos-text-muted); text-decoration: line-through; }
+body.till-body .refund-lines .exemption { grid-column: 1 / -1; }
+body.till-body .refund-lines .qty-input { width: 6rem; text-align: right; }
+body.till-body .pos-field { display: grid; gap: var(--pos-2); margin: 0; padding: 0; border: 0; min-width: 0; background: none; box-shadow: none; }
+body.till-body .pos-field > legend { padding: 0; margin-bottom: var(--pos-2); font-size: var(--pos-text-sm); font-weight: var(--pos-weight-bold); color: var(--pos-text-2); }
+body.till-body .chip-row { display: flex; gap: var(--pos-gap-target); flex-wrap: wrap; }
+body.till-body .refund-amount { display: flex; justify-content: space-between; align-items: baseline; gap: var(--pos-3); padding: var(--pos-3) var(--pos-4); border-radius: var(--pos-radius); background: var(--pos-surface-2); border: 1px solid var(--pos-border); }
+body.till-body .refund-amount span { color: var(--pos-text-2); font-size: var(--pos-text-md); }
+body.till-body .refund-amount strong { font-size: var(--pos-text-2xl); }
+body.till-body .refund-form .pos-sheet-foot { margin-top: var(--pos-2); }
+
+/* ---------- Dialogs the till shares with the web (shift, tables, discounts): on the tokens ---------- */
+body.till-body .shift-bar,
+body.till-body .till-shift { border-radius: var(--pos-radius); }
+body.till-body .modal-backdrop .modal h2,
+body.till-body .modal h2 { font-size: var(--pos-text-xl); }
+body.till-body .modal .row > button,
+body.till-body .modal form .row > button { min-height: var(--pos-target); }
+
+/* ---------- Settings (Devices): sections of rows, each with its control ---------- */
+body.till-body .settings-group { display: grid; gap: 0; border: 1px solid var(--pos-border); border-radius: var(--pos-radius-lg); background: var(--pos-surface); overflow: hidden; }
+body.till-body .settings-group > h2 { margin: 0; padding: var(--pos-3) var(--pos-4); font-size: var(--pos-text-md); font-weight: var(--pos-weight-bold); color: var(--pos-text-2); background: var(--pos-surface-2); border-bottom: 1px solid var(--pos-border); }
+body.till-body .setting { display: flex; align-items: center; gap: var(--pos-4); min-height: 64px; padding: var(--pos-2) var(--pos-4); border-bottom: 1px solid var(--pos-border); flex-wrap: wrap; }
+body.till-body .setting:last-child { border-bottom: 0; }
+body.till-body .setting .what { display: grid; gap: 2px; flex: 1; min-width: 12rem; }
+body.till-body .setting .what strong { font-size: var(--pos-text-md); font-weight: var(--pos-weight-medium); }
+body.till-body .setting .what span { font-size: var(--pos-text-sm); color: var(--pos-text-muted); }
+body.till-body .device-list li { background: var(--pos-surface-2); border-color: var(--pos-border); border-radius: var(--pos-radius); min-height: 64px; padding: var(--pos-2) var(--pos-3); }
+body.till-body .scan-test { background: var(--pos-surface-2); border-color: var(--pos-border-strong); border-radius: var(--pos-radius); }
+body.till-body .facts dt,
+body.till-body .sync-facts dt { font-size: var(--pos-text-xs); color: var(--pos-text-muted); }
+body.till-body .facts dd { font-size: var(--pos-text-md); }
+body.till-body .sync-facts dd { font-size: var(--pos-text-xl); }
+body.till-body .sync-list > li:not(.card) { background: var(--pos-surface); border-color: var(--pos-border); min-height: var(--pos-target); font-size: var(--pos-text-md); }
+body.till-body .sync-failed { background: var(--pos-danger-soft); color: var(--pos-danger-text); font-size: var(--pos-text-xs); }
+body.till-body .warn-text { color: var(--pos-warning-text); }
+body.till-body .offline-note { background: var(--pos-surface-2); border-color: var(--pos-border-strong); color: var(--pos-text-2); }
+body.till-body .toggle-list { display: grid; gap: var(--pos-1); }
+body.till-body .setting-line { display: flex; align-items: center; gap: var(--pos-3) var(--pos-4); flex-wrap: wrap; }
+body.till-body .setting-line .what { display: grid; gap: 2px; flex: 1; min-width: 14rem; }
+body.till-body .setting-line .what strong { font-size: var(--pos-text-md); font-weight: var(--pos-weight-medium); }
+body.till-body .setting-line .what span { font-size: var(--pos-text-sm); color: var(--pos-text-muted); }
+body.till-body .till-settings > .card { padding: var(--pos-5); }
+body.till-body .till-settings h2 { font-size: var(--pos-text-xl); margin: 0; }
+body.till-body .device-list li .pos-btn { flex: none; }
+body.till-body .receipt-choice input[type='radio'] { width: 24px; height: 24px; accent-color: var(--pos-brand); }
+
+/* ---------- The Shift screen and the bar above the counter ---------- */
+body.till-body .till-shift-screen .shift-actions,
+body.till-body .till-shift-screen .till-list-head > .pos-btn { margin-left: auto; }
+body.till-body .shift-actions { display: flex; gap: var(--pos-gap-target); flex-wrap: wrap; }
+body.till-body .shift-bar { display: flex; align-items: center; gap: var(--pos-2) var(--pos-3); flex-wrap: wrap; min-height: var(--pos-target-lg); padding: var(--pos-2) var(--pos-2) var(--pos-2) var(--pos-4); border-radius: var(--pos-radius); background: var(--pos-surface); color: var(--pos-text); border: 1px dashed var(--pos-border-strong); font-size: var(--pos-text-md); }
+body.till-body .shift-bar.open { border-style: solid; border-color: var(--pos-success-line); background: var(--pos-success-soft); }
+body.till-body .shift-bar .small { font-size: var(--pos-text-sm); color: var(--pos-text-2); }
+body.till-body .shift-bar button { min-height: var(--pos-target); }
+body.till-body .till-shift-screen table td, body.till-body .till-shift-screen table th { font-size: var(--pos-text-md); }
+
+/* ---------- Choices for an item (B3): groups with what they need, the running price on Add ---------- */
+body.till-body .venue-group { border: 1px solid var(--pos-border); border-radius: var(--pos-radius); padding: var(--pos-3) var(--pos-4) var(--pos-4); background: var(--pos-surface); }
+body.till-body .venue-group.is-required:not(.is-done) { border-color: var(--pos-warning-line); }
+body.till-body .venue-group > legend { display: flex; align-items: baseline; gap: var(--pos-2); padding: 0 var(--pos-2); margin-left: calc(-1 * var(--pos-2)); flex-wrap: wrap; }
+body.till-body .venue-group .group-name { font-size: var(--pos-text-lg); font-weight: var(--pos-weight-bold); color: var(--pos-text); }
+body.till-body .venue-group .group-state { font-size: var(--pos-text-xs); font-weight: var(--pos-weight-bold); padding: 2px var(--pos-2); border-radius: var(--pos-radius-pill); border: 1px solid; }
+body.till-body .venue-group .group-state.needed { color: var(--pos-warning-text); background: var(--pos-warning-soft); border-color: var(--pos-warning-line); }
+body.till-body .venue-group .group-state.done { color: var(--pos-success-text); background: var(--pos-success-soft); border-color: var(--pos-success-line); }
+body.till-body .venue-pick { display: grid; grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr)); gap: var(--pos-gap-target); }
+body.till-body .venue-pick .chip-toggle { min-height: var(--pos-target-lg); justify-content: flex-start; gap: var(--pos-2); padding: 0 var(--pos-4); border-radius: var(--pos-radius); background: var(--pos-surface); color: var(--pos-text); border: 1px solid var(--pos-border-strong); font-size: var(--pos-text-md); font-weight: var(--pos-weight-medium); text-align: left; }
+body.till-body .venue-pick .chip-toggle .num { margin-left: auto; color: var(--pos-text-2); font-variant-numeric: tabular-nums; }
+body.till-body .venue-pick .chip-toggle[aria-pressed='true'] { background: var(--pos-brand-soft); border-color: var(--pos-brand); color: var(--pos-brand-text); box-shadow: inset 0 0 0 1px var(--pos-brand); }
+body.till-body .venue-pick .chip-toggle .tick { font-weight: var(--pos-weight-bold); }
+body.till-body button.add-to-order { min-height: var(--pos-target-lg); gap: var(--pos-3); padding: 0 var(--pos-6); font-size: var(--pos-text-lg); }
+body.till-body button.add-to-order .num { padding: 2px var(--pos-2); border-radius: var(--pos-radius-sm); background: rgba(0, 0, 0, 0.2); }
+body.till-body .qty-stepper { display: inline-flex; align-items: center; border: 1px solid var(--pos-border-strong); border-radius: var(--pos-radius); overflow: hidden; }
+body.till-body .qty-stepper button { min-width: var(--pos-target-lg); min-height: var(--pos-target-lg); border: 0; border-radius: 0; font-size: var(--pos-text-xl); background: var(--pos-surface); color: var(--pos-text); }
+body.till-body .qty-stepper output { min-width: 3rem; text-align: center; font-size: var(--pos-text-xl); font-weight: var(--pos-weight-bold); font-variant-numeric: tabular-nums; }

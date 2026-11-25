@@ -8,9 +8,11 @@ import { useToast } from '../toast';
 import { ErrorText, money } from '../ui';
 import { zReportTicket } from './ticket';
 import { useTill } from './TillApp';
+import { Button, dmy } from './design/components';
 
 type Current = { shift: Shift | null; report: ShiftReport | null };
 const time = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+const when = (iso: string) => `${dmy(iso)} ${time(iso)}`;
 
 /** Print a shift's report (X while open, Z once closed). */
 function usePrintReport() {
@@ -94,17 +96,16 @@ export function ShiftPanel() {
   const problem = (e: unknown) => toast(e instanceof Error ? e.message : String(e), 'bad');
   const s = current?.shift ?? null;
   return (
-    <div className="stack">
-      <div className="row">
+    <div className="stack till-shift-screen">
+      <div className="till-list-head">
         <div><span className="kicker">{till.till.device.register.name}</span><h1>{s ? (s.number ? t('Shift #{n}', { n: s.number }) : t('New shift')) : t('Cash drawer')}</h1></div>
-        <span className="spacer" />
         {s ? (
-          <>
-            <button type="button" className="secondary" onClick={() => setDialog('cash')}>{t('Cash in/out')}</button>
-            <button type="button" className="secondary" onClick={() => void printReport(s.id).catch(problem)}>{t('Print X report')}</button>
-            <button type="button" onClick={() => setDialog('close')}>{t('Close shift')}</button>
-          </>
-        ) : current && <button type="button" onClick={() => setDialog('open')}>{t('Open shift')}</button>}
+          <div className="shift-actions">
+            <Button icon="cash" size="lg" onClick={() => setDialog('cash')}>{t('Cash in/out')}</Button>
+            <Button icon="printer" size="lg" onClick={() => void printReport(s.id).catch(problem)}>{t('Print X report')}</Button>
+            <Button variant="primary" icon="drawer" size="lg" onClick={() => setDialog('close')}>{t('Close shift')}</Button>
+          </div>
+        ) : current && <Button variant="primary" icon="drawer" size="lg" onClick={() => setDialog('open')}>{t('Open shift')}</Button>}
       </div>
       <ErrorText error={error} />
       {s && current?.report && (
@@ -123,11 +124,11 @@ export function ShiftPanel() {
               {history.filter((x) => x.status === 'closed').slice(0, 20).map((x) => (
                 <tr key={x.id}>
                   <td data-label="#" className="mono">{x.number || '—'}</td>
-                  <td data-label={t('Opened')} className="small">{new Date(x.openedAt).toLocaleString()} · {x.openedBy.name}</td>
-                  <td data-label={t('Closed')} className="small">{x.closedAt ? new Date(x.closedAt).toLocaleString() : ''}</td>
+                  <td data-label={t('Opened')} className="small">{when(x.openedAt)} · {x.openedBy.name}</td>
+                  <td data-label={t('Closed')} className="small">{x.closedAt ? when(x.closedAt) : ''}</td>
                   <td data-label={t('Counted')} className="right mono">{x.countedCash ? money(x.countedCash) : '—'}</td>
                   <td data-label={t('Difference')}><DifferenceText difference={x.difference} /></td>
-                  <td><button type="button" className="secondary small-button" onClick={() => void printReport(x.id).catch(problem)}>{t('Print')}</button></td>
+                  <td><Button icon="printer" onClick={() => void printReport(x.id).catch(problem)}>{t('Print')}</Button></td>
                 </tr>
               ))}
             </tbody>
