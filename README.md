@@ -578,6 +578,82 @@ All three are the same web code (`web/src/pos`). It reuses the counter and the s
   - `apps/desktop` `npm run smoke`, and `node scripts/offline-check.mjs`: the desktop app with the server really stopped and started again.
   - `E2E_DB`, `E2E_PORT` and `E2E_BTS_PORT` run the browser tests on their own database and ports, beside another run.
 
+## Restaurants, bars and hotels (`src/venue`, `src/api/venue*.ts`, `src/api/hotel.ts`, `web/src/venue`)
+
+Off for every business until an owner turns on Restaurant, Bar or Hotel under
+Settings → Venue. With all three off nothing here shows or runs, and the
+counter is the shop's counter as before. PLAN.md has the build list,
+TAX-RULES.md the rates and where each comes from, ETD-MAPPING.md which tax
+document is issued when, DECISIONS.md the judgment calls.
+
+- **A check is a list of operations.** `src/venue/check.ts` is a pure
+  reducer, `apply(store, op)`, used by the server and by the screens. Every
+  operation (open, add, fire, void, comp, move, merge, pay, …) has an id made
+  on the device, so sending one twice does nothing. The server keeps the
+  operations (`venue_ops`), the folded check (`venue_checks.state`) and a
+  change counter per business. A device applies an operation at once, queues
+  it, posts it (`POST /v1/venue/ops`) and reads everyone else's
+  (`GET /v1/venue/changes?since=`) every two seconds.
+- **Two servers on one table.** Items have their own ids and every operation
+  names its items, so two people adding never collide and nothing is
+  overwritten. An item goes to the kitchen once: the first `fire` to reach
+  the server sends it, a later one skips it, and the answer says what each
+  operation really sent. Tickets are made from that answer only.
+- **Setup** (Settings → Venue): floor plans by area with other layouts of the
+  same tables, drawn by dragging; menus and promotions by the clock (prices
+  per menu, happy hour, two for one, an item at a price, items together for a
+  price) with a supervisor's override for the day; stations with the
+  categories they make, the till whose printer they use, a kitchen screen,
+  and a fallback station; groups of choices with at least / at most, defaults
+  and prices; allergens, dietary tags, course and stations per item; sold out
+  in one tap with a countdown; sections per server; the tax rules in force.
+- **Roles**: supervisor, server, bartender, host, kitchen, housekeeper, each
+  signing in at a till with a PIN. A void after sending, a comp, a discount
+  over the limit and a price change need a supervisor's PIN
+  (`POST /v1/venue/approve`) and a reason; each is in the check's history.
+- **The floor** (`/floor`, and the Floor tab of the till app): tables coloured
+  by stage with the party, the server, minutes and the amount; tabs by name,
+  bar seat or room; quick sale. **The order screen**: seat, course, choices,
+  notes, the guest's allergy, hold and fire a course, repeat a round, move,
+  merge, give to another server, share an item between guests, the guest
+  check (marked as not a tax document).
+- **Paying** hands the chosen part (whole, by seat, evenly, by item) to the
+  counter, so every tender, US dollars, tips, the receipt, BTS and the
+  offline till work as they do for a shop; a room number charges it to the
+  guest's folio instead. `src/venue/bill.ts` does the arithmetic in cents:
+  what has been paid is recorded per item, the last payer takes what is left,
+  and the separate receipts add up to the unsplit bill exactly.
+- **The kitchen** (`/kitchen`): a ticket per station per send, printed by the
+  till that hosts the station's printer or shown on a screen; follow-up
+  tickets for voids; cards that age, done, recall, the all-day count, the
+  expediter's view; ready shows on the floor. A ticket that does not print
+  is shown to whoever sent it, retried, and can be sent to the fallback or
+  printed where they stand.
+- **The host stand** (`/host`): bookings against tables and time with clashes
+  refused, deposits (a tax receipt when taken, taken off the bill), email
+  confirmation and a reminder the day before, a WhatsApp or text message the
+  host sends from their own phone, no-shows, the waitlist, guest records.
+- **The hotel** (`/hotel`): room types, rooms, rates by season and weekend in
+  BZ$ or US$, minimum stays; a calendar of rooms against dates (sweep to
+  book, drag to move); the front desk; folios (nights posted by the night
+  audit, restaurant and bar charges by room, extras, a second folio,
+  deposits, part payments, the final bill); housekeeping from a phone; the
+  night audit with occupancy, average daily rate and revenue per available
+  room.
+- **Closing**: the server's checkout report, tips per server and the pooled
+  shares (figures only: no payroll), and a guided day close. The business day
+  ends at an hour the owner sets, so a sale at 1 a.m. belongs to the evening
+  before.
+- **With no connection**: opening tables, ordering, sending (the device makes
+  and prints the tickets itself) and working out a bill happen on the device
+  and are sent when the connection is back (tested in a browser). Payment
+  goes through the till app's own offline receipts; a table paid with no
+  connection has not been run end to end. The kitchen screen, the host
+  stand, the hotel, a charge to a room and the reports need the server.
+- **Tests**: `test/venue-check.test.ts`, `venue-api.test.ts`,
+  `venue-floor.test.ts`, `hotel.test.ts`; in a browser `e2e/venue.spec.ts`
+  and `e2e/hotel.spec.ts`.
+
 ## Email (`src/mail`, `src/api/mail.ts`, `web/src/pages/Email.tsx`)
 
 Every email leaves through one mail service. `mailer.send({ type, tenantId, to, subject, text, html })` checks the message, writes it to `mail_messages` and returns; delivery happens in the background, so a slow or dead mail server never holds up a checkout or a sign-up. Nothing but `src/mail/smtp.ts` talks SMTP (nodemailer), and a test keeps it so.

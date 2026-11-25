@@ -52,84 +52,92 @@ tax values in TAX-RULES.md; which tax document when in ETD-MAPPING.md.
   Reservations, Tabs, Hotel*, VenueReports). Spanish in `es.ts`, Chinese for
   the service screens in `zh.ts`.
 
-## Where it stands (update as you go)
+## Where it stands
 
-- **Server: done and tested** for every section (A to J). Files: `src/venue/`
-  (`check.ts` reducer, `bill.ts` splits, `pricing.ts`, `settings.ts`,
-  `service.ts` ops + tickets, `tax-rules.ts`, `room-charge.ts`), `src/api/`
-  (`venue.ts` setup + ops, `venue-floor.ts` reservations, waitlist, guests,
-  day close, checkout, tips, reports, tax rules; `hotel.ts`). Migrations 063
-  to 066. Tests: `test/venue-check.test.ts` (pure), `venue-api.test.ts`,
-  `venue-floor.test.ts` (scenarios 1 and 2), `hotel.test.ts` (scenario 3),
-  helpers in `test/venue-helpers.ts`.
-- **Web: to build** in `web/src/venue/` (the same screens run in the web
-  app and in the till app on desktop, Android and iOS): the store (local-first
-  ops queue), Floor, Order, Pay hand-off to the counter, FloorEditor, MenuSetup,
-  Kitchen, Reservations, Hotel, VenueReports, Settings; Spanish; browser tests.
+Every item below is done. What was left out, and why, is in DECISIONS.md
+("Restaurants, bars and hotels": Skipped, Blockers).
+
+- **Server**: `src/venue/` (`check.ts` reducer, `bill.ts` splits,
+  `pricing.ts`, `settings.ts`, `service.ts` operations and tickets,
+  `station-tickets.ts`, `tax-rules.ts`, `room-charge.ts`), `src/api/`
+  (`venue.ts` setup and operations; `venue-floor.ts` reservations, waitlist,
+  guests, day close, checkout, tips, reports, tax rules; `hotel.ts`).
+  Migrations 063 to 066.
+- **Screens**: `web/src/venue/` (`store.ts` the device's queue of operations,
+  `Floor.tsx`, `Order.tsx`, `Kitchen.tsx`, `Host.tsx`, `Hotel.tsx`,
+  `Reports.tsx`, `Setup.tsx` under Settings → Venue, `handoff.ts` to the
+  counter, `tickets.ts`). The till app has Floor and Kitchen tabs. Spanish
+  for all of it; Chinese for the floor, the order and the kitchen.
+- **Tests**: `test/venue-check.test.ts` (the reducer, splits, concurrency),
+  `venue-api.test.ts`, `venue-floor.test.ts` (scenarios 1 and 2),
+  `hotel.test.ts` (scenario 3); in a browser `e2e/venue.spec.ts` (table
+  service, no connection, the bar) and `e2e/hotel.spec.ts` (the stay, the
+  host stand).
+- **Not merged, not pushed.** The branch sits on top of `pos-platform`.
 
 ## Build order
 
 ### 0. Groundwork
-- [ ] 0.1 PLAN.md, TAX-RULES.md, ETD-MAPPING.md
-- [ ] 0.2 `tenants.venue`, the switch in Settings, roles and permissions (A4)
+- [x] 0.1 PLAN.md, TAX-RULES.md, ETD-MAPPING.md
+- [x] 0.2 `tenants.venue`, the switch in Settings, roles and permissions (A4)
 
 ### A. Venue setup
-- [ ] A1 Areas and floor plans, drag and drop, alternative layouts
-- [ ] A2 Service periods and menus (hours, prices, automatic, override)
-- [ ] A3 Stations and routing (printer, screen, fallback)
-- [ ] A4 Roles, PIN switching, sections
+- [x] A1 Areas and floor plans, drag and drop, alternative layouts
+- [x] A2 Service periods and menus (hours, prices, automatic, override)
+- [x] A3 Stations and routing (printer, screen, fallback)
+- [x] A4 Roles, PIN switching, sections
 
 ### B. Menu
-- [ ] B5 Modifier groups and rules; combos; notes
-- [ ] B6 Allergens and dietary tags
-- [ ] B7 Sold out ("86") with a countdown
-- [ ] B8 Recipes by measure; waste and spillage
+- [x] B5 Modifier groups and rules; combos; notes
+- [x] B6 Allergens and dietary tags
+- [x] B7 Sold out ("86") with a countdown
+- [x] B8 Recipes by measure; waste and spillage
 
 ### C. Table service
-- [ ] C9 Live floor view
-- [ ] C10 Seating, seats
-- [ ] C11 Ordering: modifiers, courses, hold and fire, repeat round
-- [ ] C12 Move, merge, split, transfer
-- [ ] C13 Voids, comps, discounts with supervisor PIN and reasons
-- [ ] C14 Pre-bill; split evenly, by seat, by item, shared items
+- [x] C9 Live floor view
+- [x] C10 Seating, seats
+- [x] C11 Ordering: modifiers, courses, hold and fire, repeat round
+- [x] C12 Move, merge, split, transfer
+- [x] C13 Voids, comps, discounts with supervisor PIN and reasons
+- [x] C14 Pre-bill; split evenly, by seat, by item, shared items
 
 ### D. Bar
-- [ ] D15 Tabs by name, seat or room; list with age; shift-end warning
-- [ ] D16 Quick sale
-- [ ] D17 Happy hour, two-for-one, bundles
+- [x] D15 Tabs by name, seat or room; list with age; shift-end warning
+- [x] D16 Quick sale
+- [x] D17 Happy hour, two-for-one, bundles
 
 ### E. Kitchen and bar production
-- [ ] E18 Tickets, follow-ups for changes and voids
-- [ ] E19 Kitchen display: cards, ageing, bump, recall, all-day, expediter
-- [ ] E20 Ready back to the floor
+- [x] E18 Tickets, follow-ups for changes and voids
+- [x] E19 Kitchen display: cards, ageing, bump, recall, all-day, expediter
+- [x] E20 Ready back to the floor
 
 ### F. Reservations and waitlist
-- [ ] F21 Reservations, timeline, clashes, deposit, confirmations, no-shows
-- [ ] F22 Waitlist
-- [ ] F23 Guest records
+- [x] F21 Reservations, timeline, clashes, deposit, confirmations, no-shows
+- [x] F22 Waitlist
+- [x] F23 Guest records
 
 ### G. Payments and closing
-- [ ] G24 Tenders: US$, charge to room, house account, mixed
-- [ ] G25 Service charge rules; tips per server; pooling report
-- [ ] G26 Server checkout report
-- [ ] G27 End of day and the business date
+- [x] G24 Tenders: US$, charge to room, house account, mixed
+- [x] G25 Service charge rules; tips per server; pooling report
+- [x] G26 Server checkout report
+- [x] G27 End of day and the business date
 
 ### H. Hotel
-- [ ] H28 Room types, rooms, rate plans
-- [ ] H29 Reservations and the availability calendar
-- [ ] H30 Front desk
-- [ ] H31 Guest folio
-- [ ] H32 Housekeeping
-- [ ] H33 Night audit
+- [x] H28 Room types, rooms, rate plans
+- [x] H29 Reservations and the availability calendar
+- [x] H30 Front desk
+- [x] H31 Guest folio
+- [x] H32 Housekeeping
+- [x] H33 Night audit
 
 ### I. Tax
-- [ ] I34 Dated tax configuration; TAX-RULES.md
-- [ ] I35 ETD mapping implemented as written
+- [x] I34 Dated tax configuration; TAX-RULES.md
+- [x] I35 ETD mapping implemented as written
 
 ### J. Reports
-- [ ] J36 Hospitality reports
+- [x] J36 Hospitality reports
 
 ### Proof
-- [ ] P1 Automated tests the brief lists
-- [ ] P2 Scenario 1 (restaurant), 2 (bar), 3 (hotel), end to end
-- [ ] P3 Full unit and browser suites; README, DECISIONS, summary
+- [x] P1 Automated tests the brief lists
+- [x] P2 Scenario 1 (restaurant), 2 (bar), 3 (hotel), end to end
+- [x] P3 Full unit and browser suites; README, DECISIONS, summary

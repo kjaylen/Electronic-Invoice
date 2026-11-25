@@ -730,3 +730,153 @@ above this line are the earlier jobs' and are unchanged.
 None that stopped an item. Not checked anywhere real: BTS's test server with
 a wallet payment from the counter; a real receipt printer with an order
 ticket; a real phone opening the WhatsApp link; GitHub Actions on this branch.
+
+---
+
+# Restaurants, bars and hotels (25 Nov 2026)
+
+Judgment calls made while building the hospitality module from the fifth
+PLAN.md. The brief said to work without stopping to ask, to note each call,
+and to log what could not be done. The parts above this line are the earlier
+jobs' and are unchanged. Rates and their sources are in TAX-RULES.md; which
+tax document is issued when is in ETD-MAPPING.md.
+
+## How the work was done
+
+- **Where**: the worktree `../eInvoicing-pos`, branch `hospitality`, cut from
+  `pos-platform` (itself not yet merged into `main`). Nothing was pushed or
+  merged.
+- **Migrations 063 to 066**: venue setup (063), checks, operations and
+  tickets (064), guests, reservations, waitlist, deposits and closed days
+  (065), the hotel (066). All add tables or columns. 063 widens the list of
+  allowed roles; no existing row changes.
+- **The switch**: `tenants.venue`. With restaurant, bar and hotel all off
+  (the default) the menu entries, the till tabs, the routes' data and the
+  background jobs do nothing, and the counter is unchanged. The browser tests
+  turn it on for their own tests and off again, and the shop's tests run
+  after them.
+- **Left alone**, as the brief asked: pricing and plans, the sign-in flow,
+  the payment provider setup. Venue staff sign in the way till staff already
+  did (a PIN at an enrolled till); the only change near sign-in is the list
+  of roles a till accepts.
+- **No new dependency.**
+
+## Choices that could have gone another way
+
+- **A check is a log of operations, not a row that is edited.** Each device
+  applies an operation locally and sends it; the server folds them in the
+  order they arrive. This is what makes "no tap waits on the network", work
+  with no connection, and two servers on one table possible with one
+  mechanism. The cost: a device can show, for up to two seconds, something
+  the server then refuses (it is listed as a problem on the floor screen).
+- **The concurrency rule**: items have their own ids; operations name items;
+  an item is sent to the kitchen once, by the first `fire` the server
+  receives; the server's answer says what each operation really sent and
+  tickets are made from that. Two servers adding to a table both keep their
+  items; two servers pressing Send print one ticket. Tested in
+  `test/venue-check.test.ts` and `test/venue-api.test.ts`.
+- **One edge left open**: if the connection drops after the server has taken
+  an order but before the device hears so, the device prints the ticket
+  itself and the server's copy prints too when the connection returns. A
+  duplicate ticket was judged better than a missing one.
+- **Paying goes through the existing counter.** The chosen part of the bill
+  becomes a sale in the counter's cart with fixed amounts, so US dollars,
+  mixed tenders, tips, receipts, BTS and offline issue are the code a shop
+  already uses. A hospitality payment screen of its own would have meant a
+  second copy of all of it.
+- **Split bills add up exactly by construction.** What each payment took is
+  recorded per item in cents; the last payer of an item, and of the bill,
+  takes what is left. For an even split every part but the last is set to an
+  amount whose GST has nothing to round (a multiple of 8 cents at 12.5%), so
+  the parts can differ by a few cents and the receipts add up to the unsplit
+  bill. One receipt per payer, not one receipt with several tenders (the
+  counter's Split tender still does that).
+- **A void of an item that is partly paid** writes off the unpaid remainder
+  and keeps what was paid; the paid part is refunded, if at all, by a credit
+  note from the receipt.
+- **A table deposit** is a tax receipt when taken (GST inside the amount) and
+  comes off the bill as an allowance of its amount before GST. **A hotel
+  deposit** is a receipt when taken, credited at check-out and counted as a
+  payment on the stay's invoices. Two ways, because a table bill is a receipt
+  paid at once and a stay is invoices on account.
+- **A charge to a room is a tax invoice on the guest's account**, issued when
+  the meal is served, and a line on the folio. The folio's final bill is a
+  statement listing the tax documents, not a document of its own.
+- **Room nights**: one invoice per stay at check-out, with a cut at the last
+  night of each month. The room line is GST-exempt with the exemption code in
+  the tax rules; the hotel tax is a named charge on the line, because the
+  document has no tax scheme for it.
+- **Tax values are dated rows an admin can change** (`venue_tax_rules`),
+  each with a source and a "verified" mark. Changing one never touches an
+  issued document.
+- **Two of those rows are recorded but not yet acted on**:
+  "GST charged on the service charge" and "Hotel tax charged on the service
+  charge". The calculation today always charges GST on the service charge and
+  never hotel tax (the cautious reading). Setting either the other way
+  changes nothing until that path is built; both are marked unverified.
+- **The business day** ends at an hour the owner sets (default 4 a.m.,
+  Belize time). The day close moves the date on even if it is before that
+  hour, and carries open tables over.
+- **Tip pooling is a report**: by hours, by role in percent, or by points per
+  hour, from the time clock. It says who gets what; it pays nobody.
+- **Stations that are only a screen do not print.** A station with no till
+  chosen prints where the order is sent from.
+- **Messages by SMS or WhatsApp**: no provider is set up, so the host gets
+  the message written and opens it in WhatsApp or their messages to send it
+  themselves. Email confirmations and reminders go through the mail service.
+- **The hotel calendar**: sweep across empty nights to book, drag a booking
+  to another room or date. A stay is made longer or shorter by opening it and
+  changing the date, not by dragging its edge.
+- **Service staff see the floor in English, Spanish or Chinese**; the host
+  stand, the hotel, the reports and the setup are in English and Spanish.
+
+## Skipped, and why
+
+- **Devices talking to each other with no server** (a kitchen screen fed by
+  a tablet on the same Wi-Fi while the internet is down). The apps reach one
+  server; there is no device-to-device channel in this architecture. With no
+  connection each device works alone and prints its own tickets; the kitchen
+  screen shows what it last had.
+- **The hotel, the host stand, the kitchen screen and the reports with no
+  connection.** They read and write on the server. Only table service, the
+  bar and payment at the till work offline.
+- **Paying a check on a till with no connection** was not run end to end in
+  a browser. Ordering and sending with no connection was
+  (`e2e/venue.spec.ts`). Payment uses the till's own offline receipts, which
+  have their own tests.
+- **A service charge without GST, or with hotel tax** (see above).
+- **Channel managers and online booking for rooms**; **key cards**;
+  **payment-terminal pre-authorisation for bar tabs**. Outside the brief, and
+  the last would have touched the payment provider setup.
+- **Payroll**: by the owner's earlier decision and the brief.
+
+## Blockers
+
+- **The BTS public ruling on service charges** could not be read: the page is
+  a script shell that neither a fetch nor a browser would render. GST on the
+  service charge is therefore unverified.
+- **GST on accommodation** (exempt) rests on a secondary source, not the Act;
+  the exemption reason code on the document (`HOTEL`) is a placeholder until
+  BTS gives the code. Both are marked unverified in the app.
+- **Not run anywhere real**: the BTS tests environment with a hospitality
+  document, a kitchen printer, a second device on the same table (two
+  servers were tested at the API and with two operation streams, not with
+  two physical tablets), the Android and desktop builds of the new screens
+  (they are the same web screens, checked in a browser).
+
+## How it was proved
+
+- **Unit tests** (`npm test`, 465 tests): 463 passed, 1 skipped as before,
+  1 failed: a shop's cashier was being told of table-service permissions.
+  That was fixed (a till reports them only for a business with the module
+  on) and the till, sync and venue tests were run again and pass. The whole
+  suite was not run a third time after that fix.
+- **Browser tests** on a fresh database (Edge, a real server): 68 passed,
+  the shop's own tests and the phone layout among them. Five are this
+  module's: table service, no connection, the bar, the hotel stay, the host
+  stand.
+- **The three scenarios** run in `test/venue-floor.test.ts` (restaurant,
+  bar) and `test/hotel.test.ts` (hotel) against the API with stock, reports
+  and documents checked at the end, and in shorter form in the browser
+  tests. Documents go to the local stand-in for BTS's tests environment;
+  nothing was sent to BTS itself.
