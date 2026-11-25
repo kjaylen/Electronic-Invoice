@@ -809,11 +809,12 @@ tax document is issued when is in ETD-MAPPING.md.
 - **Tax values are dated rows an admin can change** (`venue_tax_rules`),
   each with a source and a "verified" mark. Changing one never touches an
   issued document.
-- **Two of those rows are recorded but not yet acted on**:
-  "GST charged on the service charge" and "Hotel tax charged on the service
-  charge". The calculation today always charges GST on the service charge and
-  never hotel tax (the cautious reading). Setting either the other way
-  changes nothing until that path is built; both are marked unverified.
+- **"GST charged on the service charge" is acted on** (added 26 Nov 2026).
+  Yes, the default: a charge on each line, taxed with the line. No: one
+  exempt line of its own on the receipt, with a reason code that is a
+  placeholder until BTS gives one. Split bills add up exactly either way.
+  "Hotel tax charged on the service charge" was taken out of the settings:
+  no service charge is put on a room night, so it had nothing to change.
 - **The business day** ends at an hour the owner sets (default 4 a.m.,
   Belize time). The day close moves the date on even if it is before that
   hour, and carries open tables over.
@@ -844,7 +845,8 @@ tax document is issued when is in ETD-MAPPING.md.
   a browser. Ordering and sending with no connection was
   (`e2e/venue.spec.ts`). Payment uses the till's own offline receipts, which
   have their own tests.
-- **A service charge without GST, or with hotel tax** (see above).
+- **A service charge on room nights** (some hotels add 10% to the room).
+  Not asked for; it would bring back the question of hotel tax on it.
 - **Channel managers and online booking for rooms**; **key cards**;
   **payment-terminal pre-authorisation for bar tabs**. Outside the brief, and
   the last would have touched the payment provider setup.

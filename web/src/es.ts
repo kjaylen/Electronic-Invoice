@@ -4890,7 +4890,7 @@ export const ES: Record<string, string> = {
   "GST on a room night (exempt or standard)": "GST sobre una noche de habitación (exempt o standard)",
   "Exemption reason code on a room night": "Código de exención en una noche de habitación",
   "GST charged on the service charge": "GST sobre el cargo por servicio",
-  "Hotel tax charged on the service charge": "Impuesto hotelero sobre el cargo por servicio",
+  "Exemption reason code on a service charge without GST": "Código de exención en un cargo por servicio sin GST",
   "That cannot be done": "Eso no se puede hacer",
   "Guest check ": "Precuenta ",
   "Menu ": "Menú ",

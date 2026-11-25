@@ -13,7 +13,8 @@ is hard-coded in a calculation. Looked up on 25 Nov 2026.
 | GST on hotel accommodation | exempt: a room night carries no GST, only the hotel tax | — | **unverified** at the level of the Act (secondary source) | Belize Chamber of Commerce and Industry, "Tax regime" (belize.org/trade-investment-zone/investment-regime/tax-regime): hotel rooms listed among exempt supplies. The Schedule of the GST Act was not read. `accommodationGst` can be set to `standard` |
 | Exemption reason code on a room night | `HOTEL` (a placeholder) | — | **unverified** | BTS has to say which code an exempt room night carries on the e-invoice |
 | GST on a service charge | charged (the service charge is part of what is paid for the supply) | — | **unverified** | BTS has a public ruling, "Treatment of tax for service charge for the hospitality industry" (bts.gov.bz/category/tax-ruling/). Its page would not load on 25 Nov 2026. Read it and set `serviceChargeGst` accordingly |
-| Hotel tax on a service charge | not charged | — | **unverified** | as above |
+| Exemption reason code on a service charge without GST | `SERVICE` (a placeholder, used only when `serviceChargeGst` is `no`) | — | **unverified** | BTS has to say which code it carries |
+| Hotel tax on a service charge | not charged, and not a setting: no service charge is put on a room night, and the restaurant's service charge is not accommodation | — | **unverified** | as above |
 | Usual service charge | 10%, a venue's own setting | — | custom, not law | travel and trade guides |
 | US dollar rate | BZ$2.00 to US$1.00 | fixed peg | verified | Central Bank of Belize peg; the venue can change its own rate |
 | Tips | not part of the sale, no tax document | — | follows the earlier POS decision | DECISIONS.md |
@@ -23,8 +24,11 @@ is hard-coded in a calculation. Looked up on 25 Nov 2026.
 
 - **Food, drinks, anything sold at a table or bar**: GST by the item's own
   category (standard, zero, exempt), as in the shop.
-- **Service charge**: a charge on each line. With `serviceChargeGst` on (the
-  default, the cautious reading) it carries the line's GST.
+- **Service charge**: with `serviceChargeGst` on (the default, the cautious
+  reading) it is a charge on each line and carries the line's GST. With it
+  off, the charge is the same amount but goes on the receipt as one line of
+  its own, exempt, with the reason code in `serviceChargeExemptionCode`:
+  a charge on a line shares the line's GST, so it cannot stay there.
 - **A room night**: a line at the nightly rate, exempt from GST (with the
   exemption reason code), and the hotel tax as a charge on that line, so it
   carries no GST either. The BTS document has only the GST, environmental
@@ -32,10 +36,9 @@ is hard-coded in a calculation. Looked up on 25 Nov 2026.
   is shown as a named charge, "Hotel tax 9%", and reported separately for the
   BTB return. With `accommodationGst` set to `standard` the line is
   standard-rated and the charge on it then carries GST too.
-- **The service charge without GST is not built**: a charge on a line shares
-  the line's GST category. If the BTS ruling says a service charge is outside
-  GST, it has to become a line of its own; until then leave `serviceChargeGst`
-  on, or do not use the automatic service charge.
+- **The counter's own service charge** (a shop's setting, from the POS work)
+  is always a charge on each line with GST; only the hospitality module's
+  follows `serviceChargeGst`.
 - **Unverified values** are marked so in the settings screen and repeated in
   the final summary. Changing one is a new dated row; documents already issued
   are never touched.

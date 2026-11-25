@@ -233,4 +233,23 @@ test('paying: a shared bottle and a side that is stock come off once; recipes de
     assert.equal(spilt.json().stock, 8.82);
     assert.equal((await call(c, 'GET', `/v1/inventory/${rum}`)).json().movements[0].reason, 'spillage');
     assert.equal((await call(c, 'POST', '/v1/venue/waste', { itemId: punch, quantity: '1', reason: 'waste', note: 'x' }, kit.headers)).json().error.code, 'not_tracked');
+
+    // The business sets, from today, that a service charge carries no GST: the devices are told, the charge is a line
+    // of its own on the receipt, exempt, and the server works out the same total to the cent.
+    const day = new Date(Date.now() - 6 * 3600_000).toISOString().slice(0, 10);
+    assert.equal((await call(c, 'POST', '/v1/venue/tax-rules', { key: 'serviceChargeGst', value: 'no', from: day, note: 'BTS ruling, as read by the accountant' })).statusCode, 201);
+    const taxes = (await call(c, 'GET', '/v1/venue')).json().taxes;
+    assert.deepEqual([taxes.serviceChargeGst, taxes.serviceChargeExemptionCode], [false, 'SERVICE']);
+    const id2 = randomUUID();
+    await ops(c, ana.headers, [
+      { checkId: id2, type: 'open', payload: { kind: 'tab', name: 'Maria', partySize: 2 } },
+      { checkId: id2, type: 'add', payload: { items: [{ id: randomUUID(), itemId: punch, quantity: 3, seat: 1 }] } },
+      { checkId: id2, type: 'fire' },
+    ]);
+    const untaxed = { servicePercent: '10', gstPercent: taxes.gstPercent, periods: [], serviceUntaxed: { exemptionReasonCode: taxes.serviceChargeExemptionCode } };
+    const bill = wholeBill(await check(c, id2), untaxed);
+    assert.equal(bill.gstCents, Math.round((bill.subtotalCents - bill.allowCents) * 0.125), 'GST on the drinks, not on the service charge');
+    const doc = await call(c, 'POST', '/v1/documents', { type: '02', lines: documentLines(bill, '10', untaxed.serviceUntaxed), payment: { meansCode: '10', terms: 'Cash' } }, ana.headers);
+    assert.equal(doc.statusCode, 201, doc.body);
+    assert.deepEqual([doc.json().totals.payable, doc.json().totals.gst], [(bill.totalCents / 100).toFixed(2), (bill.gstCents / 100).toFixed(2)]);
   }));

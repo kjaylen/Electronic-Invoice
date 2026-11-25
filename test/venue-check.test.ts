@@ -7,7 +7,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { billBySeat, billOfItems, billOneShare, type BillContext, type BillPart, checkAmounts, exactStep, paymentOf, percentCents, serviceApplies, wholeBill } from '../src/venue/bill.ts';
+import { billBySeat, billOfItems, billOneShare, type BillContext, type BillPart, checkAmounts, documentLines, exactStep, paymentOf, percentCents, serviceApplies, wholeBill } from '../src/venue/bill.ts';
 import { apply, type Check, fullyPaid, memoryStore, needsApproval, type Op, tableState } from '../src/venue/check.ts';
 import { billPromotions, currentMenu, defaultModifiers, type ModifierGroup, modifierProblem, type Period, periodRuns, priceNow, resolveModifiers } from '../src/venue/pricing.ts';
 import { belizeClock, businessDate, expectedMinutes, venueSettings } from '../src/venue/settings.ts';
@@ -249,6 +249,16 @@ test('the service charge rule, and GST to the cent', () => {
   const bill = wholeBill(get(store), { ...ctx, servicePercent: '10' });
   // Snapper 33.33 - 3.33 = 30.00, service 3.00; juice 4.50, service 0.45. GST 12.5% of 33.00 = 4.13 (4.125 up).
   assert.deepEqual([bill.subtotalCents, bill.allowCents, bill.serviceCents, bill.gstCents, bill.totalCents], [3783, 333, 345, 413, 4208]);
+  assert.deepEqual(documentLines(bill, '10').map((l) => (l.allowanceCharges as Array<{ isCharge: boolean; amount: string }>).filter((a) => a.isCharge).map((a) => a.amount)), [['3.00'], ['0.45']]);
+  // When the tax rules say the service charge carries no GST: the same charge, GST on the food only (12.5% of 30.00),
+  // and on the receipt it is one exempt line, not a charge on each line.
+  const untaxed = { ...ctx, servicePercent: '10', serviceUntaxed: { exemptionReasonCode: 'SERVICE' } };
+  const plain = wholeBill(get(store), untaxed);
+  assert.deepEqual([plain.subtotalCents, plain.allowCents, plain.serviceCents, plain.gstCents, plain.totalCents], [3783, 333, 345, 375, 4170]);
+  const lines = documentLines(plain, '10', untaxed.serviceUntaxed);
+  assert.equal(lines.length, 3);
+  assert.deepEqual(lines[2], { description: 'Service charge 10%', quantity: '1', unitCode: 'C62', unitPrice: '3.45', gstCategory: 'E', exemptionReasonCode: 'SERVICE' });
+  assert.ok(lines.slice(0, 2).every((l) => !(l.allowanceCharges as Array<{ isCharge: boolean }> | undefined)?.some((a) => a.isCharge)));
 });
 
 test('splitting a bill: by seat, by item, a shared item, and evenly: the parts add up to the bill exactly', () => {
@@ -293,7 +303,7 @@ test('splitting a bill: by seat, by item, a shared item, and evenly: the parts a
     const count = 1 + rand(7);
     apply(s, op('e', 'add', { items: Array.from({ length: count }, (_, k) => item(`x${k}`, `Dish ${k}`, 95 + rand(9000), { quantity: 1 + rand(3), gst: rand(5) === 0 ? 'Z' : 'S' })) }));
     if (rand(3) === 0) apply(s, op('e', 'discount', { itemIds: ['x0'], percent: 5 + rand(40), reason: 'Promo' }));
-    const c: BillContext = { ...ctx, servicePercent: rand(2) ? '10' : null };
+    const c: BillContext = { ...ctx, servicePercent: rand(2) ? '10' : null, serviceUntaxed: rand(2) ? { exemptionReasonCode: 'SERVICE' } : null };
     const one = wholeBill(s.get('e')!, c);
     apply(s, op('e', 'share', { itemIds: s.get('e')!.items.map((i) => i.id), ways }));
     const parts: BillPart[] = [];
