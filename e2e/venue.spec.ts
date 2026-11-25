@@ -297,6 +297,55 @@ test('speed: a table opened and four items with choices sent, on a slow connecti
   }, { timeout: 20_000 }).toBe(4);
 });
 
+test('the menu: in the sidebar for a restaurant, sections made, ordered, renamed everywhere, items moved, sold out', async ({ page }) => {
+  await logIn(page);
+  await setUp(page);
+  await page.reload();
+  // Restaurant or bar on: Menu sits after Products.
+  const nav = page.getByRole('navigation');
+  await nav.getByRole('link', { name: 'Menu', exact: true }).click();
+  await expect(page.getByRole('heading', { level: 1, name: 'Menu' })).toBeVisible();
+  const section = (name: string) => page.getByRole('region', { name, exact: true });
+  await expect(section('Food')).toContainText('Johnny cakes');
+  await expect(section('Drinks')).toContainText('Coconut water');
+
+  // A section made before anything is in it, then the Johnny cakes moved into it by ticking them.
+  const name = `Specials ${Date.now() % 10000}`;
+  await page.getByLabel('New section').fill(name);
+  await page.getByRole('button', { name: '+ Section' }).click();
+  await expect(section(name)).toContainText('Nothing in it yet');
+  await section('Food').getByLabel('Select Johnny cakes').check();
+  await page.getByLabel('Move to section').click();
+  await page.getByRole('option', { name }).click();
+  await page.getByRole('button', { name: 'Move', exact: true }).click();
+  await expect(section(name)).toContainText('Johnny cakes');
+  await expect(section('Food')).toContainText('Nothing in it yet');
+
+  // Put first, then renamed: the kitchen station that makes it follows.
+  for (let i = 0; i < 20 && (await page.locator('.menu-section h2').first().innerText()) !== name; i++) {
+    await page.getByRole('button', { name: `Move ${name} up` }).click();
+    await page.waitForTimeout(250);
+  }
+  await expect(page.locator('.menu-section h2').first()).toHaveText(name);
+  await put(page, 'put', `/v1/venue/stations/${(await (await page.request.get('/v1/venue', { headers: API })).json()).stations[0].id}`, { name: 'Kitchen', categories: [name], deviceId: null, screen: true, fallbackId: null, targetMin: 12, position: 0 });
+  await section(name).getByRole('button', { name: 'Rename' }).click();
+  await page.locator('.menu-section form input').fill(`${name} tonight`);
+  await page.locator('.menu-section form button', { hasText: 'Rename' }).click();
+  await expect(section(`${name} tonight`)).toContainText('Johnny cakes');
+  const venue = await (await page.request.get('/v1/venue', { headers: API })).json();
+  expect(venue.stations[0].categories).toEqual([`${name} tonight`]);
+  expect(venue.menuSections[0].name).toBe(`${name} tonight`);
+
+  // Sold out in one tap, from the menu.
+  await section(`${name} tonight`).getByRole('button', { name: 'Mark Johnny cakes sold out' }).click();
+  await expect(section(`${name} tonight`).getByRole('button', { name: 'Johnny cakes is sold out: put it back on' })).toBeVisible();
+  await section(`${name} tonight`).getByRole('button', { name: 'Johnny cakes is sold out: put it back on' }).click();
+
+  // Settings → Venue points to the menu.
+  await page.goto(`/${SLUG}/settings?tab=venue`);
+  await expect(page.getByRole('link', { name: 'Open the menu' })).toBeVisible();
+});
+
 test('the bar: a tab by name, a round repeated, moved to a table, split evenly in two, and a sold-out item', async ({ page }) => {
   await logIn(page);
   const { cakes } = await setUp(page);

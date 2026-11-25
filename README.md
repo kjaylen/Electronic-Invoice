@@ -600,13 +600,30 @@ document is issued when, DECISIONS.md the judgment calls.
   the server sends it, a later one skips it, and the answer says what each
   operation really sent. Tickets are made from that answer only.
 - **Setup** (Settings → Venue): floor plans by area with other layouts of the
-  same tables, drawn by dragging; menus and promotions by the clock (prices
-  per menu, happy hour, two for one, an item at a price, items together for a
-  price) with a supervisor's override for the day; stations with the
-  categories they make, the till whose printer they use, a kitchen screen,
-  and a fallback station; groups of choices with at least / at most, defaults
-  and prices; allergens, dietary tags, course and stations per item; sold out
-  in one tap with a countdown; sections per server; the tax rules in force.
+  same tables, drawn by dragging; sections per server; the tax rules in force.
+- **The menu** (`/menu`, in the sidebar after Products when Restaurant or Bar
+  is on; `web/src/venue/Menu.tsx`, `src/venue/sections.ts`). The menu's items
+  are the business's products (one list: price, GST, stock and recipes stay
+  under Products); the menu arranges them and says how each is served:
+  - **Items in sections** (Starters, Mains, Drinks…). A section is an item
+    category, so the counter's quick buttons, sales by category and the
+    stations follow the menu. Sections are made ahead of time, put in order
+    (the floor's ordering screen follows it), renamed (everywhere the category
+    is named: items, stations, menus, promotions; renaming to another section's
+    name joins the two) and removed (their items go to another section or to
+    none). Items move one at a time or many at once.
+  - **Per item**: course, groups of choices, allergens and dietary tags, the
+    stations that make it when its section does not say, how many are left,
+    and sold out in one tap.
+  - **Menus and promotions by the clock** (prices per menu, happy hour, two for
+    one, an item at a price, items together for a price) with a supervisor's
+    override for the day; **choices** with at least / at most, defaults and
+    prices; **stations** with the sections they make, the till whose printer
+    they use, a kitchen screen, and a fallback station.
+  - `GET /v1/venue` carries `menuSections` in order; `GET|PUT|POST
+    /v1/venue/menu-sections`, `POST /v1/venue/menu-sections/rename`,
+    `POST /v1/venue/menu-sections/remove`, `POST /v1/venue/items/move`
+    (`catalog.manage`). The order is kept in `venue_menu_sections`.
 - **Roles**: supervisor, server, bartender, host, kitchen, housekeeper, each
   signing in at a till with a PIN. A void after sending, a comp, a discount
   over the limit and a price change need a supervisor's PIN
@@ -652,7 +669,7 @@ document is issued when, DECISIONS.md the judgment calls.
   kitchen screen, the host stand, the hotel, a charge to a room and the
   reports need the server.
 - **Tests**: `test/venue-check.test.ts`, `venue-api.test.ts`,
-  `venue-floor.test.ts`, `hotel.test.ts`; in a browser `e2e/venue.spec.ts`
+  `venue-floor.test.ts`, `venue-menu.test.ts`, `hotel.test.ts`; in a browser `e2e/venue.spec.ts`
   and `e2e/hotel.spec.ts`.
 
 ## Email (`src/mail`, `src/api/mail.ts`, `web/src/pages/Email.tsx`)
