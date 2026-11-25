@@ -105,7 +105,7 @@ test('table service: seat a party, order with a choice, send to the kitchen, the
 
   // Send: the kitchen's ticket prints here (this browser sent it), with the table, the choice and the note; the drinks have no station.
   await order.getByRole('button', { name: /^Send/ }).click();
-  await expect(page.getByText('Sent: 2 items')).toBeVisible();
+  await expect(page.getByText('Sent: 3 items')).toBeVisible();
   await expect(order.getByText('not sent')).toHaveCount(0);
   await expect.poll(async () => page.locator('iframe.print-frame').evaluate((f) => (f as HTMLIFrameElement).srcdoc).catch(() => '')).toContain('KITCHEN');
   const ticket = await page.locator('iframe.print-frame').evaluate((f) => (f as HTMLIFrameElement).srcdoc);
@@ -253,6 +253,48 @@ test('the till app with no connection: a table opened, ordered, sent and paid in
   expect([doc.type, doc.totals.payable]).toEqual(['02', '7.88']);
   await expect.poll(async () => (await (await page.request.get(`/v1/documents/${doc.id}`, { headers: API })).json()).status, { timeout: 20_000 }).toBe('authorized');
   await context.close();
+});
+
+test('speed: a table opened and four items with choices sent, on a slow connection, without one tap waiting for the server', async ({ page }) => {
+  await logIn(page);
+  await setUp(page);
+  await page.goto(`/${SLUG}/floor`);
+  const plan = page.getByRole('group', { name: 'Floor plan of Dining room' });
+  await expect(plan.getByRole('button', { name: /^Table 2: Free/ })).toBeVisible();
+  await expect(page.getByRole('status').filter({ hasText: 'In step' })).toBeVisible();
+  // Every call to the server takes two seconds from here.
+  await page.route('**/v1/**', async (r) => { await new Promise((done) => setTimeout(done, 2000)); await r.continue().catch(() => {}); });
+
+  const started = Date.now();
+  await plan.getByRole('button', { name: /^Table 2/ }).click();
+  const seat = page.getByRole('dialog', { name: 'Seat a party at Table 2' });
+  await seat.getByRole('button', { name: '2', exact: true }).click();
+  await seat.getByRole('button', { name: 'Open the table for 2' }).click();
+  const menu = page.getByRole('region', { name: 'Menu' });
+  const choose = page.getByRole('dialog', { name: 'Johnny cakes' });
+  // Four items: two Johnny cakes, each with its required choice, and two coconut waters.
+  for (const butter of ['With butter', 'No butter']) {
+    await menu.getByRole('button', { name: /^Johnny cakes/ }).click();
+    await choose.getByRole('button', { name: butter }).click();
+    await choose.getByRole('button', { name: 'Add to the order' }).click();
+  }
+  await menu.getByRole('button', { name: /^Coconut water/ }).click();
+  await menu.getByRole('button', { name: /^Coconut water/ }).click();
+  const order = page.getByRole('region', { name: 'The order' });
+  await order.getByRole('button', { name: /^Send/ }).click();
+  await expect(order.getByText('not sent')).toHaveCount(0);
+  await expect(page.getByText('Sent: 4 items')).toBeVisible();
+  const taken = Date.now() - started;
+  // Twelve taps. Had each waited for the server it would be 24 seconds; a person has 20 for the lot.
+  expect(taken, `took ${taken} ms`).toBeLessThan(6000);
+
+  // And the server did get it, once, a moment later.
+  await page.unroute('**/v1/**');
+  await expect.poll(async () => {
+    const now = await (await page.request.get('/v1/venue/changes', { headers: API })).json() as { checks: Array<{ tableName: string; items: Array<{ quantity: number; status: string }> }> };
+    const c = now.checks.find((x) => x.tableName === 'Table 2');
+    return c ? c.items.filter((i) => i.status === 'sent').reduce((a, i) => a + i.quantity, 0) : 0;
+  }, { timeout: 20_000 }).toBe(4);
 });
 
 test('the bar: a tab by name, a round repeated, moved to a table, split evenly in two, and a sold-out item', async ({ page }) => {

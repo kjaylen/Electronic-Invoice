@@ -110,7 +110,7 @@ export function OrderScreen({ checkId, onBack, onPay, print }: { checkId: string
     else addItem(entry, [], 1, '');
   };
   const send = async () => {
-    const before = c.items.filter((i) => i.status === 'held' && !c.heldCourses.includes(i.course)).length;
+    const before = c.items.filter((i) => i.status === 'held' && !c.heldCourses.includes(i.course)).reduce((a, i) => a + i.quantity, 0);
     if (await run('fire') && before) toast(t('Sent: {n} items', { n: before }));
   };
   /** The last round again: everything sent in the most recent send that is a drink. */

@@ -826,8 +826,8 @@ tax document is issued when is in ETD-MAPPING.md.
   the message written and opens it in WhatsApp or their messages to send it
   themselves. Email confirmations and reminders go through the mail service.
 - **The hotel calendar**: sweep across empty nights to book, drag a booking
-  to another room or date. A stay is made longer or shorter by opening it and
-  changing the date, not by dragging its edge.
+  to another room or date, drag its right edge to make the stay longer or
+  shorter (added 26 Nov 2026). The arrival is changed by opening the booking.
 - **Service staff see the floor in English, Spanish or Chinese**; the host
   stand, the hotel, the reports and the setup are in English and Spanish.
 
@@ -841,10 +841,10 @@ tax document is issued when is in ETD-MAPPING.md.
 - **The hotel, the host stand, the kitchen screen and the reports with no
   connection.** They read and write on the server. Only table service, the
   bar and payment at the till work offline.
-- **Paying a check on a till with no connection** was not run end to end in
-  a browser. Ordering and sending with no connection was
-  (`e2e/venue.spec.ts`). Payment uses the till's own offline receipts, which
-  have their own tests.
+- **Paying a check on a till with no connection** is tested in a browser
+  since 26 Nov 2026 (`e2e/venue.spec.ts`), with ordering and sending. If the
+  payment reaches the server before its receipt does, stock for shared items
+  is taken with a note instead of a link to the receipt.
 - **A service charge on room nights** (some hotels add 10% to the room).
   Not asked for; it would bring back the question of hotel tax on it.
 - **Channel managers and online booking for rooms**; **key cards**;
@@ -882,3 +882,16 @@ tax document is issued when is in ETD-MAPPING.md.
   and documents checked at the end, and in shorter form in the browser
   tests. Documents go to the local stand-in for BTS's tests environment;
   nothing was sent to BTS itself.
+
+## Afterwards (26 Nov 2026, branch `hospitality-next`)
+
+- **The service charge follows the tax rule** (see above), with tests for
+  the bill, its splits and the document the server issues.
+- **A table paid on the till app with no connection**: a browser test.
+- **The hotel calendar's right edge.**
+- **Speed**: a browser test opens a table and sends four items with choices
+  while every call to the server is held for two seconds; it has to finish in
+  six seconds, so no tap can have waited for the server. "Sent: n items" now
+  counts items, not lines.
+- **Still not done**: the Android and desktop tills were not rebuilt; nothing
+  was sent to BTS's tests environment; no SMS or WhatsApp provider.
