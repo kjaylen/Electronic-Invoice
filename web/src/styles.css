@@ -280,6 +280,18 @@ input[type='file'] { padding: 0.45rem; background: var(--sheet-2); min-height: 0
 input[type='checkbox'], input[type='radio'] { accent-color: var(--brand); width: 1rem; height: 1rem; min-height: 0; padding: 0; box-shadow: none; cursor: pointer; }
 input[type='date'] { min-height: 2.5rem; }
 .form-grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+/*
+ * Fields side by side line up: across a row, the labels share a line, the boxes share a line and the
+ * hints share a line, however long one label is (a label on two lines no longer pushes its box down).
+ * Each simple field (a label, one control, maybe a hint) spans three rows of the grid and uses them
+ * (subgrid). The space between rows of fields moves from the grid's gap to each field's own margin.
+ */
+@supports (grid-template-rows: subgrid) {
+  .form-grid, .auth-page .auth-card .form-grid { row-gap: 0; margin-bottom: -1rem; }
+  .form-grid > * { margin-bottom: 1rem; }
+  .form-grid > label.field:not(:has(> :nth-child(4))) { display: grid; grid-row: span 3; grid-template-rows: subgrid; row-gap: 0.4rem; align-content: start; }
+  .form-grid > label.field:not(:has(> :nth-child(4))) > .field-label { align-self: end; }
+}
 .form-error { color: var(--coral-ink); font-weight: 560; font-size: 0.93rem; animation: pop 280ms var(--ease-out) both; }
 fieldset { border: 1px solid var(--hairline); border-radius: var(--radius-lg); padding: 1.1rem 1.25rem 1.25rem; margin: 0; background: var(--sheet); box-shadow: var(--shadow-xs); }
 legend { font-family: var(--display); font-size: 0.97rem; font-weight: 630; letter-spacing: -0.01em; padding: 0 0.35rem; margin-left: -0.35rem; color: var(--ink); background: none; }
