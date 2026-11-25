@@ -64,6 +64,9 @@ try {
       await page.click('.person >> nth=0');
       for (const d of process.env.SMOKE_PIN) await page.keyboard.press(d);
       await page.keyboard.press('Enter');
+      // A restaurant's till opens on the floor: go to Sell.
+      await page.waitForSelector('.status-tabs', { timeout: 15_000 });
+      await page.click('.status-tabs button:has-text("Sell")');
       await page.waitForSelector('text=Issue receipt', { timeout: 15_000 });
       console.log('✓ signed in with the PIN; the counter is ready');
       await page.click('button:has-text("Devices")');
