@@ -233,7 +233,10 @@ button.status-pill:hover { background: rgba(255, 255, 255, 0.08); }
 .status-pill .dot { width: 10px; height: 10px; border-radius: 999px; flex: none; background: var(--pos-on-bar-muted); }
 .status-pill.ok .dot { background: #3fbf6a; }
 .status-pill.off .dot { background: #e9a23b; }
-.status-pill.bad .dot, .status-pill.bad svg { background: #f06a5e; color: #f06a5e; }
+.status-pill.bad .dot { background: #f06a5e; }
+.status-pill.bad svg { color: #f06a5e; }
+/* No printer: a mark beside the icon, so it is not told by colour alone when the words are hidden. */
+.status-pill.printer.bad::after { content: '!'; display: inline-grid; place-items: center; width: 16px; height: 16px; margin-left: -10px; margin-top: -14px; border-radius: 999px; background: #f06a5e; color: #1a0705; font-size: 12px; font-weight: var(--pos-weight-bold); line-height: 1; }
 .status-pill.busy .dot { background: #9a62cf; animation: pos-blink 1.2s ease-in-out infinite; }
 .status-pill .count { padding: 0 6px; border-radius: 999px; background: rgba(255, 255, 255, 0.14); font-size: var(--pos-text-xs); }
 .status-pill.warn-badge .count { background: #e9a23b; color: #1d1405; }

@@ -52,3 +52,4 @@ No flow takes more taps or keystrokes than before.
 - Browser tests: `npm run e2e` (the till: `app.spec.ts`, `offline.spec.ts`, `venue.spec.ts`, including the floor's legend, actions, drag to move, filters and list, and the layout editor).
 - Screenshots: `node scripts/pos-shots.mjs --phase after --theme light|dark` against `node e2e/view.ts`.
 - Contrast: `node scripts/pos-contrast.mjs`.
+- On the real apps: `node scripts/till-flows.mjs --app desktop` (the packaged app) and `--app android` (the installed debug app on an emulator or phone) pair a new till and do a three-item cash sale (checking Pay is on screen without scrolling), a refund with a one-tap reason, a table order for two seats paid seat by seat, and closing the shift. Both pass. On Android, screenshots come from the device itself (`adb screencap`); the app is started on the built-in screen, since an emulator can have a second display.

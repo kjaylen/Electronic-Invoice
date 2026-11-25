@@ -241,7 +241,8 @@ body.till-body .counter > .stack > .last-sale { order: -1; }
 
 /* A narrow order panel (a phone, a tablet held upright): each line on two rows, the name and its
    amount, then the quantity and the line's buttons. Follows the panel's own width. */
-body.till-body .counter .cart.ticket { container: cart / inline-size; }
+/* The lines themselves are the container: on the whole panel it would also hold the fixed Pay button on a phone. */
+body.till-body .counter .cart-lines { container: cart / inline-size; }
 @container cart (max-width: 32rem) {
   body.till-body .counter .cart-lines li { grid-template-columns: minmax(0, 1fr) auto auto; row-gap: var(--pos-2); }
   body.till-body .counter .cart-lines li > .name, body.till-body .counter .cart-lines li > .custom { grid-column: 1 / 3; grid-row: 1; }

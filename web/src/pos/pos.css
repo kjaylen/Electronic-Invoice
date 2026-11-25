@@ -39,7 +39,7 @@ body.till-body { overflow: hidden; background: var(--paper); padding: env(safe-a
 /* signed in */
 .till { height: 100%; display: flex; flex-direction: column; }
 .till-banner { margin: 0.75rem 1rem 0; }
-.till-main { flex: 1; overflow: auto; padding: 1rem; view-transition-name: none; animation: till-screen-in 140ms var(--ease-out) both; }
+.till-main { flex: 1; overflow: auto; padding: 1rem; view-transition-name: none; animation: till-screen-in 140ms var(--ease-out) backwards; /* backwards: once it ends it holds nothing, so fixed parts (Pay on a phone) stay fixed to the screen */ }
 /* A tab's screen comes in on its own: a quick fade and a few pixels up. Nothing of the screen before it stays. */
 @keyframes till-screen-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 /* Lists on a till appear at once with their screen (no row-by-row entrance on top of the screen's own). */
