@@ -5,7 +5,7 @@
  * stations) has its own page, Menu (Menu.tsx), which uses the cards below.
  */
 
-import { type FormEvent, type PointerEvent as ReactPointerEvent, useCallback, useEffect, useRef, useState } from 'react';
+import { type FormEvent, useCallback, useEffect, useState } from 'react';
 import { api } from '../api';
 import { useConfirm } from '../confirm';
 import { useT } from '../i18n';
@@ -14,7 +14,8 @@ import { useToast } from '../toast';
 import { Link } from 'react-router';
 import { ErrorText, Field, Select } from '../ui';
 import type { ModifierGroup, Period, PromoRule } from '../../../src/venue/pricing.ts';
-import type { FloorItem, FloorPlan, MenuEntry, Station, VenueData, VenueSettings } from './store';
+import type { FloorPlan, MenuEntry, Station, VenueData, VenueSettings } from './store';
+import { FloorEditor } from './FloorEditor';
 import './venue.css';
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -115,127 +116,10 @@ function FloorCard({ plans, layout, onChange }: { plans: FloorPlan[]; layout: st
   const confirm = useConfirm();
   const [planId, setPlanId] = useState(plans[0]?.id ?? '');
   const plan = plans.find((p) => p.id === planId) ?? plans[0];
-  const [items, setItemsRaw] = useState<FloorItem[]>(plan?.items ?? []);
-  const [selected, setSelected] = useState<string[]>([]);
-  const [several, setSeveral] = useState(false);
-  const [snapOn, setSnapOn] = useState(true);
   const [area, setArea] = useState('');
   const [newLayout, setNewLayout] = useState('');
   const [error, setError] = useState<unknown>(null);
-  const board = useRef<HTMLDivElement>(null);
-  // Undo and redo: every change is a step; a drag is one step however far it goes.
-  const history = useRef<{ past: FloorItem[][]; future: FloorItem[][] }>({ past: [], future: [] });
-  const drag = useRef<null | { mode: 'move' | 'resize'; id: string; startX: number; startY: number; start: FloorItem[]; moved: boolean }>(null);
-  useEffect(() => { setItemsRaw(plan?.items ?? []); setSelected([]); history.current = { past: [], future: [] }; }, [plan?.id]); // eslint-disable-line react-hooks/exhaustive-deps
-  const changed = JSON.stringify(items) !== JSON.stringify(plan?.items ?? []);
-  const sel = items.find((i) => i.id === selected[0]);
-  const chosen = items.filter((i) => selected.includes(i.id));
-  const snap = (n: number) => (snapOn ? Math.round(n / 10) * 10 : Math.round(n));
-  const clamp = (i: FloorItem): FloorItem => ({ ...i, x: Math.max(0, Math.min(1000 - i.w, i.x)), y: Math.max(0, Math.min(1000 - i.h, i.y)) });
-  const commit = (next: FloorItem[]) => {
-    history.current.past.push(items);
-    if (history.current.past.length > 100) history.current.past.shift();
-    history.current.future = [];
-    setItemsRaw(next);
-  };
-  const patch = (id: string, p: Partial<FloorItem>) => commit(items.map((i) => (i.id === id ? clamp({ ...i, ...p }) : i)));
-  const undo = () => { const p = history.current.past.pop(); if (!p) return; history.current.future.push(items); setItemsRaw(p); };
-  const redo = () => { const f = history.current.future.pop(); if (!f) return; history.current.past.push(items); setItemsRaw(f); };
-  const units = (e: { clientX: number; clientY: number }) => {
-    const box = board.current!.getBoundingClientRect();
-    return { x: ((e.clientX - box.left) / box.width) * 1000, y: ((e.clientY - box.top) / box.height) * 1000 };
-  };
-  const pick = (id: string, add: boolean) => setSelected((cur) => (add ? (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]) : cur.includes(id) && cur.length > 1 ? cur : [id]));
-
-  // Drag with a finger or a mouse: the chosen items follow together, on the grid, and stay on the plan. The corner handle resizes.
-  const down = (e: ReactPointerEvent, item: FloorItem, mode: 'move' | 'resize' = 'move') => {
-    e.stopPropagation();
-    const add = several || e.shiftKey || e.ctrlKey || e.metaKey;
-    if (mode === 'move') pick(item.id, add);
-    const p = units(e);
-    drag.current = { mode, id: item.id, startX: p.x, startY: p.y, start: items, moved: false };
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
-  };
-  const move = (e: ReactPointerEvent) => {
-    const d = drag.current;
-    if (!d) return;
-    const p = units(e);
-    const dx = p.x - d.startX;
-    const dy = p.y - d.startY;
-    if (!d.moved && Math.hypot(dx, dy) < 4) return;
-    d.moved = true;
-    const ids = d.mode === 'resize' ? [d.id] : selected.includes(d.id) ? selected : [d.id];
-    setItemsRaw(d.start.map((i) => {
-      if (!ids.includes(i.id)) return i;
-      return d.mode === 'resize'
-        ? clamp({ ...i, w: Math.max(20, Math.min(1000 - i.x, snap(i.w + dx))), h: Math.max(10, Math.min(1000 - i.y, snap(i.h + dy))) })
-        : clamp({ ...i, x: snap(i.x + dx), y: snap(i.y + dy) });
-    }));
-  };
-  const up = () => {
-    const d = drag.current;
-    drag.current = null;
-    if (d?.moved) { history.current.past.push(d.start); history.current.future = []; }
-  };
-
-  const add = (type: FloorItem['type'], shape: FloorItem['shape'] = 'square', name?: string) => {
-    const n = items.filter((i) => i.type === type).length + 1;
-    const id = `${type[0]}${Date.now().toString(36)}`;
-    const base = { id, type, rotation: 0, x: 420, y: 420 };
-    const item: FloorItem = type === 'table' ? { ...base, name: `${t('Table')} ${items.filter((i) => i.type === 'table').length + 1}`, shape, seats: shape === 'rect' ? 6 : 4, w: shape === 'rect' ? 220 : 120, h: shape === 'rect' ? 180 : 190 }
-      : type === 'stool' ? { ...base, name: `${t('Bar')} ${n}`, shape: 'round', seats: 1, w: 60, h: 90 }
-      : type === 'wall' ? { ...base, name: '', shape: 'rect', seats: 0, w: 400, h: 20 } : { ...base, name: name ?? t('Bar'), shape: 'rect', seats: 0, w: name ? 90 : 300, h: name ? 30 : 100 };
-    commit([...items, item]);
-    setSelected([id]);
-  };
-  const duplicate = () => {
-    if (!chosen.length) return;
-    const copies = chosen.map((i, n) => clamp({ ...i, id: `${i.type[0]}${(Date.now() + n).toString(36)}`, x: i.x + 40, y: i.y + 40, name: i.type === 'table' || i.type === 'stool' ? `${i.name} (2)` : i.name }));
-    commit([...items, ...copies]);
-    setSelected(copies.map((c) => c.id));
-  };
-  const remove = () => { commit(items.filter((i) => !selected.includes(i.id))); setSelected([]); };
-  const rotate = () => commit(items.map((i) => (selected.includes(i.id) ? { ...i, rotation: (i.rotation + 45) % 360 } : i)));
-  // Number the tables (and the stools) in reading order: top to bottom, left to right.
-  const autoNumber = () => {
-    const order = (type: FloorItem['type']) => items.filter((i) => i.type === type).sort((a, b) => (Math.abs(a.y - b.y) < 60 ? a.x - b.x : a.y - b.y)).map((i) => i.id);
-    const tables = order('table');
-    const stools = order('stool');
-    commit(items.map((i) => (i.type === 'table' ? { ...i, name: `${t('Table')} ${tables.indexOf(i.id) + 1}` } : i.type === 'stool' ? { ...i, name: `${t('Bar')} ${stools.indexOf(i.id) + 1}` } : i)));
-    toast(t('Tables numbered in reading order'));
-  };
-  const align = (how: 'left' | 'top' | 'hspace' | 'vspace') => {
-    if (chosen.length < 2) return;
-    if (how === 'left' || how === 'top') {
-      const edge = Math.min(...chosen.map((i) => (how === 'left' ? i.x : i.y)));
-      return commit(items.map((i) => (selected.includes(i.id) ? clamp({ ...i, ...(how === 'left' ? { x: edge } : { y: edge }) }) : i)));
-    }
-    // Even gaps between the first and the last, in their order across (or down).
-    const key = how === 'hspace' ? 'x' : 'y';
-    const size = how === 'hspace' ? 'w' : 'h';
-    const row = [...chosen].sort((a, b) => a[key] - b[key]);
-    const span = row.at(-1)![key] + row.at(-1)![size] - row[0]![key];
-    const gap = (span - row.reduce((a, i) => a + i[size], 0)) / (row.length - 1);
-    let at = row[0]![key];
-    const placed = new Map(row.map((i) => { const v = Math.round(at); at += i[size] + gap; return [i.id, v]; }));
-    commit(items.map((i) => (placed.has(i.id) ? clamp({ ...i, [key]: placed.get(i.id)! }) : i)));
-  };
-  const keys = (e: React.KeyboardEvent) => {
-    const mod = e.ctrlKey || e.metaKey;
-    if (mod && e.key.toLowerCase() === 'z') { e.preventDefault(); return e.shiftKey ? redo() : undo(); }
-    if (mod && e.key.toLowerCase() === 'y') { e.preventDefault(); return redo(); }
-    if (mod && e.key.toLowerCase() === 'd') { e.preventDefault(); return duplicate(); }
-    if (!selected.length) return;
-    if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); return remove(); }
-    const step = e.shiftKey ? 50 : 10;
-    const d = e.key === 'ArrowLeft' ? [-step, 0] : e.key === 'ArrowRight' ? [step, 0] : e.key === 'ArrowUp' ? [0, -step] : e.key === 'ArrowDown' ? [0, step] : null;
-    if (!d) return;
-    e.preventDefault();
-    commit(items.map((i) => (selected.includes(i.id) ? clamp({ ...i, x: i.x + d[0]!, y: i.y + d[1]! }) : i)));
-  };
-
   const run = async (fn: () => Promise<unknown>, done?: string) => { setError(null); try { await fn(); if (done) toast(done); onChange(); } catch (e) { setError(e); } };
-  const save = () => run(() => api(`/v1/venue/floor/${plan!.id}`, { method: 'PUT', body: { items } }), t('Floor plan saved. Every device shows it within seconds.'));
   return (
     <section className="card stack">
       <div><h2>{t('Floor plans')}</h2><p className="small muted">{t('One plan for each area: dining room, patio, bar. Drag tables where they stand. An area can have other layouts (weekday, event) with the same tables in other places.')}</p></div>
@@ -252,57 +136,7 @@ function FloorCard({ plans, layout, onChange }: { plans: FloorPlan[]; layout: st
       )}
       {plan && (
         <>
-          <div className="floor-palette" role="toolbar" aria-label={t('Add to the plan')}>
-            <button type="button" className="secondary" onClick={() => add('table', 'round')}>+ {t('Round table')}</button>
-            <button type="button" className="secondary" onClick={() => add('table', 'square')}>+ {t('Square table')}</button>
-            <button type="button" className="secondary" onClick={() => add('table', 'rect')}>+ {t('Long table')}</button>
-            <button type="button" className="secondary" onClick={() => add('stool')}>+ {t('Bar stool')}</button>
-            <button type="button" className="secondary" onClick={() => add('wall')}>+ {t('Wall')}</button>
-            <button type="button" className="secondary" onClick={() => add('fixture', 'rect', t('Door'))}>+ {t('Door')}</button>
-            <button type="button" className="secondary" onClick={() => add('fixture')}>+ {t('Fixture')}</button>
-          </div>
-          <div className="floor-palette" role="toolbar" aria-label={t('Arrange')}>
-            <button type="button" className="secondary" onClick={undo} disabled={!history.current.past.length} aria-keyshortcuts="Control+Z">{t('Undo')}</button>
-            <button type="button" className="secondary" onClick={redo} disabled={!history.current.future.length} aria-keyshortcuts="Control+Shift+Z">{t('Redo')}</button>
-            <button type="button" className="secondary" onClick={duplicate} disabled={!chosen.length} aria-keyshortcuts="Control+D">{t('Duplicate')}</button>
-            <button type="button" className="secondary" onClick={rotate} disabled={!chosen.length}>{t('Turn 45°')}</button>
-            <button type="button" className="secondary" aria-pressed={several} onClick={() => setSeveral((v) => !v)}>{t('Select several')}</button>
-            <button type="button" className="secondary" onClick={() => align('left')} disabled={chosen.length < 2}>{t('Line up left')}</button>
-            <button type="button" className="secondary" onClick={() => align('top')} disabled={chosen.length < 2}>{t('Line up top')}</button>
-            <button type="button" className="secondary" onClick={() => align('hspace')} disabled={chosen.length < 3}>{t('Space evenly across')}</button>
-            <button type="button" className="secondary" onClick={() => align('vspace')} disabled={chosen.length < 3}>{t('Space evenly down')}</button>
-            <button type="button" className="secondary" onClick={autoNumber}>{t('Number the tables')}</button>
-            <label className="row floor-snap"><input type="checkbox" checked={snapOn} onChange={(e) => setSnapOn(e.target.checked)} /> {t('Snap to the grid')}</label>
-            <span className="spacer" />
-            <button type="button" disabled={!changed} onClick={() => void save()}>{t('Save the plan')}</button>
-          </div>
-          <div className="floor-editor" ref={board} tabIndex={-1} onPointerMove={move} onPointerUp={up} onPointerCancel={up} onPointerDown={() => !several && setSelected([])} onKeyDown={keys} aria-label={t('Floor plan editor')}>
-            {items.map((item) => {
-              const style = { left: `${item.x / 10}%`, top: `${item.y / 10}%`, width: `${item.w / 10}%`, height: `${item.h / 10}%`, transform: item.rotation ? `rotate(${item.rotation}deg)` : undefined };
-              const door = item.type === 'fixture' && /door|puerta/i.test(item.name);
-              const cls = item.type === 'wall' || item.type === 'fixture' ? `venue-fixture ${item.type}${door ? ' door' : ''}` : `venue-table ${item.shape} state-free`;
-              const on = selected.includes(item.id);
-              return (
-                <div key={item.id} role="button" tabIndex={0} aria-pressed={on} aria-label={item.name || t(item.type)} className={`${cls} ${on ? 'selected' : ''}`} style={style} onPointerDown={(e) => down(e, item)}>
-                  {item.type !== 'wall' && <strong>{item.name}</strong>}{(item.type === 'table') && <span className="small">{t('{n} seats', { n: item.seats })}</span>}
-                  {on && selected.length === 1 && <span className="floor-handle" role="presentation" onPointerDown={(e) => down(e, item, 'resize')} title={t('Drag to resize')} />}
-                </div>
-              );
-            })}
-          </div>
-          <p className="small muted">{t('Tip: drag the corner to resize. Shift-click or "Select several" to move, line up or space out a group. Ctrl+Z undoes, Ctrl+D duplicates, arrows nudge (Shift for more).')}</p>
-          {sel && selected.length === 1 && (
-            <div className="form-grid">
-              {sel.type !== 'wall' && <Field label={t('Name')}><input maxLength={30} value={sel.name} onChange={(e) => patch(sel.id, { name: e.target.value })} /></Field>}
-              {sel.type === 'table' && <Field label={t('Seats')}><input type="number" inputMode="numeric" min={1} max={40} value={sel.seats} onChange={(e) => patch(sel.id, { seats: Number(e.target.value) })} /></Field>}
-              {sel.type === 'table' && <Field label={t('Shape')}><Select value={sel.shape} onChange={(e) => patch(sel.id, { shape: e.target.value as FloorItem['shape'] })}><option value="square">{t('Square')}</option><option value="rect">{t('Rectangle')}</option><option value="round">{t('Round')}</option></Select></Field>}
-              <Field label={t('Width')}><input type="range" min={20} max={600} step={10} value={sel.w} onChange={(e) => patch(sel.id, { w: Number(e.target.value) })} /></Field>
-              <Field label={t('Depth')}><input type="range" min={10} max={600} step={10} value={sel.h} onChange={(e) => patch(sel.id, { h: Number(e.target.value) })} /></Field>
-              <Field label={t('Turned')}><input type="range" min={0} max={315} step={45} value={sel.rotation} onChange={(e) => patch(sel.id, { rotation: Number(e.target.value) })} /></Field>
-              <div><button type="button" className="link danger-link" onClick={remove}>{t('Remove from the plan')}</button></div>
-            </div>
-          )}
-          {selected.length > 1 && <p className="small">{t('{n} chosen', { n: selected.length })} · <button type="button" className="link danger-link" onClick={remove}>{t('Remove them from the plan')}</button></p>}
+          <FloorEditor key={plan.id} items={plan.items} onSave={(items) => void run(() => api(`/v1/venue/floor/${plan.id}`, { method: 'PUT', body: { items } }), t('Floor plan saved. Every device shows it within seconds.'))} />
           <div className="row">
             <form className="row" onSubmit={(e) => { e.preventDefault(); void run(() => api('/v1/venue/floor', { method: 'POST', body: { area: plan.area, layout: newLayout.trim(), copyFrom: plan.id } }).then(() => setNewLayout('')), t('Layout added, with the same tables.')); }}>
               <Field label={t('Another layout of {area}', { area: plan.area })}><input value={newLayout} maxLength={40} placeholder={t('Weekday, Event…')} onChange={(e) => setNewLayout(e.target.value)} /></Field>

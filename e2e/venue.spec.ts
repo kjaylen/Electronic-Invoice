@@ -315,34 +315,83 @@ test('the till floor: the plan and the list, the legend, a table held for its ac
   await context.close();
 });
 
-test('the layout editor: tables added, duplicated, undone and redone, numbered in reading order, lined up, and saved', async ({ page }) => {
+test('the layout editor: drag a corner to resize, the round handle to turn, a box to choose several; add, duplicate, undo, redo, number, line up, save', async ({ page }) => {
   await logIn(page);
   await setUp(page);
+  await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto(`/${SLUG}/settings?tab=venue`);
   const editor = page.getByLabel('Floor plan editor');
+  const panel = page.getByRole('complementary', { name: 'The chosen item' });
+  await editor.scrollIntoViewIfNeeded();
   await expect(editor.getByRole('button', { name: 'Table 1' })).toBeVisible();
-  await page.getByRole('button', { name: '+ Round table' }).click();
+
+  // Table 1 chosen: its bottom-right corner dragged out makes it wider and deeper.
+  const t1 = editor.getByRole('button', { name: 'Table 1' });
+  await t1.click();
+  const width = panel.getByLabel('Width');
+  const depth = panel.getByLabel('Depth');
+  const [w0, d0] = [Number(await width.inputValue()), Number(await depth.inputValue())];
+  const before = await t1.boundingBox();
+  const corner = await t1.locator('.fe-handle.h-se').boundingBox();
+  await page.mouse.move(corner!.x + corner!.width / 2, corner!.y + corner!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(corner!.x + 40, corner!.y + 30, { steps: 5 });
+  await page.mouse.move(corner!.x + 80, corner!.y + 60, { steps: 5 });
+  await page.mouse.up();
+  expect(Number(await width.inputValue())).toBeGreaterThan(w0);
+  expect(Number(await depth.inputValue())).toBeGreaterThan(d0);
+  // Only the right and bottom sides moved: the left and top edges stayed where they were.
+  const after = await t1.boundingBox();
+  expect(Math.abs(after!.x - before!.x)).toBeLessThan(2);
+  expect(Math.abs(after!.y - before!.y)).toBeLessThan(2);
+  // Turned a quarter by dragging the round handle round to the right of the table.
+  const box = await t1.boundingBox();
+  const knob = await t1.locator('.fe-rotate').boundingBox();
+  await page.mouse.move(knob!.x + knob!.width / 2, knob!.y + knob!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box!.x + box!.width + 60, box!.y + box!.height / 2 - 30, { steps: 6 });
+  await page.mouse.move(box!.x + box!.width + 80, box!.y + box!.height / 2, { steps: 6 });
+  await page.mouse.up();
+  await expect(panel.getByLabel('Turned')).toHaveValue('90');
+  await page.getByRole('button', { name: 'Undo' }).click();
+  await expect(panel.getByLabel('Turned')).toHaveValue('0');
+
+  // A table added, duplicated, undone and redone.
+  await page.getByRole('button', { name: 'Round table' }).click();
   await expect(editor.getByRole('button', { name: 'Table 3' })).toBeVisible();
-  await page.getByRole('button', { name: 'Duplicate' }).click();
+  await panel.getByRole('button', { name: 'Duplicate' }).click();
   await expect(editor.getByRole('button', { name: 'Table 3 (2)' })).toBeVisible();
   await page.getByRole('button', { name: 'Undo' }).click();
   await expect(editor.getByRole('button', { name: 'Table 3 (2)' })).toHaveCount(0);
   await page.getByRole('button', { name: 'Redo' }).click();
   await expect(editor.getByRole('button', { name: 'Table 3 (2)' })).toBeVisible();
-  // Numbered top to bottom, left to right: the copy (lower down) is last.
   await page.getByRole('button', { name: 'Number the tables' }).click();
   await expect(editor.getByRole('button', { name: /^Table \d$/ })).toHaveCount(4);
-  await expect(editor.getByRole('button', { name: 'Table 3 (2)' })).toHaveCount(0);
-  // Two chosen, lined up on the left.
+
+  // A box dragged over the empty bottom of the plan and up across Tables 1 and 2 chooses them both.
+  const plan = await editor.boundingBox();
+  const t2 = await editor.getByRole('button', { name: 'Table 2' }).boundingBox();
+  await page.mouse.move(plan!.x + 8, plan!.y + plan!.height - 8);
+  await page.mouse.down();
+  await page.mouse.move(t2!.x + t2!.width / 2, t2!.y + t2!.height / 2, { steps: 10 });
+  await page.mouse.up();
+  await expect(panel.getByRole('heading', { name: /^\d+ chosen$/ })).toBeVisible();
+  await expect(editor.getByRole('button', { name: 'Table 1', pressed: true })).toBeVisible();
+  await expect(editor.getByRole('button', { name: 'Table 2', pressed: true })).toBeVisible();
+  // Just those two (Shift-click Table 1 and Table 2 from nothing), lined up on the left.
+  await editor.press('Escape');
   await editor.getByRole('button', { name: 'Table 1' }).click();
   await editor.getByRole('button', { name: 'Table 2' }).click({ modifiers: ['Shift'] });
-  await page.getByRole('button', { name: 'Line up left' }).click();
+  await panel.getByRole('button', { name: 'Line up left' }).click();
   await page.getByRole('button', { name: 'Save the plan' }).click();
   await expect(page.getByText('Floor plan saved')).toBeVisible();
-  const venue = await (await page.request.get('/v1/venue', { headers: API })).json() as { floor: Array<{ area: string; items: Array<{ name: string; x: number; type: string }> }> };
+  const venue = await (await page.request.get('/v1/venue', { headers: API })).json() as { floor: Array<{ area: string; items: Array<{ name: string; x: number; w: number; rotation: number; type: string }> }> };
   const items = venue.floor.find((p) => p.area === 'Dining room')!.items;
   expect(items.filter((i) => i.type === 'table').map((i) => i.name).sort()).toEqual(['Table 1', 'Table 2', 'Table 3', 'Table 4']);
-  expect(items.find((i) => i.name === 'Table 1')!.x).toBe(items.find((i) => i.name === 'Table 2')!.x);
+  const one = items.find((i) => i.name === 'Table 1')!;
+  expect(one.x).toBe(items.find((i) => i.name === 'Table 2')!.x);
+  expect(one.w).toBeGreaterThan(180);
+  expect(one.rotation).toBe(0);
 });
 
 test('speed: a table opened and four items with choices sent, on a slow connection, without one tap waiting for the server', async ({ page }) => {

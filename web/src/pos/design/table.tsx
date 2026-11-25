@@ -48,7 +48,7 @@ export interface TableShapeProps {
 }
 
 /** Seats around a table: evenly round a round one, along the long sides of a rectangle. */
-function seatPositions(shape: TableShapeProps['shape'], seats: number, w: number, h: number): Array<{ x: number; y: number }> {
+export function seatPositions(shape: TableShapeProps['shape'], seats: number, w: number, h: number): Array<{ x: number; y: number }> {
   const n = Math.max(0, Math.min(seats, 16));
   if (shape === 'stool' || n === 0) return [];
   if (shape === 'round') return Array.from({ length: n }, (_, i) => {

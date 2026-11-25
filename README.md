@@ -602,7 +602,17 @@ document is issued when, DECISIONS.md the judgment calls.
   the server sends it, a later one skips it, and the answer says what each
   operation really sent. Tickets are made from that answer only.
 - **Setup** (Settings → Venue): floor plans by area with other layouts of the
-  same tables, drawn by dragging; sections per server; the tax rules in force.
+  same tables; sections per server; the tax rules in force.
+- **The floor plan editor** (`web/src/venue/FloorEditor.tsx`): a canvas of
+  the room with its seats drawn. Drag to move (the chosen items together),
+  with guides that snap to other items' edges and centres, or to the grid;
+  drag any side or corner to resize (Shift keeps the shape) and the round
+  handle to turn (15° steps, Alt for any angle); drag a box to choose
+  several. A panel beside the plan sets the exact name, seats, shape, size
+  and angle, lines up, spaces out or matches the size of what is chosen.
+  Undo and redo, zoom (or Ctrl+wheel), numbering in reading order, and keys
+  (arrows, R, Delete, Ctrl+Z, Ctrl+D, Ctrl+A). Nothing is saved until "Save
+  the plan".
 - **The menu** (`/menu`, in the sidebar after Products when Restaurant or Bar
   is on; `web/src/venue/Menu.tsx`, `src/venue/sections.ts`). The menu's items
   are the business's products (one list: price, GST, stock and recipes stay
