@@ -4895,4 +4895,6 @@ export const ES: Record<string, string> = {
   "Guest check ": "Precuenta ",
   "Menu ": "Menú ",
   "Likes ": "Preferencias ",
+  "Drag across empty nights to book; drag a booking to move it; drag its right edge to make the stay longer or shorter.": "Arrastre sobre noches libres para reservar; arrastre una reserva para moverla; arrastre su borde derecho para alargar o acortar la estadía.",
+  "{name} now leaves on {date}": "{name} ahora sale el {date}",
 };

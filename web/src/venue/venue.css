@@ -135,3 +135,7 @@
   .venue-plan { aspect-ratio: 4 / 5; }
   .venue-items { grid-template-columns: repeat(auto-fill, minmax(7rem, 1fr)); }
 }
+
+/* The right edge of a stay on the hotel calendar: taken to make the stay longer or shorter. */
+.timeline-bar { position: relative; }
+.timeline-grip { position: absolute; top: 0; right: 0; bottom: 0; width: 14px; cursor: ew-resize; border-right: 3px solid color-mix(in srgb, currentColor 45%, transparent); border-radius: 0 6px 6px 0; }
