@@ -112,3 +112,17 @@ create table item_modifier_groups (
 alter table stock_movements drop constraint stock_movements_reason_check;
 alter table stock_movements add constraint stock_movements_reason_check check (reason in
   ('initial', 'sale', 'sale_reversed', 'order', 'order_cancelled', 'refund', 'receive', 'count', 'damaged', 'lost', 'returned', 'other', 'transfer_out', 'transfer_in', 'waste', 'spillage'));
+
+-- Tax values as dated configuration: a business's own value for a rule,
+-- from a day on (src/venue/tax-rules.ts holds the defaults and their sources).
+create table venue_tax_rules (
+  id         uuid primary key,
+  tenant_id  uuid not null references tenants (id),
+  key        text not null,
+  value      text not null,
+  valid_from date not null,
+  note       text,
+  created_by uuid references users (id),
+  created_at timestamptz not null default now()
+);
+create index venue_tax_rules_tenant on venue_tax_rules (tenant_id, key, valid_from desc);

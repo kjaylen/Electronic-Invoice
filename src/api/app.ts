@@ -92,6 +92,7 @@ import { namesOneThing, storePageMeta, storeRobots, storeSitemap, withMeta, with
 import { registerLayawayRoutes } from './layaways.ts';
 import { registerLocationRoutes } from './locations.ts';
 import { registerBusinessTaxRoutes } from './business-tax.ts';
+import { registerVenueRoutes } from './venue.ts';
 
 export type Principal = 'api' | Role;
 
@@ -434,6 +435,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     registerLayawayRoutes(tenant, deps);
     registerLocationRoutes(tenant, deps);
     registerBusinessTaxRoutes(tenant, deps);
+    registerVenueRoutes(tenant, deps);
     registerSiteRoutes(tenant, deps);
     registerConnectRoutes(tenant, deps, ctx);
     registerDeveloperRoutes(tenant, deps, devlog);

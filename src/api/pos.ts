@@ -49,10 +49,14 @@ const CODE_ALPHABET = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
 /** What a person can do on a till: their role's permissions, within these. */
 export const TILL_PERMISSIONS: ReadonlySet<Permission> = new Set([
   'documents.issue', 'documents.adjust', 'documents.cancel', 'documents.send', 'orders.manage', 'payments.record', 'reports.view',
+  'venue.orders', 'venue.approve', 'venue.floor', 'venue.kitchen', 'hotel.frontdesk', 'hotel.housekeeping',
 ]);
 
 /** The API routes a till session may use (method and route pattern). */
 export const TILL_ROUTES: ReadonlySet<string> = new Set([
+  // Table service, the bar and the kitchen screen (the hospitality module).
+  'GET /v1/venue', 'POST /v1/venue/ops', 'GET /v1/venue/changes', 'GET /v1/venue/checks/:id', 'POST /v1/venue/tickets/:id/:what', 'POST /v1/venue/approve',
+  'POST /v1/venue/items/:id/availability', 'POST /v1/venue/waste', 'PUT /v1/venue/sections', 'POST /v1/venue/menu-override',
   'GET /v1/me',
   'GET /v1/business',
   'GET /v1/items',
@@ -188,7 +192,7 @@ export async function deviceFromToken(db: Queryable, request: FastifyRequest): P
 }
 
 const tillUsersSql = `select u.id, u.name, u.role, u.pos_pin_set_at is not null as has_pin from users u
-  where u.tenant_id = $1 and u.status = 'active' and u.role in ('owner', 'admin', 'manager', 'cashier') order by lower(u.name)`;
+  where u.tenant_id = $1 and u.status = 'active' and u.role not in ('accountant') order by lower(u.name)`;
 
 // ---------- web app: managing tills ----------
 
@@ -335,7 +339,8 @@ export function registerPosDeviceRoutes(app: FastifyInstance, deps: PipelineDeps
       const limitKey = `pospin|${d.id}|${request.body.userId}`;
       if (await atLimit(db, limitKey, PIN_FAILURES)) throw new ApiError(429, 'too_many_attempts', 'Too many wrong PINs. Try again in 15 minutes, or ask a manager to reset your PIN.');
       const user = await checkPin(db, d.tenant_id, request.body.userId, request.body.pin);
-      if (!user || !tillPermissions(user.role).includes('documents.issue')) {
+      // Anyone with something to do on a till: selling, or the floor, the kitchen screen, the rooms.
+      if (!user || !tillPermissions(user.role).some((p) => p === 'documents.issue' || p.startsWith('venue.') || p.startsWith('hotel.'))) {
         const failures = await countHit(db, limitKey, PIN_WINDOW_MS);
         const left = PIN_FAILURES - failures;
         throw new ApiError(401, 'wrong_pin', left > 0 ? `Wrong PIN. ${left} ${left === 1 ? 'try' : 'tries'} left.` : 'Too many wrong PINs. Try again in 15 minutes.');

@@ -195,7 +195,7 @@ export function registerPosSyncRoutes(app: FastifyInstance, deps: PipelineDeps) 
       )).rows[0]!;
       const users = (await db.query<{ id: string; name: string; role: Role; has_pin: boolean; pin_set_at: Date | null }>(
         `select u.id, u.name, u.role, u.pos_pin_set_at is not null as has_pin, u.pos_pin_set_at as pin_set_at from users u
-         where u.tenant_id = $1 and u.status = 'active' and u.role in ('owner', 'admin', 'manager', 'cashier') order by lower(u.name)`, [d.tenant_id],
+         where u.tenant_id = $1 and u.status = 'active' and u.role not in ('accountant') order by lower(u.name)`, [d.tenant_id],
       )).rows;
       const logo = (await db.query<{ id: string; name: string; content_type: string; bytes: number; data: Buffer | Uint8Array }>(
         'select a.id, a.name, a.content_type, a.bytes, a.data from tenants t join template_assets a on a.id = t.logo_asset_id where t.id = $1', [d.tenant_id],

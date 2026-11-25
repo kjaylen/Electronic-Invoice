@@ -135,7 +135,7 @@ export const isSignedOut = (e: unknown) => e instanceof ApiError && e.status ===
 
 // ---------- shapes returned by the API ----------
 
-export type Role = 'owner' | 'admin' | 'manager' | 'cashier' | 'accountant';
+export type Role = 'owner' | 'admin' | 'manager' | 'cashier' | 'accountant' | 'supervisor' | 'server' | 'bartender' | 'host' | 'kitchen' | 'housekeeper';
 export type Permission =
   | 'documents.issue' | 'documents.adjust' | 'documents.cancel' | 'documents.send' | 'catalog.manage' | 'orders.manage'
   | 'payments.record' | 'expenses.manage' | 'reports.view' | 'business.manage' | 'users.manage' | 'apikeys.manage' | 'audit.view';

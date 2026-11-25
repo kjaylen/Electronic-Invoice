@@ -14,7 +14,7 @@ import type { Queryable } from '../db/database.ts';
 import { emitEvent } from '../webhooks/emit.ts';
 import { documentLocation, levelSql } from './locations.ts';
 
-export type MovementReason = 'initial' | 'sale' | 'sale_reversed' | 'order' | 'order_cancelled' | 'refund' | 'receive' | 'count' | 'damaged' | 'lost' | 'returned' | 'other' | 'transfer_out' | 'transfer_in';
+export type MovementReason = 'initial' | 'sale' | 'sale_reversed' | 'order' | 'order_cancelled' | 'refund' | 'receive' | 'count' | 'damaged' | 'lost' | 'returned' | 'other' | 'transfer_out' | 'transfer_in' | 'waste' | 'spillage';
 export const ADJUST_REASONS = ['count', 'damaged', 'lost', 'returned', 'other'] as const;
 export type AdjustReason = (typeof ADJUST_REASONS)[number];
 
