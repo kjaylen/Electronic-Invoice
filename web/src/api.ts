@@ -138,7 +138,8 @@ export const isSignedOut = (e: unknown) => e instanceof ApiError && e.status ===
 export type Role = 'owner' | 'admin' | 'manager' | 'cashier' | 'accountant' | 'supervisor' | 'server' | 'bartender' | 'host' | 'kitchen' | 'housekeeper';
 export type Permission =
   | 'documents.issue' | 'documents.adjust' | 'documents.cancel' | 'documents.send' | 'catalog.manage' | 'orders.manage'
-  | 'payments.record' | 'expenses.manage' | 'reports.view' | 'business.manage' | 'users.manage' | 'apikeys.manage' | 'audit.view';
+  | 'payments.record' | 'expenses.manage' | 'reports.view' | 'business.manage' | 'users.manage' | 'apikeys.manage' | 'audit.view'
+  | 'venue.orders' | 'venue.approve' | 'venue.floor' | 'venue.kitchen' | 'hotel.frontdesk' | 'hotel.housekeeping';
 
 export interface Account {
   id: string;
@@ -166,6 +167,8 @@ export interface SessionInfo {
 }
 
 export interface Me {
+  /** The hospitality module: which kinds of venue the business is (all false: a shop). */
+  venue?: { restaurant: boolean; bar: boolean; hotel: boolean };
   id: string;
   legalName: string;
   tradeName: string | null;

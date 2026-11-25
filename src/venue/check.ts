@@ -304,15 +304,22 @@ export function apply(store: Store, op: Op): Applied {
     case 'void': {
       const items = picked().filter(live);
       if (!items.length) return no('Nothing to void');
-      if (items.some((i) => paidShares(i) > 0)) return no('That is already paid for: refund it from the receipt instead');
+      if (items.some(fullyPaid)) return no('That is already paid for: refund it from the receipt instead');
       if (!reason && items.some((i) => i.status !== 'held')) return no('Say why it is voided');
       for (const i of items) {
+        // Part paid (shared, and some of the sharers left): what was paid stands, the rest is written off.
+        if (paidShares(i) > 0) {
+          i.shares = paidShares(i);
+          check.events.push({ at: op.at, by: op.by, type: 'written off', note: `${i.name}: ${reason}`, itemIds: [i.id], ...(approvedBy && { approvedBy }) });
+          continue;
+        }
         const afterSend = i.status !== 'held';
         if (afterSend) result.voided.push(i.id);
         i.status = 'void';
         i.voided = { at: op.at, by: op.by, reason: reason || 'Not sent', afterSend, ...(approvedBy && { approvedBy }) };
       }
-      log('voided', { itemIds: items.map((i) => i.id) });
+      if (items.some((i) => i.status === 'void')) log('voided', { itemIds: items.filter((i) => i.status === 'void').map((i) => i.id) });
+      settle(check, op.at);
       break;
     }
     case 'comp': {

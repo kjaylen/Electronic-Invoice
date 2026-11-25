@@ -212,8 +212,8 @@ export async function loadItems(deps: PipelineDeps, tenantId: string, ids: strin
 /** The business as the app's screens need it (GET /v1/me; also in a till's offline snapshot). */
 export async function meJson(deps: PipelineDeps, tenantId: string) {
   const { db } = deps;
-  const t = (await db.query<{ id: string; legal_name: string; trade_name: string | null; tin: string; environment: string; cashier_discount_limit: string | null; sells: 'products' | 'services' | 'both'; counter_settings: unknown }>(
-    'select id, legal_name, trade_name, tin, environment, cashier_discount_limit::text, sells, counter_settings from tenants where id = $1', [tenantId],
+  const t = (await db.query<{ id: string; legal_name: string; trade_name: string | null; tin: string; environment: string; cashier_discount_limit: string | null; sells: 'products' | 'services' | 'both'; counter_settings: unknown; venue: { restaurant?: boolean; bar?: boolean; hotel?: boolean } | null }>(
+    'select id, legal_name, trade_name, tin, environment, cashier_discount_limit::text, sells, counter_settings, venue from tenants where id = $1', [tenantId],
   )).rows[0]!;
   const period = (await db.query<{ started_at: string | Date; reason: string }>(
     'select started_at, reason from contingency_periods where tenant_id = $1 and ended_at is null', [tenantId],
@@ -236,6 +236,8 @@ export async function meJson(deps: PipelineDeps, tenantId: string) {
     notices: (await db.query<{ id: string; message: string; message_es: string | null; level: 'info' | 'warning' }>(
       `select id, message, message_es, level from platform_notices where starts_at <= now() and (ends_at is null or ends_at > now()) order by created_at desc limit 3`,
     )).rows.map((n) => ({ id: n.id, message: n.message, messageEs: n.message_es, level: n.level })),
+    // The hospitality module: which kinds of venue the business is (none: a shop).
+    venue: { restaurant: t.venue?.restaurant === true, bar: t.venue?.bar === true, hotel: t.venue?.hotel === true },
     counter: {
       cashierDiscountLimit: t.cashier_discount_limit === null ? null : String(Number(t.cashier_discount_limit)),
       loyalty: await loyaltySettings(db, tenantId).then((l) => (l.enabled ? { pointValue: l.pointValue, minRedeem: l.minRedeem } : null)),

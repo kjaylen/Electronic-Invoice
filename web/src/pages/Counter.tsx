@@ -53,6 +53,8 @@ interface CartLine {
   note?: string;
   /** How many have already gone to the kitchen or bar on an order ticket. */
   sent?: string;
+  /** From a table's check: its discounts and service charge as worked out there, used as they are. */
+  fixed?: Array<{ isCharge: boolean; reason: string; amount: string }>;
 }
 
 /** 68: a mobile wallet (DigiWallet, E-Kyash): the customer pays on their phone and shows the confirmation. */
@@ -79,6 +81,8 @@ interface Sale {
   tip?: string;
   /** The table this sale is the tab of. */
   table?: string;
+  /** A part of a table's or tab's check being paid (the hospitality module): its lines are fixed. */
+  venue?: VenuePay;
   /** Charged to the customer's account: days until it is due. */
   dueDays?: number;
   /** On account as a layaway: the goods stay in the shop until paid. How long they are kept, and the deposit paid now. */
@@ -93,6 +97,7 @@ interface HeldSale { id: string; at: string; label: string; total: string; count
 
 /** A barcode scanned outside the search box (a CustomEvent<string> on window). */
 export const SCAN_EVENT = 'etd:scan';
+import { clearPay, finishPay, PAY_EVENT, peekPay, type VenuePay } from '../venue/handoff';
 
 export interface CounterCart {
   lines: Array<{ name: string; quantity: string; unitPrice: string }>;
@@ -209,6 +214,23 @@ export function CounterPanel(props: {
     if (saved?.lines) key = Math.max(key, ...saved.lines.map((l) => l.key), 0);
     return saved?.lines ? saved : newSale();
   });
+  // A part of a check to pay arrives from the floor: its lines replace whatever was in the cart (which is held first, not lost).
+  useEffect(() => {
+    const take = () => {
+      const pay = peekPay();
+      if (!pay) return;
+      setSale((old) => {
+        if (old.lines.length && !old.venue) void api('/v1/held-sales', { method: 'POST', body: { label: '', total: '0.00', count: Math.max(1, old.lines.length), sale: old } }).catch(() => {});
+        return {
+          ...newSale(), venue: pay,
+          lines: pay.lines.map((l) => ({ key: ++key, ...(l.itemId && { itemId: l.itemId }), name: l.description, quantity: l.quantity, unitCode: l.unitCode, unitPrice: l.unitPrice, gstCategory: l.gstCategory, ...(l.exemptionReasonCode && { exemptionReasonCode: l.exemptionReasonCode }), custom: !l.itemId, fixed: l.allowanceCharges ?? [] })),
+        };
+      });
+    };
+    take();
+    window.addEventListener(PAY_EVENT, take);
+    return () => window.removeEventListener(PAY_EVENT, take);
+  }, []);
   const [held, setHeld] = useState<HeldSale[]>([]);
   const loadHeld = useCallback(() => api<{ data: HeldSale[] }>('/v1/held-sales').then((r) => setHeld(r.data)).catch(() => {}), []);
   const [favorites, setFavorites] = useState<Item[]>([]);
@@ -324,10 +346,10 @@ export function CounterPanel(props: {
   const saleDiscount = percentOk(sale.discount) ? sale.discount! : null;
   // The business's service charge, when this sale carries it: a charge on every line, so it is on the receipt with its GST.
   const servicePercent = me?.counter?.serviceChargePercent ?? null;
-  const serviceOn = Boolean(servicePercent) && sale.service === true;
+  const serviceOn = Boolean(servicePercent) && sale.service === true && !sale.venue;
   const valid = sale.lines.filter((l) => l.name.trim() && DECIMAL.test(l.quantity) && Number(l.quantity) > 0 && DECIMAL.test(l.unitPrice) && (l.gstCategory !== 'E' || l.exemptionReasonCode) && discountOk(l));
   const linesBody = valid.map((l) => {
-    const allowances = [
+    const allowances = l.fixed ?? [
       ...(l.discount ? [{ isCharge: false, reason: 'Discount', ...(l.discount.kind === 'percent' ? { percent: l.discount.value } : { amount: l.discount.value }) }] : []),
       ...(saleDiscount ? [{ isCharge: false, reason: `Sale discount ${saleDiscount}%`, percent: saleDiscount }] : []),
       ...(serviceOn ? [{ isCharge: true, reason: `Service charge ${servicePercent}%`, percent: servicePercent! }] : []),
@@ -421,7 +443,7 @@ export function CounterPanel(props: {
   const depositCents = layaway && MONEY.test(layaway.deposit) ? toCents(layaway.deposit) : 0n;
   const depositOk = !layaway || layaway.deposit === '' || (MONEY.test(layaway.deposit) && depositCents <= totalCents);
   // A tip rides with a card or wallet payment; cash tips go straight to the staff.
-  const tipAllowed = Boolean(me?.counter?.tips) && (means === '48' || means === '68') && !gift;
+  const tipAllowed = (Boolean(me?.counter?.tips) || Boolean(sale.venue)) && (means === '48' || means === '68') && !gift && !sale.venue?.room;
   const tipOk = !tipAllowed || !sale.tip || MONEY.test(sale.tip);
   const tipCents = tipAllowed && sale.tip && MONEY.test(sale.tip) ? toCents(sale.tip) : 0n;
   const canIssue = tipOk && depositOk && valid.length > 0 && valid.length === sale.lines.length && Boolean(totals) && previewFresh && Boolean(me?.certificate) && (change === null || change >= 0n) && splitOk && !overLimit;
@@ -441,7 +463,10 @@ export function CounterPanel(props: {
         ...(overrideCreditLimit && { overrideCreditLimit: true }),
         ...(redeem && { redeemPoints: redeem }),
         ...(tipCents > 0n && { tip: { amount: fromCents(tipCents), meansCode: means } }),
-        ...(onAccount && layaway
+        ...(sale.venue?.room
+          // Charged to the guest's room: the server makes it an invoice on their stay.
+          ? { room: { bookingId: sale.venue.room.bookingId }, payment: { meansCode: '10' } }
+          : onAccount && layaway
           ? { layaway: { holdUntil: belizeDate(layaway.weeks * 7), ...(depositCents > 0n && { deposit: { amount: fromCents(depositCents), method: layaway.method } }) } }
           : onAccount
           ? { payment: { meansCode: '30', dueDate: belizeDate(days), terms: `Payment due in ${days} days` } }
@@ -453,6 +478,8 @@ export function CounterPanel(props: {
       };
       const doc = await api<DocumentInfo>('/v1/documents', { method: 'POST', headers: { 'Idempotency-Key': sale.idempotencyKey }, body });
       const changeText = change !== null ? fromCents(change) : null;
+      // A check's part is paid: written back on the check, which shows the floor again.
+      if (sale.venue && doc.status !== 'rejected') finishPay(sale.venue, doc.id, Number(tipCents), means, sale.venue.room ? `Room ${sale.venue.room.room}` : means === '10' ? 'Cash' : means === '48' ? 'Card' : means === '68' ? 'Wallet' : means === '30' ? 'Transfer' : 'Split');
       setLast({ doc, change: changeText, email: sale.customer?.email ?? null });
       setSale(newSale());
       setDiscountFor(null);
@@ -723,8 +750,14 @@ export function CounterPanel(props: {
           )}
         </div>
 
-        <form className="card ticket cart stack" onSubmit={issue}>
-          <span className="kicker">{means === 'account' ? t('Tax invoice, on account') : t('Tax receipt')} · BZD</span>
+        <form className={`card ticket cart stack ${sale.venue ? 'venue-pay' : ''}`} onSubmit={issue}>
+          <span className="kicker">{sale.venue?.room ? t('Charged to a room') : means === 'account' ? t('Tax invoice, on account') : t('Tax receipt')} · BZD</span>
+          {sale.venue && (
+            <div className="cart-table">
+              <strong>{sale.venue.label}{sale.venue.room && ` → ${t('Room {room}, {guest}', { room: sale.venue.room.room, guest: sale.venue.room.guest })}`}</strong>
+              <button type="button" className="link on-dark" onClick={() => { clearPay(); setSale(newSale()); }}>{t('Back to the check')}</button>
+            </div>
+          )}
           {sale.table && (
             <div className="cart-table">
               <strong>{sale.table}</strong>
@@ -912,7 +945,7 @@ export function CounterPanel(props: {
             <button type="button" className="secondary" disabled={busy} onClick={() => void issue(undefined, true)}>{t('Allow it this time')}</button>
           )}
           <button type="submit" className="big lime" disabled={!canIssue || busy}>
-            {busy ? t('Signing and sending…') : layaway ? t('Start the layaway') : means === 'account' ? t('Issue invoice') : t('Issue receipt')}<span className="chip" aria-hidden="true">F2</span>
+            {busy ? t('Signing and sending…') : sale.venue?.room ? t('Charge to the room') : layaway ? t('Start the layaway') : means === 'account' ? t('Issue invoice') : t('Issue receipt')}<span className="chip" aria-hidden="true">F2</span>
           </button>
           {sale.lines.length > 0 && <button type="button" className="link on-dark" onClick={() => { setSale(newSale()); setDiscountFor(null); focusSearch(); }}>{t('Clear sale')}</button>}
         </form>

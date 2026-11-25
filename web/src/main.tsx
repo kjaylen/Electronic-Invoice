@@ -10,6 +10,7 @@ import { Brand } from './art';
 import { BUSINESS, STORE_DOMAIN } from './business';
 import { ErrorBoundary } from './ErrorBoundary';
 import { Icons } from './icons';
+import { FloorPage, KitchenPage } from './venue/pages';
 import { I18nProvider, LanguageToggle, useI18n } from './i18n';
 import { ROLE_LABEL } from './permissions';
 import { SessionProvider, useSession } from './session';
@@ -167,7 +168,18 @@ function Layout() {
 
   // What the business sells: services-only businesses do without stock and the store's products.
   const sells = me?.sells ?? 'both';
+  // Restaurants, bars and hotels: their own screens, first. A shop has none of this.
+  const venue = me?.venue;
+  const service = Boolean(venue?.restaurant || venue?.bar);
+  const venueItems: NavItem[] = [
+    ...(service && (can('venue.orders') || can('venue.floor')) ? [{ to: '/floor', label: t('Floor'), icon: Icons.counter }] : []),
+    ...(service && can('venue.kitchen') ? [{ to: '/kitchen', label: t('Kitchen'), icon: Icons.orders }] : []),
+    ...(service && can('venue.floor') ? [{ to: '/host', label: t('Reservations'), icon: Icons.clock }] : []),
+    ...(venue?.hotel && (can('hotel.frontdesk') || can('hotel.housekeeping')) ? [{ to: '/hotel', label: t('Hotel'), icon: Icons.store }] : []),
+    ...((service || venue?.hotel) && can('reports.view') ? [{ to: '/venue-reports', label: t('Service reports'), icon: Icons.reports }] : []),
+  ];
   const groups: Array<[string, NavItem[]]> = [
+    ...(venueItems.length ? [[t('Service'), venueItems] as [string, NavItem[]]] : []),
     [t('Sell'), [
       { to: '/', label: t('Overview'), icon: Icons.overview },
       { to: '/counter', label: t('Counter'), icon: Icons.counter, permission: 'documents.issue' },
@@ -419,6 +431,8 @@ function BusinessApp() {
         <Route path="/shifts" element={<Allowed permission="documents.issue"><Shifts /></Allowed>} />
         <Route path="/gift-cards" element={<Allowed permission="documents.issue"><GiftCards /></Allowed>} />
         <Route path="/layaways" element={<Allowed permission="documents.issue"><Layaways /></Allowed>} />
+        <Route path="/floor" element={<FloorPage />} />
+        <Route path="/kitchen" element={<KitchenPage />} />
         <Route path="/site" element={<Allowed permission="business.manage"><SiteEditor /></Allowed>} />
         <Route path="/shifts/:id" element={<Allowed permission="documents.issue"><ShiftDetail /></Allowed>} />
         <Route path="/inventory/receive" element={<Allowed permission="catalog.manage"><ReceiveStock /></Allowed>} />
