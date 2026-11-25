@@ -34,7 +34,7 @@ export interface TicketBody { number: number; table: string; server: string; par
 export interface Ticket { id: string; checkId: string; stationId: string; kind: 'order' | 'void' | 'change'; body: TicketBody; status: 'queued' | 'printed' | 'failed' | 'screen'; attempts: number; error: string | null; originDeviceId: string | null; sentBy: string | null; createdAt: string; printedAt: string | null; bumpedAt: string | null }
 export interface VenueData {
   on: boolean; venue: VenueSettings; now: string; businessDate: string;
-  taxes: { gstPercent: string; hotelTaxPercent: string; unverified: string[] };
+  taxes: { gstPercent: string; hotelTaxPercent: string; serviceChargeGst?: boolean; serviceChargeExemptionCode?: string; unverified: string[] };
   floor: FloorPlan[]; periods: Period[]; stations: Station[]; modifierGroups: ModifierGroup[]; items: MenuEntry[]; staff: Staff[];
   sections: Array<{ userId: string; tableIds: string[] }>; allergens: string[]; dietary: string[];
   me: { id: string; deviceId: string | null; orders: boolean; approves: boolean; kitchen: boolean; floor: boolean };

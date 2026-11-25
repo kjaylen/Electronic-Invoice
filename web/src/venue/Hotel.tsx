@@ -112,7 +112,7 @@ function Calendar({ onOpen, onCreate, onChanged }: { onOpen: (id: string) => voi
   const [d, setD] = useState<{ from: string; to: string; today: string; rooms: Room[]; bookings: Booking[] } | null>(null);
   const [error, setError] = useState<unknown>(null);
   const DAYS = 21;
-  const drag = useRef<{ id: string; offset: number } | null>(null);
+  const drag = useRef<{ id: string; offset: number; edge: boolean } | null>(null);
   const sweep = useRef<{ roomId: string; day: number } | null>(null);
   const load = useCallback(async () => {
     try {
@@ -131,6 +131,18 @@ function Calendar({ onOpen, onCreate, onChanged }: { onOpen: (id: string) => voi
     drag.current = null;
     const b = d.bookings.find((x) => x.id === g?.id);
     if (!b || !g) return;
+    // Taken by its right edge: the last night moves to where it is dropped, in the room it has.
+    if (g.edge) {
+      const departure = addDays(d.from, day + 1);
+      if (departure <= b.arrival || departure === b.departure) return;
+      try {
+        await api(`/v1/hotel/bookings/${b.id}`, { method: 'PUT', body: { departure } });
+        toast(t('{name} now leaves on {date}', { name: b.guest.name, date: departure }));
+        await load();
+        onChanged();
+      } catch (e) { toast(e instanceof Error ? e.message : String(e), 'bad'); }
+      return;
+    }
     const arrival = b.status === 'in_house' ? b.arrival : addDays(d.from, day - g.offset);
     try {
       await api(`/v1/hotel/bookings/${b.id}`, { method: 'PUT', body: { roomId: room.id, roomTypeId: room.roomType.id, arrival, departure: b.status === 'in_house' ? b.departure : addDays(arrival, b.nights) } });
@@ -147,7 +159,7 @@ function Calendar({ onOpen, onCreate, onChanged }: { onOpen: (id: string) => voi
         <button type="button" className="secondary" onClick={() => setFrom(null)}>{t('Today')}</button>
         <button type="button" className="secondary" onClick={() => setFrom(addDays(d.from, 7))}>{t('Later')} →</button>
         <span className="spacer" />
-        <span className="small muted">{t('Drag across empty nights to book; drag a booking to move it; open it to extend it.')}</span>
+        <span className="small muted">{t('Drag across empty nights to book; drag a booking to move it; drag its right edge to make the stay longer or shorter.')}</span>
       </div>
       <ErrorText error={error} />
       <section className="timeline" aria-label={t('Rooms against dates')}>
@@ -171,8 +183,12 @@ function Calendar({ onOpen, onCreate, onChanged }: { onOpen: (id: string) => voi
                 if (end <= 0 || start >= DAYS) return null;
                 return (
                   <button key={b.id} type="button" draggable={b.status !== 'checked_out'} className={`timeline-bar ${b.status}`} style={{ gridColumn: `${start + 2} / ${end + 2}`, gridRow: 1 }} title={`${b.guest.name}, ${b.arrival} → ${b.departure}`}
-                    onDragStart={(e) => { const box = (e.target as HTMLElement).getBoundingClientRect(); drag.current = { id: b.id, offset: Math.floor(((e.clientX - box.left) / box.width) * (end - start)) }; }}
-                    onClick={() => onOpen(b.id)}>{b.guest.name}</button>
+                    onDragStart={(e) => { const box = (e.currentTarget as HTMLElement).getBoundingClientRect(); drag.current = { id: b.id, offset: Math.floor(((e.clientX - box.left) / box.width) * (end - start)), edge: col(b.departure) <= DAYS && box.right - e.clientX <= 14 }; }}
+                    onDragEnd={() => { drag.current = null; }}
+                    // Dropped on a stay (its own, to make it shorter): the night under the pointer.
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => { e.preventDefault(); const box = e.currentTarget.getBoundingClientRect(); void drop(room, Math.min(end - 1, start + Math.max(0, Math.floor(((e.clientX - box.left) / box.width) * (end - start))))); }}
+                    onClick={() => onOpen(b.id)}>{b.guest.name}{b.status !== 'checked_out' && col(b.departure) <= DAYS && <span className="timeline-grip" aria-hidden="true" />}</button>
                 );
               })}
             </div>

@@ -8,7 +8,7 @@ import { ErrorText, Field, Modal, money } from '../ui';
 import { billOfItems, billOneShare, type BillContext, type BillPart, centsText, documentLines, paymentOf, serviceApplies, wholeBill } from '../../../src/venue/bill.ts';
 import { type Check, type CheckItem, COURSES, fullyPaid, needsApproval, type Op, type OpType, paidShares } from '../../../src/venue/check.ts';
 import { defaultModifiers, type ModifierGroup, modifierProblem, onMenu, currentMenu, priceNow, runningPromotions } from '../../../src/venue/pricing.ts';
-import { startPay } from './handoff';
+import { type PayLine, startPay } from './handoff';
 import { dispatch, type MenuEntry, type NumberedCheck, ticketDid, useVenue, type VenueData } from './store';
 import { guestCheck } from './tickets';
 import type { Ticket as Printed } from '../pos/ticket';
@@ -17,7 +17,7 @@ const cents = (n: number) => money(centsText(n));
 const belizeClock = (at: Date) => { const local = new Date(at.getTime() - 6 * 3600_000); return { minutes: local.getUTCHours() * 60 + local.getUTCMinutes(), weekday: local.getUTCDay() }; };
 
 export function billContext(data: VenueData, check: Check): BillContext {
-  return { servicePercent: serviceApplies(check, data.venue) ? data.venue.servicePercent : null, gstPercent: data.taxes.gstPercent, periods: data.periods };
+  return { servicePercent: serviceApplies(check, data.venue) ? data.venue.servicePercent : null, gstPercent: data.taxes.gstPercent, periods: data.periods, serviceUntaxed: data.taxes.serviceChargeGst === false ? { exemptionReasonCode: data.taxes.serviceChargeExemptionCode || 'SERVICE' } : null };
 }
 
 /** A supervisor's PIN, asked for only when the person at the screen cannot approve it themselves. */
@@ -110,7 +110,7 @@ export function OrderScreen({ checkId, onBack, onPay, print }: { checkId: string
     else addItem(entry, [], 1, '');
   };
   const send = async () => {
-    const before = c.items.filter((i) => i.status === 'held' && !c.heldCourses.includes(i.course)).length;
+    const before = c.items.filter((i) => i.status === 'held' && !c.heldCourses.includes(i.course)).reduce((a, i) => a + i.quantity, 0);
     if (await run('fire') && before) toast(t('Sent: {n} items', { n: before }));
   };
   /** The last round again: everything sent in the most recent send that is a drink. */
@@ -421,7 +421,7 @@ function PayDialog({ check, ctx, hotel, label, onClose, run, onPay }: { check: C
   const whole = wholeBill(check, ctx);
   const go = (part: BillPart, what: string) => {
     if (!part.lines.length) return;
-    startPay({ checkId: check.id, label: `${label}${what ? `, ${what}` : ''}`, lines: documentLines(part, ctx.servicePercent), items: paymentOf(part), ...(room && { room }) });
+    startPay({ checkId: check.id, label: `${label}${what ? `, ${what}` : ''}`, lines: documentLines(part, ctx.servicePercent, ctx.serviceUntaxed) as unknown as PayLine[], items: paymentOf(part), ...(room && { room }) });
     onPay();
   };
   const findRoom = async (e: FormEvent) => {

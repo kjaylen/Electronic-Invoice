@@ -635,7 +635,7 @@ document is issued when, DECISIONS.md the judgment calls.
   host sends from their own phone, no-shows, the waitlist, guest records.
 - **The hotel** (`/hotel`): room types, rooms, rates by season and weekend in
   BZ$ or US$, minimum stays; a calendar of rooms against dates (sweep to
-  book, drag to move); the front desk; folios (nights posted by the night
+  book, drag to move, drag the right edge to lengthen or shorten); the front desk; folios (nights posted by the night
   audit, restaurant and bar charges by room, extras, a second folio,
   deposits, part payments, the final bill); housekeeping from a phone; the
   night audit with occupancy, average daily rate and revenue per available
@@ -646,10 +646,11 @@ document is issued when, DECISIONS.md the judgment calls.
   before.
 - **With no connection**: opening tables, ordering, sending (the device makes
   and prints the tickets itself) and working out a bill happen on the device
-  and are sent when the connection is back (tested in a browser). Payment
-  goes through the till app's own offline receipts; a table paid with no
-  connection has not been run end to end. The kitchen screen, the host
-  stand, the hotel, a charge to a room and the reports need the server.
+  and are sent when the connection is back. On the till app a table is paid
+  with no connection too: the till makes the receipt itself, and the receipt
+  and the payment reach the server once (both tested in a browser). The
+  kitchen screen, the host stand, the hotel, a charge to a room and the
+  reports need the server.
 - **Tests**: `test/venue-check.test.ts`, `venue-api.test.ts`,
   `venue-floor.test.ts`, `hotel.test.ts`; in a browser `e2e/venue.spec.ts`
   and `e2e/hotel.spec.ts`.

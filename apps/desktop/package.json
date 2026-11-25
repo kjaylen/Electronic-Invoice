@@ -8,6 +8,7 @@
   "scripts": {
     "web": "node scripts/copy-web.mjs",
     "start": "npm run web && electron .",
+    "dev": "node scripts/dev.mjs",
     "smoke": "npm run web && node scripts/smoke.mjs",
     "dist": "npm run web && electron-builder",
     "dist:win": "npm run web && electron-builder --win",

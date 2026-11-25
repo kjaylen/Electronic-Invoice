@@ -75,6 +75,21 @@ test('hotel: a booking with a deposit, check-in, a drink charged to the room, th
   await booking.getByRole('button', { name: 'Check in', exact: true }).click();
   await expect(booking.getByText('In house', { exact: true })).toBeVisible();
   await page.keyboard.press('Escape');
+
+  // On the calendar the stay is taken by its right edge: two nights longer, then back to two nights.
+  await page.goto(`/${SLUG}/hotel?tab=calendar`);
+  const plus = (n: number) => new Date(new Date(`${today}T12:00:00Z`).getTime() + n * 86_400_000).toISOString().slice(0, 10);
+  const bar = page.locator('.timeline-bar', { hasText: guest });
+  await expect(bar).toBeVisible();
+  let box = (await bar.boundingBox())!;
+  await bar.dragTo(page.getByRole('button', { name: `Room ${roomName}, ${plus(3)}` }), { sourcePosition: { x: box.width - 5, y: box.height / 2 } });
+  await expect(page.getByText(`${guest} now leaves on ${plus(4)}`)).toBeVisible();
+  expect((await get(page, '/v1/hotel/front-desk')).inHouse.find((b: { guest: { name: string } }) => b.guest.name === guest).departure).toBe(plus(4));
+  await expect.poll(async () => Math.round((await bar.boundingBox())!.width / box.width)).toBe(2);
+  box = (await bar.boundingBox())!;
+  await bar.dragTo(bar, { sourcePosition: { x: box.width - 5, y: box.height / 2 }, targetPosition: { x: box.width * (1.5 / 4), y: box.height / 2 } });
+  await expect(page.getByText(`${guest} now leaves on ${out}`)).toBeVisible();
+  expect((await get(page, '/v1/hotel/front-desk')).inHouse.find((b: { guest: { name: string } }) => b.guest.name === guest).departure).toBe(out);
   await page.goto(`/${SLUG}/hotel`);
   await expect(page.locator('section.card', { hasText: 'In house' }).getByText(guest)).toBeVisible();
 

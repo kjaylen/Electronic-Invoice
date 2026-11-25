@@ -43,7 +43,7 @@ test('rates: the season that covers the night, weekends their own, US dollars at
   assert.equal(nightRate(type, seasons, '2026-12-25', 200), 45000, 'the season that started last wins; a Friday');
   assert.equal(nightRate({ rate_cents: 15000, weekend_rate_cents: null, usd: true }, [], '2026-11-26', 200), 30000, 'US$150 is BZ$300');
   assert.deepEqual(nightsOf('2026-11-30', '2026-12-03'), ['2026-11-30', '2026-12-01', '2026-12-02']);
-  const tax = { gstPercent: '12.5', hotelTaxPercent: '9', accommodationGst: 'exempt' as const, accommodationExemptionCode: 'HOTEL', serviceChargeGst: true, serviceChargeHotelTax: false, unverified: [] };
+  const tax = { gstPercent: '12.5', hotelTaxPercent: '9', accommodationGst: 'exempt' as const, accommodationExemptionCode: 'HOTEL', serviceChargeGst: true, serviceChargeExemptionCode: 'SERVICE', unverified: [] };
   const lines = roomLines([{ date: '2026-12-01', cents: 20000, room: '101' }, { date: '2026-12-02', cents: 20000, room: '101' }, { date: '2026-12-03', cents: 20000, room: '102' }, { date: '2026-12-04', cents: 24000, room: '102' }], 'Garden room', tax);
   assert.deepEqual(lines.map((l) => [l.quantity, l.unitPrice, l.gstCategory, l.exemptionReasonCode, l.allowanceCharges[0]!.amount]), [['2', '200.00', 'E', 'HOTEL', '36.00'], ['1', '200.00', 'E', 'HOTEL', '18.00'], ['1', '240.00', 'E', 'HOTEL', '21.60']]);
   assert.match(lines[0]!.description, /^Room 101 \(Garden room\), 2 nights from 2026-12-01$/);

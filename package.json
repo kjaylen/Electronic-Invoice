@@ -16,6 +16,7 @@
     "example:pdf": "node --disable-warning=ExperimentalWarning scripts/example-pdf.ts",
     "start": "node --disable-warning=ExperimentalWarning src/server.ts",
     "web:dev": "vite --config web/vite.config.ts",
+    "till:dev": "node apps/desktop/scripts/dev.mjs",
     "web:build": "vite build --config web/vite.config.ts",
     "web:compress": "node --disable-warning=ExperimentalWarning scripts/compress-web.ts",
     "demo": "node --disable-warning=ExperimentalWarning scripts/demo.ts",

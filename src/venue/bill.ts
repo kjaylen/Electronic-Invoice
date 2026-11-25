@@ -25,6 +25,12 @@ export interface BillContext {
   /** GST standard rate in percent ("12.5"). */
   gstPercent: string;
   periods: Period[];
+  /**
+   * The tax rules say a service charge carries no GST: it is then a line of
+   * its own on the receipt, exempt with this reason code, and not a charge on
+   * each line (a charge on a line shares the line's GST).
+   */
+  serviceUntaxed?: { exemptionReasonCode: string } | null;
 }
 
 export interface ItemAmounts { grossCents: number; allowCents: number; allowReason: string; serviceCents: number }
@@ -135,11 +141,14 @@ const left = (item: CheckItem, a: ItemAmounts) => item.paid.reduce((r, p) => ({
   grossCents: r.grossCents - (p.grossCents ?? 0), allowCents: r.allowCents - (p.allowCents ?? 0), serviceCents: r.serviceCents - (p.serviceCents ?? 0),
 }), { grossCents: a.grossCents, allowCents: a.allowCents, serviceCents: a.serviceCents });
 
+/** What of a line carries GST at the standard rate. */
+const taxable = (l: BillLine, serviceUntaxed: boolean) => (l.gst === 'S' ? l.netCents - (serviceUntaxed ? l.serviceCents : 0) : 0);
+
 const describe = (i: CheckItem) => (i.modifiers.length ? `${i.name} (${i.modifiers.map((m) => m.name).join(', ')})` : i.name).slice(0, 180);
 
 /** Totals of a set of lines as one receipt: GST rounded per category on the receipt's total. */
-export function totalsOf(lines: BillLine[], gstPercent: string) {
-  const standard = lines.filter((l) => l.gst === 'S').reduce((a, l) => a + l.netCents, 0);
+export function totalsOf(lines: BillLine[], gstPercent: string, serviceUntaxed = false) {
+  const standard = lines.reduce((a, l) => a + taxable(l, serviceUntaxed), 0);
   const gstCents = percentCents(standard, gstPercent);
   const subtotalCents = lines.reduce((a, l) => a + l.grossCents, 0);
   const allowCents = lines.reduce((a, l) => a + l.allowCents, 0);
@@ -183,7 +192,7 @@ export function billPart(check: Check, amounts: Map<string, ItemAmounts>, take: 
   const final = check.items.every((i) => i.status === 'void' || fullyPaid(i) || (taken.get(i.id) ?? 0) >= i.shares - paidShares(i));
   if (!final) {
     const step = exactStep(ctx.gstPercent);
-    const over = lines.filter((l) => l.gst === 'S').reduce((a, l) => a + l.netCents, 0) % step;
+    const over = lines.reduce((a, l) => a + taxable(l, !!ctx.serviceUntaxed), 0) % step;
     // A shared line that leaves something behind can give up a few cents to whoever pays after.
     const give = lines.filter((l) => l.gst === 'S' && !l.last && l.grossCents - l.allowCents > over).sort((a, b) => b.grossCents - a.grossCents)[0];
     if (over && give) {
@@ -192,7 +201,7 @@ export function billPart(check: Check, amounts: Map<string, ItemAmounts>, take: 
       give.netCents -= over;
     }
   }
-  return { key, label, lines, ...totalsOf(lines, ctx.gstPercent) };
+  return { key, label, lines, ...totalsOf(lines, ctx.gstPercent, !!ctx.serviceUntaxed) };
 }
 
 const unpaid = (check: Check) => check.items.filter((i) => i.status !== 'void' && !fullyPaid(i));
@@ -226,8 +235,9 @@ const money = (cents: number) => `${cents < 0 ? '-' : ''}${Math.floor(Math.abs(c
 export const centsText = money;
 
 /** A part as the lines of a tax document (POST /v1/documents), amounts given outright so nothing is worked out twice. */
-export function documentLines(part: BillPart, servicePercent: string | null) {
-  return part.lines.map((l) => ({
+export function documentLines(part: BillPart, servicePercent: string | null, serviceUntaxed?: { exemptionReasonCode: string } | null) {
+  const name = `Service charge ${servicePercent ?? ''}%`.replace(' %', '');
+  const lines: Array<Record<string, unknown>> = part.lines.map((l) => ({
     ...(l.itemId && l.whole ? { itemId: l.itemId } : {}),
     description: l.description,
     quantity: l.quantity,
@@ -235,13 +245,18 @@ export function documentLines(part: BillPart, servicePercent: string | null) {
     unitPrice: money(l.unitCents),
     gstCategory: l.gst,
     ...(l.gst === 'E' && l.exemptionReasonCode && { exemptionReasonCode: l.exemptionReasonCode }),
-    ...((l.allowCents > 0 || l.serviceCents > 0) && {
+    ...((l.allowCents > 0 || (l.serviceCents > 0 && !serviceUntaxed)) && {
       allowanceCharges: [
         ...(l.allowCents > 0 ? [{ isCharge: false, reason: l.allowReason || 'Discount', amount: money(l.allowCents) }] : []),
-        ...(l.serviceCents > 0 ? [{ isCharge: true, reason: `Service charge ${servicePercent ?? ''}%`.replace(' %', ''), amount: money(l.serviceCents) }] : []),
+        ...(l.serviceCents > 0 && !serviceUntaxed ? [{ isCharge: true, reason: name, amount: money(l.serviceCents) }] : []),
       ],
     }),
   }));
+  // Without GST the service charge cannot ride on the lines: one exempt line for all of it.
+  if (serviceUntaxed && part.serviceCents > 0) {
+    lines.push({ description: name, quantity: '1', unitCode: 'C62', unitPrice: money(part.serviceCents), gstCategory: 'E', exemptionReasonCode: serviceUntaxed.exemptionReasonCode });
+  }
+  return lines;
 }
 
 /** What a payment of this part records on the check: the shares and the cents each took. */
