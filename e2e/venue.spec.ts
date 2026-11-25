@@ -152,6 +152,48 @@ test('table service: seat a party, order with a choice, send to the kitchen, the
   expect(report.byItem.find((i: { name: string }) => i.name === 'Johnny cakes').quantity).toBeGreaterThanOrEqual(1);
 });
 
+test('no connection: a table is opened, ordered and sent; the ticket prints here once; it all goes up when the connection is back', async ({ page }) => {
+  await logIn(page);
+  await setUp(page);
+  await page.goto(`/${SLUG}/floor`);
+  const plan = page.getByRole('group', { name: 'Floor plan of Dining room' });
+  await expect(plan.getByRole('button', { name: /^Table 2: Free/ })).toBeVisible();
+  await expect(page.getByRole('status').filter({ hasText: 'In step' })).toBeVisible();
+
+  // The connection goes: every call to the server fails from here.
+  await page.route('**/v1/**', (r) => r.abort('internetdisconnected'));
+  await plan.getByRole('button', { name: /^Table 2/ }).click();
+  const seat = page.getByRole('dialog', { name: 'Seat a party at Table 2' });
+  await seat.getByRole('button', { name: '2', exact: true }).click();
+  await seat.getByRole('button', { name: 'Open the table for 2' }).click();
+  await expect(page.getByRole('heading', { level: 1, name: /Table 2/ })).toBeVisible();
+  const menu = page.getByRole('region', { name: 'Menu' });
+  await menu.getByRole('button', { name: /^Johnny cakes/ }).click();
+  const choose = page.getByRole('dialog', { name: 'Johnny cakes' });
+  await choose.getByRole('button', { name: 'With butter' }).click();
+  await choose.getByRole('button', { name: 'Add to the order' }).click();
+  const order = page.getByRole('region', { name: 'The order' });
+  await order.getByRole('button', { name: /^Send/ }).click();
+  await expect(order.getByText('not sent')).toHaveCount(0);
+  // The kitchen's ticket is made and printed by this device.
+  await expect.poll(async () => page.locator('iframe.print-frame').evaluate((f) => (f as HTMLIFrameElement).srcdoc).catch(() => ''), { timeout: 15_000 }).toContain('KITCHEN');
+  const ticket = await page.locator('iframe.print-frame').evaluate((f) => (f as HTMLIFrameElement).srcdoc);
+  for (const text of ['Table 2', '1 x Johnny cakes', 'With butter']) expect(ticket).toContain(text);
+  await page.getByRole('button', { name: /Floor$/ }).click();
+  await expect(page.getByRole('status').filter({ hasText: /No connection: \d+ to send/ })).toBeVisible();
+  await expect(plan.getByRole('button', { name: /^Table 2: Food sent, 2/ })).toBeVisible();
+
+  // The connection is back: the order goes up by itself, and the server does not print the ticket a second time.
+  await page.unroute('**/v1/**');
+  await expect(page.getByRole('status').filter({ hasText: 'In step' })).toBeVisible({ timeout: 20_000 });
+  const changes = await (await page.request.get('/v1/venue/changes', { headers: API })).json() as { checks: Array<{ id: string; tableName: string; items: Array<{ name: string; status: string }> }>; tickets: Array<{ checkId: string; kind: string; status: string; attempts: number }> };
+  const check = changes.checks.find((c) => c.tableName === 'Table 2')!;
+  expect(check.items.map((i) => [i.name, i.status])).toEqual([['Johnny cakes', 'sent']]);
+  const tickets = changes.tickets.filter((k) => k.checkId === check.id);
+  expect(tickets.map((k) => [k.kind, k.status, k.attempts])).toEqual([['order', 'printed', 0]]);
+  await expect(plan.getByRole('button', { name: /^Table 2: Food sent, 2/ })).toBeVisible();
+});
+
 test('the bar: a tab by name, a round repeated, moved to a table, split evenly in two, and a sold-out item', async ({ page }) => {
   await logIn(page);
   const { cakes } = await setUp(page);

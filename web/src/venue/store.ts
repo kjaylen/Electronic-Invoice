@@ -117,10 +117,18 @@ export function dispatch(checkId: string, type: OpType, payload: Record<string, 
   rebuild();
   // With no connection the server cannot queue the tickets: this device makes and prints them itself, and says so
   // when the order goes up (so they are not printed a second time). If its printer fails, the server queues them later.
-  if (!state.online && (done.sent.length || done.voided.length)) void printOffline(op, store.get(checkId) as NumberedCheck, done);
+  if (done.sent.length || done.voided.length) {
+    const check = store.get(checkId) as NumberedCheck;
+    if (!state.online) void printOffline(op, check, done);
+    // The connection may drop with this very order: it is kept until the server has it, and printed here if it cannot go.
+    else unprinted.set(op.id, { op, check, done });
+  }
   void flush();
   return done;
 }
+
+/** Orders sent while the device thought it was connected, not yet answered by the server. */
+const unprinted = new Map<string, { op: Op; check: NumberedCheck; done: Applied }>();
 
 async function printOffline(op: Op, check: NumberedCheck | undefined, done: Applied) {
   if (!printer || !check || !state.data) return;
@@ -156,6 +164,7 @@ export async function flush(): Promise<void> {
       }
     }
     state.pending = state.pending.filter((o) => !answered.has(o.id));
+    for (const id of answered) unprinted.delete(id);
     save();
     await poll();
   } catch (e) {
@@ -166,7 +175,12 @@ export async function flush(): Promise<void> {
       state.problems.push({ id: crypto.randomUUID(), checkId: '', type: 'sync', reason: (e as Error).message });
       state.pending = [];
       save();
-    } else state.online = false;
+    } else {
+      state.online = false;
+      const waiting = [...unprinted.values()];
+      unprinted.clear();
+      for (const w of waiting) void printOffline(w.op, w.check, w.done);
+    }
     rebuild();
   } finally {
     flushing = false;

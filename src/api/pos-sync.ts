@@ -22,6 +22,7 @@
  *    (a receipt that does not match its number) is reported and the batch goes on.
  */
 
+import { loadVenue } from '../venue/settings.ts';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { audit } from '../db/audit.ts';
 import type { Queryable } from '../db/database.ts';
@@ -203,6 +204,7 @@ export function registerPosSyncRoutes(app: FastifyInstance, deps: PipelineDeps) 
       const categories = (await db.query<{ name: string }>(
         `select distinct category as name from items where tenant_id = $1 and archived_at is null and category is not null order by 1`, [d.tenant_id],
       )).rows;
+      const venue = await loadVenue(db, d.tenant_id);
       const series = await offlineSeries(db, d.tenant_id, t.environment, d.id, request.query.install);
       reply.header('Cache-Control', 'no-store');
       return {
@@ -210,7 +212,7 @@ export function registerPosSyncRoutes(app: FastifyInstance, deps: PipelineDeps) 
         business: { id: d.tenant_id, slug: t.slug, name: t.trade_name ?? t.legal_name, legalName: t.legal_name, tradeName: t.trade_name, tin: t.tin, environment: t.environment },
         device: { id: d.id, name: d.name, register: { id: d.register_id, name: d.register_name } },
         // pinSetAt: a PIN changed since the till remembered it is forgotten there (offline sign-in).
-        users: users.map((u) => ({ id: u.id, name: u.name, role: u.role, hasPin: u.has_pin, pinSetAt: u.pin_set_at ? new Date(u.pin_set_at).toISOString() : null, permissions: tillPermissions(u.role) })),
+        users: users.map((u) => ({ id: u.id, name: u.name, role: u.role, hasPin: u.has_pin, pinSetAt: u.pin_set_at ? new Date(u.pin_set_at).toISOString() : null, permissions: tillPermissions(u.role, venue) })),
         // A shift open on this till's drawer (opened before the till sold offline): the till carries on with it.
         openShift: await openShiftOf(db, d.tenant_id, d.register_id),
         me: await meJson(deps, d.tenant_id),

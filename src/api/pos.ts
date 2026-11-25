@@ -27,6 +27,7 @@
  * till lock that person out of that till for 15 minutes.
  */
 
+import { loadVenue } from '../venue/settings.ts';
 import { createHash, randomBytes, randomInt, randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { audit } from '../db/audit.ts';
@@ -104,8 +105,10 @@ function newPairingCode(): string {
 }
 
 /** The permissions a person has on a till. */
-export function tillPermissions(role: Role): Permission[] {
-  return [...ROLE_PERMISSIONS[role]].filter((p) => TILL_PERMISSIONS.has(p));
+export function tillPermissions(role: Role, venue?: { restaurant: boolean; bar: boolean; hotel: boolean }): Permission[] {
+  // Table service and the hotel exist on a till only for a business that has turned them on: a shop's till is as it was.
+  const on = (p: Permission) => (p.startsWith('venue.') ? !!venue && (venue.restaurant || venue.bar) : p.startsWith('hotel.') ? !!venue?.hotel : true);
+  return [...ROLE_PERMISSIONS[role]].filter((p) => TILL_PERMISSIONS.has(p) && on(p));
 }
 
 interface DeviceRow {
@@ -345,8 +348,9 @@ export function registerPosDeviceRoutes(app: FastifyInstance, deps: PipelineDeps
       const limitKey = `pospin|${d.id}|${request.body.userId}`;
       if (await atLimit(db, limitKey, PIN_FAILURES)) throw new ApiError(429, 'too_many_attempts', 'Too many wrong PINs. Try again in 15 minutes, or ask a manager to reset your PIN.');
       const user = await checkPin(db, d.tenant_id, request.body.userId, request.body.pin);
+      const venue = await loadVenue(db, d.tenant_id);
       // Anyone with something to do on a till: selling, or the floor, the kitchen screen, the rooms.
-      if (!user || !tillPermissions(user.role).some((p) => p === 'documents.issue' || p.startsWith('venue.') || p.startsWith('hotel.'))) {
+      if (!user || !tillPermissions(user.role, venue).some((p) => p === 'documents.issue' || p.startsWith('venue.') || p.startsWith('hotel.'))) {
         const failures = await countHit(db, limitKey, PIN_WINDOW_MS);
         const left = PIN_FAILURES - failures;
         throw new ApiError(401, 'wrong_pin', left > 0 ? `Wrong PIN. ${left} ${left === 1 ? 'try' : 'tries'} left.` : 'Too many wrong PINs. Try again in 15 minutes.');
@@ -359,7 +363,7 @@ export function registerPosDeviceRoutes(app: FastifyInstance, deps: PipelineDeps
         token: `${SESSION_TOKEN_PREFIX}${session.token}`,
         expiresAt: session.expiresAt.toISOString(),
         user: { id: user.id, name: user.name, role: user.role },
-        permissions: tillPermissions(user.role),
+        permissions: tillPermissions(user.role, venue),
       };
     },
   );

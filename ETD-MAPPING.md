@@ -9,7 +9,7 @@ Test documents go to the BTS tests environment only.
 | Event | Document | When | Notes |
 |---|---|---|---|
 | A table bill, paid | 02 tax receipt (01 tax invoice when the guest gives a TIN and asks for one) | at payment | lines are the items as served, modifiers priced into their line; the service charge is a charge on each line |
-| Each part of a split bill | one 02 per part | when that part is paid | by seat or by item: the part's own lines. An item shared by N guests: a line of quantity 1/N (6 decimals); the last sharer's line takes the odd cent, so the parts add up to the bill exactly. An even split: one receipt for the whole bill with several tenders, because equal slices of every line cannot be made to add up line by line (**to confirm**: whether BTS expects a document per payer) |
+| Each part of a split bill | one 02 per part | when that part is paid | by seat or by item: the part's own lines. An item shared by N guests: a line of quantity 1/N (6 decimals); the last sharer's line takes the odd cent, so the parts add up to the bill exactly. An even split in N: one receipt per payer, each with a 1/N line of every item. Equal slices of every line do not add up cent for cent by themselves, so every part but the last is set to an amount whose GST has nothing to round (a multiple of 8 cents at 12.5%) and the last payer takes what is left: the receipts add up to the unsplit bill exactly, and the parts differ by a few cents (**to confirm**: that BTS accepts a document per payer; the other reading is one receipt with several tenders, which the counter's Split tender already does) |
 | A bar tab | 02 | when the tab is closed and paid; a part-payment of chosen rounds is a split part | nothing is issued while the tab runs |
 | A comped item | on the receipt at full price with a 100% allowance, reason "Complimentary" | with the bill it belongs to | cautious: the supply is shown, at zero. A bill that is entirely comps issues nothing and is kept in the comp log (**to confirm**: whether a zero-value document is wanted) |
 | A void before payment | none | — | the item never reached a document; the void is in the audit log |
@@ -28,7 +28,7 @@ Test documents go to the BTS tests environment only.
 ## Open for BTS confirmation
 
 1. A deposit: receipt when taken (as built) or only at the supply.
-2. An even split: one receipt with several tenders (as built) or one per payer.
+2. An even split: one receipt per payer (as built) or one receipt with several tenders.
 3. A fully comped bill: no document (as built) or a zero-value receipt.
 4. Room nights: one invoice per stay with a month-end cut (as built) or one per night.
 5. Hotel tax shown as a charge, since the document has no scheme for it.
