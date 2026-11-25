@@ -16,6 +16,14 @@ npm install
 npm start                    # copies the till into web/ and opens the app
 ```
 
+While working on it, skip the build: at the repository root,
+
+```bash
+npm run till:dev             # the app, with its screens straight from the source; a change shows at once
+```
+
+It keeps its own data folder ("Floreo Till (dev)"), so it does not touch an installed till's pairing. Pair it with a server you have running (the demo, for one); `VITE_TILL_SERVER=http://localhost:4300 npm run till:dev` pre-fills the address.
+
 Set `VITE_TILL_SERVER=https://app.example.bz` when building the web app to pre-fill the server address in the pairing screen.
 
 ## Installers

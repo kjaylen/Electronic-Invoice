@@ -18,6 +18,10 @@ const { sendToPrinter } = require('./network.cjs');
 
 const WEB = path.join(__dirname, 'web');
 const ORIGIN = 'app://pos';
+// Development only (npm run till:dev): the screens come from a Vite server on this computer instead of
+// the copy in web/. Never in an installed app.
+const DEV = !app.isPackaged && /^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(process.env.TILL_DEV_SERVER ?? '') ? process.env.TILL_DEV_SERVER : null;
+if (DEV) app.setPath('userData', path.join(app.getPath('appData'), 'Floreo Till (dev)'));
 
 protocol.registerSchemesAsPrivileged([{ scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }]);
 
@@ -54,6 +58,12 @@ const CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inl
 function serveApp() {
   protocol.handle('app', async (request) => {
     const url = new URL(request.url);
+    // No Content-Security-Policy here: Vite's live reload needs inline scripts.
+    if (DEV) {
+      const accept = request.headers.get('accept');
+      const res = await electronNet.fetch(`${DEV}${url.pathname === '/' ? '/pos.html' : url.pathname}${url.search}`, { ...(accept && { headers: { accept } }), bypassCustomProtocolHandlers: true });
+      return new Response(res.body, { status: res.status, headers: res.headers });
+    }
     const rel = decodeURIComponent(url.pathname).replace(/^\/+/, '') || 'pos.html';
     const file = path.normalize(path.join(WEB, rel));
     if (!file.startsWith(WEB + path.sep) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) return new Response('Not found', { status: 404 });
