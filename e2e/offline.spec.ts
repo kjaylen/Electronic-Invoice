@@ -112,6 +112,14 @@ async function sell(till: Page, barcode = COCONUT, cash = '5'): Promise<string> 
   return heading.split('·')[0]!.trim();
 }
 
+// These are shop tills (Sell first): whatever an earlier run left on, the restaurant is off here.
+test.beforeAll(async ({ browser }) => {
+  const page = await browser.newPage();
+  await logIn(page);
+  await api(page, 'PUT', '/v1/venue/settings', { restaurant: false, bar: false, hotel: false });
+  await page.close();
+});
+
 const indicator = (till: Page) => till.locator('.till-bar .sync-indicator, .till-lock-head .sync-indicator').first();
 
 test('offline: sell without a connection, restart, sign in offline, reconnect: each sale reaches the server once', async ({ page, browser }) => {
@@ -187,6 +195,11 @@ test('offline: the connection drops in the middle of an upload; sending again do
   for (let i = 0; i < 3; i++) await till.getByRole('button', { name: 'Send now' }).click();
   await expect(till.locator('.sync-facts')).toContainText('0');
   expect((await seriesDocs(page, series)).length).toBe(2);
+
+  // A receipt made here, once the server has it, can be refunded from the till.
+  await till.getByRole('button', { name: 'Sales', exact: true }).click();
+  await till.locator('.sale-list li button').filter({ hasText: first }).click();
+  await expect(till.getByRole('dialog').getByRole('button', { name: 'Refund', exact: true })).toBeVisible();
   await context.close();
 });
 

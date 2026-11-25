@@ -164,8 +164,18 @@ export class LocalApi {
       m = /^\/v1\/documents\/([0-9a-f-]{36})(\/view)?$/.exec(p);
       if (method === 'GET' && m) {
         const local = await this.sale(m[1]!);
-        if (local) return json(200, m[2] ? this.printView(snap, local.sale) : { ...local.sale.doc, lines: local.sale.lines });
-        return null;
+        if (!local) return null;
+        // Once the server has it, its details come from there when it can be reached: what is left to refund
+        // (credit) is the server's to know. Offline, or not sent yet: the till's own copy.
+        if (!m[2] && local.sale.doc.status !== 'on_till' && this.ctx.online() && this.ctx.hasSession()) {
+          try {
+            const res = await this.ctx.net(path, { timeoutMs: 6000 });
+            if (res.ok) return res;
+          } catch {
+            /* offline: the till's copy */
+          }
+        }
+        return json(200, m[2] ? this.printView(snap, local.sale) : { ...local.sale.doc, lines: local.sale.lines });
       }
       m = /^\/v1\/documents\/([0-9a-f-]{36})\/(email|share|cancel|payments)$/.exec(p);
       if (m) {
