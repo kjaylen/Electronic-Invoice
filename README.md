@@ -510,6 +510,8 @@ One till app runs everywhere:
 
 All three are the same web code (`web/src/pos`). It reuses the counter and the shift screens.
 
+- **Design:** the till has its own design system (`web/src/pos/design/`, `docs/design/DESIGN-SYSTEM.md`): tokens in light and dark (chosen per device under Devices → Appearance), 48px targets and 64px for selling actions, Inter with tabular figures, one icon set, WCAG AA contrast (`node scripts/pos-contrast.mjs`). The status bar shows where, the screens, the connection, the printer, the time and who is selling (one tap to switch). The sale screen keeps the order at full height with Pay and the total always in reach; tiles show stock; a removed line can be undone; cash has a number pad. The floor is drawn to scale with zoom, pan, a list view, filters, hold for actions and drag to move or join. Before and after screenshots at four sizes: `docs/design/` (`node scripts/pos-shots.mjs`); decisions in `docs/design/DECISIONS.md`.
+
 - **Pairing:**
   - A manager adds a till in Settings → Tills. Each till gets its own cash drawer (register).
   - The manager gets a one-time code (30 minutes) and its QR code, which holds `https://<server>/pos?pair=<code>`.
