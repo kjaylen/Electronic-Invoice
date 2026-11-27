@@ -14,6 +14,7 @@
  */
 
 import { Capacitor, registerPlugin } from '@capacitor/core';
+import type { DesktopUpdateState } from './updates';
 
 export type PrinterConnection = 'network' | 'bluetooth' | 'system' | 'browser';
 export type RawTarget = { connection: 'network'; host: string; port: number } | { connection: 'bluetooth'; address: string };
@@ -51,6 +52,15 @@ export interface Platform {
   scanBarcode?(): Promise<string | null>;
   /** The screen facing the customer. */
   customerDisplay?: { open(): Promise<boolean>; update(state: DisplayState): void; close(): void };
+  /** The desktop app updating itself from the till's server (see updates.ts). */
+  updates?: DesktopUpdates;
+}
+
+export interface DesktopUpdates {
+  check(server: string): Promise<DesktopUpdateState>;
+  state(): Promise<DesktopUpdateState>;
+  install(): Promise<boolean>;
+  onStatus(fn: (state: DesktopUpdateState) => void): () => void;
 }
 
 // ---------- the desktop app ----------
@@ -65,6 +75,8 @@ interface DesktopBridge {
     sendNetwork(host: string, port: number, data: Uint8Array): Promise<void>;
   };
   display: { open(): Promise<boolean>; update(state: DisplayState): void; close(): void };
+  /** Missing in desktop apps from before updates (1.0.0). */
+  updates?: DesktopUpdates;
 }
 
 // ---------- Capacitor (iOS and Android) ----------
@@ -150,6 +162,7 @@ async function detectPlatform(): Promise<Platform> {
       printHtml: (html, options) => desktop.printers.printHtml(html, options),
       listSystemPrinters: () => desktop.printers.list(),
       customerDisplay: desktop.display,
+      ...(desktop.updates && { updates: desktop.updates }),
     };
   }
   // The native plugins by name: Preferences and App (Capacitor's), BarcodeScanner (ML Kit), TillHardware (ours).

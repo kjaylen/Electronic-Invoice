@@ -26,6 +26,7 @@
  *   BTS_CA_FILE          extra CA certificate (PEM) to trust for the BTS host (e.g. a test double)
  *   BTS_TIMEOUT_MS       default 30000
  *   WEB_ROOT             built web app to serve; default web/dist when it exists
+ *   TILL_DOWNLOADS_DIR   the till apps' installers and update files, served at /downloads/till/
  *   COOKIE_SECURE        "false" only for local plain-HTTP development; default true
  *   ALLOW_SIGNUP         "false" to close self-service sign-up; default true
  *   PUBLIC_URL           public address of the web app (links in emails, share links), e.g. https://app.example.bz
@@ -133,6 +134,7 @@ const app = await buildApp({
     billing: { ...(env.PLATFORM_BILLING_TENANT && { tenantSlug: env.PLATFORM_BILLING_TENANT }), ...(env.PLATFORM_PAYMENT_INSTRUCTIONS && { paymentInstructions: env.PLATFORM_PAYMENT_INSTRUCTIONS }) },
   }),
   ...(webRoot && { webRoot }),
+  ...(env.TILL_DOWNLOADS_DIR && { tillDownloads: env.TILL_DOWNLOADS_DIR }),
   ...(env.PDF_RENDERER === 'chromium' && { pdfRenderer: chromiumRenderer({ ...(env.CHROMIUM_PATH && { executablePath: env.CHROMIUM_PATH }), ...(env.CHROMIUM_CHANNEL && { channel: env.CHROMIUM_CHANNEL }) }) }),
   cookieSecure: env.COOKIE_SECURE !== 'false',
   allowSignup: env.ALLOW_SIGNUP !== 'false',

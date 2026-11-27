@@ -13,6 +13,10 @@ services:
     env_file: .env.production
     environment:
       COOKIE_SECURE: "true"
+      TILL_DOWNLOADS_DIR: /data/till-downloads
+    volumes:
+      # The till apps' installers and updates: copy each release in here (read-only for the app).
+      - till-downloads:/data/till-downloads:ro
     ports:
       - "127.0.0.1:3000:3000"
     depends_on:
@@ -60,3 +64,4 @@ services:
 volumes:
   db-data:
   backups:
+  till-downloads:

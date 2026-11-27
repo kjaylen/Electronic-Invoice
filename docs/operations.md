@@ -131,6 +131,16 @@ deployments). To move to object storage behind a CDN:
 - **Payment reminders** are emailed by housekeeping for businesses that turned them on (at most 50 per business per run, each step once per invoice). They need SMTP and `PUBLIC_URL` (for the pay links).
 - **Webhooks** go out every 5 seconds from the worker's process. A failing endpoint is switched off after 20 failures in a row; the business switches it back on.
 
+### The till apps' installers and updates
+
+Set `TILL_DOWNLOADS_DIR` to a folder the app can read (the production compose file mounts the
+`till-downloads` volume there). Each release of a till app is copied into it; installed desktop tills
+update from it, Android tills installed from it are offered the new APK, and Settings → Tills links to
+the installers. Copy the installer (and its `.blockmap`) first and the update file (`latest.yml`,
+`android.json`) last. To pull a bad release, put the previous files back: tills never go back a
+version on their own, so publish the fix as a higher version. How to build and sign them:
+`apps/desktop/README.md` and `apps/mobile/README.md`.
+
 ## 7. Printing from templates
 
 Businesses can edit their printed documents (Templates in the app). Those print as PDFs in a

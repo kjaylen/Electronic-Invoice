@@ -105,6 +105,13 @@ export function HardwareSettings({ onError }: { onError: (e: unknown) => void })
           <div><dt>{t('Cash drawer')}</dt><dd>{till.till.device.register.name}</dd></div>
           <div><dt>{t('Server')}</dt><dd className="mono small">{till.server}</dd></div>
           <div><dt>{t('App')}</dt><dd>{till.platform.kind} {till.platform.appVersion}</dd></div>
+          {till.update.kind !== 'none' && (
+            <div><dt>{t('Update')}</dt><dd>
+              {till.update.kind === 'downloading'
+                ? t('Version {v} is downloading ({p}%)', { v: till.update.version, p: till.update.percent ?? 0 })
+                : <>{t('Version {v} is ready', { v: till.update.version })} <button type="button" className="link" onClick={till.offerUpdate}>{till.update.kind === 'ready' ? t('Restart to update') : t('Download')}</button></>}
+            </dd></div>
+          )}
         </dl>
         <Field label={t('Lock the till after')}>
           <Select value={hw.lockAfterMinutes} onChange={(e) => save({ lockAfterMinutes: Number(e.target.value) })}>

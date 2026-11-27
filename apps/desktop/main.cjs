@@ -7,7 +7,8 @@
  *     cash drawer plugged into them);
  *   - printing to installed (USB) printers without a dialog;
  *   - a customer display on a second screen;
- *   - storage for the till's token, encrypted with the OS keychain.
+ *   - storage for the till's token, encrypted with the OS keychain;
+ *   - updates from the server it is paired with (updates.cjs).
  */
 
 const { app, BrowserWindow, ipcMain, protocol, safeStorage, screen, shell, net: electronNet } = require('electron');
@@ -15,6 +16,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { sendToPrinter } = require('./network.cjs');
+const updates = require('./updates.cjs');
 
 const WEB = path.join(__dirname, 'web');
 const ORIGIN = 'app://pos';
@@ -202,6 +204,12 @@ handle('printers:list', async () => {
 handle('printers:printHtml', (html, options) => printHtml(String(html), options ?? {}));
 handle('printers:sendNetwork', (host, port, data) => sendToPrinter(String(host), Number(port), data instanceof Uint8Array ? data : new Uint8Array(data)));
 handle('display:open', () => openDisplay());
+// Updates from the server the till is paired with (updates.cjs).
+handle('updates:check', (server) => updates.check(server));
+handle('updates:state', () => updates.state());
+handle('updates:install', () => updates.install());
+updates.onStatus((state) => till?.webContents.send('updates:status', state));
+
 ipcMain.on('display:update', (event, state) => {
   if (fromTill(event)) display?.webContents.send('display:state', state);
 });

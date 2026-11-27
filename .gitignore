@@ -23,6 +23,7 @@ backups/
 apps/desktop/web/
 apps/desktop/release/
 apps/mobile/www/
+apps/mobile/release/
 apps/mobile/android/app/build/
 apps/mobile/android/.gradle/
 apps/mobile/ios/App/Pods/

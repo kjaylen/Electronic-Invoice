@@ -16,7 +16,7 @@ import { VenueFloor } from '../venue/Floor';
 import { KitchenScreen } from '../venue/Kitchen';
 import { SessionContext, type SessionState } from '../session';
 import { useToast } from '../toast';
-import { ErrorText, Field, usdOf } from '../ui';
+import { ErrorText, Field, Modal, usdOf } from '../ui';
 import { HardwareSettings } from './Devices';
 import { type HardwareConfig, hardwareReport, HardwareError, loadHardware, openDrawer as kickDrawer, type PrinterConfig, printTicket as sendTicket, saveHardware } from './hardware';
 import { browserCanScan, type Platform, platform as getPlatform } from './platform';
@@ -31,6 +31,7 @@ import { Banner, Icon, useNow } from './design/components';
 import { feedback } from './design/feedback';
 import type { PosIconName } from './design/icons';
 import { offlineTill, type OfflineTill, type SignedInInfo } from './offline/till';
+import { type TillUpdate, useTillUpdate } from './updates';
 import { SyncIndicator, SyncScreen, useSyncState } from './offline/status';
 import type { Snapshot } from './offline/types';
 
@@ -62,6 +63,10 @@ interface TillContextValue {
   offline: OfflineTill | null;
   /** Read a barcode with the camera, where the device has one. */
   scanWithCamera: (() => Promise<string | null>) | null;
+  /** A newer till app, ready to install (desktop) or to download (Android). */
+  update: TillUpdate;
+  /** Asks first, then restarts into the update (desktop) or opens the download (Android). */
+  offerUpdate: () => void;
 }
 
 const TillContext = createContext<TillContextValue | null>(null);
@@ -643,6 +648,8 @@ function SignedInTill(props: {
   const [legacyOnline, setLegacyOnline] = useState(() => navigator.onLine);
   const [camera, setCamera] = useState<((code: string | null) => void) | null>(null);
   const [hasSession, setHasSession] = useState(!session.offline);
+  const { update, install: installUpdate } = useTillUpdate(p, props.server);
+  const [askUpdate, setAskUpdate] = useState(false);
   const permissions = useMemo(() => new Set(session.permissions), [session.permissions]);
   const isManager = ['owner', 'admin', 'manager'].includes(session.user.role);
   const sync = useSyncState(props.offline);
@@ -759,6 +766,8 @@ function SignedInTill(props: {
     scanWithCamera: p.scanBarcode
       ? () => p.scanBarcode!()
       : browserCanScan() ? () => new Promise<string | null>((resolve) => setCamera(() => resolve)) : null,
+    update,
+    offerUpdate: () => setAskUpdate(true),
   };
 
   // What the shared counter and shift screens expect of a signed-in session.
@@ -815,6 +824,12 @@ function SignedInTill(props: {
             </nav>
             <div className="pills">
               {sync && <SyncIndicator state={sync} onOpen={isManager ? () => setTab('sync') : undefined} />}
+              {(update.kind === 'ready' || update.kind === 'available') && (
+                <button type="button" className="status-pill update" onClick={() => setAskUpdate(true)} title={t('Version {v} of the till app', { v: update.version })}
+                  aria-label={update.kind === 'ready' ? t('Restart to update') : t('Update available')}>
+                  <Icon name="sparkle" /><span className="pill-text">{update.kind === 'ready' ? t('Restart to update') : t('Update available')}</span>
+                </button>
+              )}
               <button type="button" className={`status-pill printer${printerName ? '' : ' bad'}`} title={printerName ? t('Receipt printer: {name}', { name: printerName }) : t('No receipt printer is set up')}
                 onClick={isManager ? () => setTab('devices') : undefined} aria-label={printerName ? t('Receipt printer: {name}', { name: printerName }) : t('No receipt printer is set up')}>
                 <Icon name="printer" /><span className="pill-text">{printerName ?? t('No printer')}</span>
@@ -841,6 +856,20 @@ function SignedInTill(props: {
           </main>
         </div>
         {camera && <CameraScanner onClose={() => { camera(null); setCamera(null); }} onScan={(code) => { camera(code); setCamera(null); }} />}
+        {askUpdate && (update.kind === 'ready' || update.kind === 'available') && (
+          <Modal title={update.kind === 'ready' ? t('Restart to update?') : t('A new till app')} onClose={() => setAskUpdate(false)}>
+            <div className="stack">
+              {update.kind === 'ready'
+                ? <p>{t('Version {v} is downloaded. The till closes and opens again in a few seconds. Sales already made are kept; finish the sale on screen first.', { v: update.version })}</p>
+                : <p>{t('Version {v} is ready on the server. It downloads in the browser; open it and tap Install. Sales already made are kept.', { v: update.version })}</p>}
+              <div className="row">
+                <button type="button" className="secondary" onClick={() => setAskUpdate(false)}>{t('Not now')}</button>
+                <span className="spacer" />
+                <button type="button" onClick={() => { setAskUpdate(false); installUpdate(); }}>{update.kind === 'ready' ? t('Restart now') : t('Download')}</button>
+              </div>
+            </div>
+          </Modal>
+        )}
       </SessionContext.Provider>
       </ConnectivityContext.Provider>
     </TillContext.Provider>

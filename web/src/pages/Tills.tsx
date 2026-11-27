@@ -227,8 +227,36 @@ export function TillsTab() {
       <CounterSettingsCard />
       <TablesCard />
       <TillsCard />
+      <DownloadsCard />
       <LocationsCard />
     </div>
+  );
+}
+
+type Download = { version: string; file: string; url: string };
+
+/** The till apps this server offers (its TILL_DOWNLOADS_DIR). Shown only when it has some. */
+function DownloadsCard() {
+  const t = useT();
+  const [d, setD] = useState<Partial<Record<'windows' | 'mac' | 'linux' | 'android', Download>> | null>(null);
+  useEffect(() => void api<typeof d>('/v1/pos/downloads').then(setD).catch(() => setD({})), []);
+  const rows = ([['windows', t('Windows')], ['mac', t('Mac')], ['linux', t('Linux')], ['android', t('Android')]] as const).filter(([k]) => d?.[k]);
+  if (!rows.length) return null;
+  return (
+    <section className="card stack">
+      <h2>{t('Get the till app')}</h2>
+      <p className="muted small">{t('Install it on the computer or tablet at the counter, then pair it with a code from the list above. It updates itself from here.')}</p>
+      <ul className="stack" style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+        {rows.map(([k, label]) => (
+          <li key={k} className="row">
+            <strong>{label}</strong>
+            <span className="muted small">{t('Version {v}', { v: d![k]!.version })}</span>
+            <span className="spacer" />
+            <a className="button secondary" href={d![k]!.url} download>{t('Download')}</a>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 

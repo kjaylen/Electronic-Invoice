@@ -75,6 +75,7 @@ import { answerStorePreflight } from './store-access.ts';
 import { createDevLog, registerDeveloperRoutes, registerDevLogHook } from './devlog.ts';
 import { assertRouteHasArea, enforceKeyScope, type KeyArea } from './key-scope.ts';
 import { registerShiftRoutes } from './shifts.ts';
+import { registerTillDownloads } from './till-downloads.ts';
 import { registerPosAdminRoutes, registerPosDeviceRoutes, SESSION_TOKEN_PREFIX, tillMayUse, touchDevice } from './pos.ts';
 import { registerPosSyncRoutes } from './pos-sync.ts';
 import { lookupSession } from '../db/users.ts';
@@ -120,6 +121,8 @@ export interface AppOptions {
   bodyLimit?: number;
   /** Folder with the built web app (web/dist). Unset: API only. */
   webRoot?: string;
+  /** Folder with the till apps' installers and update files, served at /downloads/till/ (TILL_DOWNLOADS_DIR). */
+  tillDownloads?: string;
   /** Secure flag on the session cookie. Default true; false only for local HTTP development. */
   cookieSecure?: boolean;
   /** Allow self-service sign-up. Default true. */
@@ -456,6 +459,8 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     // Offline-first tills: the snapshot to sell from, and the upload of what they sold.
     registerPosSyncRoutes(pos, deps);
   }, { prefix: '/v1/pos' });
+  // The till apps' installers and updates (Settings → Tills links to them; desktop tills update from here).
+  await registerTillDownloads(app, options.tillDownloads);
 
   registerPublicDocumentRoutes(app, deps);
   registerPublicAssetRoutes(app, deps);

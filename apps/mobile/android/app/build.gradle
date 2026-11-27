@@ -1,5 +1,20 @@
 apply plugin: 'com.android.application'
 
+// The version comes from apps/mobile/package.json (1.2.3 -> versionName 1.2.3, versionCode 10203), so
+// the till's update check and the store see the same number. Bump it there for each release.
+def tillVersion = new groovy.json.JsonSlurper().parse(file('../../package.json')).version as String
+def tillNumbers = tillVersion.tokenize('-')[0].tokenize('.').collect { it as int }
+def tillVersionCode = tillNumbers[0] * 10000 + tillNumbers[1] * 100 + tillNumbers[2]
+
+// Release signing, never in the repository: android/keystore.properties (git-ignored) or environment
+// variables. See apps/mobile/README.md for making the key, and keep it backed up: an app signed with a
+// lost key can never be updated in place again.
+def keystoreProperties = new Properties()
+def keystoreFile = rootProject.file('keystore.properties')
+if (keystoreFile.exists()) keystoreFile.withInputStream { keystoreProperties.load(it) }
+def signingValue = { String key, String env -> System.getenv(env) ?: keystoreProperties.getProperty(key) }
+def releaseStore = signingValue('storeFile', 'FLOREO_ANDROID_STORE_FILE')
+
 android {
     namespace = "bz.floreo.till"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -7,8 +22,8 @@ android {
         applicationId "bz.floreo.till"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode tillVersionCode
+        versionName tillVersion
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,8 +31,19 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        release {
+            if (releaseStore) {
+                storeFile rootProject.file(releaseStore)
+                storePassword signingValue('storePassword', 'FLOREO_ANDROID_STORE_PASSWORD')
+                keyAlias signingValue('keyAlias', 'FLOREO_ANDROID_KEY_ALIAS')
+                keyPassword signingValue('keyPassword', 'FLOREO_ANDROID_KEY_PASSWORD')
+            }
+        }
+    }
     buildTypes {
         release {
+            if (releaseStore) signingConfig signingConfigs.release
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }

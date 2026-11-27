@@ -238,6 +238,15 @@ button.status-pill:hover { background: rgba(255, 255, 255, 0.08); }
 /* No printer: a mark beside the icon, so it is not told by colour alone when the words are hidden. */
 .status-pill.printer.bad::after { content: '!'; display: inline-grid; place-items: center; width: 16px; height: 16px; margin-left: -10px; margin-top: -14px; border-radius: 999px; background: #f06a5e; color: #1a0705; font-size: 12px; font-weight: var(--pos-weight-bold); line-height: 1; }
 .status-pill.busy .dot { background: #9a62cf; animation: pos-blink 1.2s ease-in-out infinite; }
+/* A newer till app is ready: noticeable on the dark bar, not alarming. */
+.status-pill.update { background: rgba(255, 255, 255, 0.12); color: #fff; }
+.status-pill.update svg { color: #e7c96b; }
+button.status-pill.update:hover { background: rgba(255, 255, 255, 0.2); }
+/* Below a wide screen the screens' tabs need the room: the icon alone, with a dot so it is still seen. */
+@media (max-width: 1439px) {
+  .status-bar .status-pill.update .pill-text { display: none; }
+  .status-pill.update::after { content: ''; width: 8px; height: 8px; margin-left: -8px; margin-top: -14px; border-radius: 999px; background: #e7c96b; }
+}
 .status-pill .count { padding: 0 6px; border-radius: 999px; background: rgba(255, 255, 255, 0.14); font-size: var(--pos-text-xs); }
 .status-pill.warn-badge .count { background: #e9a23b; color: #1d1405; }
 .status-clock { font-size: var(--pos-text-md); font-weight: var(--pos-weight-bold); padding: 0 var(--pos-2); }

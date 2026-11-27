@@ -119,6 +119,7 @@ Local database: `docker compose up -d db`, then `DATABASE_URL=postgres://einvoic
 | `BTS_BASE_URL`, `BTS_TIMEOUT_MS` | Override the BTS host (e.g. a proxy) and the request timeout |
 | `BTS_CA_FILE` | Extra CA certificate (PEM) to trust for the BTS host |
 | `WEB_ROOT` | Built web app to serve; default `web/dist` when it exists |
+| `TILL_DOWNLOADS_DIR` | The till apps' installers and update files, served at `/downloads/till/`; desktop tills update from it (see `docs/operations.md`) |
 | `COOKIE_SECURE` | `false` only for local plain-HTTP development; default `true` |
 | `ALLOW_SIGNUP` | `false` to close self-service sign-up |
 | `PUBLIC_URL` | Public address of the web app, e.g. `https://app.example.bz`. Links in emails and share links are built from it, never from the request's Host header. Without it, password reset, welcome links and share links are off |

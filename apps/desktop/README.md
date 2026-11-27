@@ -29,14 +29,61 @@ Set `VITE_TILL_SERVER=https://app.example.bz` when building the web app to pre-f
 ## Installers
 
 ```bash
-npm run dist:win             # Windows installer (NSIS), in release/
-npm run dist:mac             # macOS .dmg (build on a Mac; sign and notarize with your Apple Developer ID)
+npm run dist:win             # Windows installer (NSIS) and its update files, in release/
+npm run dist:mac             # macOS .dmg and .zip (build on a Mac)
 npm run dist:linux           # AppImage and .deb
 ```
 
-For installers people download, sign them:
-- **Windows:** a code-signing certificate, through electron-builder's `win.certificateFile` or `CSC_LINK`.
-- **macOS:** a Developer ID, with notarization.
+The settings are in `electron-builder.config.cjs`; anything secret comes from the environment.
+
+### Signing (Windows)
+
+An unsigned installer works, but Windows warns that the publisher is unknown, and installed tills
+cannot check who made an update. For businesses, sign it. Since 2023 code-signing keys live on a
+hardware token or in a cloud service, not in a file, so there are two ways in:
+
+| You have | Set | Notes |
+|---|---|---|
+| A USB token, or a cloud service that puts its certificate in the Windows certificate store (DigiCert KeyLocker, SSL.com eSigner…) | `WIN_SIGN_THUMBPRINT` | The certificate's SHA-1 thumbprint. Uses `signtool` from the Windows SDK (or `SIGNTOOL`). |
+| Any other signing tool (Azure Trusted Signing, jsign, a provider's own tool) | `WIN_SIGN_COMMAND` | A command that signs one file, with `{file}` where the file goes. |
+
+Also set:
+- `WIN_PUBLISHER_NAME`: the certificate's subject name, exactly. From then on, an installed till takes
+  an update only if it is signed with that name.
+- `WIN_SIGN_TIMESTAMP_URL` if your provider names one (default `http://timestamp.digicert.com`).
+
+Each of the app, its uninstaller and the installer is signed (`scripts/sign-win.cjs`). Check the
+result with `signtool verify /pa release\Floreo-Till-Setup-<version>.exe`.
+
+### macOS
+
+A Developer ID certificate in the keychain (or `CSC_LINK`) signs; `APPLE_API_KEY`,
+`APPLE_API_KEY_ID` and `APPLE_API_ISSUER` (an App Store Connect API key) notarize. A Mac takes
+updates only when both are done.
+
+### Releasing and updates
+
+Installed tills update themselves from the server they are paired with, so staging's tills follow
+staging and production's follow production:
+
+1. Raise `version` in `package.json` (`npm version patch`, for one).
+2. `npm run dist:win` (signed, as above).
+3. Copy the release into the server's `TILL_DOWNLOADS_DIR`:
+   `npm run publish-local -- <folder>` on the same machine, or copy the installer, its `.blockmap` and
+   then `latest.yml` (last) with rsync or the hosting's tools.
+
+What a till does (`updates.cjs`, `web/src/pos/updates.ts`):
+- It asks the server (`GET /v1/pos/downloads`) when it starts and every four hours.
+- A newer version downloads in the background while it keeps selling; only the parts that changed,
+  thanks to the `.blockmap`. Its SHA-512 is checked against `latest.yml`.
+- The status bar then shows **Restart to update** (Devices says so too). Choosing it closes the till,
+  installs silently and opens the new version in a few seconds. If nobody chooses it, the update is
+  installed the next time the app is closed. Never in the middle of a sale; sales already made stay
+  in the app's data folder, which updates do not touch.
+- Settings → Tills in the web app links to the installers, for setting up a new till.
+
+Desktop apps from before updates (1.0.0) do not look for them: install the first version that has
+them by hand, once.
 
 ## Test
 

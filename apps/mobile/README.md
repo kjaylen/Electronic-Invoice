@@ -31,7 +31,43 @@ npm run sync                 # copies the till into www/ and into both native pr
 $env:JAVA_TOOL_OPTIONS = '-Djdk.net.unixdomain.tmpdir=C:\Windows\Temp'
 ```
 
-For Google Play, build a signed release bundle in Android Studio (Build → Generate Signed App Bundle) with your upload key.
+### Android releases
+
+The version comes from `version` in `package.json` (1.2.3 becomes versionName 1.2.3, versionCode
+10203). Raise it for each release.
+
+**The release key, once.** Make it, and keep the file and its password in the team's password
+manager: an app signed with a lost key can never be updated in place again, every till would have to
+uninstall (losing anything unsent) and install anew.
+
+```powershell
+& "$env:JAVA_HOME\bin\keytool.exe" -genkeypair -keystore floreo-release.jks -alias floreo -keyalg RSA -keysize 4096 -validity 10000
+```
+
+Then either `android/keystore.properties` (git-ignored):
+
+```properties
+storeFile=C:/keys/floreo-release.jks
+storePassword=...
+keyAlias=floreo
+keyPassword=...
+```
+
+or the variables `FLOREO_ANDROID_STORE_FILE`, `FLOREO_ANDROID_STORE_PASSWORD`,
+`FLOREO_ANDROID_KEY_ALIAS` and `FLOREO_ANDROID_KEY_PASSWORD` (for a build server).
+
+**Each release:** `npm run release:android` (add `-- --to <folder>` to copy it into a server's
+`TILL_DOWNLOADS_DIR` on this machine). In `release/`:
+- `Floreo-Till-<version>.aab` for Google Play. With Play App Signing, this key is your upload key.
+- `Floreo-Till-<version>.apk` and `android.json`, for tills installed from the server. Copy the APK
+  first and `android.json` last.
+
+How tills get it:
+- **From Google Play:** Play updates the app. Leave the APK and `android.json` off the server.
+- **From the server** (Settings → Tills → Get the till app): the till checks when it starts and every
+  four hours. When a newer one is there, the status bar shows **Update available**; it downloads in the
+  browser, and Android asks to install it over the old one (same key, so nothing is lost). Android asks
+  once to allow installing apps from the browser.
 
 ### iOS
 
