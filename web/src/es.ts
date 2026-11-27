@@ -5053,4 +5053,11 @@ export const ES: Record<string, string> = {
   "Leave without saving?": "¿Salir sin guardar?",
   "The changes to {area} are not saved yet.": "Los cambios en {area} aún no están guardados.",
   "Leave without saving": "Salir sin guardar",
+  "Tap an item to change it. Drag a side or a corner to resize it, the round handle to turn it.": "Toque un elemento para cambiarlo. Arrastre un lado o una esquina para cambiar el tamaño, y el asa redonda para girarlo.",
+  "Drag it with one finger": "Arrástrelo con un dedo",
+  "Hold a finger on it": "Mantenga un dedo encima",
+  "One finger on an empty part, or two fingers": "Un dedo en una parte vacía, o dos dedos",
+  "Pinch with two fingers": "Pellizque con dos dedos",
+  "Several": "Varios",
+  "Turn on Select several, then tap them or draw a box": "Active Elegir varios y tóquelos o dibuje un recuadro",
 };

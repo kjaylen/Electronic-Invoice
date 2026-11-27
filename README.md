@@ -620,9 +620,16 @@ document is issued when, DECISIONS.md the judgment calls.
     length and thickness), angle, checked when the field is left or Enter is
     pressed; line up, space out, same size. Tables that overlap are marked.
   - Undo and redo (typing in one field or nudging is one step), copy and
-    paste, zoom at the pointer (Ctrl+wheel) and panning (Space+drag, the
-    middle button). Nothing is saved until "Save the plan"; leaving the area
-    or the page with changes not saved asks first.
+    paste, zoom at the pointer (Ctrl+wheel, smooth with a trackpad pinch) and
+    panning (Space+drag, the middle button). Nothing is saved until "Save the
+    plan"; leaving the area or the page with changes not saved asks first.
+    "Unsaved" compares the plan field by field as the server keeps it, and a
+    table left without a name is given one on saving (the server would drop
+    it).
+  - By touch (a tablet): one finger drags an item, or on an empty part moves
+    the view (a tap there clears the choice); two fingers pinch to zoom and
+    pan; a finger held on an item opens its menu. With "Select several" on, a
+    finger draws a box. The panel's help speaks of fingers on a touch screen.
 - **The menu** (`/menu`, in the sidebar after Products when Restaurant or Bar
   is on; `web/src/venue/Menu.tsx`, `src/venue/sections.ts`). The menu's items
   are the business's products (one list: price, GST, stock and recipes stay

@@ -313,3 +313,7 @@
 
 /* Chairs drawn to scale: about 34 units across (a tenth of a table for four), never tiny. */
 .fe-seat { --seat: max(7px, calc(var(--u, 0.45px) * 34)); width: var(--seat); height: var(--seat); margin: calc(var(--seat) / -2) 0 0 calc(var(--seat) / -2); border-width: max(1px, calc(var(--u, 0.45px) * 3)); }
+@media (pointer: coarse) {
+  .fe-menu button { min-height: 2.9rem; }
+  .fe-menu kbd { display: none; }
+}

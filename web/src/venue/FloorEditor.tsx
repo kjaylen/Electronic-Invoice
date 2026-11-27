@@ -10,7 +10,10 @@
  *   something small. Shift keeps the proportions. The round handle turns it (15° steps; Alt for any).
  * - Drag on an empty part of the plan to choose everything in the box; Shift-click adds and removes.
  *   Right-click for duplicate, turn, front and back, remove.
- * - Zoom at the pointer (Ctrl + wheel) or with the buttons; pan with Space + drag or the middle button.
+ * - Zoom at the pointer (Ctrl + wheel, a trackpad pinch) or with the buttons; pan with Space + drag or
+ *   the middle button.
+ * - By touch: one finger moves an item (or, on an empty part, the view), two fingers pinch to zoom and
+ *   pan, and a finger held on an item opens its menu. With "Select several" on, a finger draws a box.
  * - A panel beside the plan for the exact name, seats, shape, size and angle, checked when you leave
  *   the field (or press Enter); tables that overlap are marked.
  * - Every change is one step of undo, however many keys it took. Nothing is saved until "Save the
@@ -25,6 +28,7 @@ import { type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPoi
 import { useT } from '../i18n';
 import { Icon } from '../pos/design/components';
 import type { PosIconName } from '../pos/design/icons';
+import { feedback } from '../pos/design/feedback';
 import { seatPositions } from '../pos/design/table';
 import type { FloorItem } from './store';
 
@@ -51,6 +55,12 @@ function place(i: FloorItem, b: Box): FloorItem {
   const h = Math.max(10, Math.min(1000, Math.round(b.h)));
   return { ...i, w, h, x: Math.max(0, Math.min(1000 - w, Math.round(b.x / SX))), y: Math.max(0, Math.min(1000 - h, Math.round(b.y))) };
 }
+/**
+ * An item as the server keeps it (fields in one order, the name trimmed), so "unsaved" compares what
+ * would be saved and not how the object happens to be written.
+ */
+const stored = (i: FloorItem) => [i.id, i.type, i.name.trim().slice(0, 30), i.shape, i.type === 'table' ? i.seats : i.type === 'stool' ? 1 : 0, i.x, i.y, i.w, i.h, i.rotation];
+const samePlan = (a: FloorItem[], b: FloorItem[]) => a.length === b.length && JSON.stringify(a.map(stored)) === JSON.stringify(b.map(stored));
 /** The box an item covers on the floor, turned. */
 function footprint(i: FloorItem): Box {
   const b = world(i);
@@ -81,7 +91,12 @@ type Gesture =
   | { kind: 'resize'; start: Pt; before: FloorItem[]; id: string; handle: Handle; moved: boolean }
   | { kind: 'rotate'; before: FloorItem[]; id: string; moved: boolean }
   | { kind: 'marquee'; start: Pt; base: string[]; moved: boolean }
-  | { kind: 'pan'; x: number; y: number; left: number; top: number };
+  | { kind: 'pan'; x: number; y: number; left: number; top: number; tap?: boolean; moved?: boolean }
+  // Two fingers: the point of the plan under them at the start stays under them, at the new size.
+  | { kind: 'pinch'; dist: number; zoom: number; fx: number; fy: number };
+
+/** A finger held this long on an item, without moving, opens its menu. */
+const HOLD_MS = 500;
 
 export function FloorEditor({ items: saved, onSave, onDirty }: { items: FloorItem[]; onSave: (items: FloorItem[]) => void; onDirty?: (dirty: boolean) => void }) {
   const t = useT();
@@ -103,11 +118,17 @@ export function FloorEditor({ items: saved, onSave, onDirty }: { items: FloorIte
   const canvas = useRef<HTMLDivElement>(null);
   const frame = useRef<HTMLDivElement>(null);
   const zoomAnchor = useRef<{ fx: number; fy: number; vx: number; vy: number } | null>(null);
-  const changed = JSON.stringify(items) !== JSON.stringify(saved);
+  // Touch: the fingers on the plan, the one that leads a one-finger gesture, and the hold timer.
+  const pointers = useRef(new Map<number, Pt>());
+  const lead = useRef<number | null>(null);
+  const hold = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const [touch, setTouch] = useState(() => typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches);
+  const changed = !samePlan(items, saved);
   const chosen = items.filter((i) => selected.includes(i.id));
   const one = chosen.length === 1 ? chosen[0]! : null;
 
   useEffect(() => onDirty?.(changed), [changed, onDirty]);
+  useEffect(() => () => clearTimeout(hold.current), []);
   // One world unit in pixels, for things drawn to scale (the chairs): kept on the canvas as --u.
   useEffect(() => {
     const c = canvas.current;
@@ -235,12 +256,42 @@ export function FloorEditor({ items: saved, onSave, onDirty }: { items: FloorIte
   };
 
   // ---------- pointer on the plan ----------
+  const openMenu = (item: FloorItem, e: { clientX: number; clientY: number }) => {
+    if (!selected.includes(item.id)) setSelected([item.id]);
+    const r = canvas.current!.getBoundingClientRect();
+    setMenu({ x: ((e.clientX - r.left) / r.width) * 100, y: ((e.clientY - r.top) / r.height) * 100 });
+  };
+  const startPan = (e: ReactPointerEvent, tap = false) => {
+    const f = frame.current!;
+    gesture.current = { kind: 'pan', x: e.clientX, y: e.clientY, left: f.scrollLeft, top: f.scrollTop, tap, moved: false };
+  };
   const down = (e: ReactPointerEvent, item: FloorItem | null, kind: 'move' | 'resize' | 'rotate' = 'move', handle?: Handle) => {
+    const finger = e.pointerType === 'touch';
+    if (finger !== touch) setTouch(finger);
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    // A second finger: whatever the first one started is put back, and the two pinch (and pan) the plan.
+    if (finger && pointers.current.size >= 2) {
+      e.stopPropagation();
+      e.preventDefault();
+      clearTimeout(hold.current);
+      const g = gesture.current;
+      if (pointers.current.size > 2 || g?.kind === 'pinch') return;
+      if (g && 'before' in g && g.moved) setItems(g.before);
+      if (g?.kind === 'marquee') setSelected(g.base);
+      setGuides({ v: [], h: [] });
+      setMarquee(null);
+      setReadout(null);
+      const [a, b] = [...pointers.current.values()];
+      const r = canvas.current!.getBoundingClientRect();
+      gesture.current = { kind: 'pinch', dist: Math.max(1, Math.hypot(a!.x - b!.x, a!.y - b!.y)), zoom, fx: ((a!.x + b!.x) / 2 - r.left) / r.width, fy: ((a!.y + b!.y) / 2 - r.top) / r.height };
+      lead.current = null;
+      return;
+    }
+    lead.current = e.pointerId;
     setMenu(null);
     if (e.button === 1 || (e.button === 0 && spaceDown)) {
       e.preventDefault();
-      const f = frame.current!;
-      gesture.current = { kind: 'pan', x: e.clientX, y: e.clientY, left: f.scrollLeft, top: f.scrollTop };
+      startPan(e);
       try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch { /* not tracked */ }
       return;
     }
@@ -252,6 +303,9 @@ export function FloorEditor({ items: saved, onSave, onDirty }: { items: FloorIte
     const p = at(e);
     const additive = several || e.shiftKey || e.ctrlKey || e.metaKey;
     if (!item) {
+      // A finger on an empty part of the plan moves the view (a tap there clears the choice); with
+      // "Select several" on, it draws a box instead, as the mouse does.
+      if (finger && !several) return startPan(e, true);
       gesture.current = { kind: 'marquee', start: p, base: additive ? selected : [], moved: false };
       return;
     }
@@ -261,6 +315,20 @@ export function FloorEditor({ items: saved, onSave, onDirty }: { items: FloorIte
       setSelected(next);
       // A click (no drag) on one of several chosen items chooses just that one, on release.
       gesture.current = { kind: 'move', start: p, before: items, ids: next.includes(item.id) ? next : [], moved: false, only: !additive && was && selected.length > 1 ? item.id : null };
+      // A finger held still on it opens its menu (there is no right button on a touch screen).
+      if (e.pointerType !== 'mouse') {
+        const g = gesture.current;
+        const point = { clientX: e.clientX, clientY: e.clientY };
+        clearTimeout(hold.current);
+        hold.current = setTimeout(() => {
+          if (gesture.current !== g || g.moved) return;
+          gesture.current = null;
+          feedback('tap');
+          if (!next.includes(item.id)) setSelected([item.id]);
+          const r = canvas.current!.getBoundingClientRect();
+          setMenu({ x: ((point.clientX - r.left) / r.width) * 100, y: ((point.clientY - r.top) / r.height) * 100 });
+        }, HOLD_MS);
+      }
     } else if (kind === 'resize' && handle) {
       gesture.current = { kind: 'resize', start: p, before: items, id: item.id, handle, moved: false };
     } else {
@@ -269,9 +337,25 @@ export function FloorEditor({ items: saved, onSave, onDirty }: { items: FloorIte
   };
 
   const move = (e: ReactPointerEvent) => {
+    if (pointers.current.has(e.pointerId)) pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     const g = gesture.current;
     if (!g) return;
+    if (g.kind === 'pinch') {
+      if (pointers.current.size < 2) return;
+      const [a, b] = [...pointers.current.values()];
+      const f = frame.current!;
+      const fr = f.getBoundingClientRect();
+      const next = Math.max(ZOOMS[0]!, Math.min(ZOOMS.at(-1)!, g.zoom * (Math.hypot(a!.x - b!.x, a!.y - b!.y) / g.dist)));
+      const anchor = { fx: g.fx, fy: g.fy, vx: (a!.x + b!.x) / 2 - fr.left, vy: (a!.y + b!.y) / 2 - fr.top };
+      // The same size (at a limit): only the view moves with the fingers.
+      if (Math.abs(next - zoom) < 0.005) scrollTo(anchor);
+      else { zoomAnchor.current = anchor; setZoom(next); }
+      return;
+    }
+    if (lead.current !== null && e.pointerId !== lead.current) return;
     if (g.kind === 'pan') {
+      if (!g.moved && Math.hypot(e.clientX - g.x, e.clientY - g.y) < 6) return;
+      g.moved = true;
       frame.current!.scrollLeft = g.left - (e.clientX - g.x);
       frame.current!.scrollTop = g.top - (e.clientY - g.y);
       return;
@@ -364,13 +448,26 @@ export function FloorEditor({ items: saved, onSave, onDirty }: { items: FloorIte
     show(item.type === 'wall' ? `${shownWidth(w)}` : `${shownWidth(w)} × ${Math.round(h)}`);
   };
 
-  const up = () => {
+  const up = (e: ReactPointerEvent) => {
+    pointers.current.delete(e.pointerId);
+    clearTimeout(hold.current);
     const g = gesture.current;
+    // A pinch lasts until the last finger is lifted; one left behind does not start anything.
+    if (g?.kind === 'pinch') {
+      if (!pointers.current.size) gesture.current = null;
+      return;
+    }
+    if (lead.current !== null && e.pointerId !== lead.current) return;
+    lead.current = null;
     gesture.current = null;
     setGuides({ v: [], h: [] });
     setMarquee(null);
     setReadout(null);
-    if (!g || g.kind === 'pan') return;
+    if (g?.kind === 'pan') {
+      if (g.tap && !g.moved) setSelected([]);
+      return;
+    }
+    if (!g) return;
     if (g.kind === 'marquee') {
       if (!g.moved && !g.base.length) setSelected([]);
       return;
@@ -380,6 +477,22 @@ export function FloorEditor({ items: saved, onSave, onDirty }: { items: FloorIte
   };
 
   // ---------- commands ----------
+  // A table or stool left without a name would be dropped by the server: it is given one first.
+  const save = () => {
+    let n = 0;
+    const used = new Set(items.map((x) => x.name.trim()));
+    const named = items.map((i) => {
+      if (!isSeated(i) || i.name.trim()) return i;
+      n += 1;
+      const kind = i.type === 'table' ? t('Table') : t('Bar');
+      let k = items.filter((x) => x.type === i.type).indexOf(i) + 1;
+      while (used.has(`${kind} ${k}`)) k += 1;
+      used.add(`${kind} ${k}`);
+      return { ...i, name: `${kind} ${k}` };
+    });
+    if (n) commit(named);
+    onSave(named);
+  };
   const duplicate = (from = chosen, offset = 40) => {
     if (!from.length) return;
     const copies = from.map((i, n) => place({ ...i, id: `${i.type[0]}${(Date.now() + n).toString(36)}${Math.random().toString(36).slice(2, 4)}`, name: isSeated(i) ? `${i.name} (2)` : i.name }, { ...world(i), x: world(i).x + offset, y: world(i).y + offset }));
@@ -460,7 +573,7 @@ export function FloorEditor({ items: saved, onSave, onDirty }: { items: FloorIte
   const zoomTo = (next: number, anchor?: { clientX: number; clientY: number }) => {
     const f = frame.current;
     const c = canvas.current;
-    if (!f || !c || next === zoom) return;
+    if (!f || !c || Math.abs(next - zoom) < 0.001) return;
     const fr = f.getBoundingClientRect();
     const cr = c.getBoundingClientRect();
     const ax = anchor?.clientX ?? fr.left + fr.width / 2;
@@ -468,28 +581,40 @@ export function FloorEditor({ items: saved, onSave, onDirty }: { items: FloorIte
     zoomAnchor.current = { fx: (ax - cr.left) / cr.width, fy: (ay - cr.top) / cr.height, vx: ax - fr.left, vy: ay - fr.top };
     setZoom(next);
   };
-  useLayoutEffect(() => {
-    const a = zoomAnchor.current;
+  /** Scrolls so the point fx, fy of the plan (fractions) is at vx, vy in the frame. */
+  function scrollTo(a: { fx: number; fy: number; vx: number; vy: number }) {
     const f = frame.current;
     const c = canvas.current;
-    if (!a || !f || !c) return;
-    zoomAnchor.current = null;
+    if (!f || !c) return;
     const cs = getComputedStyle(f);
     f.scrollLeft = a.fx * c.offsetWidth + parseFloat(cs.paddingLeft) - a.vx;
     f.scrollTop = a.fy * c.offsetHeight + parseFloat(cs.paddingTop) - a.vy;
+  }
+  useLayoutEffect(() => {
+    const a = zoomAnchor.current;
+    if (!a) return;
+    zoomAnchor.current = null;
+    scrollTo(a);
   }, [zoom]);
-  const step = (dir: 1 | -1) => ZOOMS[Math.max(0, Math.min(ZOOMS.length - 1, ZOOMS.indexOf(zoom) + dir))]!;
+  // The next level up or down (after a pinch the zoom can be between two levels).
+  const step = (dir: 1 | -1) => (dir > 0 ? ZOOMS.find((z) => z > zoom + 0.01) ?? ZOOMS.at(-1)! : [...ZOOMS].reverse().find((z) => z < zoom - 0.01) ?? ZOOMS[0]!);
   const zoomRef = useRef(zoomTo);
   zoomRef.current = zoomTo;
   const stepRef = useRef(step);
   stepRef.current = step;
+  const zoomLevel = useRef(zoom);
+  zoomLevel.current = zoom;
   useEffect(() => {
     const el = frame.current;
     if (!el) return;
     const wheel = (e: WheelEvent) => {
       if (!e.ctrlKey && !e.metaKey) return;
       e.preventDefault();
-      zoomRef.current(stepRef.current(e.deltaY < 0 ? 1 : -1), e);
+      // A mouse wheel's notch goes to the next level; a trackpad pinch (many small steps) zooms smoothly.
+      if (e.deltaMode === 0 && Math.abs(e.deltaY) < 40) {
+        const z = zoomLevel.current;
+        zoomRef.current(Math.max(ZOOMS[0]!, Math.min(ZOOMS.at(-1)!, z * Math.exp(-e.deltaY * 0.01))), e);
+      } else zoomRef.current(stepRef.current(e.deltaY < 0 ? 1 : -1), e);
     };
     el.addEventListener('wheel', wheel, { passive: false });
     return () => el.removeEventListener('wheel', wheel);
@@ -531,13 +656,13 @@ export function FloorEditor({ items: saved, onSave, onDirty }: { items: FloorIte
         <label className="fe-check"><input type="checkbox" checked={snapOn} onChange={(e) => setSnapOn(e.target.checked)} /> {t('Snap to the grid')}</label>
         <span className="fe-sep" />
         <div className="fe-zoom" role="group" aria-label={t('Zoom')}>
-          <button type="button" className="fe-tool icon" aria-label={t('Zoom out')} title={t('Zoom out')} disabled={zoom === ZOOMS[0]} onClick={() => zoomTo(step(-1))}><Icon name="zoomOut" /></button>
+          <button type="button" className="fe-tool icon" aria-label={t('Zoom out')} title={t('Zoom out')} disabled={zoom <= ZOOMS[0]! + 0.001} onClick={() => zoomTo(step(-1))}><Icon name="zoomOut" /></button>
           <button type="button" className="fe-zoom-level num" title={t('Back to 100%')} onClick={() => zoomTo(1)}>{Math.round(zoom * 100)}%</button>
-          <button type="button" className="fe-tool icon" aria-label={t('Zoom in')} title={t('Zoom in')} disabled={zoom === ZOOMS.at(-1)} onClick={() => zoomTo(step(1))}><Icon name="zoomIn" /></button>
+          <button type="button" className="fe-tool icon" aria-label={t('Zoom in')} title={t('Zoom in')} disabled={zoom >= ZOOMS.at(-1)! - 0.001} onClick={() => zoomTo(step(1))}><Icon name="zoomIn" /></button>
         </div>
         <span className="spacer" />
         {changed && <span className="fe-unsaved"><span className="dot" aria-hidden="true" />{t('Unsaved changes')}</span>}
-        <button type="button" className="fe-save" disabled={!changed} onClick={() => onSave(items)}>{t('Save the plan')}</button>
+        <button type="button" className="fe-save" disabled={!changed} onClick={save}>{t('Save the plan')}</button>
       </div>
 
       <div className="fe-body">
@@ -570,13 +695,7 @@ export function FloorEditor({ items: saved, onSave, onDirty }: { items: FloorIte
                   aria-description={clash ? t('Overlaps {names}', { names: clashes.get(item.id)!.join(', ') }) : undefined}
                   className={`${cls}${on ? ' selected' : ''}${clash ? ' clash' : ''}`} style={{ ...pct(b), transform: item.rotation ? `rotate(${item.rotation}deg)` : undefined }}
                   onPointerDown={(e) => down(e, item)}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    if (!selected.includes(item.id)) setSelected([item.id]);
-                    const r = canvas.current!.getBoundingClientRect();
-                    setMenu({ x: ((e.clientX - r.left) / r.width) * 100, y: ((e.clientY - r.top) / r.height) * 100 });
-                  }}
+                  onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); openMenu(item, e); }}
                   onFocus={() => !selected.includes(item.id) && setSelected([item.id])}>
                   {seats.map((s, n) => <span key={n} className="fe-seat" style={{ left: `${s.x}%`, top: `${s.y}%` }} aria-hidden="true" />)}
                   {door && (
@@ -631,6 +750,19 @@ export function FloorEditor({ items: saved, onSave, onDirty }: { items: FloorIte
             <>
               <h3>{t('{n} tables, {s} seats', { n: counts.tables, s: counts.seats })}</h3>
               {clashes.size > 0 && <p className="fe-warn">{t('{n} tables overlap. They are marked in red.', { n: clashes.size })}</p>}
+              {touch ? (
+                <>
+                  <p className="small muted">{t('Tap an item to change it. Drag a side or a corner to resize it, the round handle to turn it.')}</p>
+                  <dl className="fe-keys small">
+                    <div><dt>{t('Move')}</dt><dd>{t('Drag it with one finger')}</dd></div>
+                    <div><dt>{t('Menu')}</dt><dd>{t('Hold a finger on it')}</dd></div>
+                    <div><dt>{t('Pan')}</dt><dd>{t('One finger on an empty part, or two fingers')}</dd></div>
+                    <div><dt>{t('Zoom')}</dt><dd>{t('Pinch with two fingers')}</dd></div>
+                    <div><dt>{t('Several')}</dt><dd>{t('Turn on Select several, then tap them or draw a box')}</dd></div>
+                  </dl>
+                </>
+              ) : (
+              <>
               <p className="small muted">{t('Choose an item to change it, or drag across the plan to choose several. Drag a side or a corner to resize it (Shift keeps its shape), the round handle to turn it.')}</p>
               <dl className="fe-keys small">
                 <div><dt>{t('Move')}</dt><dd>{t('Drag, or the arrow keys (Shift for more, Alt for a little)')}</dd></div>
@@ -640,6 +772,8 @@ export function FloorEditor({ items: saved, onSave, onDirty }: { items: FloorIte
                 <div><dt>{t('Pan')}</dt><dd>{t('Space + drag, or the middle button')}</dd></div>
                 <div><dt>{t('Zoom')}</dt><dd>Ctrl + {t('wheel')}</dd></div>
               </dl>
+              </>
+              )}
             </>
           )}
           {one && (

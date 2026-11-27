@@ -385,6 +385,9 @@ test('the layout editor: drag a corner to resize, the round handle to turn, a bo
   await panel.getByRole('button', { name: 'Line up left' }).click();
   await page.getByRole('button', { name: 'Save the plan' }).click();
   await expect(page.getByText('Floor plan saved')).toBeVisible();
+  // Saved: nothing is left to save (the server's copy, written its own way, counts as the same plan).
+  await expect(page.getByText('Unsaved changes')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Save the plan' })).toBeDisabled();
   const venue = await (await page.request.get('/v1/venue', { headers: API })).json() as { floor: Array<{ area: string; items: Array<{ name: string; x: number; w: number; rotation: number; type: string }> }> };
   const items = venue.floor.find((p) => p.area === 'Dining room')!.items;
   expect(items.filter((i) => i.type === 'table').map((i) => i.name).sort()).toEqual(['Table 1', 'Table 2', 'Table 3', 'Table 4']);
@@ -464,6 +467,78 @@ test('the layout editor: a table dragged in from the toolbar, a size typed (one 
   // Nothing of it was saved.
   const venue = await (await page.request.get('/v1/venue', { headers: API })).json() as { floor: Array<{ area: string; items: Array<{ name: string }> }> };
   expect(venue.floor.find((p) => p.area === 'Dining room')!.items.map((i) => i.name)).not.toContain('Table 3');
+});
+
+test.describe('on a tablet', () => {
+  test.use({ hasTouch: true, viewport: { width: 1024, height: 768 } });
+
+  test('the layout editor by touch: a finger moves a table, held opens its menu, two fingers pinch to zoom, one on an empty part pans', async ({ page }) => {
+    await logIn(page);
+    await setUp(page);
+    await page.goto(`/${SLUG}/settings?tab=venue`);
+    const editor = page.getByLabel('Floor plan editor');
+    const panel = page.getByRole('complementary', { name: 'The chosen item' });
+    const frame = page.locator('.fe-frame');
+    await editor.scrollIntoViewIfNeeded();
+    const tableOne = editor.getByRole('button', { name: 'Table 1' });
+    await expect(tableOne).toBeVisible();
+    // Real touch input, several fingers at once (Playwright's touchscreen has only tap).
+    const cdp = await page.context().newCDPSession(page);
+    const touch = (type: 'touchStart' | 'touchMove' | 'touchEnd', points: Array<[number, number]> = []) =>
+      cdp.send('Input.dispatchTouchEvent', { type, touchPoints: points.map(([x, y], id) => ({ x, y, id })) });
+    const centre = async (l: typeof tableOne) => { const b = (await l.boundingBox())!; return { x: b.x + b.width / 2, y: b.y + b.height / 2 }; };
+    const swipe = async (from: Array<[number, number]>, to: Array<[number, number]>, steps = 10) => {
+      await touch('touchStart', from);
+      for (let s = 1; s <= steps; s++) await touch('touchMove', from.map(([x, y], i) => [x + ((to[i]![0] - x) * s) / steps, y + ((to[i]![1] - y) * s) / steps]));
+      await touch('touchEnd');
+    };
+
+    // One finger drags Table 1 to the right: it moves (to the grid).
+    const a = await centre(tableOne);
+    await swipe([[a.x, a.y]], [[a.x + 100, a.y]]);
+    const a2 = await centre(tableOne);
+    expect(a2.x - a.x).toBeGreaterThan(80);
+    expect(Math.abs(a2.y - a.y)).toBeLessThan(12);
+    await expect(panel.getByRole('heading', { name: 'Table 1' })).toBeVisible();
+
+    // Held still on Table 2: its menu opens; a tap on Turn 90° turns it.
+    const two = await centre(editor.getByRole('button', { name: 'Table 2' }));
+    await touch('touchStart', [[two.x, two.y]]);
+    await page.waitForTimeout(800);
+    await touch('touchEnd');
+    await expect(page.getByRole('menuitem', { name: 'Duplicate' })).toBeVisible();
+    await page.getByRole('menuitem', { name: 'Turn 90°' }).tap();
+    await expect(panel.getByRole('heading', { name: 'Table 2' })).toBeVisible();
+    await expect(panel.getByLabel('Turned')).toHaveValue('90');
+
+    // Two fingers spread over Table 1: the plan zooms in about them, and the table is not moved by it.
+    const before = await centre(tableOne);
+    const plan = (await editor.boundingBox())!;
+    await swipe([[before.x - 40, before.y], [before.x + 40, before.y]], [[before.x - 100, before.y], [before.x + 100, before.y]]);
+    const level = Number((await page.locator('.fe-zoom-level').innerText()).replace('%', ''));
+    expect(level).toBeGreaterThan(200);
+    expect((await editor.boundingBox())!.width / plan.width).toBeGreaterThan(2);
+    const after = await centre(tableOne);
+    expect(Math.abs(after.x - before.x)).toBeLessThan(12);
+    expect(Math.abs(after.y - before.y)).toBeLessThan(12);
+
+    // One finger on an empty part moves the view; a tap there clears the choice.
+    const view = (await frame.boundingBox())!;
+    const left = await frame.evaluate((f) => f.scrollLeft);
+    const empty: [number, number] = [view.x + view.width * 0.5, view.y + view.height - 40];
+    expect(await page.evaluate(([x, y]) => document.elementFromPoint(x!, y!)?.className, empty)).toContain('fe-canvas');
+    await swipe([empty], [[empty[0] - 200, empty[1]]]);
+    expect(await frame.evaluate((f) => f.scrollLeft) - left).toBeGreaterThan(150);
+    await page.touchscreen.tap(empty[0], empty[1]);
+    await expect(panel.getByRole('heading', { name: /tables, .* seats/ })).toBeVisible();
+    await expect(panel.getByText('Pinch with two fingers')).toBeVisible();
+
+    // Back to 100%: Table 1 is where the finger left it.
+    await page.locator('.fe-zoom-level').tap();
+    await expect(page.locator('.fe-zoom-level')).toHaveText('100%');
+    const back = await centre(tableOne);
+    expect(Math.abs(back.x - a2.x)).toBeLessThan(4);
+  });
 });
 
 test('speed: a table opened and four items with choices sent, on a slow connection, without one tap waiting for the server', async ({ page }) => {
